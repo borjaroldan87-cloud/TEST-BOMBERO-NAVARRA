@@ -121,7 +121,7 @@ app.post("/api/generate", async(req,res)=>{
         mime_type:"application/json",
         schema:questionSchema
       },
-      background:true
+      
     });
 
     console.log("GENERATE background id:", interaction.id);
