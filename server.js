@@ -116,7 +116,10 @@ app.post("/api/generate", async(req,res)=>{
       throw new Error("Pregunta inválida detectada.");
   }
   res.json({ok:true,questions:parsed.questions});
- }catch(e){res.status(500).json({ok:false,error:e.message})}
+ }catch(e){
+  console.error("ERROR GENERATE:", e);
+  res.status(500).json({ok:false,error:e?.message || String(e)})
+}
 });
 
 app.listen(process.env.PORT||3000,()=>console.log("Test Bombero V2 listo"));
