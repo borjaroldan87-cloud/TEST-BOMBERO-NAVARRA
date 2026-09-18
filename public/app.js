@@ -13,7 +13,7 @@ async function generate(){
     btn.disabled=true;
     btn.textContent="GENERANDO TEST...";
 
-    let j=await api("/api/generate",{
+    const j=await api("/api/generate",{
       method:"POST",
       body:JSON.stringify({
         count:+$("count").value,
@@ -22,30 +22,15 @@ async function generate(){
       })
     });
 
-    if(!j.ok) throw new Error(j.error||"No se pudo iniciar el test.");
-    if(!j.interactionId) throw new Error("No se recibió el identificador del test.");
-
-    let result=null;
-
-    for(let intento=0; intento<120; intento++){
-      await wait(3000);
-
-      result=await api(
-        "/api/generate-status/"+encodeURIComponent(j.interactionId)
-      );
-
-      if(!result.ok) throw new Error(result.error||"Error generando el test.");
-
-      if(result.completed) break;
-
-      btn.textContent="GENERANDO TEST...";
+    if(!j.ok){
+      throw new Error(j.error||"No se pudo generar el test.");
     }
 
-    if(!result?.completed){
-      throw new Error("El test está tardando demasiado. Inténtalo de nuevo.");
+    if(!j.questions || j.questions.length===0){
+      throw new Error("No se recibieron preguntas.");
     }
 
-    qs=result.questions;
+    qs=j.questions;
     ans=[];
     i=0;
 
