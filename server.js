@@ -109,7 +109,7 @@ app.post("/api/generate", async(req,res)=>{
     console.log("GENERATECONTENT: iniciando");
 
     const response=await ai.models.generateContent({
-      model:"gemini-3.8-flash",
+      model:"gemini-3.5-flash-lite",
       contents:generationPrompt(count,difficulty,mode),
       config:{
         tools:[{
