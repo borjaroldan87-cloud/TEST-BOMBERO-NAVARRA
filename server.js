@@ -109,20 +109,62 @@ app.post("/api/generate", async(req,res)=>{
 
     console.log("GENERATE: creando trabajo en segundo plano");
 
-    const interaction=await ai.interactions.create({
-      model:"gemini-2.5-flash",
-      input:generationPrompt(count,difficulty,mode),
-      tools:[{
-        type:"file_search",
-        file_search_store_names:[STORE]
-      }],
-      response_format:{
-        type:"text",
-        mime_type:"application/json",
-        schema:questionSchema
-      },
-      
-    });
+    const models=[
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash"
+];
+
+let interaction=null;
+let lastError=null;
+
+for(const model of models){
+  for(let attempt=1;attempt<=2;attempt++){
+    try{
+      console.log(`GENERATE: ${model} intento ${attempt}`);
+
+      interaction=await ai.interactions.create({
+        model,
+        input:generationPrompt(count,difficulty,mode),
+        tools:[{
+          type:"file_search",
+          file_search_store_names:[STORE]
+        }],
+        response_format:{
+          type:"text",
+          mime_type:"application/json",
+          schema:questionSchema
+        }
+      });
+
+      console.log(`GENERATE OK: ${model}`);
+      break;
+
+    }catch(e){
+      lastError=e;
+
+      const status=e?.statusCode || e?.status || e?.code;
+      const message=e?.message || String(e);
+
+      console.error(`GENERATE ERROR ${model}:`,status,message);
+
+      if(status!==503 && !message.includes("503")){
+        throw e;
+      }
+
+      if(attempt<2){
+        await new Promise(r=>setTimeout(r,3000));
+      }
+    }
+  }
+
+  if(interaction) break;
+}
+
+if(!interaction){
+  throw lastError || new Error("Ningún modelo disponible.");
+}
 
     console.log("GENERATE background id:", interaction.id);
 
