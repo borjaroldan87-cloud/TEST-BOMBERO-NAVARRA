@@ -111,7 +111,7 @@ for(let intento=1; intento<=4; intento++){
     console.log(`GENERATE intento ${intento}/4`);
 
     interaction=await ai.interactions.create({
-      model:"gemini-3.8-flash",
+      model:"gemini-3.6-flash",
       input:generationPrompt(count,difficulty,mode),
       tools:[{type:"file_search",file_search_store_names:[STORE]}],
       response_format:{type:"text",mime_type:"application/json",schema:questionSchema}
