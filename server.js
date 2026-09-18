@@ -96,6 +96,117 @@ Si una pregunta no puede fundamentarse con seguridad, no la uses y crea otra.`;
 }
 
 app.post("/api/generate", async(req,res)=>{
+  try{
+    if(!STORE) throw new Error("Primero indexa el PDF.");
+
+    const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
+    const difficulty=req.body.difficulty==="media"?"media":"alta";
+    const mode=["literal","mixto","calculos"].includes(req.body.mode)
+      ? req.body.mode
+      : "mixto";
+
+    const ai=aiClient();
+
+    console.log("GENERATE: creando trabajo en segundo plano");
+
+    const interaction=await ai.interactions.create({
+      model:"gemini-3.6-flash",
+      input:generationPrompt(count,difficulty,mode),
+      tools:[{
+        type:"file_search",
+        file_search_store_names:[STORE]
+      }],
+      response_format:{
+        type:"text",
+        mime_type:"application/json",
+        schema:questionSchema
+      },
+      background:true
+    });
+
+    console.log("GENERATE background id:", interaction.id);
+
+    res.json({
+      ok:true,
+      background:true,
+      interactionId:interaction.id,
+      count
+    });
+
+  }catch(e){
+    console.error("ERROR GENERATE:",e);
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
+
+
+app.get("/api/generate-status/:id", async(req,res)=>{
+  try{
+    const ai=aiClient();
+
+    const interaction=await ai.interactions.get({
+      id:req.params.id
+    });
+
+    console.log(
+      "GENERATE STATUS:",
+      req.params.id,
+      interaction.status
+    );
+
+    if(interaction.status==="failed"){
+      throw new Error(
+        interaction.error?.message ||
+        "Gemini no pudo generar el test."
+      );
+    }
+
+    if(interaction.status!=="completed"){
+      return res.json({
+        ok:true,
+        completed:false,
+        status:interaction.status
+      });
+    }
+
+    const parsed=JSON.parse(interaction.output_text);
+
+    if(
+      !parsed.questions ||
+      parsed.questions.length===0
+    ){
+      throw new Error("Gemini no devolvió preguntas.");
+    }
+
+    for(const q of parsed.questions){
+      if(
+        q.options?.length!==4 ||
+        !Number.isInteger(q.correctIndex) ||
+        q.correctIndex<0 ||
+        q.correctIndex>3
+      ){
+        throw new Error("Pregunta inválida detectada.");
+      }
+    }
+
+    res.json({
+      ok:true,
+      completed:true,
+      questions:parsed.questions
+    });
+
+  }catch(e){
+    console.error("ERROR GENERATE STATUS:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
  try{
   if(!STORE) throw new Error("Primero indexa el PDF.");
   const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
