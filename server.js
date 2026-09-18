@@ -136,7 +136,7 @@ for(const model of models){
           mime_type:"application/json",
           schema:questionSchema
         }
-      });
+      }, {timeout:45000});
 
       console.log(`GENERATE OK: ${model}`);
       break;
