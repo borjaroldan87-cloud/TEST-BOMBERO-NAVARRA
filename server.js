@@ -110,7 +110,7 @@ app.post("/api/generate", async(req,res)=>{
     console.log("GENERATE: creando trabajo en segundo plano");
 
     const interaction=await ai.interactions.create({
-      model:"gemini-3.6-flash",
+      model:"gemini-2.5-flash",
       input:generationPrompt(count,difficulty,mode),
       tools:[{
         type:"file_search",
