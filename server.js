@@ -3,7 +3,13 @@ import multer from "multer";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
+import pg from "pg";
+const { Pool } = pg;
 
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 const app = express();
 const upload = multer({ dest: "uploads/" });
 app.use(express.json({limit:"2mb"}));
@@ -16,7 +22,36 @@ function aiClient(){
 
 let STORE = null;
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+async function initDatabase(){
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+}
+async function loadStore(){
+  const result = await db.query(
+    "SELECT value FROM app_state WHERE key = $1",
+    ["file_search_store"]
+  );
 
+  if(result.rows.length){
+    STORE = result.rows[0].value;
+  }
+
+  return STORE;
+}
+
+async function saveStore(storeName){
+  await db.query(
+    `INSERT INTO app_state (key, value)
+     VALUES ($1, $2)
+     ON CONFLICT (key)
+     DO UPDATE SET value = EXCLUDED.value`,
+    ["file_search_store", storeName]
+  );
+}
 async function waitOp(ai, op){
   while(!op.done){ await sleep(2500); op = await ai.operations.get({operation: op}); }
   return op;
@@ -24,12 +59,19 @@ async function waitOp(ai, op){
 
 async function ensureStore(){
   if(STORE) return STORE;
+
+  await loadStore();
+  if(STORE) return STORE;
+
   const ai=aiClient();
   const store=await ai.fileSearchStores.create({config:{
     displayName:"Bombero Navarra - Apeo y poda",
     embeddingModel:"models/gemini-embedding-2"
   }});
+
   STORE=store.name;
+  await saveStore(STORE);
+
   return STORE;
 }
 
@@ -217,4 +259,17 @@ app.get("/api/generate-status/:id", async(req,res)=>{
   }
 });
 
-app.listen(process.env.PORT||3000,()=>console.log("Test Bombero V2 listo"));
+async function startServer(){
+  await initDatabase();
+  await loadStore();
+
+  app.listen(process.env.PORT || 3000, ()=>{
+    console.log("Test Bombero V2 listo");
+    console.log("STORE recuperado:", STORE || "ninguno");
+  });
+}
+
+startServer().catch(e=>{
+  console.error("ERROR INICIANDO SERVIDOR:", e);
+  process.exit(1);
+});
