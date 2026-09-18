@@ -147,9 +147,7 @@ app.get("/api/generate-status/:id", async(req,res)=>{
   try{
     const ai=aiClient();
 
-    const interaction=await ai.interactions.get({
-      id:req.params.id
-    });
+    const interaction=await ai.interactions.get(req.params.id);
 
     console.log(
       "GENERATE STATUS:",
