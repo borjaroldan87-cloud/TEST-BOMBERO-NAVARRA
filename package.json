@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {"start": "node server.js"},
   "dependencies": {
-    "@google/genai": "latest",
+    "@google/genai": "^2.0.0",
     "express": "^5.1.0",
     "multer": "^2.0.2"
   }
