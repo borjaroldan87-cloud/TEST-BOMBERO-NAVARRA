@@ -207,55 +207,5 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     });
   }
 });
- try{
-  if(!STORE) throw new Error("Primero indexa el PDF.");
-  const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
-  const difficulty=req.body.difficulty==="media"?"media":"alta";
-  const mode=["literal","mixto","calculos"].includes(req.body.mode)?req.body.mode:"mixto";
-  const ai=aiClient();
-
-let interaction;
-let lastError;
-
-for(let intento=1; intento<=4; intento++){
-  try{
-    console.log(`GENERATE intento ${intento}/4`);
-
-    interaction=await ai.interactions.create({
-      model:"gemini-3.6-flash",
-      input:generationPrompt(count,difficulty,mode),
-      tools:[{type:"file_search",file_search_store_names:[STORE]}],
-      response_format:{type:"text",mime_type:"application/json",schema:questionSchema}
-    });
-
-    lastError=null;
-    break;
-
-  }catch(e){
-    lastError=e;
-    const status=e?.statusCode || e?.status || e?.code;
-
-    console.error(`GENERATE intento ${intento} falló:`, status, e?.message);
-
-    if(status!==503 || intento===4) throw e;
-
-    await sleep(3000 * intento);
-  }
-}
-
-if(lastError) throw lastError;
-  const parsed=JSON.parse(interaction.output_text);
-  if(!parsed.questions || parsed.questions.length!==count) throw new Error("La IA no devolvió el número exacto de preguntas.");
-  // Validación estructural local antes de entregar.
-  for(const q of parsed.questions){
-    if(q.options?.length!==4 || !Number.isInteger(q.correctIndex) || q.correctIndex<0 || q.correctIndex>3)
-      throw new Error("Pregunta inválida detectada.");
-  }
-  res.json({ok:true,questions:parsed.questions});
- }catch(e){
-  console.error("ERROR GENERATE:", e);
-  res.status(500).json({ok:false,error:e?.message || String(e)})
-}
-});
 
 app.listen(process.env.PORT||3000,()=>console.log("Test Bombero V2 listo"));
