@@ -1,0 +1,22 @@
+<!doctype html><html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Bombero Navarra V2</title>
+<style>
+body{font-family:system-ui;margin:0;background:#f3f4f6;color:#111827}.w{max-width:780px;margin:auto;padding:18px}
+.c{background:#fff;padding:20px;border-radius:16px;margin:12px 0;box-shadow:0 2px 12px #0001}
+button,select{font:inherit;padding:12px;border-radius:10px}button{border:0;background:#111827;color:#fff;font-weight:700}
+.opt{display:block;width:100%;margin:8px 0;text-align:left;background:#fff;color:#111827;border:1px solid #cbd5e1}
+.sel{outline:3px solid #111827}.ok{background:#dcfce7}.bad{background:#fee2e2}.muted{color:#64748b}.hidden{display:none}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1}.pill{padding:6px 9px;border-radius:999px;background:#e5e7eb;display:inline-block}
+</style></head><body><div class="w"><h1>🔥 Test Bombero Navarra</h1>
+<div class="c" id="setup">
+<p><span class="pill" id="status">Comprobando…</span></p>
+<p><b>Benchmark:</b> Apeo y poda de arbolado</p>
+<button id="ingest" onclick="ingest()">1. INDEXAR PDF</button><hr>
+<div class="row"><label>Preguntas<br><select id="count"><option>5</option><option selected>10</option><option>20</option><option>30</option></select></label>
+<label>Dificultad<br><select id="difficulty"><option value="media">Media</option><option value="alta" selected>Alta</option></select></label>
+<label>Modo<br><select id="mode"><option value="mixto">Mixto</option><option value="literal">Literal</option><option value="calculos">Cálculos</option></select></label></div><br>
+<button onclick="generate()">2. GENERAR TEST REAL</button>
+<p class="muted">La clave API vive solo en el servidor. El navegador no la recibe.</p></div>
+<div id="quiz" class="hidden"></div><div id="result" class="hidden"></div>
+<script src="app.js"></script></div></body></html>
