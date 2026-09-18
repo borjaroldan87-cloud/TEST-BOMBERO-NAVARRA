@@ -102,12 +102,37 @@ app.post("/api/generate", async(req,res)=>{
   const difficulty=req.body.difficulty==="media"?"media":"alta";
   const mode=["literal","mixto","calculos"].includes(req.body.mode)?req.body.mode:"mixto";
   const ai=aiClient();
-  const interaction=await ai.interactions.create({
-   model:"gemini-3.8-flash",
-   input:generationPrompt(count,difficulty,mode),
-   tools:[{type:"file_search",file_search_store_names:[STORE]}],
-   response_format:{type:"text",mime_type:"application/json",schema:questionSchema}
-  });
+
+let interaction;
+let lastError;
+
+for(let intento=1; intento<=4; intento++){
+  try{
+    console.log(`GENERATE intento ${intento}/4`);
+
+    interaction=await ai.interactions.create({
+      model:"gemini-3.8-flash",
+      input:generationPrompt(count,difficulty,mode),
+      tools:[{type:"file_search",file_search_store_names:[STORE]}],
+      response_format:{type:"text",mime_type:"application/json",schema:questionSchema}
+    });
+
+    lastError=null;
+    break;
+
+  }catch(e){
+    lastError=e;
+    const status=e?.statusCode || e?.status || e?.code;
+
+    console.error(`GENERATE intento ${intento} falló:`, status, e?.message);
+
+    if(status!==503 || intento===4) throw e;
+
+    await sleep(3000 * intento);
+  }
+}
+
+if(lastError) throw lastError;
   const parsed=JSON.parse(interaction.output_text);
   if(!parsed.questions || parsed.questions.length!==count) throw new Error("La IA no devolvió el número exacto de preguntas.");
   // Validación estructural local antes de entregar.
