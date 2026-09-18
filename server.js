@@ -120,7 +120,7 @@ let interaction=null;
 let lastError=null;
 
 for(const model of models){
-  for(let attempt=1;attempt<=2;attempt++){
+  for(let attempt=1;attempt<=1;attempt++){
     try{
       console.log(`GENERATE: ${model} intento ${attempt}`);
 
@@ -149,12 +149,17 @@ for(const model of models){
 
       console.error(`GENERATE ERROR ${model}:`,status,message);
 
-      if(status!==503 && !message.includes("503")){
-        throw e;
-      }
+      const is503 = status===503 || message.includes("503");
+const isTimeout =
+  e?.name==="APIConnectionTimeoutError" ||
+  message.toLowerCase().includes("timed out") ||
+  message.toLowerCase().includes("timeout");
 
-      if(attempt<2){
-        await new Promise(r=>setTimeout(r,3000));
+if(!is503 && !isTimeout){
+  throw e;
+}
+
+      
       }
     }
   }
