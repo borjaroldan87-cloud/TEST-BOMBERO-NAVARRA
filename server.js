@@ -94,101 +94,66 @@ REGLAS OBLIGATORIAS:
 - explanation: breve y estrictamente basada en la fuente.
 Si una pregunta no puede fundamentarse con seguridad, no la uses y crea otra.`;
 }
-
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
     const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
-    const difficulty=req.body.difficulty==="media"?"media":"alta";
+    const difficulty=req.body.difficulty==="media" ? "media" : "alta";
     const mode=["literal","mixto","calculos"].includes(req.body.mode)
       ? req.body.mode
       : "mixto";
 
     const ai=aiClient();
 
-    console.log("GENERATE: creando trabajo en segundo plano");
+    console.log("GENERATECONTENT: iniciando");
 
-    const models=[
-  "gemini-3.8-flash",
-  "gemini-3.7-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash"
-];
-
-let interaction=null;
-let lastError=null;
-
-for(const model of models){
-  for(let attempt=1;attempt<=1;attempt++){
-    try{
-      console.log(`GENERATE: ${model} intento ${attempt}`);
-
-      interaction=await ai.interactions.create({
-        model,
-        input:generationPrompt(count,difficulty,mode),
+    const response=await ai.models.generateContent({
+      model:"gemini-3.8-flash",
+      contents:generationPrompt(count,difficulty,mode),
+      config:{
         tools:[{
-          type:"file_search",
-          file_search_store_names:[STORE]
+          fileSearch:{
+            fileSearchStoreNames:[STORE]
+          }
         }],
-        response_format:{
-          type:"text",
-          mime_type:"application/json",
-          schema:questionSchema
-        }
-      }, {timeout:45000});
+        responseMimeType:"application/json",
+        responseJsonSchema:questionSchema
+      }
+    });
 
-      console.log(`GENERATE OK: ${model}`);
-      break;
+    console.log("GENERATECONTENT: respuesta recibida");
 
-    }catch(e){
-      lastError=e;
+    const parsed=JSON.parse(response.text);
 
-      const status=e?.statusCode || e?.status || e?.code;
-      const message=e?.message || String(e);
+    if(!parsed.questions || parsed.questions.length===0){
+      throw new Error("Gemini no devolvió preguntas.");
+    }
 
-      console.error(`GENERATE ERROR ${model}:`,status,message);
-
-      const is503 = status===503 || message.includes("503");
-const isTimeout =
-  e?.name==="APIConnectionTimeoutError" ||
-  message.toLowerCase().includes("timed out") ||
-  message.toLowerCase().includes("timeout");
-
-if(!is503 && !isTimeout){
-  throw e;
-}
-
-      
+    for(const q of parsed.questions){
+      if(
+        q.options?.length!==4 ||
+        !Number.isInteger(q.correctIndex) ||
+        q.correctIndex<0 ||
+        q.correctIndex>3
+      ){
+        throw new Error("Pregunta inválida detectada.");
       }
     }
 
-  if(interaction) break;
-}
-
-if(!interaction){
-  throw lastError || new Error("Ningún modelo disponible.");
-}
-
-    console.log("GENERATE background id:", interaction.id);
-
     res.json({
       ok:true,
-      background:true,
-      interactionId:interaction.id,
-      count
+      questions:parsed.questions
     });
 
   }catch(e){
-    console.error("ERROR GENERATE:",e);
+    console.error("ERROR GENERATECONTENT:",e);
     res.status(500).json({
       ok:false,
       error:e?.message || String(e)
     });
   }
 });
-
-
 app.get("/api/generate-status/:id", async(req,res)=>{
   try{
     const ai=aiClient();
