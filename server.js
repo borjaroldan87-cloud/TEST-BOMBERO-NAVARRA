@@ -162,7 +162,6 @@ if(!is503 && !isTimeout){
       
       }
     }
-  }
 
   if(interaction) break;
 }
