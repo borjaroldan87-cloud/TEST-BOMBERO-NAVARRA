@@ -503,19 +503,30 @@ app.post("/api/analyze-coverage", async(req,res)=>{
 
     console.log("COVERAGE: iniciando análisis");
 
-    const response=await ai.models.generateContent({
-      model:"gemini-3.5-flash-lite",
-      contents:coverageAnalysisPrompt(),
-      config:{
-        tools:[{
-          fileSearch:{
-            fileSearchStoreNames:[STORE]
-          }
-        }],
-        responseMimeType:"application/json",
-        responseJsonSchema:coverageSchema
+    const pdfPath=path.resolve("data/apeo-poda.pdf");
+
+if(!fs.existsSync(pdfPath)){
+  throw new Error("No se encuentra el PDF para analizar.");
+}
+
+const pdfBase64=fs.readFileSync(pdfPath).toString("base64");
+
+const response=await ai.models.generateContent({
+  model:"gemini-3.8-flash",
+  contents:[
+    {text:coverageAnalysisPrompt()},
+    {
+      inlineData:{
+        mimeType:"application/pdf",
+        data:pdfBase64
       }
-    });
+    }
+  ],
+  config:{
+    responseMimeType:"application/json",
+    responseJsonSchema:coverageSchema
+  }
+});
 
     console.log("COVERAGE: respuesta recibida");
 
