@@ -681,41 +681,48 @@ for(const chunk of chunks){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  const auditResponse=await ai.models.generateContent({
-    model:"gemini-3.6-flash",
-    contents:[
-      {
-        text:coverageGapPrompt(
-          existingChunkItems.map(item=>({
-            concept:item.concept,
-            item_type:item.itemType,
-            evaluation_type:item.evaluationType,
-            source_page:item.sourcePage
-          })),
-          chunk.startPage,
-          chunk.endPage
-        )
-      },
-      {
-        inlineData:{
-          mimeType:"application/pdf",
-          data:chunk.data
+  try{
+    const auditResponse=await ai.models.generateContent({
+      model:"gemini-3.6-flash",
+      contents:[
+        {
+          text:coverageGapPrompt(
+            existingChunkItems.map(item=>({
+              concept:item.concept,
+              item_type:item.itemType,
+              evaluation_type:item.evaluationType,
+              source_page:item.sourcePage
+            })),
+            chunk.startPage,
+            chunk.endPage
+          )
+        },
+        {
+          inlineData:{
+            mimeType:"application/pdf",
+            data:chunk.data
+          }
         }
+      ],
+      config:{
+        responseMimeType:"application/json",
+        responseJsonSchema:coverageSchema
       }
-    ],
-    config:{
-      responseMimeType:"application/json",
-      responseJsonSchema:coverageSchema
+    });
+
+    const parsedAudit=JSON.parse(auditResponse.text);
+
+    if(parsedAudit.items && Array.isArray(parsedAudit.items)){
+      auditItems.push(...parsedAudit.items);
+
+      console.log(
+        `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
+      );
     }
-  });
 
-  const parsedAudit=JSON.parse(auditResponse.text);
-
-  if(parsedAudit.items && Array.isArray(parsedAudit.items)){
-    auditItems.push(...parsedAudit.items);
-
-    console.log(
-      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
+  }catch(e){
+    console.warn(
+      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage} no auditadas por error temporal: ${e.message}`
     );
   }
 }
