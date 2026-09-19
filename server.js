@@ -199,7 +199,232 @@ const questionSchema={
   },required:["stem","options","correctIndex","explanation","sourceEvidence","sourcePage","difficulty"]}}
  },required:["questions"]
 };
+const coverageSchema={
+  type:"object",
+  properties:{
+    items:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          section:{type:"string"},
+          concept:{type:"string"},
+          itemType:{
+            type:"string",
+            enum:[
+              "concepto",
+              "dato_numerico",
+              "tabla",
+              "formula",
+              "procedimiento",
+              "clasificacion",
+              "enumeracion",
+              "excepcion",
+              "relacion",
+              "otro"
+            ]
+          },
+          evaluationType:{
+            type:"string",
+            enum:[
+              "literal",
+              "identificacion",
+              "comprension",
+              "comparacion",
+              "aplicacion",
+              "calculo",
+              "interpretacion",
+              "secuencia",
+              "pertenencia_exclusion",
+              "relacion_variables"
+            ]
+          },
+          sourcePage:{type:["integer","null"]},
+          sourceEvidence:{type:"string"}
+        },
+        required:[
+          "section",
+          "concept",
+          "itemType",
+          "evaluationType",
+          "sourcePage",
+          "sourceEvidence"
+        ]
+      }
+    }
+  },
+  required:["items"]
+};
+function coverageAnalysisPrompt(){
+  return `Eres un analista de temario para una oposición de Bombero de Navarra.
 
+MISIÓN:
+Analiza exhaustivamente el documento recuperado mediante File Search y crea un INVENTARIO DE CONTENIDO EXAMINABLE.
+
+Este inventario servirá posteriormente para:
+1. generar preguntas tipo test;
+2. controlar qué contenido ya se ha trabajado;
+3. calcular el porcentaje de cobertura del tema;
+4. detectar qué contenido sigue pendiente.
+
+Por ello, la prioridad es NO OMITIR contenido razonablemente examinable y NO crear elementos artificiales o redundantes.
+
+FUENTE ÚNICA:
+- Utiliza exclusivamente el documento recuperado mediante File Search.
+- No añadas conocimiento externo.
+- No corrijas, completes ni sustituyas el contenido del documento con conocimientos propios.
+- Conserva la terminología, cifras, unidades, clasificaciones y criterios utilizados por la fuente.
+- Si algo no puede sustentarse inequívocamente con el documento, no lo incluyas.
+
+CRITERIO DE OPOSICIÓN:
+Analiza el contenido desde la perspectiva de una oposición de Bombero de Navarra de nivel alto.
+Considera examinable cualquier información que razonablemente pueda convertirse en una pregunta objetiva de 4 opciones con una sola respuesta correcta.
+No descartes información por ser demasiado literal, específica, numérica o aparentemente secundaria.
+
+GRANULARIDAD:
+- Divide el tema en unidades examinables con significado propio.
+- Un elemento debe representar un conocimiento o capacidad concreta que pueda evaluarse de forma independiente.
+- No agrupes contenidos distintos únicamente porque aparezcan en el mismo párrafo, apartado o tabla.
+- No fragmentes una misma idea en múltiples elementos equivalentes únicamente cambiando su redacción.
+- Dos elementos sobre el mismo concepto son válidos cuando evalúan conocimientos o capacidades sustancialmente diferentes.
+- El objetivo NO es producir el mayor número posible de items, sino representar exhaustivamente todo lo razonablemente examinable sin redundancia artificial.
+
+TIPOS DE CONTENIDO:
+Identifica, cuando existan:
+- conceptos y definiciones;
+- características y propiedades;
+- datos numéricos;
+- porcentajes;
+- dimensiones y medidas;
+- unidades;
+- límites, intervalos y umbrales;
+- clasificaciones y categorías;
+- enumeraciones;
+- relaciones entre conceptos;
+- causas y consecuencias expresamente indicadas;
+- condiciones de aplicación;
+- excepciones;
+- procedimientos;
+- secuencias y orden de actuaciones;
+- tablas;
+- fórmulas;
+- relaciones entre variables;
+- ejemplos técnicos que contengan conocimiento generalizable respaldado por la fuente;
+- cualquier otro contenido susceptible de evaluación objetiva.
+
+TABLAS:
+Analiza cada tabla con especial profundidad.
+No consideres una tabla como un único elemento si contiene varios conocimientos independientes.
+Identifica cuando proceda:
+- significado de filas, columnas o categorías;
+- valores concretos relevantes;
+- correspondencias;
+- comparaciones;
+- límites e intervalos;
+- pertenencias y exclusiones;
+- excepciones;
+- relaciones entre diferentes valores.
+No generes combinaciones triviales de cada celda solo para aumentar artificialmente el inventario.
+
+FÓRMULAS:
+Para cada fórmula determina qué formas de evaluación están realmente respaldadas por el documento.
+Pueden incluir, cuando proceda:
+- reconocimiento o identificación;
+- significado de variables;
+- unidades;
+- relación entre magnitudes;
+- despeje o aplicación;
+- cálculo numérico;
+- interpretación del resultado;
+- efecto objetivo de modificar una variable.
+No inventes aplicaciones que requieran principios, constantes o supuestos externos al documento.
+
+PROCEDIMIENTOS:
+Cuando exista un procedimiento, analiza independientemente cuando proceda:
+- objetivo;
+- condiciones de aplicación;
+- material o elementos implicados;
+- acciones;
+- orden o secuencia;
+- comprobaciones;
+- límites;
+- prohibiciones;
+- excepciones;
+- actuaciones anteriores o posteriores.
+No dividas pasos que carezcan de significado examinable independiente.
+
+ENUMERACIONES Y CLASIFICACIONES:
+Cuando existan, considera cuando proceda:
+- identificación;
+- pertenencia;
+- exclusión;
+- correspondencia;
+- diferencias;
+- características;
+- número de elementos, únicamente cuando ese número tenga sentido examinable.
+No crees múltiples items equivalentes que evalúen exactamente la misma memorización.
+
+DATOS NUMÉRICOS:
+Conserva exactamente los valores, unidades, signos, intervalos y condiciones de la fuente.
+Un mismo dato puede participar en diferentes tipos de evaluación únicamente si realmente exige capacidades diferentes, por ejemplo recuerdo literal frente a aplicación en un cálculo.
+
+TIPOS DE EVALUACIÓN:
+Asigna a cada item el evaluationType que mejor represente cómo puede evaluarse:
+- literal
+- identificacion
+- comprension
+- comparacion
+- aplicacion
+- calculo
+- interpretacion
+- secuencia
+- pertenencia_exclusion
+- relacion_variables
+
+No generes automáticamente todos los evaluationType para cada concepto.
+Incluye únicamente aquellos que tengan sentido real según el contenido disponible.
+
+CONTROL DE DUPLICADOS:
+Antes de devolver el inventario, revisa mentalmente todos los items.
+Elimina:
+- duplicados;
+- paráfrasis del mismo conocimiento;
+- variantes que solo cambien palabras;
+- divisiones artificiales;
+- elementos que no puedan generar una pregunta objetiva y defendible.
+
+CONTROL DE OMISIONES:
+Antes de finalizar, realiza una segunda revisión mental del documento buscando específicamente:
+- cifras;
+- porcentajes;
+- unidades;
+- tablas;
+- fórmulas;
+- notas;
+- excepciones;
+- enumeraciones;
+- clasificaciones;
+- procedimientos;
+- condiciones;
+- límites;
+- relaciones;
+- contenido de apartados que haya quedado sin representar.
+
+CAMPOS:
+- section: apartado o contexto del documento al que pertenece.
+- concept: descripción precisa y autosuficiente del conocimiento que se evaluará.
+- itemType: tipo de contenido según el esquema proporcionado.
+- evaluationType: forma concreta de evaluación.
+- sourcePage: página si puede identificarse con seguridad; null si no.
+- sourceEvidence: evidencia breve y fiel de la fuente suficiente para justificar que el item existe. No inventes ni completes información.
+
+REGLA FINAL:
+La calidad del inventario se mide por dos criterios simultáneos:
+EXHAUSTIVIDAD: no dejar contenido razonablemente examinable sin representar.
+PRECISIÓN: no inflar el inventario mediante elementos redundantes, artificiales o no respaldados por la fuente.
+
+Devuelve exclusivamente el JSON solicitado por el esquema.`;
+}
 function generationPrompt(count,difficulty,mode){
   return `Eres un generador de preguntas para una oposición de Bombero de Navarra.
 
@@ -270,6 +495,106 @@ REGLAS OBLIGATORIAS:
 PRIORIDAD:
 Calidad, fidelidad al documento, diversidad temática y cobertura del contenido tienen prioridad sobre generar preguntas rápidamente.`;
 }
+app.post("/api/analyze-coverage", async(req,res)=>{
+  try{
+    if(!STORE) throw new Error("Primero indexa el PDF.");
+
+    const ai=aiClient();
+
+    console.log("COVERAGE: iniciando análisis");
+
+    const response=await ai.models.generateContent({
+      model:"gemini-3.5-flash-lite",
+      contents:coverageAnalysisPrompt(),
+      config:{
+        tools:[{
+          fileSearch:{
+            fileSearchStoreNames:[STORE]
+          }
+        }],
+        responseMimeType:"application/json",
+        responseJsonSchema:coverageSchema
+      }
+    });
+
+    console.log("COVERAGE: respuesta recibida");
+
+    const parsed=JSON.parse(response.text);
+
+    if(!parsed.items || !Array.isArray(parsed.items) || parsed.items.length===0){
+      throw new Error("Gemini no devolvió elementos de cobertura.");
+    }
+
+    const validItems=parsed.items.filter(item=>
+      item &&
+      typeof item.concept==="string" &&
+      item.concept.trim() &&
+      typeof item.itemType==="string" &&
+      typeof item.evaluationType==="string" &&
+      typeof item.sourceEvidence==="string" &&
+      item.sourceEvidence.trim()
+    );
+
+    if(validItems.length===0){
+      throw new Error("El análisis no contiene elementos de cobertura válidos.");
+    }
+
+    const topic=await getOrCreateTopic(
+      "Apeo y poda de arbolado",
+      "apeo-poda.pdf"
+    );
+
+    await saveCoverageItems(topic.id,validItems);
+
+    const result=await db.query(
+      `SELECT
+         t.id,
+         t.name,
+         t.total_items,
+         COUNT(c.id) FILTER (WHERE c.worked = TRUE)::int AS worked_items,
+         COUNT(c.id) FILTER (WHERE c.worked = FALSE)::int AS pending_items
+       FROM topics t
+       LEFT JOIN coverage_items c ON c.topic_id = t.id
+       WHERE t.id = $1
+       GROUP BY t.id`,
+      [topic.id]
+    );
+
+    const summary=result.rows[0];
+
+    const total=Number(summary.total_items)||0;
+    const worked=Number(summary.worked_items)||0;
+
+    const coveragePercentage=
+      total>0
+        ? Number(((worked/total)*100).toFixed(1))
+        : 0;
+
+    console.log(
+      "COVERAGE: análisis guardado:",
+      total,
+      "elementos"
+    );
+
+    res.json({
+      ok:true,
+      topicId:summary.id,
+      topic:summary.name,
+      totalItems:total,
+      workedItems:worked,
+      pendingItems:Number(summary.pending_items)||0,
+      coveragePercentage
+    });
+
+  }catch(e){
+    console.error("ERROR COVERAGE:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
