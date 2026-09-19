@@ -257,7 +257,7 @@ duplicateIds NO debe contener keepId.
 ELEMENTOS:
 ${JSON.stringify(compactItems)}
 `;
-
+const ai=aiClient();
   const response=await ai.models.generateContent({
     model:"gemini-3.5-flash-lite",
     contents:prompt,
