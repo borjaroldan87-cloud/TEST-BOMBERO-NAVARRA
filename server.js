@@ -133,6 +133,21 @@ async function saveCoverageItems(topicId, items){
     [topicId]
   );
 }
+function normalizeCoverageItem(item){
+  const clean = value =>
+    typeof value === "string"
+      ? value.trim().replace(/\s+/g, " ")
+      : value;
+
+  return {
+    ...item,
+    section: clean(item.section) || null,
+    concept: clean(item.concept),
+    itemType: clean(item.itemType),
+    evaluationType: clean(item.evaluationType),
+    sourceEvidence: clean(item.sourceEvidence) || null
+  };
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
