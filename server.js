@@ -411,6 +411,171 @@ ${JSON.stringify(candidates)}
     ? parsed.approvedGroups
     : [];
 }
+async function finalDuplicateDecision(items,approvedGroups){
+  if(!approvedGroups.length){
+    return [];
+  }
+
+  const itemMap=new Map(
+    items.map(item=>[Number(item.id),item])
+  );
+
+  const pairs=[];
+
+  for(const group of approvedGroups){
+    const keep=itemMap.get(Number(group.keepId));
+    if(!keep) continue;
+
+    for(const deleteId of group.deleteIds){
+      const candidate=itemMap.get(Number(deleteId));
+      if(!candidate) continue;
+
+      pairs.push({
+        keep,
+        candidate
+      });
+    }
+  }
+
+  if(!pairs.length){
+    return [];
+  }
+
+  const ai=aiClient();
+
+  const prompt=`
+Eres el control final de deduplicación de un mapa curricular para una
+oposición de Bomberos de Navarra.
+
+Cada elemento representa una UNIDAD EXAMINABLE extraída del temario.
+
+Recibirás parejas:
+- keep: elemento que se conservaría.
+- candidate: elemento que se plantea eliminar.
+
+Debes decidir CADA PAREJA POR SEPARADO.
+
+La prioridad absoluta es NO PERDER COBERTURA.
+
+DECISIÓN "DELETE":
+Solo cuando keep y candidate contienen EXACTAMENTE la misma unidad examinable.
+
+DECISIÓN "KEEP":
+Siempre que candidate permita evaluar cualquier dato, paso, cifra, condición,
+excepción, relación, definición, fórmula, variable, clasificación, procedimiento,
+medida de seguridad o detalle que no esté íntegramente contenido en keep.
+
+REGLAS OBLIGATORIAS:
+
+1. Pertenecer al mismo concepto NO significa ser duplicado.
+
+2. Dos pasos diferentes del mismo procedimiento son unidades diferentes:
+   KEEP.
+
+3. Una regla general y uno de sus detalles concretos:
+   KEEP.
+
+4. Una clasificación y cada una de sus categorías:
+   KEEP.
+
+5. Una fórmula y el significado de una variable:
+   KEEP.
+
+6. Una técnica y sus indicaciones, pasos, límites o medidas de seguridad:
+   KEEP.
+
+7. Una cifra y otra cifra relacionada:
+   KEEP.
+
+8. Una definición y una consecuencia:
+   KEEP.
+
+9. Una pregunta directa y otra que exige conocimiento materialmente distinto:
+   KEEP.
+
+10. Solo la redacción puede variar para poder decidir DELETE.
+    El conocimiento necesario para responder debe ser el mismo.
+
+11. Compara especialmente sourceEvidence.
+    No decidas DELETE por similitud de los títulos conceptuales.
+
+12. Si candidate contiene aunque sea UN detalle examinable adicional:
+    KEEP.
+
+13. Ante cualquier duda:
+    KEEP.
+
+Para cada pareja indica también:
+- sharedKnowledge: qué información tienen realmente en común.
+- uniqueCandidateKnowledge: qué aporta candidate que no aporta keep.
+  Si no aporta absolutamente nada diferente, devuelve cadena vacía.
+
+Solo DELETE cuando uniqueCandidateKnowledge sea cadena vacía.
+
+FORMATO JSON EXACTO:
+
+{
+  "decisions":[
+    {
+      "keepId":123,
+      "candidateId":456,
+      "decision":"KEEP",
+      "sharedKnowledge":"...",
+      "uniqueCandidateKnowledge":"...",
+      "reason":"..."
+    }
+  ]
+}
+
+PAREJAS:
+${JSON.stringify(pairs)}
+`;
+
+  const response=await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:{
+        type:"object",
+        properties:{
+          decisions:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                keepId:{type:"integer"},
+                candidateId:{type:"integer"},
+                decision:{
+                  type:"string",
+                  enum:["KEEP","DELETE"]
+                },
+                sharedKnowledge:{type:"string"},
+                uniqueCandidateKnowledge:{type:"string"},
+                reason:{type:"string"}
+              },
+              required:[
+                "keepId",
+                "candidateId",
+                "decision",
+                "sharedKnowledge",
+                "uniqueCandidateKnowledge",
+                "reason"
+              ]
+            }
+          }
+        },
+        required:["decisions"]
+      }
+    }
+  });
+
+  const parsed=JSON.parse(response.text);
+
+  return Array.isArray(parsed.decisions)
+    ? parsed.decisions
+    : [];
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
@@ -1129,14 +1294,27 @@ app.get("/api/coverage-semantic-audit", async(req,res)=>{
 
     const groups=await semanticDeduplicateCoverageItems(items);
 const approvedGroups=await validateSemanticDuplicateGroups(items,groups);
+const decisions=await finalDuplicateDecision(items,approvedGroups);
 
+const deleteDecisions=decisions.filter(
+  d=>d.decision==="DELETE" &&
+     String(d.uniqueCandidateKnowledge ?? "").trim()===""
+);
+
+const keepDecisions=decisions.filter(
+  d=>d.decision!=="DELETE" ||
+     String(d.uniqueCandidateKnowledge ?? "").trim()!==""
+);
     res.json({
       ok:true,
       topic:topic.name,
       totalItems:items.length,
       candidateGroups:groups.length,
 approvedGroups:approvedGroups.length,
-groups:approvedGroups
+pairDecisions:decisions.length,
+safeDeletes:deleteDecisions.length,
+keptCandidates:keepDecisions.length,
+deleteDecisions
     });
 
   }catch(e){
