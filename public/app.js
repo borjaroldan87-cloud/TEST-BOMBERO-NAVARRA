@@ -83,9 +83,4 @@ function pick(j){ans[i]=j;show()} function next(){if(ans[i]===null)return alert(
 function finish(){if(ans.some(x=>x===null))return alert("Faltan respuestas");let ok=ans.filter((x,k)=>x===qs[k].correctIndex).length;$("quiz").classList.add("hidden");$("result").classList.remove("hidden");$("result").innerHTML=`<div class="c"><h2>${ok}/${qs.length} · ${Math.round(ok/qs.length*100)}%</h2><button onclick="review()">REVISAR</button></div>`}
 function review(){$("result").innerHTML=qs.map((q,k)=>`<div class="c"><b>${k+1}. ${q.stem}</b><p class="${ans[k]===q.correctIndex?"ok":"bad"}">Tu respuesta: ${"ABCD"[ans[k]]}) ${q.options[ans[k]]}</p>${ans[k]!==q.correctIndex?`<p class="ok">Correcta: ${"ABCD"[q.correctIndex]}) ${q.options[q.correctIndex]}</p>`:""}<p>${q.explanation}</p><p class="muted"><b>Fuente:</b> ${q.sourceEvidence}${q.sourcePage?` · pág. ${q.sourcePage}`:""}</p></div>`).join("")+`<button onclick="location.reload()">NUEVO TEST</button>`}
 status();
-fetch("/api/coverage-deduplicate",{
-  method:"POST"
-})
-.then(r=>r.json())
-.then(j=>alert(JSON.stringify(j,null,2)))
-.catch(e=>alert(e.message));
+
