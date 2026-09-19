@@ -28,6 +28,34 @@ async function initDatabase(){
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )
+  `);  await db.query(`
+    CREATE TABLE IF NOT EXISTS topics (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      source_file TEXT,
+      total_items INTEGER NOT NULL DEFAULT 0,
+      worked_items INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS coverage_items (
+      id SERIAL PRIMARY KEY,
+      topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+      section TEXT,
+      concept TEXT NOT NULL,
+      item_type TEXT NOT NULL,
+      evaluation_type TEXT NOT NULL,
+      source_page INTEGER,
+      source_evidence TEXT,
+      worked BOOLEAN NOT NULL DEFAULT FALSE,
+      times_asked INTEGER NOT NULL DEFAULT 0,
+      times_correct INTEGER NOT NULL DEFAULT 0,
+      times_wrong INTEGER NOT NULL DEFAULT 0,
+      last_asked_at TIMESTAMPTZ,
+      UNIQUE(topic_id, concept, item_type, evaluation_type)
+    )
   `);
 }
 async function loadStore(){
@@ -50,6 +78,58 @@ async function saveStore(storeName){
      ON CONFLICT (key)
      DO UPDATE SET value = EXCLUDED.value`,
     ["file_search_store", storeName]
+  );
+}
+async function getOrCreateTopic(name, sourceFile=null){
+  const existing = await db.query(
+    "SELECT * FROM topics WHERE name = $1 LIMIT 1",
+    [name]
+  );
+
+  if(existing.rows.length){
+    return existing.rows[0];
+  }
+
+  const created = await db.query(
+    `INSERT INTO topics (name, source_file)
+     VALUES ($1, $2)
+     RETURNING *`,
+    [name, sourceFile]
+  );
+
+  return created.rows[0];
+}
+
+async function saveCoverageItems(topicId, items){
+  for(const item of items){
+    await db.query(
+      `INSERT INTO coverage_items
+       (topic_id, section, concept, item_type, evaluation_type,
+        source_page, source_evidence)
+       VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (topic_id, concept, item_type, evaluation_type)
+       DO NOTHING`,
+      [
+        topicId,
+        item.section || null,
+        item.concept,
+        item.itemType,
+        item.evaluationType,
+        item.sourcePage ?? null,
+        item.sourceEvidence || null
+      ]
+    );
+  }
+
+  await db.query(
+    `UPDATE topics
+     SET total_items = (
+       SELECT COUNT(*)
+       FROM coverage_items
+       WHERE topic_id = $1
+     )
+     WHERE id = $1`,
+    [topicId]
   );
 }
 async function waitOp(ai, op){
