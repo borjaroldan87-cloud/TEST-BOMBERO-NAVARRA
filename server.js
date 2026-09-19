@@ -689,6 +689,45 @@ const parsed={
     });
   }
 });
+app.get("/api/coverage-audit", async(req,res)=>{
+  try{
+    const topic=await getOrCreateTopic(
+      "Apeo y poda de arbolado",
+      "apeo-poda.pdf"
+    );
+
+    const result=await db.query(
+      `SELECT
+        id,
+        section,
+        concept,
+        item_type,
+        evaluation_type,
+        source_page,
+        source_evidence,
+        worked
+      FROM coverage_items
+      WHERE topic_id = $1
+      ORDER BY source_page ASC NULLS LAST, id ASC`,
+      [topic.id]
+    );
+
+    res.json({
+      ok:true,
+      topic:topic.name,
+      total:result.rows.length,
+      items:result.rows
+    });
+
+  }catch(e){
+    console.error("ERROR COVERAGE AUDIT:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
