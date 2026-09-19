@@ -170,6 +170,63 @@ async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
     chunks
   };
 }
+function coverageGapPrompt(existingItems, startPage, endPage){
+  const existingSummary=existingItems.map(item=>({
+    concept:item.concept,
+    itemType:item.item_type,
+    evaluationType:item.evaluation_type,
+    sourcePage:item.source_page
+  }));
+
+  return `
+ACTÚAS COMO AUDITOR EXHAUSTIVO DE COBERTURA DE UN TEMARIO DE OPOSICIÓN.
+
+Estás revisando únicamente las páginas ${startPage} a ${endPage}
+del documento original.
+
+Ya existe un análisis previo de estas páginas. Los elementos examinables
+detectados anteriormente son:
+
+${JSON.stringify(existingSummary)}
+
+TU ÚNICA MISIÓN ES DETECTAR CONTENIDO EXAMINABLE QUE FALTE.
+
+Compara exhaustivamente el PDF adjunto con la lista anterior.
+
+Debes buscar especialmente omisiones de:
+- definiciones y conceptos;
+- datos numéricos y unidades;
+- tablas, filas, columnas y relaciones entre valores;
+- fórmulas y cada una de sus variables;
+- cálculos y posibles aplicaciones de las fórmulas;
+- clasificaciones y enumeraciones;
+- procedimientos y secuencias;
+- condiciones, límites y excepciones;
+- relaciones causa-efecto;
+- diferencias entre conceptos similares;
+- medidas de seguridad;
+- indicaciones y contraindicaciones;
+- contenido técnico presente en esquemas, figuras o gráficos;
+- cualquier detalle literal susceptible de convertirse en una pregunta tipo test.
+
+REGLAS:
+1. NO repitas elementos que ya estén representados en la lista previa.
+2. NO inventes información.
+3. TODO elemento nuevo debe estar respaldado literalmente por estas páginas.
+4. Divide un mismo contenido en varios elementos cuando permita evaluar
+   conocimientos realmente distintos.
+5. Si una fórmula permite preguntar por su identificación, variables,
+   despeje o aplicación, considera esas posibilidades por separado cuando
+   estén respaldadas por el documento.
+6. Si una tabla contiene varios datos examinables, no la reduzcas a una
+   descripción genérica de "la tabla".
+7. sourcePage debe corresponder a una página comprendida entre
+   ${startPage} y ${endPage}.
+8. Si no falta absolutamente ningún elemento examinable, devuelve items: [].
+
+Devuelve EXCLUSIVAMENTE los elementos que faltan.
+`;
+}
 async function waitOp(ai, op){
   while(!op.done){ await sleep(2500); op = await ai.operations.get({operation: op}); }
   return op;
@@ -610,7 +667,64 @@ ${chunk.startPage} a ${chunk.endPage}.`
 console.log(
   `COVERAGE: todos los bloques completados. Total bruto: ${allItems.length}`
 );
+console.log("COVERAGE AUDIT: iniciando segunda pasada para detectar omisiones");
 
+const auditItems=[];
+
+for(const chunk of chunks){
+  const existingChunkItems=allItems.filter(item=>
+    Number(item.sourcePage)>=chunk.startPage &&
+    Number(item.sourcePage)<=chunk.endPage
+  );
+
+  console.log(
+    `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
+  );
+
+  const auditResponse=await ai.models.generateContent({
+    model:"gemini-3.6-flash",
+    contents:[
+      {
+        text:coverageGapPrompt(
+          existingChunkItems.map(item=>({
+            concept:item.concept,
+            item_type:item.itemType,
+            evaluation_type:item.evaluationType,
+            source_page:item.sourcePage
+          })),
+          chunk.startPage,
+          chunk.endPage
+        )
+      },
+      {
+        inlineData:{
+          mimeType:"application/pdf",
+          data:chunk.data
+        }
+      }
+    ],
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:coverageSchema
+    }
+  });
+
+  const parsedAudit=JSON.parse(auditResponse.text);
+
+  if(parsedAudit.items && Array.isArray(parsedAudit.items)){
+    auditItems.push(...parsedAudit.items);
+
+    console.log(
+      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
+    );
+  }
+}
+
+allItems.push(...auditItems);
+
+console.log(
+  `COVERAGE AUDIT: completada. Añadidos ${auditItems.length} elementos. Total: ${allItems.length}`
+);
 const parsed={
   items:allItems
 };
