@@ -121,20 +121,46 @@ const questionSchema={
 };
 
 function generationPrompt(count,difficulty,mode){
-return `Eres un generador de preguntas para una oposición de Bombero de Navarra.
-FUENTE ÚNICA: los documentos recuperados mediante File Search. No uses conocimiento externo.
+  return `Eres un generador de preguntas para una oposición de Bombero de Navarra.
+
+FUENTE DE CONTENIDO:
+Los documentos recuperados mediante File Search son la ÚNICA fuente de verdad.
+No uses conocimiento externo ni completes información que no esté respaldada por la fuente.
+
+OBJETIVO:
 Genera EXACTAMENTE ${count} preguntas tipo test, en español, dificultad ${difficulty}, modo ${mode}.
+Las preguntas deben parecer redactadas para una oposición oficial de Bombero de Navarra.
+
+COBERTURA DEL TEMARIO:
+- Antes de redactar las preguntas, identifica mentalmente los distintos conceptos, apartados, datos y procedimientos disponibles en los fragmentos recuperados.
+- Distribuye las preguntas entre el mayor número posible de conceptos y apartados diferentes.
+- Cada pregunta debe evaluar preferentemente un concepto principal distinto.
+- No concentres el test en una sola sección del documento si existe información suficiente de otras secciones.
+- Evita preguntas repetidas, casi equivalentes o que evalúen esencialmente el mismo conocimiento.
+- No descartes información por parecer demasiado literal o numérica.
+- Son examinables cifras, porcentajes, medidas, unidades, valores de tablas, fórmulas, enumeraciones, clasificaciones, excepciones, condiciones, procedimientos, secuencias, relaciones y cualquier otro dato contenido en la fuente.
+
+ESTILO DE OPOSICIÓN:
+- Combina preguntas de conocimiento literal con preguntas que exijan comprensión, relación y razonamiento sobre el contenido.
+- Incluye, cuando el contenido lo permita, preguntas del tipo "señale la CORRECTA" y "señale la INCORRECTA".
+- En preguntas de dificultad alta, utiliza también alternativas desarrolladas que obliguen a leer y comparar cuidadosamente varias afirmaciones.
+- Los distractores deben ser plausibles, próximos al contenido correcto y diferenciarse mediante matices relevantes.
+- Cuando el contenido permita realizar cálculos, genera también problemas de cálculo que obliguen a aplicar correctamente los datos o fórmulas de la fuente.
+- No conviertas todas las preguntas en preguntas de razonamiento: los datos literales y numéricos también deben ser evaluados.
+
 REGLAS OBLIGATORIAS:
 - 4 opciones y exactamente una correcta.
 - La respuesta correcta debe estar demostrada literalmente o de forma inequívoca por la fuente.
-- Distractores plausibles pero falsos según la fuente; nunca dos respuestas defendibles.
-- Respeta cifras, unidades, terminología y procedimientos del documento.
-- Evita preguntas repetidas o casi equivalentes.
-- Mezcla posiciones A/B/C/D sin patrón evidente.
+- Nunca puede haber dos respuestas razonablemente defendibles.
+- Respeta exactamente cifras, unidades, terminología, excepciones y procedimientos del documento.
+- Mezcla las posiciones A/B/C/D de las respuestas correctas sin un patrón evidente.
 - sourceEvidence debe contener una paráfrasis breve del fragmento que demuestra la respuesta, NO inventada.
 - sourcePage: número de página si la recuperación permite identificarlo; null si no.
-- explanation: breve y estrictamente basada en la fuente.
-Si una pregunta no puede fundamentarse con seguridad, no la uses y crea otra.`;
+- explanation: explicación clara y estrictamente basada en la fuente que permita comprender por qué la respuesta correcta lo es.
+- Si una pregunta no puede fundamentarse con seguridad, descártala y crea otra.
+
+PRIORIDAD:
+Calidad, fidelidad al documento, diversidad temática y cobertura del contenido tienen prioridad sobre generar preguntas rápidamente.`;
 }
 app.post("/api/generate", async(req,res)=>{
   try{
