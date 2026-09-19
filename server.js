@@ -293,6 +293,124 @@ const ai=aiClient();
     ? parsed.groups
     : [];
 }
+async function validateSemanticDuplicateGroups(items,groups){
+  if(!groups.length){
+    return [];
+  }
+
+  const itemMap=new Map(
+    items.map(item=>[Number(item.id),item])
+  );
+
+  const candidates=groups.map(group=>({
+    keep:itemMap.get(Number(group.keepId)),
+    duplicates:group.duplicateIds
+      .map(id=>itemMap.get(Number(id)))
+      .filter(Boolean),
+    firstReason:group.reason
+  })).filter(group=>group.keep && group.duplicates.length);
+
+  const ai=aiClient();
+
+  const prompt=`
+Eres la SEGUNDA Y ÚLTIMA AUDITORÍA de deduplicación de un mapa curricular
+para una oposición de Bomberos de Navarra.
+
+Una primera auditoría ha propuesto grupos de posibles duplicados.
+Debes revisar esos grupos de forma MUY CONSERVADORA utilizando el contenido
+completo de cada registro, especialmente concept, itemType, evaluationType,
+sourcePage y sourceEvidence.
+
+OBJETIVO:
+Autorizar exclusivamente eliminaciones que NO provoquen ninguna pérdida
+de conocimiento examinable ni de una forma de evaluación materialmente distinta.
+
+REGLA FUNDAMENTAL:
+Dos registros solo pueden fusionarse cuando son REDUNDANTES DE VERDAD.
+
+Para autorizar la eliminación de un registro deben cumplirse TODAS estas condiciones:
+
+1. Expresan exactamente el mismo dato, regla, definición, fórmula,
+   clasificación, procedimiento, condición o conocimiento.
+2. No contienen cifras, límites, excepciones, pasos o condiciones diferentes.
+3. Ninguno aporta información examinable adicional.
+4. La eliminación no reduce la cobertura curricular.
+5. No representan formas de evaluación materialmente diferentes que interese conservar.
+6. sourceEvidence confirma la equivalencia.
+7. Ante la mínima duda, NO autorices la eliminación.
+
+EJEMPLOS DE LO QUE NO DEBES FUSIONAR:
+- funciones de raíces y funciones de ramas;
+- coeficiente aerodinámico y módulo de Young;
+- definición de una técnica y pasos de ejecución;
+- aplicación de una técnica y normas de seguridad;
+- fórmula y significado de sus variables;
+- valor numérico y procedimiento para obtenerlo;
+- clasificación y características de cada categoría.
+
+IMPORTANTE:
+Puedes aceptar solo una parte de los duplicateIds de un grupo.
+No estás obligado a aceptar el grupo completo.
+
+Devuelve ÚNICAMENTE los IDs cuya eliminación sea segura.
+
+FORMATO JSON EXACTO:
+
+{
+  "approvedGroups":[
+    {
+      "keepId":123,
+      "deleteIds":[456],
+      "reason":"Ambos registros contienen exactamente la misma unidad examinable."
+    }
+  ]
+}
+
+Si ningún candidato puede eliminarse con seguridad:
+
+{
+  "approvedGroups":[]
+}
+
+CANDIDATOS:
+${JSON.stringify(candidates)}
+`;
+
+  const response=await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:{
+        type:"object",
+        properties:{
+          approvedGroups:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                keepId:{type:"integer"},
+                deleteIds:{
+                  type:"array",
+                  items:{type:"integer"}
+                },
+                reason:{type:"string"}
+              },
+              required:["keepId","deleteIds","reason"]
+            }
+          }
+        },
+        required:["approvedGroups"]
+      }
+    }
+  });
+
+  const parsed=JSON.parse(response.text);
+
+  return Array.isArray(parsed.approvedGroups)
+    ? parsed.approvedGroups
+    : [];
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
@@ -1010,13 +1128,15 @@ app.get("/api/coverage-semantic-audit", async(req,res)=>{
     }));
 
     const groups=await semanticDeduplicateCoverageItems(items);
+const approvedGroups=await validateSemanticDuplicateGroups(items,groups);
 
     res.json({
       ok:true,
       topic:topic.name,
       totalItems:items.length,
-      duplicateGroups:groups.length,
-      groups
+      candidateGroups:groups.length,
+approvedGroups:approvedGroups.length,
+groups:approvedGroups
     });
 
   }catch(e){
