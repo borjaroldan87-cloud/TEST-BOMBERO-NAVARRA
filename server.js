@@ -512,7 +512,7 @@ if(!fs.existsSync(pdfPath)){
 const pdfBase64=fs.readFileSync(pdfPath).toString("base64");
 
 const response=await ai.models.generateContent({
-  model:"gemini-3.8-flash",
+  model:"gemini-3.6-flash",
   contents:[
     {text:coverageAnalysisPrompt()},
     {
