@@ -45,6 +45,39 @@ async function generate(){
     btn.textContent=originalText;
   }
 }
+async function analyzeCoverage(){
+  const btn=$("coverage");
+  const originalText=btn.textContent;
+
+  try{
+    btn.disabled=true;
+    btn.textContent="ANALIZANDO TODO EL TEMA...";
+
+    const j=await api("/api/analyze-coverage",{
+      method:"POST",
+      body:JSON.stringify({})
+    });
+
+    if(!j.ok){
+      throw new Error(j.error||"No se pudo analizar la cobertura del tema.");
+    }
+
+    alert(
+      "ANÁLISIS COMPLETADO\n\n"+
+      "Tema: "+j.topic+"\n"+
+      "Elementos detectados: "+j.totalItems+"\n"+
+      "Trabajados: "+j.workedItems+"\n"+
+      "Pendientes: "+j.pendingItems+"\n"+
+      "Cobertura actual: "+j.coveragePercentage+" %"
+    );
+
+  }catch(e){
+    alert(e?.message||String(e));
+  }finally{
+    btn.disabled=false;
+    btn.textContent=originalText;
+  }
+}
 function show(){let q=qs[i];$("quiz").innerHTML=`<div class="c"><div class="muted">Pregunta ${i+1}/${qs.length}</div><h2>${q.stem}</h2>${q.options.map((x,j)=>`<button class="opt ${ans[i]===j?"sel":""}" onclick="pick(${j})">${"ABCD"[j]}) ${x}</button>`).join("")}<button onclick="${i?`i--;show()`:"void(0)"}">Anterior</button> <button onclick="${i<qs.length-1?`next()`:`finish()`}">${i<qs.length-1?"Siguiente":"Finalizar"}</button></div>`}
 function pick(j){ans[i]=j;show()} function next(){if(ans[i]===null)return alert("Selecciona una respuesta");i++;show()}
 function finish(){if(ans.some(x=>x===null))return alert("Faltan respuestas");let ok=ans.filter((x,k)=>x===qs[k].correctIndex).length;$("quiz").classList.add("hidden");$("result").classList.remove("hidden");$("result").innerHTML=`<div class="c"><h2>${ok}/${qs.length} · ${Math.round(ok/qs.length*100)}%</h2><button onclick="review()">REVISAR</button></div>`}
