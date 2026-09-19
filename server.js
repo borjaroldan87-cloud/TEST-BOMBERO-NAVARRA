@@ -3,6 +3,7 @@ import multer from "multer";
 import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
+import { PDFDocument } from "pdf-lib";
 import pg from "pg";
 const { Pool } = pg;
 
@@ -131,6 +132,43 @@ async function saveCoverageItems(topicId, items){
      WHERE id = $1`,
     [topicId]
   );
+}
+async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
+  const sourceBytes=fs.readFileSync(pdfPath);
+  const sourcePdf=await PDFDocument.load(sourceBytes);
+
+  const totalPages=sourcePdf.getPageCount();
+  const chunks=[];
+
+  for(let start=0; start<totalPages; start+=pagesPerChunk){
+    const end=Math.min(start+pagesPerChunk,totalPages);
+
+    const chunkPdf=await PDFDocument.create();
+    const pageIndexes=[];
+
+    for(let i=start;i<end;i++){
+      pageIndexes.push(i);
+    }
+
+    const copiedPages=await chunkPdf.copyPages(sourcePdf,pageIndexes);
+
+    copiedPages.forEach(page=>{
+      chunkPdf.addPage(page);
+    });
+
+    const chunkBytes=await chunkPdf.save();
+
+    chunks.push({
+      startPage:start+1,
+      endPage:end,
+      data:Buffer.from(chunkBytes).toString("base64")
+    });
+  }
+
+  return {
+    totalPages,
+    chunks
+  };
 }
 async function waitOp(ai, op){
   while(!op.done){ await sleep(2500); op = await ai.operations.get({operation: op}); }
@@ -509,28 +547,73 @@ if(!fs.existsSync(pdfPath)){
   throw new Error("No se encuentra el PDF para analizar.");
 }
 
-const pdfBase64=fs.readFileSync(pdfPath).toString("base64");
+const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
 
-const response=await ai.models.generateContent({
-  model:"gemini-3.6-flash",
-  contents:[
-    {text:coverageAnalysisPrompt()},
-    {
-      inlineData:{
-        mimeType:"application/pdf",
-        data:pdfBase64
+console.log(
+  `COVERAGE: ${totalPages} páginas divididas en ${chunks.length} bloques`
+);
+
+const allItems=[];
+
+for(const chunk of chunks){
+  console.log(
+    `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
+  );
+
+  const response=await ai.models.generateContent({
+    model:"gemini-3.6-flash",
+    contents:[
+      {
+        text:
+          coverageAnalysisPrompt()+
+          `
+
+IMPORTANTE:
+Estás analizando únicamente las páginas ${chunk.startPage} a ${chunk.endPage}
+del documento original.
+
+Analiza exhaustivamente TODO el contenido de estas páginas.
+No omitas tablas, cifras, fórmulas, clasificaciones, procedimientos,
+excepciones, definiciones ni elementos gráficos con contenido examinable.
+
+Cuando indiques sourcePage utiliza la numeración REAL del documento original:
+${chunk.startPage} a ${chunk.endPage}.`
+      },
+      {
+        inlineData:{
+          mimeType:"application/pdf",
+          data:chunk.data
+        }
       }
+    ],
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:coverageSchema
     }
-  ],
-  config:{
-    responseMimeType:"application/json",
-    responseJsonSchema:coverageSchema
+  });
+
+  const parsedChunk=JSON.parse(response.text);
+
+  if(!parsedChunk.items || !Array.isArray(parsedChunk.items)){
+    throw new Error(
+      `El bloque ${chunk.startPage}-${chunk.endPage} no devolvió elementos válidos.`
+    );
   }
-});
 
-    console.log("COVERAGE: respuesta recibida");
+  allItems.push(...parsedChunk.items);
 
-    const parsed=JSON.parse(response.text);
+  console.log(
+    `COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${parsedChunk.items.length} elementos`
+  );
+}
+
+console.log(
+  `COVERAGE: todos los bloques completados. Total bruto: ${allItems.length}`
+);
+
+const parsed={
+  items:allItems
+};
 
     if(!parsed.items || !Array.isArray(parsed.items) || parsed.items.length===0){
       throw new Error("Gemini no devolvió elementos de cobertura.");
