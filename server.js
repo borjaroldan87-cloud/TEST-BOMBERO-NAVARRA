@@ -971,7 +971,74 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     });
   }
 });
+app.get("/api/coverage-audit", async(req,res)=>{
+  try{
+    const topicResult=await db.query(
+      `SELECT id, name, total_items
+       FROM topics
+       WHERE name=$1
+       LIMIT 1`,
+      ["Apeo y poda de arbolado"]
+    );
 
+    if(!topicResult.rows.length){
+      throw new Error("No existe el análisis de cobertura del tema.");
+    }
+
+    const topic=topicResult.rows[0];
+
+    const itemsResult=await db.query(
+      `SELECT
+         id,
+         section,
+         concept,
+         item_type,
+         evaluation_type,
+         source_page,
+         source_evidence,
+         worked
+       FROM coverage_items
+       WHERE topic_id=$1
+       ORDER BY source_page ASC, section ASC, id ASC`,
+      [topic.id]
+    );
+
+    const items=itemsResult.rows;
+
+    const byPage={};
+    const byType={};
+    const byEvaluation={};
+
+    for(const item of items){
+      const page=String(item.source_page ?? "sin_pagina");
+      const type=item.item_type || "sin_tipo";
+      const evaluation=item.evaluation_type || "sin_tipo";
+
+      byPage[page]=(byPage[page]||0)+1;
+      byType[type]=(byType[type]||0)+1;
+      byEvaluation[evaluation]=(byEvaluation[evaluation]||0)+1;
+    }
+
+    res.json({
+      ok:true,
+      topic:topic.name,
+      databaseTotal:items.length,
+      topicTotal:Number(topic.total_items)||0,
+      byPage,
+      byType,
+      byEvaluation,
+      items
+    });
+
+  }catch(e){
+    console.error("ERROR COVERAGE AUDIT READ:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 async function startServer(){
   await initDatabase();
   await loadStore();
