@@ -202,6 +202,97 @@ function deduplicateCoverageItems(items){
 
   return [...unique.values()];
 }
+async function semanticDeduplicateCoverageItems(items){
+  if(!items.length){
+    return [];
+  }
+
+  const compactItems=items.map(item=>({
+    id:item.id,
+    page:item.sourcePage,
+    concept:item.concept,
+    itemType:item.itemType,
+    evaluationType:item.evaluationType
+  }));
+
+  const prompt=`
+Actúa como auditor de un mapa curricular para una oposición de Bomberos de Navarra.
+
+Recibirás elementos examinables extraídos DEL MISMO TEMA.
+
+OBJETIVO:
+Detectar exclusivamente elementos que representan realmente el mismo conocimiento
+aunque estén redactados de forma diferente.
+
+REGLAS CRÍTICAS:
+
+1. NO agrupes elementos solo porque hablen del mismo asunto.
+2. NO agrupes conocimientos complementarios.
+3. NO agrupes cifras, condiciones, excepciones, procedimientos o consecuencias diferentes.
+4. NO elimines variantes que exijan conocimientos distintos.
+5. Si dos elementos tienen el mismo concepto pero evalúan aspectos materialmente distintos,
+   deben conservarse separados.
+6. Agrupa únicamente cuando responder correctamente a uno implique necesariamente conocer
+   exactamente la misma información que para responder al otro.
+7. Ante cualquier duda, CONSERVA ambos.
+8. Los números de página ayudan a contextualizar, pero no determinan por sí solos que sean duplicados.
+9. No inventes, corrijas ni añadas contenido.
+10. Devuelve únicamente grupos con DOS O MÁS IDs realmente equivalentes.
+
+FORMATO JSON EXACTO:
+
+{
+  "groups":[
+    {
+      "keepId":123,
+      "duplicateIds":[456,789],
+      "reason":"Explicación breve de por qué evalúan exactamente el mismo conocimiento"
+    }
+  ]
+}
+
+El keepId debe ser uno de los IDs del grupo.
+duplicateIds NO debe contener keepId.
+
+ELEMENTOS:
+${JSON.stringify(compactItems)}
+`;
+
+  const response=await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:{
+        type:"object",
+        properties:{
+          groups:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                keepId:{type:"integer"},
+                duplicateIds:{
+                  type:"array",
+                  items:{type:"integer"}
+                },
+                reason:{type:"string"}
+              },
+              required:["keepId","duplicateIds","reason"]
+            }
+          }
+        },
+        required:["groups"]
+      }
+    }
+  });
+
+  const parsed=JSON.parse(response.text);
+
+  return Array.isArray(parsed.groups)
+    ? parsed.groups
+    : [];
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
@@ -882,6 +973,58 @@ const parsed={
     res.status(500).json({
       ok:false,
       error:e?.message || String(e)
+    });
+  }
+});
+app.get("/api/coverage-semantic-audit", async(req,res)=>{
+  try{
+    const topicResult=await db.query(`
+      SELECT id, name
+      FROM topics
+      WHERE name = $1
+      LIMIT 1
+    `,["Apeo y poda de arbolado"]);
+
+    if(!topicResult.rows.length){
+      throw new Error("No se encontró el tema Apeo y poda de arbolado.");
+    }
+
+    const topic=topicResult.rows[0];
+
+    const result=await db.query(`
+      SELECT *
+      FROM coverage_items
+      WHERE topic_id = $1
+      ORDER BY source_page, id
+    `,[topic.id]);
+
+    const items=result.rows.map(row=>({
+      id:row.id,
+      section:row.section,
+      concept:row.concept,
+      itemType:row.item_type,
+      evaluationType:row.evaluation_type,
+      sourcePage:row.source_page,
+      sourceEvidence:row.source_evidence,
+      worked:row.worked
+    }));
+
+    const groups=await semanticDeduplicateCoverageItems(items);
+
+    res.json({
+      ok:true,
+      topic:topic.name,
+      totalItems:items.length,
+      duplicateGroups:groups.length,
+      groups
+    });
+
+  }catch(e){
+    console.error("ERROR SEMANTIC COVERAGE AUDIT:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message||String(e)
     });
   }
 });
