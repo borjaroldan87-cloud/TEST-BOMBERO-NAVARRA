@@ -148,6 +148,60 @@ function normalizeCoverageItem(item){
     sourceEvidence: clean(item.sourceEvidence) || null
   };
 }
+function coverageKey(item){
+  const normalized=normalizeCoverageItem(item);
+
+  const text=value=>
+    String(value ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .replace(/[^\p{L}\p{N}]+/gu," ")
+      .trim()
+      .replace(/\s+/g," ");
+
+  return [
+    Number(normalized.sourcePage) || 0,
+    text(normalized.concept),
+    text(normalized.itemType),
+    text(normalized.evaluationType)
+  ].join("|");
+}
+
+function deduplicateCoverageItems(items){
+  const unique=new Map();
+
+  for(const rawItem of items){
+    const item=normalizeCoverageItem(rawItem);
+
+    if(!item.concept){
+      continue;
+    }
+
+    const key=coverageKey(item);
+
+    if(!unique.has(key)){
+      unique.set(key,item);
+      continue;
+    }
+
+    const current=unique.get(key);
+
+    if(
+      (!current.sourceEvidence && item.sourceEvidence) ||
+      String(item.sourceEvidence ?? "").length >
+      String(current.sourceEvidence ?? "").length
+    ){
+      unique.set(key,{
+        ...current,
+        ...item,
+        worked:Boolean(current.worked || item.worked)
+      });
+    }
+  }
+
+  return [...unique.values()];
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
@@ -747,8 +801,14 @@ allItems.push(...auditItems);
 console.log(
   `COVERAGE AUDIT: completada. Añadidos ${auditItems.length} elementos. Total: ${allItems.length}`
 );
+const deduplicatedItems=deduplicateCoverageItems(allItems);
+
+console.log(
+  `COVERAGE: deduplicación exacta/normalizada: ${allItems.length} -> ${deduplicatedItems.length}`
+);
+
 const parsed={
-  items:allItems
+  items:deduplicatedItems
 };
 
     if(!parsed.items || !Array.isArray(parsed.items) || parsed.items.length===0){
@@ -822,6 +882,94 @@ const parsed={
     res.status(500).json({
       ok:false,
       error:e?.message || String(e)
+    });
+  }
+});
+app.post("/api/coverage-deduplicate", async(req,res)=>{
+  try{
+    const topicResult=await db.query(`
+      SELECT id, name
+      FROM topics
+      WHERE name = $1
+      LIMIT 1
+    `,["Apeo y poda de arbolado"]);
+
+    if(!topicResult.rows.length){
+      throw new Error("No se encontró el tema Apeo y poda de arbolado.");
+    }
+
+    const topic=topicResult.rows[0];
+
+    const result=await db.query(`
+      SELECT *
+      FROM coverage_items
+      WHERE topic_id = $1
+      ORDER BY id
+    `,[topic.id]);
+
+    const original=result.rows;
+
+    const mapped=original.map(row=>({
+      id:row.id,
+      section:row.section,
+      concept:row.concept,
+      itemType:row.item_type,
+      evaluationType:row.evaluation_type,
+      sourcePage:row.source_page,
+      sourceEvidence:row.source_evidence,
+      worked:row.worked
+    }));
+
+    const unique=deduplicateCoverageItems(mapped);
+
+    const keepIds=new Set(
+      unique
+        .map(item=>item.id)
+        .filter(id=>id!==undefined && id!==null)
+    );
+
+    const deleteIds=original
+      .map(row=>row.id)
+      .filter(id=>!keepIds.has(id));
+
+    if(deleteIds.length){
+      await db.query(
+        `DELETE FROM coverage_items
+         WHERE topic_id = $1
+         AND id = ANY($2::int[])`,
+        [topic.id,deleteIds]
+      );
+    }
+
+    const countResult=await db.query(
+      `SELECT COUNT(*)::int AS total
+       FROM coverage_items
+       WHERE topic_id = $1`,
+      [topic.id]
+    );
+
+    const finalTotal=countResult.rows[0].total;
+
+    await db.query(
+      `UPDATE topics
+       SET total_items = $1
+       WHERE id = $2`,
+      [finalTotal,topic.id]
+    );
+
+    res.json({
+      ok:true,
+      topic:topic.name,
+      before:original.length,
+      removed:deleteIds.length,
+      after:finalTotal
+    });
+
+  }catch(e){
+    console.error("ERROR COVERAGE DEDUPLICATE:",e);
+    res.status(500).json({
+      ok:false,
+      error:e?.message||String(e)
     });
   }
 });
