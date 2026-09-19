@@ -1741,6 +1741,77 @@ app.get("/api/coverage-audit", async(req,res)=>{
     });
   }
 });
+async function getCoverageTargetsForGeneration(count){
+  const result=await db.query(`
+    SELECT
+      ci.id,
+      ci.section,
+      ci.concept,
+      ci.item_type,
+      ci.evaluation_type,
+      ci.source_page,
+      ci.source_evidence
+    FROM coverage_items ci
+    JOIN topics t ON t.id = ci.topic_id
+    WHERE ci.worked = FALSE
+    ORDER BY RANDOM()
+    LIMIT $1
+  `,[count]);
+
+  return result.rows;
+}
+
+function coverageTargetsPrompt(targets){
+  if(!targets.length) return "";
+
+  return `
+
+==================================================
+OBJETIVOS OBLIGATORIOS DE COBERTURA
+==================================================
+
+El sistema ha seleccionado ${targets.length} unidades examinables que todavía NO han sido trabajadas.
+
+Debes generar EXACTAMENTE UNA pregunta sobre CADA objetivo siguiente.
+No sustituyas estos objetivos por otros conceptos que te parezcan más interesantes.
+No concentres las preguntas en otros contenidos recuperados por File Search.
+
+OBJETIVOS:
+
+${targets.map((item,index)=>`
+OBJETIVO ${index+1}
+- Apartado: ${item.section || "No especificado"}
+- Concepto: ${item.concept}
+- Tipo de contenido: ${item.item_type}
+- Tipo de evaluación solicitado: ${item.evaluation_type}
+- Página de referencia: ${item.source_page ?? "No determinada"}
+- Evidencia catalogada: ${item.source_evidence || "No disponible"}
+`).join("\n")}
+
+REGLAS DE COBERTURA:
+- La pregunta 1 debe evaluar el OBJETIVO 1.
+- La pregunta 2 debe evaluar el OBJETIVO 2.
+- Continúa exactamente en ese orden.
+- No generes dos preguntas sobre el mismo objetivo.
+- El objetivo indica QUÉ conocimiento debe evaluarse.
+- File Search sigue siendo la fuente factual definitiva.
+- Verifica cada objetivo contra el documento recuperado antes de formular la pregunta.
+- Si la evidencia catalogada y el documento recuperado presentan alguna incompatibilidad, prevalece el documento original.
+`;
+}
+
+async function markCoverageTargetsWorked(targets){
+  if(!targets.length) return;
+
+  const ids=targets.map(item=>item.id);
+
+  await db.query(
+    `UPDATE coverage_items
+     SET worked = TRUE
+     WHERE id = ANY($1::int[])`,
+    [ids]
+  );
+}
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -1751,13 +1822,29 @@ app.post("/api/generate", async(req,res)=>{
       ? req.body.mode
       : "mixto";
 
+    const targets=await getCoverageTargetsForGeneration(count);
+
+    if(targets.length<count){
+      throw new Error(
+        `Solo quedan ${targets.length} unidades de cobertura sin trabajar.`
+      );
+    }
+
     const ai=aiClient();
 
-    console.log("GENERATECONTENT: iniciando");
+    console.log(
+      "GENERATECONTENT: iniciando con",
+      targets.length,
+      "objetivos de cobertura"
+    );
+
+    const prompt=
+      generationPrompt(count,difficulty,mode) +
+      coverageTargetsPrompt(targets);
 
     const response=await ai.models.generateContent({
       model:"gemini-3.5-flash-lite",
-      contents:generationPrompt(count,difficulty,mode),
+      contents:prompt,
       config:{
         tools:[{
           fileSearch:{
@@ -1773,8 +1860,13 @@ app.post("/api/generate", async(req,res)=>{
 
     const parsed=JSON.parse(response.text);
 
-    if(!parsed.questions || parsed.questions.length===0){
-      throw new Error("Gemini no devolvió preguntas.");
+    if(
+      !parsed.questions ||
+      parsed.questions.length!==count
+    ){
+      throw new Error(
+        `Gemini debía devolver ${count} preguntas y devolvió ${parsed.questions?.length || 0}.`
+      );
     }
 
     for(const q of parsed.questions){
@@ -1788,9 +1880,29 @@ app.post("/api/generate", async(req,res)=>{
       }
     }
 
+    /*
+      Las preguntas mantienen el mismo orden que los objetivos:
+      pregunta 1 -> objetivo 1
+      pregunta 2 -> objetivo 2
+      etc.
+
+      Solo llegamos aquí después de recibir y validar
+      exactamente el número solicitado de preguntas.
+    */
+    await markCoverageTargetsWorked(targets);
+
+    console.log(
+      "COBERTURA: marcados como trabajados",
+      targets.map(t=>t.id)
+    );
+
     res.json({
       ok:true,
-      questions:parsed.questions
+      questions:parsed.questions,
+      coverage:{
+        targeted:targets.length,
+        markedWorked:targets.length
+      }
     });
 
   }catch(e){
