@@ -773,10 +773,10 @@ app.post("/api/ingest-benchmark", async(req,res)=>{
 app.post("/api/ingest-official-exams", async (req,res)=>{
   try{
     const dataFiles = fs.readdirSync(path.resolve("data"));
-    console.log("ARCHIVOS EN DATA:", dataFiles);
 
 const file2024 = dataFiles.find(name =>
-  name.includes("MODELO B Examen PRUEBA TEORICA")
+  name.includes("PRUEBA TEORICA BOMBEROS") &&
+  name.includes("2024")
 );
 
 const file2026 = dataFiles.find(name =>
