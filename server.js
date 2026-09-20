@@ -1077,6 +1077,58 @@ PRECISIÓN: no inflar el inventario mediante elementos redundantes, artificiales
 
 Devuelve exclusivamente el JSON solicitado por el esquema.`;
 }
+function officialStyleAnalysisPrompt(){
+  return `
+Analiza exclusivamente el ESTILO DE REDACCIÓN Y CONSTRUCCIÓN DE PREGUNTAS
+de los exámenes oficiales de Bomberos de Navarra disponibles en File Search.
+
+IMPORTANTE:
+Estos documentos NO son fuente factual para futuros test.
+No debes crear un temario, extraer respuestas correctas ni convertir sus datos
+técnicos en conocimiento de referencia.
+
+Tu trabajo es construir un PERFIL DE ESTILO reutilizable.
+
+Distingue claramente los patrones observados en 2024 y 2026 y da mayor peso
+al estilo de 2026 como referencia principal.
+
+Analiza:
+
+1. Estructura habitual de los enunciados.
+2. Longitud y complejidad de los enunciados.
+3. Estructura y longitud de las cuatro opciones.
+4. Forma de construir distractores plausibles.
+5. Uso de preguntas directas.
+6. Uso de CORRECTA / INCORRECTA / NO ES CORRECTA.
+7. Preguntas conceptuales.
+8. Preguntas numéricas.
+9. Preguntas de cálculo.
+10. Preguntas procedimentales.
+11. Preguntas contextualizadas u operativas.
+12. Grado de razonamiento exigido.
+13. Uso de referencias explícitas a manuales, páginas o normativa.
+14. Diferencias relevantes entre 2024 y 2026.
+15. Patrones que hacen que una pregunta parezca propia del examen oficial.
+16. Patrones de dificultad y construcción de distractores.
+17. Errores de estilo que un generador debe evitar.
+18. Reglas concretas para generar preguntas MÁS EXIGENTES que las oficiales
+    manteniendo su aspecto, lógica y forma de preguntar.
+
+REGLAS CRÍTICAS:
+- Analiza FORMA, no contenido factual.
+- No conviertas ninguna respuesta del examen en fuente de verdad.
+- No incluyas un banco de preguntas oficiales.
+- No copies preguntas completas.
+- Puedes describir estructuras abstractas de preguntas.
+- El perfil debe servir para generar preguntas nuevas usando OTRO almacén
+  independiente como única fuente factual.
+- 2026 debe tener prioridad estilística sobre 2024.
+- Conserva de 2024 los rasgos formales útiles que complementen 2026.
+
+Devuelve un perfil técnico, concreto y directamente utilizable como
+instrucciones para otro modelo generador.
+`;
+}
 function generationPrompt(count,difficulty,mode){
   return `Eres el generador de preguntas de entrenamiento para la oposición de Bombero de Navarra.
 
@@ -1434,6 +1486,82 @@ Prioridades, en este orden:
 8. Utilidad de la explicación para estudiar el error.
 
 Nunca sacrifiques exactitud para aumentar dificultad o variedad.`;
+}
+async function getOfficialExamStyleReference(){
+  if(!EXAM_STYLE_STORE){
+    await loadExamStyleStore();
+  }
+
+  if(!EXAM_STYLE_STORE){
+    throw new Error("No está disponible el almacén de estilo de los exámenes oficiales.");
+  }
+
+  const ai = aiClient();
+
+  const prompt = `
+Analiza los exámenes oficiales de Bomberos de Navarra contenidos en este File Search Store.
+
+IMPORTANTE:
+Estos documentos NO son fuente factual del temario.
+NO debes extraer de ellos conocimientos para decidir cuál es la respuesta correcta de una pregunta futura.
+Su única función es servir como REFERENCIA DE ESTILO DEL TRIBUNAL.
+
+Analiza conjuntamente los modelos oficiales 2024 y 2026, dando MAYOR PESO al estilo observado en 2026 y conservando los rasgos útiles de 2024.
+
+Extrae exclusivamente características de estilo útiles para generar nuevos test:
+
+1. Forma de redactar los enunciados.
+2. Longitud habitual de preguntas y respuestas.
+3. Estructura gramatical.
+4. Uso de preguntas directas.
+5. Uso de CORRECTA, INCORRECTA, NO, etc.
+6. Forma de plantear cálculos.
+7. Forma de plantear situaciones prácticas.
+8. Forma de preguntar procedimientos y secuencias.
+9. Forma de preguntar cifras, límites, clasificaciones y definiciones.
+10. Construcción de distractores.
+11. Similitud y equilibrio entre las cuatro opciones.
+12. Nivel de sutileza de los distractores.
+13. Uso de cambios mínimos de términos, cifras, unidades, orden o condiciones.
+14. Grado de razonamiento exigido.
+15. Patrones que puedan delatar artificialmente la respuesta correcta y que deban evitarse.
+16. Diferencias relevantes entre el estilo 2024 y 2026.
+17. Rasgos del modelo 2026 que deberían predominar en nuevos test.
+18. Cualquier otro patrón formal recurrente útil para reproducir fielmente el estilo del tribunal.
+
+REGLAS ABSOLUTAS:
+
+- NO conviertas ninguna respuesta de los exámenes en conocimiento factual.
+- NO indiques qué opción era correcta en ninguna pregunta oficial.
+- NO uses datos concretos de los exámenes como fuente de verdad.
+- NO sustituyas nunca el temario por estos documentos.
+- Describe PATRONES DE REDACCIÓN Y CONSTRUCCIÓN, no contenido factual.
+- El resultado debe poder utilizarse como guía de estilo para crear preguntas nuevas a partir de otra fuente documental independiente.
+
+Devuelve una guía de estilo compacta pero suficientemente precisa para que otro modelo pueda reproducir el estilo del tribunal.
+`;
+
+  const response = await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      tools:[
+        {
+          fileSearch:{
+            fileSearchStoreNames:[EXAM_STYLE_STORE]
+          }
+        }
+      ]
+    }
+  });
+
+  const text = response.text?.trim();
+
+  if(!text){
+    throw new Error("No se pudo obtener la referencia de estilo de los exámenes oficiales.");
+  }
+
+  return text;
 }
 app.post("/api/analyze-coverage", async(req,res)=>{
   try{
@@ -1952,9 +2080,41 @@ app.post("/api/generate", async(req,res)=>{
       "objetivos de cobertura"
     );
 
-    const prompt=
-      generationPrompt(count,difficulty,mode) +
-      coverageTargetsPrompt(targets);
+    const officialStyle = await getOfficialExamStyleReference();
+
+const prompt =
+  generationPrompt(count,difficulty,mode) +
+  coverageTargetsPrompt(targets) +
+  `
+
+===============================================
+REFERENCIA DINÁMICA DE ESTILO — EXÁMENES OFICIALES
+===============================================
+
+La siguiente información procede del análisis independiente de los exámenes
+oficiales de Bomberos de Navarra 2024 y 2026.
+
+Úsala EXCLUSIVAMENTE para reproducir:
+- redacción;
+- estructura;
+- construcción de distractores;
+- planteamiento de cálculos;
+- situaciones prácticas;
+- nivel de razonamiento;
+- formato conceptual de las preguntas.
+
+NO utilices esta referencia como fuente factual.
+NO extraigas de ella respuestas ni conocimientos.
+La única fuente factual continúa siendo el temario recuperado mediante File Search.
+
+Da predominio al estilo 2026, conservando los rasgos útiles del modelo 2024.
+
+--- REFERENCIA DE ESTILO ---
+
+${officialStyle}
+
+--- FIN DE REFERENCIA DE ESTILO ---
+`;
 
     const response=await ai.models.generateContent({
       model:"gemini-3.5-flash-lite",
