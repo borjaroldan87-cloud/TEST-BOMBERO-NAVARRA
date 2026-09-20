@@ -22,9 +22,8 @@ function aiClient(){
 }
 
 let STORE = null;
-let EXAM_STYLE_STORE = null;
-
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
 async function initDatabase(){
   await db.query(`
     CREATE TABLE IF NOT EXISTS app_state (
@@ -94,6 +93,7 @@ async function saveStore(storeName){
     ["file_search_store", storeName]
   );
 }
+
 async function saveExamStyleStore(storeName){
   await db.query(
     `INSERT INTO app_state (key, value)
@@ -734,7 +734,6 @@ async function ensureExamStyleStore(){
 
   return EXAM_STYLE_STORE;
 }
-
 async function ingestExamStyle(filePath, displayName){
   const ai=aiClient();
   const store=await ensureExamStyleStore();
@@ -769,7 +768,50 @@ app.post("/api/ingest-benchmark", async(req,res)=>{
     res.json({ok:true,store});
   }catch(e){res.status(500).json({ok:false,error:e.message})}
 });
+app.post("/api/ingest-official-exams", async (req,res)=>{
+  try{
+    const exam2024 = path.resolve(
+      "data/MODELO B Examen PRUEBA TEORICA BOMBEROS 30 plazas 29 junio 2024.pdf"
+    );
 
+    const exam2026 = path.resolve(
+      "data/Prueba modelo B.pdf"
+    );
+
+    if(!fs.existsSync(exam2024)){
+      throw new Error("No se encuentra el examen oficial de 2024.");
+    }
+
+    if(!fs.existsSync(exam2026)){
+      throw new Error("No se encuentra el examen oficial de 2026.");
+    }
+
+    const store = await ensureExamStyleStore();
+
+    await ingestExamStyle(
+      exam2024,
+      "Examen oficial Bomberos Navarra - Modelo B - 2024"
+    );
+
+    await ingestExamStyle(
+      exam2026,
+      "Examen oficial Bomberos Navarra - Modelo B - 2026"
+    );
+
+    res.json({
+      ok:true,
+      message:"Exámenes oficiales 2024 y 2026 indexados como referencia de estilo.",
+      examStyleStore:store
+    });
+
+  }catch(e){
+    console.error("ERROR INDEXANDO EXÁMENES OFICIALES:",e);
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/upload", upload.single("pdf"), async(req,res)=>{
   try{
     if(!req.file) throw new Error("Falta PDF");
