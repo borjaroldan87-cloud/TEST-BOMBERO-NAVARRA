@@ -83,4 +83,29 @@ function pick(j){ans[i]=j;show()} function next(){if(ans[i]===null)return alert(
 function finish(){if(ans.some(x=>x===null))return alert("Faltan respuestas");let ok=ans.filter((x,k)=>x===qs[k].correctIndex).length;$("quiz").classList.add("hidden");$("result").classList.remove("hidden");$("result").innerHTML=`<div class="c"><h2>${ok}/${qs.length} · ${Math.round(ok/qs.length*100)}%</h2><button onclick="review()">REVISAR</button></div>`}
 function review(){$("result").innerHTML=qs.map((q,k)=>`<div class="c"><b>${k+1}. ${q.stem}</b><p class="${ans[k]===q.correctIndex?"ok":"bad"}">Tu respuesta: ${"ABCD"[ans[k]]}) ${q.options[ans[k]]}</p>${ans[k]!==q.correctIndex?`<p class="ok">Correcta: ${"ABCD"[q.correctIndex]}) ${q.options[q.correctIndex]}</p>`:""}<p>${q.explanation}</p><p class="muted"><b>Fuente:</b> ${q.sourceEvidence}${q.sourcePage?` · pág. ${q.sourcePage}`:""}</p></div>`).join("")+`<button onclick="location.reload()">NUEVO TEST</button>`}
 status();
+async function ingestOfficialExams(){
+  const ok = confirm(
+    "Se indexarán los exámenes oficiales 2024 y 2026 en el almacén independiente de estilo. ¿Continuar?"
+  );
 
+  if(!ok) return;
+
+  try{
+    const r = await fetch("/api/ingest-official-exams",{
+      method:"POST"
+    });
+
+    const data = await r.json();
+
+    if(!r.ok){
+      throw new Error(data.error || "Error indexando los exámenes oficiales");
+    }
+
+    alert(
+      "Exámenes oficiales 2024 y 2026 indexados correctamente como referencia de estilo."
+    );
+
+  }catch(e){
+    alert("ERROR: " + e.message);
+  }
+}
