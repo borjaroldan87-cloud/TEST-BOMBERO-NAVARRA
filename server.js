@@ -22,6 +22,8 @@ function aiClient(){
 }
 
 let STORE = null;
+let EXAM_STYLE_STORE = null;
+
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 async function initDatabase(){
   await db.query(`
@@ -71,7 +73,18 @@ async function loadStore(){
 
   return STORE;
 }
+async function loadExamStyleStore(){
+  const result = await db.query(
+    "SELECT value FROM app_state WHERE key = $1",
+    ["exam_style_store"]
+  );
 
+  if(result.rows.length){
+    EXAM_STYLE_STORE = result.rows[0].value;
+  }
+
+  return EXAM_STYLE_STORE;
+}
 async function saveStore(storeName){
   await db.query(
     `INSERT INTO app_state (key, value)
@@ -79,6 +92,15 @@ async function saveStore(storeName){
      ON CONFLICT (key)
      DO UPDATE SET value = EXCLUDED.value`,
     ["file_search_store", storeName]
+  );
+}
+async function saveExamStyleStore(storeName){
+  await db.query(
+    `INSERT INTO app_state (key, value)
+     VALUES ($1, $2)
+     ON CONFLICT (key)
+     DO UPDATE SET value = EXCLUDED.value`,
+    ["exam_style_store", storeName]
   );
 }
 async function getOrCreateTopic(name, sourceFile=null){
@@ -692,7 +714,41 @@ async function ensureStore(){
 
   return STORE;
 }
+async function ensureExamStyleStore(){
+  if(EXAM_STYLE_STORE) return EXAM_STYLE_STORE;
 
+  await loadExamStyleStore();
+  if(EXAM_STYLE_STORE) return EXAM_STYLE_STORE;
+
+  const ai=aiClient();
+
+  const store=await ai.fileSearchStores.create({
+    config:{
+      displayName:"Bombero Navarra - Examenes oficiales 2024-2026",
+      embeddingModel:"models/gemini-embedding-2"
+    }
+  });
+
+  EXAM_STYLE_STORE=store.name;
+  await saveExamStyleStore(EXAM_STYLE_STORE);
+
+  return EXAM_STYLE_STORE;
+}
+
+async function ingestExamStyle(filePath, displayName){
+  const ai=aiClient();
+  const store=await ensureExamStyleStore();
+
+  let op=await ai.fileSearchStores.uploadToFileSearchStore({
+    file:filePath,
+    fileSearchStoreName:store,
+    config:{displayName}
+  });
+
+  await waitOp(ai,op);
+
+  return store;
+}
 async function ingest(filePath, displayName){
   const ai=aiClient(); const store=await ensureStore();
   let op=await ai.fileSearchStores.uploadToFileSearchStore({
@@ -2046,10 +2102,15 @@ app.get("/api/coverage-audit", async(req,res)=>{
 async function startServer(){
   await initDatabase();
   await loadStore();
+  await loadExamStyleStore();
 
   app.listen(process.env.PORT || 3000, ()=>{
     console.log("Test Bombero V2 listo");
-    console.log("STORE recuperado:", STORE || "ninguno");
+    console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
+    console.log(
+      "EXAM STYLE STORE recuperado:",
+      EXAM_STYLE_STORE || "ninguno"
+    );
   });
 }
 
