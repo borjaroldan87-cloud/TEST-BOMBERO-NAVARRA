@@ -772,13 +772,26 @@ app.post("/api/ingest-benchmark", async(req,res)=>{
 });
 app.post("/api/ingest-official-exams", async (req,res)=>{
   try{
-    const exam2024 = path.resolve(
-      "data/MODELO B Examen PRUEBA TEORICA BOMBEROS 30 plazas 29 junio 2024.pdf"
-    );
+    const dataFiles = fs.readdirSync(path.resolve("data"));
 
-    const exam2026 = path.resolve(
-      "data/Prueba modelo B.pdf"
-    );
+const file2024 = dataFiles.find(name =>
+  name.includes("MODELO B Examen PRUEBA TEORICA")
+);
+
+const file2026 = dataFiles.find(name =>
+  name === "Prueba modelo B.pdf"
+);
+
+if(!file2024){
+  throw new Error("No se encuentra el examen oficial de 2024.");
+}
+
+if(!file2026){
+  throw new Error("No se encuentra el examen oficial de 2026.");
+}
+
+const exam2024 = path.resolve("data", file2024);
+const exam2026 = path.resolve("data", file2026);
 
     if(!fs.existsSync(exam2024)){
       throw new Error("No se encuentra el examen oficial de 2024.");
