@@ -1563,6 +1563,35 @@ Devuelve una guía de estilo compacta pero suficientemente precisa para que otro
 
   return text;
 }
+async function getCachedOfficialExamStyleReference(){
+  const cached = await db.query(
+    "SELECT value FROM app_state WHERE key=$1 LIMIT 1",
+    ["official_exam_style_reference"]
+  );
+
+  if(cached.rows.length && cached.rows[0].value?.trim()){
+    console.log("OFFICIAL STYLE: referencia recuperada de PostgreSQL");
+    return cached.rows[0].value;
+  }
+
+  console.log("OFFICIAL STYLE: no existe caché; obteniendo referencia desde File Search");
+
+  const styleReference = await getOfficialExamStyleReference();
+
+  await db.query(`
+    INSERT INTO app_state (key,value)
+    VALUES ($1,$2)
+    ON CONFLICT (key)
+    DO UPDATE SET value=EXCLUDED.value
+  `,[
+    "official_exam_style_reference",
+    styleReference
+  ]);
+
+  console.log("OFFICIAL STYLE: referencia guardada en PostgreSQL");
+
+  return styleReference;
+}
 app.post("/api/analyze-coverage", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -2080,7 +2109,7 @@ app.post("/api/generate", async(req,res)=>{
       "objetivos de cobertura"
     );
 
-    const officialStyle = await getOfficialExamStyleReference();
+    const officialStyle = await getCachedOfficialExamStyleReference();
 
 const prompt =
   generationPrompt(count,difficulty,mode) +
