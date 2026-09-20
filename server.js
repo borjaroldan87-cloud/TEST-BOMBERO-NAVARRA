@@ -22,6 +22,8 @@ function aiClient(){
 }
 
 let STORE = null;
+let EXAM_STYLE_STORE = null;
+
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 async function initDatabase(){
