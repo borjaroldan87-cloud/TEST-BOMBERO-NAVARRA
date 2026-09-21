@@ -425,7 +425,22 @@ async function testLocal(){
     {
       stem:"Última pregunta local para comprobar la finalización del test con preguntas sin contestar.",
       options:[
-        "Respuesta
+        "Respuesta A",
+        "Respuesta B",
+        "Respuesta C",
+        "Respuesta D"
+      ],
+      correctIndex:1,
+      explanation:"Explicación local de la quinta pregunta.",
+      sourceEvidence:"Evidencia local de prueba.",
+      sourcePage:5
+    }
+  ];
+
+  ans=Array(qs.length).fill(null);
+  pos=0;
+  render();
+}
 status();
 async function ingestOfficialExams(){
   const ok = confirm(
