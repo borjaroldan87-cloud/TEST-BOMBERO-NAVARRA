@@ -122,17 +122,16 @@ function answeredCount(){
 }
 
 function show(){
-  const q=qs[i];
   const answered=answeredCount();
-  const pending=qs.length-answered;
+  const blank=qs.length-answered;
 
   $("quiz").classList.remove("hidden");
 
   $("quiz").innerHTML=`
     <div class="exam-toolbar">
       <div>
-        Contestadas <b>${answered}</b>
-        · Pendientes <b>${pending}</b>
+        Contestadas <b id="answered-count">${answered}</b>
+        · En blanco <b id="blank-count">${blank}</b>
       </div>
 
       <div class="exam-timer">
@@ -147,59 +146,45 @@ function show(){
         <span>TEST DE ENTRENAMIENTO · NO OFICIAL</span>
       </div>
 
-      <div class="question-number">
-        Pregunta ${i+1} de ${qs.length}
+      <div class="exam-block-summary">
+        <strong>BLOQUE TEMÁTICO 3</strong>
+        <span>Conocimientos específicos</span>
+        <span><b>Tema:</b> Apeo y poda de arbolado</span>
+        <span>
+          ${qs.length} pregunta${qs.length===1?"":"s"}
+          (de la 1 a la ${qs.length})
+        </span>
       </div>
 
-      <div class="question-stem">
-        ${i+1}. ${q.stem}
-      </div>
+      <div class="exam-questions">
+        ${qs.map((q,k)=>`
+          <div class="exam-question">
 
-      <div>
-        ${q.options.map((option,j)=>`
-          <button
-            class="opt ${ans[i]===j?"sel":""}"
-            onclick="pick(${j})">
-            <b>${"ABCD"[j]})</b> ${option}
-          </button>
+            <div class="question-stem">
+              ${k+1}. ${q.stem}
+            </div>
+
+            <div class="question-options">
+              ${q.options.map((option,j)=>`
+                <button
+                  type="button"
+                  class="opt ${ans[k]===j?"sel":""}"
+                  onclick="pick(${k},${j})">
+                  <b>${"ABCD"[j]})</b> ${option}
+                </button>
+              `).join("")}
+            </div>
+
+          </div>
         `).join("")}
       </div>
 
-      <div style="margin-top:18px">
+      <div class="exam-submit">
         <button
-          class="secondary"
-          onclick="clearAnswer()">
-          DEJAR EN BLANCO
+          class="primary"
+          onclick="requestFinish()">
+          FINALIZAR TEST
         </button>
-      </div>
-
-      <div class="exam-nav">
-
-        <button
-          class="secondary"
-          onclick="previousQuestion()"
-          ${i===0?"disabled":""}>
-          ANTERIOR
-        </button>
-
-        ${
-          i<qs.length-1
-          ?`
-            <button
-              class="primary"
-              onclick="nextQuestion()">
-              SIGUIENTE
-            </button>
-          `
-          :`
-            <button
-              class="primary"
-              onclick="requestFinish()">
-              FINALIZAR
-            </button>
-          `
-        }
-
       </div>
 
     </div>
@@ -208,28 +193,22 @@ function show(){
   updateTimer();
 }
 
-function pick(j){
-  ans[i]=j;
-  show();
-}
-
-function clearAnswer(){
-  ans[i]=null;
-  show();
-}
-
-function previousQuestion(){
-  if(i>0){
-    i--;
-    show();
+function pick(questionIndex,optionIndex){
+  /*
+    Pulsar otra opción cambia la respuesta.
+    Pulsar de nuevo la misma opción la deja en blanco.
+  */
+  if(ans[questionIndex]===optionIndex){
+    ans[questionIndex]=null;
+  }else{
+    ans[questionIndex]=optionIndex;
   }
-}
 
-function nextQuestion(){
-  if(i<qs.length-1){
-    i++;
-    show();
-  }
+  const scrollPosition=window.scrollY;
+
+  show();
+
+  window.scrollTo(0,scrollPosition);
 }
 
 function requestFinish(){
