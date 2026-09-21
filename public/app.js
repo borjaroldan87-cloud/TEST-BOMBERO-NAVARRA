@@ -130,8 +130,8 @@ function show(){
   $("quiz").innerHTML=`
     <div class="exam-toolbar">
       <div>
-        Contestadas <b id="answered-count">${answered}</b>
-        · En blanco <b id="blank-count">${blank}</b>
+        Contestadas <b>${answered}</b>
+        · En blanco <b>${blank}</b>
       </div>
 
       <div class="exam-timer">
@@ -146,44 +146,40 @@ function show(){
         <span>TEST DE ENTRENAMIENTO · NO OFICIAL</span>
       </div>
 
-      <div class="exam-block-summary">
-        <strong>BLOQUE TEMÁTICO 3</strong>
-        <span>Conocimientos específicos</span>
-        <span><b>Tema:</b> Apeo y poda de arbolado</span>
-        <span>
-          ${qs.length} pregunta${qs.length===1?"":"s"}
-          (de la 1 a la ${qs.length})
-        </span>
+      <div class="exam-block-info">
+        <strong>BLOQUE TEMÁTICO 3</strong><br>
+        Conocimientos específicos<br><br>
+
+        <strong>Tema:</strong> Apeo y poda de arbolado<br>
+        <strong>${qs.length} preguntas</strong>
+        (de la 1 a la ${qs.length})
       </div>
 
-      <div class="exam-questions">
-        ${qs.map((q,k)=>`
-          <div class="exam-question">
+      ${qs.map((q,k)=>`
+        <div class="exam-question">
 
-            <div class="question-stem">
-              ${k+1}. ${q.stem}
-            </div>
-
-            <div class="question-options">
-              ${q.options.map((option,j)=>`
-                <button
-                  type="button"
-                  class="opt ${ans[k]===j?"sel":""}"
-                  onclick="pick(${k},${j})">
-                  <b>${"ABCD"[j]})</b> ${option}
-                </button>
-              `).join("")}
-            </div>
-
+          <div class="question-stem">
+            ${k+1}. ${q.stem}
           </div>
-        `).join("")}
-      </div>
 
-      <div class="exam-submit">
+          <div>
+            ${q.options.map((option,j)=>`
+              <button
+                class="opt ${ans[k]===j?"sel":""}"
+                onclick="pick(${k},${j})">
+                <b>${"ABCD"[j]})</b> ${option}
+              </button>
+            `).join("")}
+          </div>
+
+        </div>
+      `).join("")}
+
+      <div class="exam-nav">
         <button
           class="primary"
           onclick="requestFinish()">
-          FINALIZAR TEST
+          FINALIZAR Y ENTREGAR
         </button>
       </div>
 
