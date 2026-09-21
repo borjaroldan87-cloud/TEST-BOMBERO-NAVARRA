@@ -438,8 +438,12 @@ async function testLocal(){
   ];
 
   ans=Array(qs.length).fill(null);
-  pos=0;
-  render();
+i=0;
+
+$("quiz").style.display="block";
+$("result").innerHTML="";
+show();
+startExamTimer();
 }
 status();
 async function ingestOfficialExams(){
