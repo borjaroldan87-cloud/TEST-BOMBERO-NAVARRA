@@ -368,6 +368,64 @@ function review(){
       </button>
     `;
 }
+async function testLocal(){
+  qs=[
+    {
+      stem:"Pregunta local de prueba número 1.",
+      options:[
+        "Primera opción",
+        "Segunda opción",
+        "Tercera opción",
+        "Cuarta opción"
+      ],
+      correctIndex:1,
+      explanation:"Explicación local de prueba para comprobar la corrección.",
+      sourceEvidence:"Evidencia local de prueba.",
+      sourcePage:1
+    },
+    {
+      stem:"Señale la opción INCORRECTA en esta segunda pregunta local de prueba.",
+      options:[
+        "Opción A de prueba",
+        "Opción B de prueba",
+        "Opción C de prueba",
+        "Opción D de prueba"
+      ],
+      correctIndex:2,
+      explanation:"Explicación local de la segunda pregunta.",
+      sourceEvidence:"Evidencia local de prueba.",
+      sourcePage:2
+    },
+    {
+      stem:"Esta tercera pregunta sirve para comprobar que una respuesta marcada puede volver a dejarse en blanco.",
+      options:[
+        "Respuesta A",
+        "Respuesta B",
+        "Respuesta C",
+        "Respuesta D"
+      ],
+      correctIndex:0,
+      explanation:"Explicación local de la tercera pregunta.",
+      sourceEvidence:"Evidencia local de prueba.",
+      sourcePage:3
+    },
+    {
+      stem:"Pregunta local número 4 para comprobar la navegación hacia atrás y hacia delante.",
+      options:[
+        "Respuesta A",
+        "Respuesta B",
+        "Respuesta C",
+        "Respuesta D"
+      ],
+      correctIndex:3,
+      explanation:"Explicación local de la cuarta pregunta.",
+      sourceEvidence:"Evidencia local de prueba.",
+      sourcePage:4
+    },
+    {
+      stem:"Última pregunta local para comprobar la finalización del test con preguntas sin contestar.",
+      options:[
+        "Respuesta
 status();
 async function ingestOfficialExams(){
   const ok = confirm(
