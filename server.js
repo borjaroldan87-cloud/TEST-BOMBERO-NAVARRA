@@ -1367,38 +1367,159 @@ Antes de aceptar una pregunta negativa, comprueba especialmente que la polaridad
 del enunciado y de las cuatro opciones sea inequívoca.
 
 ==================================================
-9. OPCIONES Y DISTRACTORES
+9. OPCIONES Y DISTRACTORES — CALIDAD DE TRIBUNAL
 ==================================================
 
 Cada pregunta tendrá EXACTAMENTE 4 opciones.
-
 EXACTAMENTE UNA será correcta.
 
-Los distractores deben ser plausibles y difíciles.
+OBJETIVO PRINCIPAL:
+Un opositor bien preparado NO debe poder localizar la respuesta correcta
+por descarte superficial, por diferencias de redacción o porque los
+distractores resulten evidentemente absurdos.
 
-Constrúyelos preferentemente mediante:
-- conceptos próximos presentes en la fuente;
-- cifras cercanas presentes o compatibles con la confusión evaluada;
-- categorías relacionadas;
-- alteraciones de secuencia;
-- intercambio de condiciones;
-- modificación de límites;
-- confusión entre procedimientos;
-- errores razonables de cálculo.
+Las cuatro alternativas deben pertenecer al MISMO campo conceptual y
+parecer razonables en una primera lectura.
 
-Pero cada distractor debe ser inequívocamente falso para ESA pregunta.
+CONSTRUCCIÓN PRIORITARIA DE DISTRACTORES:
 
-PROHIBIDO:
-- distractores absurdos;
-- respuestas obviamente más largas o precisas que las demás;
-- pistas gramaticales;
-- dos alternativas defendibles;
-- inventar contenido técnico para crear dificultad.
+Siempre que la fuente lo permita, construye cada distractor partiendo de
+información REAL y próxima presente en el temario y modifica el MÍNIMO
+elemento necesario para convertirla en falsa para ESA pregunta.
 
-Equilibra razonablemente longitud, precisión y estructura de las cuatro opciones.
+Prioriza, en este orden:
 
-"Ninguna de las anteriores" y "Todas las anteriores" deben ser excepcionales,
-no un recurso habitual.
+1. Sustituir una cifra por otra cifra próxima o por otra cifra real del
+   mismo apartado, tabla o procedimiento.
+
+2. Intercambiar límites, intervalos, porcentajes, unidades, magnitudes,
+   categorías o valores pertenecientes a elementos próximos.
+
+3. Sustituir UN término técnico por otro término real y próximo de la
+   misma materia.
+
+4. Alterar UNA condición de aplicación manteniendo correcto el resto de
+   la alternativa.
+
+5. Intercambiar dos pasos próximos de una secuencia o procedimiento.
+
+6. Asignar correctamente una propiedad, valor, función o característica,
+   pero al elemento, categoría o situación equivocada.
+
+7. Utilizar una regla verdadera del temario en un contexto próximo en el
+   que deja de ser aplicable.
+
+8. En cálculos, utilizar resultados derivados de errores razonables:
+   conversión incorrecta de unidades, operación invertida, omisión de un
+   factor, aplicación de una fórmula próxima o error de orden de
+   operaciones.
+
+REGLA DE CAMBIO MÍNIMO:
+
+Cuando sea posible, la diferencia entre la opción correcta y un
+distractor debe reducirse a UNA variable discriminante:
+
+- una cifra;
+- una unidad;
+- un término;
+- una condición;
+- una categoría;
+- una posición;
+- un paso;
+- un signo;
+- una relación;
+- un límite.
+
+Evita convertir toda la frase en falsa si basta modificar un único
+elemento.
+
+PLAUSIBILIDAD OBLIGATORIA:
+
+Antes de aceptar cada distractor pregúntate internamente:
+
+"¿Un opositor que conoce el tema de forma incompleta podría considerar
+seriamente que esta opción es correcta?"
+
+Si la respuesta es NO, descarta ese distractor y crea otro.
+
+Los tres distractores deben ser inequívocamente falsos según la fuente,
+pero la falsedad debe depender del CONOCIMIENTO DEL TEMARIO, no de pistas
+lingüísticas.
+
+PROHIBIDO CREAR DISTRACTORES MEDIANTE:
+
+- afirmaciones absurdas, físicamente inverosímiles o ajenas al contexto;
+- cifras extremas o arbitrarias cuando existen cifras próximas en la fuente;
+- terminología inventada;
+- procedimientos manifiestamente inseguros o disparatados utilizados solo
+  para que la opción parezca falsa;
+- explicaciones pseudotécnicas no presentes en la fuente;
+- añadir detalles innecesarios únicamente a las opciones falsas;
+- hacer que la correcta sea sistemáticamente más completa, precisa,
+  moderada o técnicamente redactada;
+- crear dos respuestas defendibles;
+- inventar conocimiento externo para aumentar la dificultad.
+
+PALABRAS DELATORAS:
+
+No introduzcas artificialmente en los distractores expresiones absolutas
+como:
+
+"siempre", "nunca", "exclusivamente", "exactamente", "en cualquier caso",
+"en cualquier especie", "sin excepción", "únicamente", "obligatoriamente",
+"estándar absoluto", "en todos los casos".
+
+Solo pueden aparecer cuando esa expresión absoluta esté realmente
+justificada por la fuente o cuando el estilo oficial analizado muestre que
+es necesaria para evaluar una distinción concreta.
+
+No utilices una palabra absoluta como mecanismo barato para convertir una
+opción en falsa.
+
+SIMETRÍA ENTRE OPCIONES:
+
+Las cuatro alternativas deben mantener, en la medida de lo posible:
+
+- longitud semejante;
+- estructura gramatical semejante;
+- grado de precisión semejante;
+- número parecido de datos y condiciones;
+- terminología del mismo nivel técnico.
+
+No permitas que la forma de la respuesta revele cuál es correcta.
+
+DIFICULTAD ALTA:
+
+Si difficulty = "alta", aumenta la dificultad mediante PROXIMIDAD entre
+alternativas, integración de conceptos próximos, discriminación de
+condiciones, secuencias, cifras o cálculos.
+
+NO aumentes la dificultad haciendo el enunciado artificialmente largo,
+rebuscado o ambiguo.
+
+En dificultad alta, al menos DOS de los tres distractores deben ser
+especialmente próximos a la respuesta correcta y exigir conocer con
+precisión el dato, condición, procedimiento o relación evaluada.
+
+ESTILO DE REDACCIÓN:
+
+Redacta de forma natural, sobria y administrativa, como un tribunal de
+oposición.
+
+Evita introducciones artificiales o innecesariamente grandilocuentes como:
+
+"Conforme a los datos teóricos..."
+"Atendiendo a los conocimientos generales..."
+"En virtud de las consideraciones conceptuales..."
+
+No añadas contexto verbal que no contribuya a evaluar conocimiento.
+
+Usa las fórmulas de pregunta observadas en la referencia oficial cuando
+resulten naturales, sin repetir mecánicamente la misma estructura.
+
+"Ninguna de las anteriores" y "Todas las anteriores" deben ser
+excepcionales y solo utilizarse cuando estén justificadas por la
+estructura de la pregunta, nunca como recurso para fabricar dificultad.
 
 ==================================================
 10. POSICIÓN DE LA RESPUESTA
