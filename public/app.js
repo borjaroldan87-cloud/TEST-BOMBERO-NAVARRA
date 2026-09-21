@@ -31,12 +31,13 @@ async function generate(){
     }
 
     qs=j.questions;
-    ans=[];
-    i=0;
+ans=Array(qs.length).fill(null);
+i=0;
 
     $("quiz").style.display="block";
     $("result").innerHTML="";
     show();
+    startExamTimer();
 
   }catch(e){
     alert(e?.message||String(e));
@@ -78,10 +79,295 @@ async function analyzeCoverage(){
     btn.textContent=originalText;
   }
 }
-function show(){let q=qs[i];$("quiz").innerHTML=`<div class="c"><div class="muted">Pregunta ${i+1}/${qs.length}</div><h2>${q.stem}</h2>${q.options.map((x,j)=>`<button class="opt ${ans[i]===j?"sel":""}" onclick="pick(${j})">${"ABCD"[j]}) ${x}</button>`).join("")}<button onclick="${i?`i--;show()`:"void(0)"}">Anterior</button> <button onclick="${i<qs.length-1?`next()`:`finish()`}">${i<qs.length-1?"Siguiente":"Finalizar"}</button></div>`}
-function pick(j){ans[i]=j;show()} function next(){if(ans[i]===null)return alert("Selecciona una respuesta");i++;show()}
-function finish(){if(ans.some(x=>x===null))return alert("Faltan respuestas");let ok=ans.filter((x,k)=>x===qs[k].correctIndex).length;$("quiz").classList.add("hidden");$("result").classList.remove("hidden");$("result").innerHTML=`<div class="c"><h2>${ok}/${qs.length} · ${Math.round(ok/qs.length*100)}%</h2><button onclick="review()">REVISAR</button></div>`}
-function review(){$("result").innerHTML=qs.map((q,k)=>`<div class="c"><b>${k+1}. ${q.stem}</b><p class="${ans[k]===q.correctIndex?"ok":"bad"}">Tu respuesta: ${"ABCD"[ans[k]]}) ${q.options[ans[k]]}</p>${ans[k]!==q.correctIndex?`<p class="ok">Correcta: ${"ABCD"[q.correctIndex]}) ${q.options[q.correctIndex]}</p>`:""}<p>${q.explanation}</p><p class="muted"><b>Fuente:</b> ${q.sourceEvidence}${q.sourcePage?` · pág. ${q.sourcePage}`:""}</p></div>`).join("")+`<button onclick="location.reload()">NUEVO TEST</button>`}
+let timerInterval=null;
+let remainingSeconds=0;
+
+function startExamTimer(){
+  clearInterval(timerInterval);
+
+  // Regla del test: 1 minuto por pregunta.
+  remainingSeconds=qs.length*60;
+
+  updateTimer();
+
+  timerInterval=setInterval(()=>{
+    remainingSeconds--;
+
+    if(remainingSeconds<=0){
+      remainingSeconds=0;
+      updateTimer();
+      clearInterval(timerInterval);
+      finish(true);
+      return;
+    }
+
+    updateTimer();
+  },1000);
+}
+
+function updateTimer(){
+  const timer=$("timer");
+  if(!timer)return;
+
+  const minutes=Math.floor(remainingSeconds/60);
+  const seconds=remainingSeconds%60;
+
+  timer.textContent=
+    String(minutes).padStart(2,"0")+":"+
+    String(seconds).padStart(2,"0");
+}
+
+function answeredCount(){
+  return ans.filter(x=>Number.isInteger(x)).length;
+}
+
+function show(){
+  const q=qs[i];
+  const answered=answeredCount();
+  const pending=qs.length-answered;
+
+  $("quiz").classList.remove("hidden");
+
+  $("quiz").innerHTML=`
+    <div class="exam-toolbar">
+      <div>
+        Contestadas <b>${answered}</b>
+        · Pendientes <b>${pending}</b>
+      </div>
+
+      <div class="exam-timer">
+        Tiempo <span id="timer">--:--</span>
+      </div>
+    </div>
+
+    <div class="exam-paper">
+
+      <div class="exam-heading">
+        <strong>PRUEBA TEÓRICA</strong>
+        <span>TEST DE ENTRENAMIENTO · NO OFICIAL</span>
+      </div>
+
+      <div class="question-number">
+        Pregunta ${i+1} de ${qs.length}
+      </div>
+
+      <div class="question-stem">
+        ${i+1}. ${q.stem}
+      </div>
+
+      <div>
+        ${q.options.map((option,j)=>`
+          <button
+            class="opt ${ans[i]===j?"sel":""}"
+            onclick="pick(${j})">
+            <b>${"ABCD"[j]})</b> ${option}
+          </button>
+        `).join("")}
+      </div>
+
+      <div style="margin-top:18px">
+        <button
+          class="secondary"
+          onclick="clearAnswer()">
+          DEJAR EN BLANCO
+        </button>
+      </div>
+
+      <div class="exam-nav">
+
+        <button
+          class="secondary"
+          onclick="previousQuestion()"
+          ${i===0?"disabled":""}>
+          ANTERIOR
+        </button>
+
+        ${
+          i<qs.length-1
+          ?`
+            <button
+              class="primary"
+              onclick="nextQuestion()">
+              SIGUIENTE
+            </button>
+          `
+          :`
+            <button
+              class="primary"
+              onclick="requestFinish()">
+              FINALIZAR
+            </button>
+          `
+        }
+
+      </div>
+
+    </div>
+  `;
+
+  updateTimer();
+}
+
+function pick(j){
+  ans[i]=j;
+  show();
+}
+
+function clearAnswer(){
+  ans[i]=null;
+  show();
+}
+
+function previousQuestion(){
+  if(i>0){
+    i--;
+    show();
+  }
+}
+
+function nextQuestion(){
+  if(i<qs.length-1){
+    i++;
+    show();
+  }
+}
+
+function requestFinish(){
+  const pending=qs.length-answeredCount();
+
+  let message="¿Quieres finalizar y entregar el test?";
+
+  if(pending>0){
+    message=
+      `Tienes ${pending} pregunta${pending===1?"":"s"} sin contestar.\n\n`+
+      `Se contabilizarán como respuestas en blanco.\n\n`+
+      `¿Quieres finalizar igualmente?`;
+  }
+
+  if(confirm(message)){
+    finish(false);
+  }
+}
+
+function finish(auto=false){
+  clearInterval(timerInterval);
+
+  const correct=ans.filter(
+    (answer,index)=>answer===qs[index].correctIndex
+  ).length;
+
+  const answered=answeredCount();
+  const wrong=answered-correct;
+  const blank=qs.length-answered;
+
+  const pointsPerCorrect=0.8;
+  const penaltyPerWrong=pointsPerCorrect/3;
+
+  const score=
+    correct*pointsPerCorrect-
+    wrong*penaltyPerWrong;
+
+  const maxScore=qs.length*pointsPerCorrect;
+
+  $("quiz").classList.add("hidden");
+  $("result").classList.remove("hidden");
+
+  $("result").innerHTML=`
+    <div class="c">
+
+      <h2>
+        ${auto?"TIEMPO FINALIZADO":"TEST FINALIZADO"}
+      </h2>
+
+      <p>
+        <b>Aciertos:</b> ${correct}<br>
+        <b>Errores:</b> ${wrong}<br>
+        <b>En blanco:</b> ${blank}
+      </p>
+
+      <p>
+        <b>Puntuación:</b>
+        ${score.toFixed(2)} / ${maxScore.toFixed(2)}
+      </p>
+
+      <button
+        class="primary"
+        onclick="review()">
+        REVISAR TEST
+      </button>
+
+    </div>
+  `;
+}
+
+function review(){
+  $("result").innerHTML=
+    qs.map((q,k)=>{
+
+      const answer=ans[k];
+      const isBlank=!Number.isInteger(answer);
+      const isCorrect=answer===q.correctIndex;
+
+      let userAnswer;
+
+      if(isBlank){
+        userAnswer=`
+          <p class="muted">
+            <b>Tu respuesta:</b> EN BLANCO
+          </p>
+        `;
+      }else{
+        userAnswer=`
+          <p class="${isCorrect?"ok":"bad"}">
+            <b>Tu respuesta:</b>
+            ${"ABCD"[answer]}) ${q.options[answer]}
+          </p>
+        `;
+      }
+
+      const correctAnswer=
+        !isCorrect
+        ?`
+          <p class="ok">
+            <b>Respuesta correcta:</b>
+            ${"ABCD"[q.correctIndex]}) ${q.options[q.correctIndex]}
+          </p>
+        `
+        :"";
+
+      return `
+        <div class="c">
+
+          <p>
+            <b>${k+1}. ${q.stem}</b>
+          </p>
+
+          ${userAnswer}
+
+          ${correctAnswer}
+
+          <p>
+            ${q.explanation}
+          </p>
+
+          <p class="muted">
+            <b>Fuente:</b>
+            ${q.sourceEvidence}
+            ${q.sourcePage?` · pág. ${q.sourcePage}`:""}
+          </p>
+
+        </div>
+      `;
+    }).join("")
+    +
+    `
+      <button
+        class="primary"
+        onclick="location.reload()">
+        NUEVO TEST
+      </button>
+    `;
+}
 status();
 async function ingestOfficialExams(){
   const ok = confirm(
