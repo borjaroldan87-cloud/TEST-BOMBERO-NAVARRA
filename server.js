@@ -1498,7 +1498,74 @@ Rechaza y reconstruye cualquier distractor si ocurre UNA de estas situaciones:
    bien redactada.
 6. Dos distractores son esencialmente la misma falsa con palabras distintas.
 7. El opositor podría eliminarlo antes de recordar el dato concreto evaluado.
+FILTRO ANTI-DISTRACTOR OBVIO — OBLIGATORIO:
 
+Antes de aceptar definitivamente una pregunta, realiza una segunda revisión
+centrada EXCLUSIVAMENTE en detectar distractores artificiales o fáciles de
+eliminar.
+
+REGLA FUNDAMENTAL:
+Un distractor NO es bueno simplemente porque sea falso.
+Debe ser una respuesta que un opositor preparado pueda considerar plausible
+si no recuerda con precisión el contenido evaluado.
+
+PROHIBIDO crear distractores cuya falsedad resulte evidente por contener:
+
+- cifras, porcentajes, potencias, distancias o unidades arbitrarias que no
+  procedan de información próxima y real del temario;
+- condiciones absurdamente restrictivas o absolutas introducidas únicamente
+  para hacer falsa la opción;
+- acciones manifiestamente improcedentes, peligrosas o ajenas al procedimiento
+  cuando existen alternativas próximas en el propio temario;
+- referencias irrelevantes al contexto preguntado;
+- tecnicismos inventados o combinaciones artificiales de términos técnicos;
+- expresiones delatoras como "exclusivamente", "obligatoriamente", "siempre",
+  "nunca", "exactamente", "por completo" o equivalentes CUANDO se introduzcan
+  artificialmente y permitan descartar la opción sin conocer el temario;
+- detalles exagerados que hagan que una alternativa parezca mucho menos
+  razonable que la correcta;
+- datos externos o inventados que no sean necesarios para evaluar el concepto.
+
+IMPORTANTE:
+Las palabras absolutas NO están prohibidas cuando formen parte real del
+contenido recuperado de la fuente o sean necesarias para reproducir fielmente
+una regla del temario. Lo prohibido es utilizarlas artificialmente como pista
+para fabricar una opción falsa.
+
+PRIORIDAD PARA CONSTRUIR CADA DISTRACTOR:
+
+1. Utilizar otro dato REAL y próximo del mismo apartado.
+2. Intercambiar dos datos, categorías, condiciones o pasos reales próximos.
+3. Modificar UNA sola variable discriminante de una afirmación verdadera.
+4. Aplicar una regla verdadera a una situación próxima pero incorrecta.
+5. Solo si la fuente no permite ninguna de las anteriores, crear una
+   modificación mínima que siga siendo técnicamente plausible.
+
+Si para crear un distractor necesitas inventar una circunstancia extravagante,
+una cifra arbitraria o una afirmación obviamente absurda, NO utilices ese
+distractor. Reformula la pregunta o utiliza otro aspecto del objetivo de
+cobertura.
+
+PRUEBA CIEGA FINAL:
+
+Lee únicamente las cuatro opciones, ignorando momentáneamente cuál has marcado
+como correcta.
+
+Pregúntate:
+
+"¿Puede localizarse la respuesta correcta por tono, sentido común, extremismo,
+longitud, precisión, vocabulario o absurdo de las otras opciones, sin dominar
+el contenido concreto del temario?"
+
+Si la respuesta es SÍ, RECHAZA LA PREGUNTA COMPLETA y reconstrúyela.
+
+En dificultad ALTA, intenta que al menos TRES de las cuatro opciones resulten
+razonablemente defendibles en una primera lectura y que la resolución dependa
+de identificar con precisión el dato, condición, relación, secuencia, fórmula
+o excepción correcta del temario.
+
+La dificultad debe provenir del CONOCIMIENTO, no de la confusión ni de la
+invención.
 OBJETIVO DE CALIDAD:
 
 Idealmente, antes de recordar con precisión el dato del temario, un opositor
@@ -1507,19 +1574,7 @@ distractores.
 
 La dificultad debe proceder de discriminar conocimiento próximo, NO de
 ambigüedad, redacción retorcida ni información externa.
-PROHIBIDO CREAR DISTRACTORES MEDIANTE:
 
-- afirmaciones absurdas, físicamente inverosímiles o ajenas al contexto;
-- cifras extremas o arbitrarias cuando existen cifras próximas en la fuente;
-- terminología inventada;
-- procedimientos manifiestamente inseguros o disparatados utilizados solo
-  para que la opción parezca falsa;
-- explicaciones pseudotécnicas no presentes en la fuente;
-- añadir detalles innecesarios únicamente a las opciones falsas;
-- hacer que la correcta sea sistemáticamente más completa, precisa,
-  moderada o técnicamente redactada;
-- crear dos respuestas defendibles;
-- inventar conocimiento externo para aumentar la dificultad.
 
 PALABRAS DELATORAS:
 
