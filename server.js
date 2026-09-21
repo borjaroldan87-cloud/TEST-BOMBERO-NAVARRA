@@ -1874,21 +1874,86 @@ longitud, precisión o apariencia de las alternativas.
 11. EXPLICACIÓN Y CORRECCIÓN
 ==================================================
 
-Para CADA pregunta, explanation debe servir posteriormente como corrección de estudio.
+Para CADA pregunta, explanation debe funcionar como una corrección pedagógica
+completa y útil para el estudio.
 
-Debe:
-- explicar por qué la respuesta correcta es correcta;
-- identificar el dato, regla, procedimiento o razonamiento que la demuestra;
-- explicar brevemente por qué las demás alternativas son incorrectas cuando la fuente
-  permita justificarlo inequívocamente;
-- conservar cifras, unidades, condiciones y terminología relevantes;
-- estar basada exclusivamente en la fuente.
+OBJETIVO:
+Después de responder una pregunta, el opositor debe poder comprender qué
+conocimiento concreto determina la respuesta correcta y qué error conceptual,
+numérico, procedimental o de interpretación existe en las alternativas
+incorrectas, sin necesidad de volver inmediatamente al documento.
 
-No escribas una explicación genérica del tipo:
-"la opción correcta es la indicada por el temario".
+La explicación debe:
 
-La explicación debe permitir estudiar el error sin necesidad de volver inmediatamente
-al documento.
+1. Explicar de forma directa por qué la respuesta correcta es correcta.
+
+2. Identificar el dato, definición, regla, relación, fórmula, clasificación,
+   condición, límite, procedimiento o razonamiento concreto que determina
+   la solución.
+
+3. Explicar brevemente por qué CADA una de las otras alternativas es incorrecta
+   SI la información recuperada de la fuente permite demostrarlo de forma
+   inequívoca.
+
+4. Cuando un distractor proceda de confundir dos datos, conceptos, categorías,
+   pasos, límites o propiedades reales del temario, indicar específicamente
+   cuál es la confusión.
+
+5. En preguntas numéricas o de cálculo, mostrar el razonamiento u operación
+   necesaria para obtener el resultado correcto cuando sea útil para comprender
+   la solución.
+
+6. En preguntas de secuencias o procedimientos, indicar qué paso, posición,
+   condición o actuación hace incorrecta cada alternativa cuando la fuente
+   permita determinarlo.
+
+7. En preguntas con formulación CORRECTA, INCORRECTA o NO, explicar la solución
+   respetando explícitamente la polaridad del enunciado para evitar una
+   corrección confusa.
+
+REGLA DE FIDELIDAD:
+
+Toda afirmación incluida en explanation debe estar respaldada exclusivamente
+por la información factual recuperada del temario.
+
+NO inventes una explicación para justificar un distractor.
+
+Si la fuente permite demostrar que una alternativa es incorrecta pero no
+permite determinar con seguridad qué concepto concreto representa, limita la
+explicación a señalar la contradicción demostrable.
+
+Si la fuente NO permite justificar inequívocamente por qué una alternativa es
+incorrecta, no inventes información para explicarla.
+
+FORMATO:
+
+Redacta explanation como un texto compacto y claro.
+
+Cuando resulte útil para distinguir las alternativas, puedes identificar
+explícitamente A), B), C) y D).
+
+Ejemplo de estructura:
+
+"La correcta es B porque [...]. A es incorrecta porque [...]. C confunde [...]
+con [...]. D es incorrecta porque [...]."
+
+No es obligatorio utilizar exactamente esta redacción ni convertir todas las
+explicaciones en una enumeración mecánica.
+
+Prioriza claridad y utilidad para el estudio.
+
+EVITA:
+
+- limitarte a repetir literalmente la opción correcta;
+- escribir únicamente "según el temario, la correcta es...";
+- explicar solo la correcta cuando la fuente permite justificar también los
+  distractores;
+- introducir conocimiento externo para completar una explicación;
+- convertir la corrección en un texto innecesariamente largo;
+- atribuir a un distractor un significado que la fuente no permita demostrar.
+
+La explicación debe conservar las cifras, unidades, condiciones, términos
+técnicos y matices necesarios para comprender exactamente la solución.
 
 ==================================================
 12. EVIDENCIA Y PÁGINA
