@@ -851,6 +851,27 @@ const questionSchema={
   },required:["stem","options","correctIndex","explanation","sourceEvidence","sourcePage","difficulty"]}}
  },required:["questions"]
 };
+const validationSchema={
+  type:"object",
+  properties:{
+    results:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          index:{type:"integer",minimum:0},
+          valid:{type:"boolean"},
+          issues:{
+            type:"array",
+            items:{type:"string"}
+          }
+        },
+        required:["index","valid","issues"]
+      }
+    }
+  },
+  required:["results"]
+};
 const coverageSchema={
   type:"object",
   properties:{
@@ -2608,6 +2629,87 @@ async function markCoverageTargetsWorked(targets){
     [ids]
   );
 }
+async function validateGeneratedQuestions(ai,questions){
+  const validationPrompt=`
+Eres un validador factual estricto de preguntas de oposición.
+
+FUENTE DE VERDAD
+- La ÚNICA fuente factual válida es el temario recuperado mediante File Search.
+- No uses conocimiento general, memoria propia ni información externa.
+- No uses los exámenes oficiales como fuente factual.
+- Si el temario recuperado no permite demostrar una afirmación, no la des por válida.
+
+TAREA
+Valida TODAS las preguntas recibidas.
+
+Para cada pregunta comprueba:
+
+1. Que el enunciado pueda resolverse exclusivamente con el temario.
+2. Que la opción indicada por correctIndex sea correcta según el temario.
+3. Que exista exactamente UNA respuesta correcta.
+4. Que ninguna otra opción sea también defendible como correcta según el temario.
+5. Que sourceEvidence respalde realmente la respuesta correcta.
+6. Que explanation sea coherente con la respuesta correcta y con el temario.
+7. Que cifras, unidades, porcentajes, fórmulas, relaciones, límites y condiciones coincidan con el temario.
+8. Que las preguntas formuladas en negativo (NO, INCORRECTA, FALSA, EXCEPTO o equivalentes) estén resueltas en el sentido correcto.
+9. Que no se introduzcan datos o afirmaciones esenciales que requieran conocimiento externo.
+10. Que sourcePage solo se considere válida cuando pueda sostenerse con la información recuperada.
+
+CRITERIO
+- valid=true únicamente cuando la pregunta completa pueda defenderse con el temario.
+- Ante una contradicción factual clara, valid=false.
+- Si falta evidencia suficiente para verificar un aspecto esencial, valid=false.
+- No corrijas ni reescribas preguntas.
+- No mejores estilo ni dificultad.
+- No evalúes si la pregunta te gusta.
+- Limítate a detectar problemas de fiabilidad factual.
+
+ÍNDICES
+- index empieza en 0.
+- Devuelve exactamente un resultado por cada pregunta.
+- Conserva exactamente el mismo orden.
+
+PREGUNTAS A VALIDAR:
+${JSON.stringify(questions)}
+`;
+
+  const response=await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:validationPrompt,
+    config:{
+      tools:[{
+        fileSearch:{
+          fileSearchStoreNames:[STORE]
+        }
+      }],
+      responseMimeType:"application/json",
+      responseJsonSchema:validationSchema
+    }
+  });
+
+  const validation=JSON.parse(response.text);
+
+  if(
+    !validation.results ||
+    validation.results.length!==questions.length
+  ){
+    throw new Error(
+      "El validador factual no devolvió un resultado por cada pregunta."
+    );
+  }
+
+  for(let i=0;i<validation.results.length;i++){
+    const result=validation.results[i];
+
+    if(result.index!==i){
+      throw new Error(
+        "El validador factual devolvió índices inconsistentes."
+      );
+    }
+  }
+
+  return validation.results;
+}
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -2707,7 +2809,36 @@ ${officialStyle}
         throw new Error("Pregunta inválida detectada.");
       }
     }
+console.log("VALIDACIÓN FACTUAL: iniciando");
 
+const factualValidation=
+  await validateGeneratedQuestions(ai,parsed.questions);
+
+const invalidQuestions=
+  factualValidation.filter(result=>!result.valid);
+
+if(invalidQuestions.length>0){
+  console.error(
+    "VALIDACIÓN FACTUAL: preguntas rechazadas",
+    invalidQuestions
+  );
+
+  const details=invalidQuestions
+    .map(result=>
+      `Pregunta ${result.index+1}: ${
+        result.issues?.join(" | ") || "fallo factual no especificado"
+      }`
+    )
+    .join(" || ");
+
+  throw new Error(
+    `Validación factual rechazada. ${details}`
+  );
+}
+
+console.log(
+  "VALIDACIÓN FACTUAL: todas las preguntas superadas"
+);
     /*
       Las preguntas mantienen el mismo orden que los objetivos:
       pregunta 1 -> objetivo 1
