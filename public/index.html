@@ -1,24 +1,391 @@
-<!doctype html><html lang="es"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Test Bombero Navarra V2</title>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Test Bombero Navarra</title>
+
 <style>
-body{font-family:system-ui;margin:0;background:#f3f4f6;color:#111827}.w{max-width:780px;margin:auto;padding:18px}
-.c{background:#fff;padding:20px;border-radius:16px;margin:12px 0;box-shadow:0 2px 12px #0001}
-button,select{font:inherit;padding:12px;border-radius:10px}button{border:0;background:#111827;color:#fff;font-weight:700}
-.opt{display:block;width:100%;margin:8px 0;text-align:left;background:#fff;color:#111827;border:1px solid #cbd5e1}
-.sel{outline:3px solid #111827}.ok{background:#dcfce7}.bad{background:#fee2e2}.muted{color:#64748b}.hidden{display:none}
-.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1}.pill{padding:6px 9px;border-radius:999px;background:#e5e7eb;display:inline-block}
-</style></head><body><div class="w"><h1>🔥 Test Bombero Navarra</h1>
+*{
+  box-sizing:border-box;
+}
+
+body{
+  margin:0;
+  background:#e9eaec;
+  color:#111;
+  font-family:Arial,Helvetica,sans-serif;
+  line-height:1.42;
+}
+
+.w{
+  max-width:900px;
+  margin:0 auto;
+  padding:18px;
+}
+
+h1,h2,h3,p{
+  margin-top:0;
+}
+
+.app-title{
+  margin:8px 0 18px;
+  font-size:28px;
+  font-weight:700;
+}
+
+/* CONFIGURACIÓN */
+
+.c{
+  background:#fff;
+  margin:14px 0;
+  padding:28px 34px;
+  border:1px solid #cfcfcf;
+}
+
+#setup{
+  background:#fff;
+}
+
+.setup-title{
+  font-size:20px;
+  margin-bottom:20px;
+}
+
+.technical{
+  margin:22px 0;
+  padding:16px;
+  background:#f5f5f5;
+  border:1px solid #ddd;
+}
+
+.row{
+  display:flex;
+  gap:18px;
+  flex-wrap:wrap;
+  margin-top:18px;
+}
+
+.row>*{
+  flex:1;
+  min-width:150px;
+}
+
+label{
+  font-size:14px;
+  font-weight:700;
+}
+
+select{
+  width:100%;
+  margin-top:6px;
+  padding:10px;
+  border:1px solid #999;
+  border-radius:2px;
+  background:#fff;
+  color:#111;
+  font:inherit;
+}
+
+button{
+  font:inherit;
+  cursor:pointer;
+}
+
+.primary{
+  padding:12px 18px;
+  border:1px solid #111;
+  background:#111;
+  color:#fff;
+  font-weight:700;
+}
+
+.secondary{
+  padding:10px 14px;
+  border:1px solid #555;
+  background:#fff;
+  color:#111;
+  font-weight:600;
+}
+
+button:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+.pill{
+  display:inline-block;
+  padding:5px 9px;
+  border:1px solid #aaa;
+  background:#f5f5f5;
+  font-size:13px;
+}
+
+.muted{
+  color:#666;
+}
+
+/* ZONA DE EXAMEN */
+
+#quiz{
+  background:#fff;
+  min-height:75vh;
+  border:1px solid #c8c8c8;
+}
+
+.exam-toolbar{
+  position:sticky;
+  top:0;
+  z-index:10;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  padding:11px 18px;
+  background:#f3f3f3;
+  border-bottom:1px solid #aaa;
+  font-size:14px;
+}
+
+.exam-timer{
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+
+.exam-paper{
+  max-width:760px;
+  margin:0 auto;
+  padding:38px 48px 50px;
+  background:#fff;
+}
+
+.exam-heading{
+  text-align:center;
+  margin-bottom:38px;
+}
+
+.exam-heading strong{
+  display:block;
+  font-size:15px;
+}
+
+.exam-heading span{
+  display:block;
+  margin-top:5px;
+  font-size:12px;
+  font-weight:700;
+}
+
+.question-number{
+  margin-bottom:8px;
+  font-size:13px;
+  color:#555;
+}
+
+.question-stem{
+  margin:0 0 20px;
+  font-size:17px;
+  line-height:1.48;
+  font-weight:700;
+}
+
+/* RESPUESTAS */
+
+.opt{
+  display:block;
+  width:100%;
+  margin:0 0 9px;
+  padding:9px 10px;
+  border:1px solid transparent;
+  border-radius:0;
+  background:#fff;
+  color:#111;
+  text-align:left;
+  font-size:16px;
+  line-height:1.42;
+  font-weight:400;
+}
+
+.opt:hover{
+  border-color:#aaa;
+  background:#f7f7f7;
+}
+
+.opt.sel,
+.sel{
+  border-color:#222;
+  background:#ededed;
+  outline:none;
+}
+
+.exam-nav{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:32px;
+  padding-top:18px;
+  border-top:1px solid #ddd;
+}
+
+/* CORRECCIÓN */
+
+.ok{
+  background:#e8f5e9;
+  padding:10px;
+}
+
+.bad{
+  background:#fdeaea;
+  padding:10px;
+}
+
+#result{
+  margin-bottom:30px;
+}
+
+/* UTILIDADES */
+
+.hidden{
+  display:none !important;
+}
+
+hr{
+  border:0;
+  border-top:1px solid #ddd;
+  margin:18px 0;
+}
+
+/* TABLET / MÓVIL */
+
+@media(max-width:650px){
+  .w{
+    padding:8px;
+  }
+
+  .app-title{
+    font-size:22px;
+    margin:10px 4px 14px;
+  }
+
+  .c{
+    padding:20px 18px;
+  }
+
+  .exam-paper{
+    padding:28px 20px 38px;
+  }
+
+  .question-stem{
+    font-size:16px;
+  }
+
+  .opt{
+    font-size:15px;
+    padding:10px 6px;
+  }
+
+  .exam-toolbar{
+    padding:10px 12px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<div class="w">
+
+<h1 class="app-title">Test Bombero Navarra</h1>
+
 <div class="c" id="setup">
-<p><span class="pill" id="status">Comprobando…</span></p>
-<p><b>Benchmark:</b> Apeo y poda de arbolado</p>
-<button id="ingest" onclick="ingest()">1. INDEXAR PDF</button><hr>
-<button onclick="ingestOfficialExams()">INDEXAR EXÁMENES OFICIALES</button>
-<button id="coverage" onclick="analyzeCoverage()">ANALIZAR COBERTURA DEL TEMA</button>
-<div class="row"><label>Preguntas<br><select id="count"><option>5</option><option selected>10</option><option>20</option><option>30</option></select></label>
-<label>Dificultad<br><select id="difficulty"><option value="media">Media</option><option value="alta" selected>Alta</option></select></label>
-<label>Modo<br><select id="mode"><option value="mixto">Mixto</option><option value="literal">Literal</option><option value="calculos">Cálculos</option></select></label></div><br>
-<button id="generate" onclick="generate()">2. GENERAR TEST REAL</button>
-<p class="muted">La clave API vive solo en el servidor. El navegador no la recibe.</p></div>
-<div id="quiz" class="hidden"></div><div id="result" class="hidden"></div>
-<script src="app.js"></script></div></body></html>
+
+  <h2 class="setup-title">Preparar test</h2>
+
+  <p>
+    <span class="pill" id="status">Comprobando…</span>
+  </p>
+
+  <p>
+    <b>Benchmark actual:</b> Apeo y poda de arbolado
+  </p>
+
+  <div class="technical">
+    <p><b>Herramientas de desarrollo</b></p>
+
+    <button
+      class="secondary"
+      id="ingest"
+      onclick="ingest()">
+      INDEXAR PDF
+    </button>
+
+    <button
+      class="secondary"
+      onclick="ingestOfficialExams()">
+      INDEXAR EXÁMENES OFICIALES
+    </button>
+
+    <button
+      class="secondary"
+      id="coverage"
+      onclick="analyzeCoverage()">
+      ANALIZAR COBERTURA
+    </button>
+  </div>
+
+  <div class="row">
+
+    <label>
+      Preguntas
+      <select id="count">
+        <option>5</option>
+        <option selected>10</option>
+        <option>20</option>
+        <option>30</option>
+      </select>
+    </label>
+
+    <label>
+      Dificultad
+      <select id="difficulty">
+        <option value="media">Media</option>
+        <option value="alta" selected>Alta</option>
+      </select>
+    </label>
+
+    <label>
+      Modo
+      <select id="mode">
+        <option value="mixto">Mixto</option>
+        <option value="literal">Literal</option>
+        <option value="calculos">Cálculos</option>
+      </select>
+    </label>
+
+  </div>
+
+  <br>
+
+  <button
+    class="primary"
+    id="generate"
+    onclick="generate()">
+    GENERAR TEST
+  </button>
+
+  <p class="muted" style="margin-top:18px">
+    Las preguntas se generan a partir del temario indexado.
+  </p>
+
+</div>
+
+<div id="quiz" class="hidden"></div>
+
+<div id="result" class="hidden"></div>
+
+</div>
+
+<script src="app.js"></script>
+
+</body>
+</html>
