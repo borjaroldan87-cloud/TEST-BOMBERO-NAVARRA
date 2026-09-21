@@ -1445,7 +1445,68 @@ Si la respuesta es NO, descarta ese distractor y crea otro.
 Los tres distractores deben ser inequívocamente falsos según la fuente,
 pero la falsedad debe depender del CONOCIMIENTO DEL TEMARIO, no de pistas
 lingüísticas.
+PRUEBA DE COMPETITIVIDAD ENTRE ALTERNATIVAS:
 
+No basta con que un distractor sea técnicamente falso. Debe ser una alternativa
+competitiva y verosímil frente a la correcta.
+
+Antes de aceptar definitivamente las cuatro opciones, compáralas entre sí como
+si fueran presentadas a un opositor preparado que conoce el tema pero puede
+confundir detalles próximos.
+
+Para cada distractor exige simultáneamente:
+
+- que pertenezca al mismo campo conceptual que la respuesta correcta;
+- que conserve la mayor parte posible de la estructura factual de la correcta;
+- que su falsedad dependa preferentemente de UN detalle discriminante;
+- que ese detalle pueda confundirse razonablemente con otro dato, término,
+  límite, condición, categoría, paso o relación próximo del temario;
+- que no pueda descartarse sin conocer el contenido concreto preguntado;
+- que no resulte más extraño, extremo, genérico o artificioso que la correcta.
+
+En dificultad alta, intenta que al menos DOS distractores obliguen a discriminar
+con precisión entre información muy próxima.
+
+Cuando la fuente proporcione varios datos, categorías, pasos, límites,
+propiedades o conceptos relacionados, utilízalos entre sí para construir
+distractores antes de inventar modificaciones arbitrarias.
+
+EJEMPLO DE CRITERIO, NO DE CONTENIDO:
+
+Si la respuesta correcta depende de que un límite sea 25 %, son preferibles
+como distractores otros porcentajes próximos o valores reales relacionados
+presentes en el mismo contexto antes que cifras extremas sin relación.
+
+Si la respuesta correcta identifica el paso 4 de un procedimiento, son
+preferibles acciones pertenecientes realmente a los pasos 3, 5 o a una fase
+próxima antes que una acción ajena al procedimiento.
+
+Si la respuesta correcta asigna una propiedad al elemento A, es preferible
+asignarle una propiedad real del elemento B próximo antes que inventar una
+propiedad inexistente.
+
+CONTROL FINAL DE DESCARTE:
+
+Rechaza y reconstruye cualquier distractor si ocurre UNA de estas situaciones:
+
+1. Puede descartarse por sentido común sin conocer el temario.
+2. Contiene una exageración que delata su falsedad.
+3. Introduce maquinaria, condiciones, cifras, materiales, procedimientos o
+   conceptos sin apoyo próximo en la fuente únicamente para fabricar una falsa.
+4. Su redacción es sensiblemente menos precisa o natural que la correcta.
+5. La correcta destaca por ser la única opción moderada, completa o técnicamente
+   bien redactada.
+6. Dos distractores son esencialmente la misma falsa con palabras distintas.
+7. El opositor podría eliminarlo antes de recordar el dato concreto evaluado.
+
+OBJETIVO DE CALIDAD:
+
+Idealmente, antes de recordar con precisión el dato del temario, un opositor
+preparado debería poder dudar razonablemente entre la correcta y al menos DOS
+distractores.
+
+La dificultad debe proceder de discriminar conocimiento próximo, NO de
+ambigüedad, redacción retorcida ni información externa.
 PROHIBIDO CREAR DISTRACTORES MEDIANTE:
 
 - afirmaciones absurdas, físicamente inverosímiles o ajenas al contexto;
@@ -1525,11 +1586,33 @@ estructura de la pregunta, nunca como recurso para fabricar dificultad.
 10. POSICIÓN DE LA RESPUESTA
 ==================================================
 
-Distribuye correctIndex entre 0, 1, 2 y 3 sin patrón reconocible.
+La posición de la respuesta correcta debe comportarse de forma NATURAL y no
+seguir un patrón artificialmente equilibrado.
 
-No coloques sistemáticamente la respuesta correcta en la misma posición.
+Asigna correctIndex entre 0, 1, 2 y 3 sin favorecer sistemáticamente ninguna
+posición.
 
-La posición de la respuesta nunca debe influir en su redacción.
+NO intentes repartir las respuestas correctas de forma perfectamente uniforme
+dentro de cada test. Un examen real puede contener de forma natural varias
+respuestas correctas consecutivas en la misma posición.
+
+Por tanto, son admisibles rachas ocasionales de 2, 3 o incluso 4 respuestas
+correctas consecutivas en una misma letra, así como distribuciones desiguales
+dentro de un test concreto.
+
+Lo que debe evitarse es un SESGO RECURRENTE entre tests: que una misma posición
+aparezca como correcta de forma anormalmente frecuente o que se reproduzcan
+repetidamente secuencias similares.
+
+No construyas patrones artificiales como A-B-C-D-A-B-C-D ni fuerces una
+cantidad idéntica de A, B, C y D.
+
+La secuencia debe parecer compatible con una distribución aleatoria natural:
+puede contener agrupaciones y rachas, pero no debe presentar una preferencia
+deliberada por ninguna posición.
+
+La posición de la respuesta correcta nunca debe influir en la redacción,
+longitud, precisión o apariencia de las alternativas.
 
 ==================================================
 11. EXPLICACIÓN Y CORRECCIÓN
