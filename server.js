@@ -1310,7 +1310,208 @@ No introduzcas constantes, reglas técnicas ni supuestos externos.
 
 Los distractores numéricos pueden derivarse de errores razonables de cálculo,
 unidades, operaciones o aplicación de la fórmula.
+REPRESENTACIÓN DE FÓRMULAS, SÍMBOLOS Y NOTACIÓN CIENTÍFICA:
 
+Toda fórmula, operación, magnitud, unidad, símbolo químico o expresión
+científica debe escribirse como texto plano Unicode seguro, estándar y
+directamente legible por el navegador.
+
+La notación debe conservar fielmente la utilizada en la fuente cuando sea
+relevante para responder correctamente.
+
+NO utilices:
+- LaTeX;
+- MathML;
+- comandos como \frac, \sqrt, \times, \cdot, \pi, \rho, \mu, etc.;
+- delimitadores como $, $$, \( \), \[ \];
+- caracteres decorativos o variantes tipográficas innecesarias;
+- sustitutos visuales de un símbolo científico real.
+
+OPERADORES Y SÍMBOLOS MATEMÁTICOS:
+
+Utiliza directamente, cuando corresponda:
+
++  suma
+-  resta
+×  multiplicación
+/  división
+=  igualdad
+≈  aproximadamente
+<  menor que
+>  mayor que
+≤  menor o igual que
+≥  mayor o igual que
+±  más/menos
+√  raíz cuadrada
+%  porcentaje
+°  grados
+π  pi
+
+Utiliza paréntesis ( ) siempre que sean necesarios para hacer inequívoco
+el orden de las operaciones.
+
+LETRAS GRIEGAS Y VARIABLES:
+
+Cuando la fuente utilice letras griegas como símbolos de magnitudes,
+coeficientes o variables, conserva el símbolo Unicode correspondiente.
+
+Ejemplos de símbolos que pueden aparecer:
+
+ρ  rho
+μ  mu
+η  eta
+λ  lambda
+Δ  delta mayúscula
+δ  delta minúscula
+α  alfa
+β  beta
+γ  gamma
+θ  theta
+φ  phi
+ω  omega
+Ω  omega mayúscula
+Σ  sigma mayúscula
+σ  sigma minúscula
+
+Estos ejemplos NO constituyen una lista cerrada.
+Puede utilizarse cualquier letra griega o símbolo científico estándar que
+aparezca realmente en la fuente.
+
+Nunca sustituyas automáticamente una letra griega por una letra latina
+visualmente parecida si esa sustitución puede alterar el significado.
+
+POTENCIAS, ÍNDICES Y NOTACIÓN EXPONENCIAL:
+
+Para cuadrados y cubos pueden utilizarse:
+
+m²
+m³
+v²
+
+Para exponentes más complejos utiliza preferentemente notación ASCII clara:
+
+x^4
+d^5
+10^-3
+10^6
+
+Si un subíndice es importante y puede representarse de forma segura, puede
+utilizarse Unicode. Si existe riesgo de corrupción o ambigüedad, utiliza una
+representación textual inequívoca, por ejemplo:
+
+CO2
+H2O
+P1
+P2
+
+Nunca sacrifiques el significado científico por intentar reproducir una
+tipografía especial.
+
+RAÍCES:
+
+La raíz cuadrada puede escribirse con √ cuando la expresión sea sencilla:
+
+√25
+√(a² + b²)
+
+Si una raíz compleja pudiera resultar ambigua, utiliza una representación
+textual inequívoca equivalente.
+
+UNIDADES Y MAGNITUDES:
+
+Conserva exactamente las unidades necesarias para resolver la pregunta.
+
+Admite notación científica y técnica estándar como, entre otras:
+
+m
+m²
+m³
+s
+kg
+N
+Pa
+kPa
+bar
+J
+W
+V
+A
+Ω
+S
+Hz
+°C
+L
+L/min
+m/s
+m/s²
+kg/m³
+
+La lista NO es cerrada. Utiliza cualquier unidad presente en la fuente y
+respeta mayúsculas, minúsculas, exponentes, prefijos y símbolos cuando sean
+relevantes.
+
+QUÍMICA:
+
+Los símbolos de los elementos químicos deben conservar su escritura estándar
+y respetar mayúsculas y minúsculas:
+
+H
+O
+C
+N
+Na
+Cl
+Fe
+Ca
+
+Las fórmulas químicas, estados de oxidación, cargas, valencias y demás
+notación química deben reproducirse de forma inequívoca según la fuente.
+
+Cuando un superíndice o subíndice Unicode pueda provocar problemas de
+representación, utiliza una alternativa de texto plano que preserve
+inequívocamente el significado.
+
+No inventes elementos, valencias, cargas, fórmulas químicas ni propiedades:
+todo contenido científico sigue sujeto a la fuente factual.
+
+FÓRMULAS:
+
+Las fracciones deben escribirse preferentemente mediante "/" y paréntesis
+suficientes para conservar inequívocamente el orden de operaciones.
+
+Ejemplos de representación:
+
+Radio = perímetro / (2 × π)
+
+Área = π × r²
+
+ρ = m / V
+
+v = distancia / tiempo
+
+a = Δv / Δt
+
+√(a² + b²)
+
+La representación de una fórmula nunca debe introducir símbolos corruptos,
+caracteres de sustitución como � ni secuencias de escape visibles.
+
+COMPROBACIÓN FINAL:
+
+Antes de devolver cualquier pregunta, opción, explicación o evidencia que
+contenga notación matemática, física, química o técnica, comprueba que:
+
+1. todos los símbolos son legibles;
+2. no aparece el carácter �;
+3. no quedan comandos LaTeX ni secuencias de escape;
+4. la fórmula conserva inequívocamente su significado;
+5. las unidades están correctamente representadas;
+6. los exponentes, índices, cargas o valencias no han perdido significado;
+7. la notación coincide con la fuente cuando esa notación sea examinable.
+
+Si existe riesgo de que un carácter especial se represente incorrectamente,
+utiliza una alternativa de texto plano más simple que conserve exactamente
+el significado científico.
 ==================================================
 7. PROCEDIMIENTOS Y CLASIFICACIONES
 ==================================================
