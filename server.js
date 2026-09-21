@@ -2710,6 +2710,95 @@ ${JSON.stringify(questions)}
 
   return validation.results;
 }
+async function regenerateInvalidQuestions(
+  ai,
+  invalidResults,
+  originalQuestions,
+  targets,
+  difficulty,
+  mode,
+  officialStyle
+){
+  const replacementTargets =
+    invalidResults.map(result => targets[result.index]);
+
+  const rejectedQuestions =
+    invalidResults.map(result => ({
+      index: result.index,
+      question: originalQuestions[result.index],
+      issues: result.issues
+    }));
+
+  const replacementPrompt =
+    generationPrompt(replacementTargets.length, difficulty, mode) +
+    coverageTargetsPrompt(replacementTargets) +
+    `
+========================================
+REGENERACIÓN DE PREGUNTAS RECHAZADAS
+========================================
+
+Debes generar EXACTAMENTE ${replacementTargets.length} preguntas.
+
+Estas preguntas sustituyen preguntas rechazadas por una validación factual independiente.
+
+MOTIVOS DEL RECHAZO:
+${JSON.stringify(rejectedQuestions)}
+
+REGLAS OBLIGATORIAS:
+- Genera una pregunta por cada objetivo de cobertura recibido.
+- Mantén exactamente el mismo orden que los objetivos.
+- Corrige específicamente los problemas indicados por el validador.
+- NO reutilices la afirmación que provocó el rechazo salvo que File Search permita demostrarla.
+- File Search y el temario son la única fuente factual.
+- No inventes datos para completar información ausente.
+- Todas las reglas normales de generación siguen siendo obligatorias.
+
+========================================
+REFERENCIA DINÁMICA DE ESTILO
+========================================
+
+Úsala EXCLUSIVAMENTE como referencia de redacción, estructura,
+distractores, cálculos y nivel de razonamiento.
+
+NO la utilices como fuente factual.
+
+${officialStyle}
+
+========================================
+FIN DE REFERENCIA
+========================================
+`;
+
+  const response = await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:replacementPrompt,
+    config:{
+      tools:[{
+        fileSearch:{
+          fileSearchStoreNames:[STORE]
+        }
+      }],
+      responseMimeType:"application/json",
+      responseJsonSchema:questionSchema
+    }
+  });
+
+  const parsed = JSON.parse(response.text);
+
+  if(
+    !parsed.questions ||
+    parsed.questions.length !== replacementTargets.length
+  ){
+    throw new Error(
+      "La regeneración no devolvió el número esperado de preguntas."
+    );
+  }
+
+  return {
+    questions: parsed.questions,
+    targets: replacementTargets
+  };
+}
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -2811,34 +2900,85 @@ ${officialStyle}
     }
 console.log("VALIDACIÓN FACTUAL: iniciando");
 
-const factualValidation=
-  await validateGeneratedQuestions(ai,parsed.questions);
+let finalQuestions = [...parsed.questions];
+let factualValidation =
+  await validateGeneratedQuestions(ai, finalQuestions);
 
-const invalidQuestions=
-  factualValidation.filter(result=>!result.valid);
+let invalidQuestions =
+  factualValidation.filter(result => !result.valid);
 
-if(invalidQuestions.length>0){
-  console.error(
-    "VALIDACIÓN FACTUAL: preguntas rechazadas",
-    invalidQuestions
+const MAX_REPLACEMENT_ATTEMPTS = 2;
+let replacementAttempt = 0;
+
+while(
+  invalidQuestions.length > 0 &&
+  replacementAttempt < MAX_REPLACEMENT_ATTEMPTS
+){
+  replacementAttempt++;
+
+  console.log(
+    `VALIDACIÓN FACTUAL: ${invalidQuestions.length} preguntas rechazadas. ` +
+    `Intento de sustitución ${replacementAttempt}/${MAX_REPLACEMENT_ATTEMPTS}`
   );
 
-  const details=invalidQuestions
-    .map(result=>
-      `Pregunta ${result.index+1}: ${
-        result.issues?.join(" | ") || "fallo factual no especificado"
+  const regenerated =
+    await regenerateInvalidQuestions(
+      ai,
+      invalidQuestions,
+      finalQuestions,
+      targets,
+      difficulty,
+      mode,
+      officialStyle
+    );
+
+  const replacementValidation =
+    await validateGeneratedQuestions(
+      ai,
+      regenerated.questions
+    );
+
+  const stillInvalid = [];
+
+  for(let i=0;i<regenerated.questions.length;i++){
+    const originalIndex = invalidQuestions[i].index;
+    const validationResult = replacementValidation[i];
+
+    if(validationResult.valid){
+      finalQuestions[originalIndex] =
+        regenerated.questions[i];
+    }else{
+      stillInvalid.push({
+        index: originalIndex,
+        valid: false,
+        issues: validationResult.issues
+      });
+    }
+  }
+
+  invalidQuestions = stillInvalid;
+}
+
+if(invalidQuestions.length > 0){
+  const details = invalidQuestions
+    .map(result =>
+      `Pregunta ${result.index + 1}: ${
+        result.issues?.join(" | ") ||
+        "fallo factual no especificado"
       }`
     )
     .join(" || ");
 
   throw new Error(
-    `Validación factual rechazada. ${details}`
+    `No se pudieron obtener todas las preguntas con validación factual. ${details}`
   );
 }
 
 console.log(
   "VALIDACIÓN FACTUAL: todas las preguntas superadas"
 );
+
+parsed.questions = finalQuestions;
     /*
       Las preguntas mantienen el mismo orden que los objetivos:
       pregunta 1 -> objetivo 1
