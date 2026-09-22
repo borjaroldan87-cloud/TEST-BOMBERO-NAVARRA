@@ -3182,7 +3182,7 @@ ${officialStyle}
     });
 
     console.log("GENERATECONTENT: respuesta recibida");
-
+console.log("TEXTO GEMINI:", response.text.slice(0,1500));
     const parsed=JSON.parse(response.text);
 
     if(
