@@ -328,7 +328,7 @@ function review(){
           <p class="muted">
             <b>Fuente:</b>
             ${q.sourceEvidence}
-            ${q.sourcePage?` · pág. ${q.sourcePage}`:""}
+            ${q.manualPage!=null?` · pág. ${q.manualPage}`:""}
           </p>
 
         </div>
