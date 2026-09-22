@@ -2327,6 +2327,7 @@ excepciones, definiciones ni elementos gráficos con contenido examinable.
 Cuando indiques sourcePage, utiliza exclusivamente el número de página física del PDF original, dentro del rango ${chunk.startPage} a ${chunk.endPage}. Este dato es interno.
 
 Cuando indiques manualPage, utiliza exclusivamente el número de página impreso que aparece en el pie de página del propio manual. Debes leerlo directamente de la página. No lo deduzcas a partir de sourcePage ni calcules ningún desplazamiento. Si no puede identificarse con seguridad, devuelve null.
+`
       },
       {
         inlineData:{
