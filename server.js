@@ -60,7 +60,10 @@ async function initDatabase(){
       last_asked_at TIMESTAMPTZ,
       UNIQUE(topic_id, concept, item_type, evaluation_type)
     )
-  `);
+  `);await db.query(`
+  ALTER TABLE coverage_items
+  ADD COLUMN IF NOT EXISTS manual_page TEXT
+`);
 }
 async function loadStore(){
   const result = await db.query(
@@ -129,20 +132,21 @@ async function saveCoverageItems(topicId, items){
   for(const item of items){
     await db.query(
       `INSERT INTO coverage_items
-       (topic_id, section, concept, item_type, evaluation_type,
-        source_page, source_evidence)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
-       ON CONFLICT (topic_id, concept, item_type, evaluation_type)
-       DO NOTHING`,
-      [
-        topicId,
-        item.section || null,
-        item.concept,
-        item.itemType,
-        item.evaluationType,
-        item.sourcePage ?? null,
-        item.sourceEvidence || null
-      ]
+  (topic_id, section, concept, item_type, evaluation_type,
+   source_page, manual_page, source_evidence)
+ VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+ ON CONFLICT (topic_id, concept, item_type, evaluation_type)
+ DO NOTHING`,
+[
+  topicId,
+  item.section || null,
+  item.concept,
+  item.itemType,
+  item.evaluationType,
+  item.sourcePage ?? null,
+  item.manualPage ?? null,
+  item.sourceEvidence || null
+]
     );
   }
 
@@ -845,10 +849,11 @@ const questionSchema={
    options:{type:"array",items:{type:"string"},minItems:4,maxItems:4},
    correctIndex:{type:"integer",minimum:0,maximum:3},
    explanation:{type:"string"},
-   sourceEvidence:{type:"string"},
-   sourcePage:{type:["integer","null"]},
-   difficulty:{type:"string",enum:["media","alta"]}
-  },required:["stem","options","correctIndex","explanation","sourceEvidence","sourcePage","difficulty"]}}
+ sourceEvidence:{type:"string"},
+sourcePage:{type:["integer","null"]},
+manualPage:{type:["integer","string","null"]},
+difficulty:{type:"string",enum:["media","alta"]}
+},required:["stem","options","correctIndex","explanation","sourceEvidence","sourcePage","manualPage","difficulty"] }}
  },required:["questions"]
 };
 const validationSchema={
@@ -921,6 +926,7 @@ const coverageSchema={
           "itemType",
           "evaluationType",
           "sourcePage",
+          "manualPage",
           "sourceEvidence"
         ]
       }
@@ -1976,9 +1982,9 @@ EVITA:
 La explicación debe conservar las cifras, unidades, condiciones, términos
 técnicos y matices necesarios para comprender exactamente la solución.
 
-==================================================
+==============================================
 12. EVIDENCIA Y PÁGINA
-==================================================
+==============================================
 
 sourceEvidence debe contener una evidencia breve, fiel y suficiente del contenido
 recuperado que sustenta la respuesta.
@@ -1986,10 +1992,18 @@ recuperado que sustenta la respuesta.
 No inventes una cita ni atribuyas al documento palabras que no estén respaldadas.
 
 sourcePage:
-- usa el número de página únicamente cuando pueda determinarse con seguridad;
-- si no puede determinarse, devuelve null;
-- nunca adivines una página.
+- representa exclusivamente la página física del archivo PDF;
+- se utiliza únicamente como referencia interna para localizar el contenido;
+- NO debe utilizarse como número de página visible para el opositor;
+- nunca deduzcas a partir de sourcePage la numeración impresa del manual.
 
+manualPage:
+- representa exclusivamente el número de página impreso en el pie de página del propio manual;
+- utiliza el valor proporcionado por el objetivo de cobertura cuando esté disponible;
+- este es el número que debe utilizarse en referencias visibles del tipo "página X";
+- si no puede determinarse con seguridad, devuelve null;
+- nunca calcules manualPage aplicando un desplazamiento u offset a sourcePage;
+- nunca inventes una página.
 ==================================================
 13. CONTROL DE CALIDAD INTERNO
 ==================================================
@@ -2181,8 +2195,9 @@ Analiza exhaustivamente TODO el contenido de estas páginas.
 No omitas tablas, cifras, fórmulas, clasificaciones, procedimientos,
 excepciones, definiciones ni elementos gráficos con contenido examinable.
 
-Cuando indiques sourcePage utiliza la numeración REAL del documento original:
-${chunk.startPage} a ${chunk.endPage}.`
+Cuando indiques sourcePage, utiliza exclusivamente el número de página física del PDF original, dentro del rango ${chunk.startPage} a ${chunk.endPage}. Este dato es interno.
+
+Cuando indiques manualPage, utiliza exclusivamente el número de página impreso que aparece en el pie de página del propio manual. Debes leerlo directamente de la página. No lo deduzcas a partir de sourcePage ni calcules ningún desplazamiento. Si no puede identificarse con seguridad, devuelve null.
       },
       {
         inlineData:{
@@ -2567,6 +2582,7 @@ async function getCoverageTargetsForGeneration(count){
       ci.item_type,
       ci.evaluation_type,
       ci.source_page,
+      ci.manual_page,
       ci.source_evidence
     FROM coverage_items ci
     JOIN topics t ON t.id = ci.topic_id
@@ -2601,7 +2617,8 @@ OBJETIVO ${index+1}
 - Concepto: ${item.concept}
 - Tipo de contenido: ${item.item_type}
 - Tipo de evaluación solicitado: ${item.evaluation_type}
-- Página de referencia: ${item.source_page ?? "No determinada"}
+- Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
+- Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
 `).join("\n")}
 
@@ -2653,7 +2670,9 @@ Para cada pregunta comprueba:
 7. Que cifras, unidades, porcentajes, fórmulas, relaciones, límites y condiciones coincidan con el temario.
 8. Que las preguntas formuladas en negativo (NO, INCORRECTA, FALSA, EXCEPTO o equivalentes) estén resueltas en el sentido correcto.
 9. Que no se introduzcan datos o afirmaciones esenciales que requieran conocimiento externo.
-10. Que sourcePage solo se considere válida cuando pueda sostenerse con la información recuperada.
+10. Que sourcePage represente exclusivamente la página física del archivo PDF y se use solo como referencia interna.
+11. Que manualPage represente exclusivamente la numeración impresa visible en el propio manual. Si no puede verificarse con seguridad mediante el documento recuperado, debe ser null.
+12. No deduzcas manualPage a partir de sourcePage, no calcules offsets entre ambas numeraciones y no consideres que tienen que coincidir.
 
 CRITERIO
 - valid=true únicamente cuando la pregunta completa pueda defenderse con el temario.
