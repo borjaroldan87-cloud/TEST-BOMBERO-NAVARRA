@@ -1717,21 +1717,26 @@ Evalúa directamente información expresa del manual:
 - excepciones;
 - detalles literales susceptibles de confusión.
 
+REGLA OBLIGATORIA:
 Cuando el objetivo de cobertura disponga de manualPage y la pregunta sea de
-esta familia, utiliza preferentemente una formulación visible del tipo:
+esta familia, el enunciado DEBE comenzar con esta estructura:
 
 "Conforme al manual elaborado por el CEIS Guadalajara, [título o materia
 identificable del manual], página X, ..."
 
-o una formulación equivalente coherente con el estilo oficial de 2024.
-
 X debe ser EXCLUSIVAMENTE manualPage.
 
-PROHIBIDO utilizar sourcePage para esta referencia.
-PROHIBIDO inventar el título de un manual si la fuente recuperada no permite
-identificarlo con seguridad.
-Si el título concreto no puede identificarse, utiliza una referencia natural
-al manual sin inventarlo, manteniendo manualPage cuando esté disponible.
+Está PROHIBIDO:
+- omitir "CEIS Guadalajara";
+- omitir "página X";
+- utilizar sourcePage para esta referencia;
+- sustituir esta estructura por fórmulas genéricas como "según el manual",
+  "conforme al manual técnico", "conforme al manual de referencia" o equivalentes;
+- inventar el título de un manual si no puede identificarse con seguridad.
+
+Si el título concreto no puede identificarse, utiliza una descripción breve
+y factual de la materia respaldada por el objetivo de cobertura, manteniendo
+OBLIGATORIAMENTE "CEIS Guadalajara" y "página X".
 
 B. CORRECTA / INCORRECTA
 Genera preguntas en las que las cuatro alternativas sean afirmaciones
