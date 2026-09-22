@@ -1699,30 +1699,106 @@ En enumeraciones y clasificaciones considera:
 8. TIPOS DE PREGUNTA
 ==================================================
 
-Utiliza variedad natural entre:
-- conocimiento directo;
-- dato literal o numérico;
-- identificación;
+Utiliza una mezcla deliberada de familias de pregunta para reproducir de forma
+más fiel la variedad observada en los exámenes oficiales de 2024 y 2026.
+
+FAMILIAS PRIORITARIAS:
+
+A. LITERAL / PRECISIÓN — ESTILO 2024
+Evalúa directamente información expresa del manual:
+- definiciones;
+- cifras;
+- unidades;
+- límites;
+- clasificaciones;
+- enumeraciones;
+- procedimientos;
+- condiciones;
+- excepciones;
+- detalles literales susceptibles de confusión.
+
+Cuando el objetivo de cobertura disponga de manualPage y la pregunta sea de
+esta familia, utiliza preferentemente una formulación visible del tipo:
+
+"Conforme al manual elaborado por el CEIS Guadalajara, [título o materia
+identificable del manual], página X, ..."
+
+o una formulación equivalente coherente con el estilo oficial de 2024.
+
+X debe ser EXCLUSIVAMENTE manualPage.
+
+PROHIBIDO utilizar sourcePage para esta referencia.
+PROHIBIDO inventar el título de un manual si la fuente recuperada no permite
+identificarlo con seguridad.
+Si el título concreto no puede identificarse, utiliza una referencia natural
+al manual sin inventarlo, manteniendo manualPage cuando esté disponible.
+
+B. CORRECTA / INCORRECTA
+Genera preguntas en las que las cuatro alternativas sean afirmaciones
+técnicamente desarrolladas y próximas entre sí.
+
+Utiliza tanto:
+- "Señale la opción CORRECTA";
+como
+- "Señale la opción INCORRECTA".
+
+En un test con 5 o más preguntas, intenta incluir al menos UNA pregunta
+INCORRECTA siempre que la fuente permita construir cuatro afirmaciones
+inequívocas.
+
+La alternativa que resuelve una pregunta INCORRECTA debe ser la única
+afirmación falsa.
+
+C. APLICACIÓN / RAZONAMIENTO — ESTILO 2026
+Evalúa:
 - comprensión;
 - comparación;
 - aplicación;
-- cálculo;
 - interpretación;
-- secuencia;
-- pertenencia/exclusión;
-- relación entre variables;
-- situación operativa.
+- relaciones entre variables;
+- situaciones operativas;
+- consecuencias;
+- selección de actuaciones;
+- cálculos cuando la fuente los permita.
 
-Cuando sea apropiado utiliza formulaciones como:
-- "Señale la opción CORRECTA";
-- "Señale la opción INCORRECTA";
-- preguntas con "NO".
+D. PROCEDIMIENTO / SECUENCIA / CLASIFICACIÓN / CÁLCULO
+Utiliza estas familias cuando el objetivo de cobertura y la información
+recuperada las permitan.
 
-Las preguntas negativas deben utilizarse con moderación.
+DISTRIBUCIÓN DEL TEST:
+
+No permitas que todas las preguntas adopten la misma estructura.
+
+Cuando count >= 5 y la fuente lo permita:
+- incluye al menos UNA pregunta literal o de precisión estilo 2024;
+- incluye al menos UNA pregunta formulada como INCORRECTA;
+- incluye preguntas de comprensión, aplicación o razonamiento estilo 2026;
+- completa el resto con las familias más adecuadas a los objetivos de cobertura.
+
+Cuando count >= 10 y la fuente lo permita:
+- incluye al menos DOS preguntas literales o de precisión estilo 2024;
+- incluye al menos DOS preguntas CORRECTA/INCORRECTA, siendo al menos UNA
+  de ellas INCORRECTA;
+- conserva una presencia significativa de aplicación o razonamiento estilo 2026.
+
+Estas reglas de distribución NO autorizan a inventar contenido ni a forzar una
+familia incompatible con el objetivo de cobertura.
+
+OPCIONES DESARROLLADAS:
+
+Cuando la pregunta evalúe CORRECTA/INCORRECTA, procedimientos, aplicación,
+comparación o razonamiento, evita reducir sistemáticamente las opciones a
+palabras o datos aislados.
+
+Cuando la fuente lo permita, construye las cuatro alternativas como
+afirmaciones completas, técnicamente plausibles y de complejidad semejante,
+diferenciadas por uno o pocos elementos relevantes.
+
+La dificultad debe proceder de distinguir el contenido técnico de las
+alternativas, no de su longitud ni de pistas formales.
 
 Antes de aceptar una pregunta negativa, comprueba especialmente que la polaridad
 del enunciado y de las cuatro opciones sea inequívoca.
-
 ==================================================
 9. OPCIONES Y DISTRACTORES — CALIDAD DE TRIBUNAL
 ==================================================
