@@ -641,6 +641,134 @@ async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
     chunks
   };
 }
+const manualPageMapSchema={
+  type:"object",
+  properties:{
+    pages:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          sourcePage:{type:"integer"},
+          manualPage:{type:["integer","string","null"]}
+        },
+        required:["sourcePage","manualPage"]
+      }
+    }
+  },
+  required:["pages"]
+};
+
+async function extractManualPageMap(ai,chunks){
+  const pageMap=[];
+
+  for(const chunk of chunks){
+    console.log(
+      `PAGE MAP: analizando páginas físicas ${chunk.startPage}-${chunk.endPage}`
+    );
+
+    const response=await ai.models.generateContent({
+      model:"gemini-3.5-flash-lite",
+      contents:[
+        {
+          text:`
+Analiza exclusivamente la NUMERACIÓN IMPRESA de las páginas del PDF adjunto.
+
+El PDF adjunto corresponde a las páginas físicas ${chunk.startPage} a ${chunk.endPage}
+del documento original.
+
+Debes devolver EXACTAMENTE un registro por cada página física del PDF adjunto.
+
+Para cada página:
+
+- sourcePage: número de página física del documento original.
+- manualPage: número de página que aparece IMPRESO VISUALMENTE en el pie de página
+  del propio manual.
+
+REGLAS OBLIGATORIAS:
+
+1. Lee manualPage directamente de cada página.
+2. NO calcules diferencias u offsets entre sourcePage y manualPage.
+3. NO deduzcas manualPage utilizando las páginas anteriores o posteriores.
+4. NO confundas sourcePage con manualPage.
+5. Si una página no muestra una numeración impresa identificable con seguridad,
+   manualPage debe ser null.
+6. No analices el contenido técnico del documento.
+7. No generes conceptos ni preguntas.
+8. Devuelve exactamente las páginas físicas comprendidas entre
+   ${chunk.startPage} y ${chunk.endPage}.
+`
+        },
+        {
+          inlineData:{
+            mimeType:"application/pdf",
+            data:chunk.data
+          }
+        }
+      ],
+      config:{
+        responseMimeType:"application/json",
+        responseJsonSchema:manualPageMapSchema
+      }
+    });
+
+    const parsed=JSON.parse(response.text);
+
+    if(!parsed.pages || !Array.isArray(parsed.pages)){
+      throw new Error(
+        `No se pudo obtener el mapa de páginas ${chunk.startPage}-${chunk.endPage}.`
+      );
+    }
+
+    const expectedCount=chunk.endPage-chunk.startPage+1;
+
+    if(parsed.pages.length!==expectedCount){
+      throw new Error(
+        `El mapa ${chunk.startPage}-${chunk.endPage} debía devolver ${expectedCount} páginas y devolvió ${parsed.pages.length}.`
+      );
+    }
+
+    for(const page of parsed.pages){
+      if(
+        page.sourcePage<chunk.startPage ||
+        page.sourcePage>chunk.endPage
+      ){
+        throw new Error(
+          `sourcePage inválida en el mapa de páginas: ${page.sourcePage}.`
+        );
+      }
+    }
+
+    pageMap.push(...parsed.pages);
+  }
+
+  return pageMap;
+}
+async function applyManualPageMapToTopic(topicId,pageMap){
+  let updatedRows=0;
+
+  for(const page of pageMap){
+    if(page.manualPage===null || page.manualPage===undefined){
+      continue;
+    }
+
+    const result=await db.query(
+      `UPDATE coverage_items
+       SET manual_page=$1
+       WHERE topic_id=$2
+       AND source_page=$3`,
+      [
+        String(page.manualPage),
+        topicId,
+        page.sourcePage
+      ]
+    );
+
+    updatedRows+=result.rowCount;
+  }
+
+  return updatedRows;
+}
 function coverageGapPrompt(existingItems, startPage, endPage){
   const existingSummary=existingItems.map(item=>({
     concept:item.concept,
@@ -918,7 +1046,8 @@ const coverageSchema={
             ]
           },
           sourcePage:{type:["integer","null"]},
-          sourceEvidence:{type:"string"}
+manualPage:{type:["integer","string","null"]},
+sourceEvidence:{type:"string"}
         },
         required:[
           "section",
@@ -2372,6 +2501,87 @@ const parsed={
 
   }catch(e){
     console.error("ERROR COVERAGE:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
+app.post("/api/repair-manual-pages", async(req,res)=>{
+  try{
+    const pdfPath=path.resolve("data/apeo-poda.pdf");
+
+    if(!fs.existsSync(pdfPath)){
+      throw new Error("No se encuentra apeo-poda.pdf.");
+    }
+
+    const topicResult=await db.query(
+      `SELECT id, name
+       FROM topics
+       WHERE name=$1
+       LIMIT 1`,
+      ["Apeo y poda de arbolado"]
+    );
+
+    if(!topicResult.rows.length){
+      throw new Error(
+        "No existe la cobertura de Apeo y poda de arbolado."
+      );
+    }
+
+    const topic=topicResult.rows[0];
+    const ai=aiClient();
+
+    console.log("PAGE MAP: iniciando reparación");
+
+    const {totalPages,chunks}=
+      await splitPdfIntoChunks(pdfPath,5);
+
+    const pageMap=
+      await extractManualPageMap(ai,chunks);
+
+    if(pageMap.length!==totalPages){
+      throw new Error(
+        `El mapa debía contener ${totalPages} páginas y contiene ${pageMap.length}.`
+      );
+    }
+
+    const updatedRows=
+      await applyManualPageMapToTopic(
+        topic.id,
+        pageMap
+      );
+
+    const remainingResult=await db.query(
+      `SELECT COUNT(*)::int AS total
+       FROM coverage_items
+       WHERE topic_id=$1
+       AND manual_page IS NULL`,
+      [topic.id]
+    );
+
+    console.log(
+      "PAGE MAP: reparación completada",
+      updatedRows,
+      "registros actualizados"
+    );
+
+    res.json({
+      ok:true,
+      topic:topic.name,
+      totalPdfPages:totalPages,
+      pageMap,
+      updatedRows,
+      remainingWithoutManualPage:
+        remainingResult.rows[0].total
+    });
+
+  }catch(e){
+    console.error(
+      "ERROR REPAIR MANUAL PAGES:",
+      e
+    );
 
     res.status(500).json({
       ok:false,
