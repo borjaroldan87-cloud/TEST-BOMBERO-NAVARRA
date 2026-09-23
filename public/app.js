@@ -134,98 +134,220 @@ function renderGraphic(q){
     .replaceAll(">","&gt;")
     .replaceAll('"',"&quot;");
 
-  const clamp=(value,min,max)=>{
+  const clamp=(value,min=0,max=100)=>{
     const n=Number(value);
     if(!Number.isFinite(n)) return min;
     return Math.min(max,Math.max(min,n));
   };
 
-  const elements=g.elements.map((el,index)=>({
-    ...el,
-    id:String(el.id??`e${index}`),
-    label:String(el.label??""),
-    kind:String(el.kind??""),
-    x:clamp(el.x,5,95),
-    y:clamp(el.y,8,92)
-  }));
+  const sx=value=>clamp(value)*6;
+  const sy=value=>clamp(value)*3.2;
 
-  const byId=new Map(elements.map(el=>[el.id,el]));
+  const pointString=points=>{
+    if(!Array.isArray(points)) return "";
 
-  const connections=Array.isArray(g.connections)
-    ? g.connections
-        .map(c=>({
-          from:byId.get(String(c.from)),
-          to:byId.get(String(c.to)),
-          label:String(c.label??"")
-        }))
-        .filter(c=>c.from && c.to)
-    : [];
+    return points
+      .map(p=>`${sx(p?.x)},${sy(p?.y)}`)
+      .join(" ");
+  };
 
-  const connectionSvg=connections.map(c=>{
-    const x1=c.from.x*6;
-    const y1=c.from.y*3.2;
-    const x2=c.to.x*6;
-    const y2=c.to.y*3.2;
-    const mx=(x1+x2)/2;
-    const my=(y1+y2)/2;
+  const drawElement=(el,index)=>{
+    const shape=String(el?.shape??"");
+    const label=String(el?.label??"");
 
-    return `
-      <line
-        x1="${x1}" y1="${y1}"
-        x2="${x2}" y2="${y2}"
-        stroke="currentColor"
-        stroke-width="2"
-      />
-      ${
-        c.label
-          ? `<text
-               x="${mx}"
-               y="${my-5}"
-               text-anchor="middle"
-               font-size="12"
-             >${esc(c.label)}</text>`
-          : ""
-      }
-    `;
-  }).join("");
+    const x=sx(el?.x);
+    const y=sy(el?.y);
 
-  const elementSvg=elements.map(el=>{
-    const x=el.x*6;
-    const y=el.y*3.2;
+    const x2=el?.x2==null ? null : sx(el.x2);
+    const y2=el?.y2==null ? null : sy(el.y2);
 
-    return `
-      <g>
-        <circle
-          cx="${x}"
-          cy="${y}"
-          r="16"
-          fill="white"
-          stroke="currentColor"
-          stroke-width="2"
-        />
+    const width=el?.width==null
+      ? null
+      : clamp(el.width)*6;
+
+    const height=el?.height==null
+      ? null
+      : clamp(el.height)*3.2;
+
+    const radius=el?.radius==null
+      ? null
+      : clamp(el.radius)*3.2;
+
+    const points=pointString(el?.points);
+
+    const text=label
+      ? `
         <text
           x="${x}"
-          y="${y+4}"
+          y="${y-7}"
           text-anchor="middle"
-          font-size="11"
+          font-size="13"
           font-weight="600"
-        >${esc(el.label)}</text>
-      </g>
-    `;
-  }).join("");
+        >${esc(label)}</text>
+      `
+      : "";
+
+    switch(shape){
+
+      case "line":
+        if(x2==null || y2==null) return "";
+        return `
+          <g>
+            <line
+              x1="${x}" y1="${y}"
+              x2="${x2}" y2="${y2}"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "rect":
+        if(width==null || height==null) return "";
+        return `
+          <g>
+            <rect
+              x="${x}"
+              y="${y}"
+              width="${width}"
+              height="${height}"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "circle":
+        if(radius==null) return "";
+        return `
+          <g>
+            <circle
+              cx="${x}"
+              cy="${y}"
+              r="${radius}"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "ellipse":
+        if(width==null || height==null) return "";
+        return `
+          <g>
+            <ellipse
+              cx="${x}"
+              cy="${y}"
+              rx="${width/2}"
+              ry="${height/2}"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "polygon":
+        if(!points) return "";
+        return `
+          <g>
+            <polygon
+              points="${points}"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linejoin="round"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "polyline":
+        if(!points) return "";
+        return `
+          <g>
+            <polyline
+              points="${points}"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            ${text}
+          </g>
+        `;
+
+      case "arrow":
+        if(x2==null || y2==null) return "";
+        return `
+          <g>
+            <line
+              x1="${x}" y1="${y}"
+              x2="${x2}" y2="${y2}"
+              stroke="currentColor"
+              stroke-width="2.5"
+              marker-end="url(#arrowhead-${index})"
+            />
+            <defs>
+              <marker
+                id="arrowhead-${index}"
+                markerWidth="10"
+                markerHeight="7"
+                refX="9"
+                refY="3.5"
+                orient="auto"
+              >
+                <polygon
+                  points="0 0, 10 3.5, 0 7"
+                  fill="currentColor"
+                />
+              </marker>
+            </defs>
+            ${text}
+          </g>
+        `;
+
+      case "text":
+        return `
+          <text
+            x="${x}"
+            y="${y}"
+            text-anchor="middle"
+            font-size="14"
+            font-weight="700"
+          >${esc(label)}</text>
+        `;
+
+      default:
+        return "";
+    }
+  };
+
+  const drawing=g.elements
+    .map((el,index)=>drawElement(el,index))
+    .join("");
 
   return `
     <div class="question-graphic">
-      ${g.title?`<div><b>${esc(g.title)}</b></div>`:""}
+      ${g.title
+        ? `<div><b>${esc(g.title)}</b></div>`
+        : ""}
 
       <svg
         viewBox="0 0 600 320"
         role="img"
-        aria-label="${esc(g.description||g.title||"Esquema de la pregunta")}"
+        aria-label="${esc(g.description||g.title||"Dibujo técnico de la pregunta")}"
         style="width:100%;max-width:700px;height:auto;display:block;margin:12px auto;"
       >
-        ${connectionSvg}
-        ${elementSvg}
+        ${drawing}
       </svg>
 
       ${g.description
