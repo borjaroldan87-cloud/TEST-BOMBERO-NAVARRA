@@ -121,6 +121,119 @@ function answeredCount(){
   return ans.filter(x=>Number.isInteger(x)).length;
 }
 
+function renderGraphic(q){
+  const g=q?.graphic;
+
+  if(!g || !Array.isArray(g.elements) || g.elements.length===0){
+    return "";
+  }
+
+  const esc=(value)=>String(value??"")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;");
+
+  const clamp=(value,min,max)=>{
+    const n=Number(value);
+    if(!Number.isFinite(n)) return min;
+    return Math.min(max,Math.max(min,n));
+  };
+
+  const elements=g.elements.map((el,index)=>({
+    ...el,
+    id:String(el.id??`e${index}`),
+    label:String(el.label??""),
+    kind:String(el.kind??""),
+    x:clamp(el.x,5,95),
+    y:clamp(el.y,8,92)
+  }));
+
+  const byId=new Map(elements.map(el=>[el.id,el]));
+
+  const connections=Array.isArray(g.connections)
+    ? g.connections
+        .map(c=>({
+          from:byId.get(String(c.from)),
+          to:byId.get(String(c.to)),
+          label:String(c.label??"")
+        }))
+        .filter(c=>c.from && c.to)
+    : [];
+
+  const connectionSvg=connections.map(c=>{
+    const x1=c.from.x*6;
+    const y1=c.from.y*3.2;
+    const x2=c.to.x*6;
+    const y2=c.to.y*3.2;
+    const mx=(x1+x2)/2;
+    const my=(y1+y2)/2;
+
+    return `
+      <line
+        x1="${x1}" y1="${y1}"
+        x2="${x2}" y2="${y2}"
+        stroke="currentColor"
+        stroke-width="2"
+      />
+      ${
+        c.label
+          ? `<text
+               x="${mx}"
+               y="${my-5}"
+               text-anchor="middle"
+               font-size="12"
+             >${esc(c.label)}</text>`
+          : ""
+      }
+    `;
+  }).join("");
+
+  const elementSvg=elements.map(el=>{
+    const x=el.x*6;
+    const y=el.y*3.2;
+
+    return `
+      <g>
+        <circle
+          cx="${x}"
+          cy="${y}"
+          r="16"
+          fill="white"
+          stroke="currentColor"
+          stroke-width="2"
+        />
+        <text
+          x="${x}"
+          y="${y+4}"
+          text-anchor="middle"
+          font-size="11"
+          font-weight="600"
+        >${esc(el.label)}</text>
+      </g>
+    `;
+  }).join("");
+
+  return `
+    <div class="question-graphic">
+      ${g.title?`<div><b>${esc(g.title)}</b></div>`:""}
+
+      <svg
+        viewBox="0 0 600 320"
+        role="img"
+        aria-label="${esc(g.description||g.title||"Esquema de la pregunta")}"
+        style="width:100%;max-width:700px;height:auto;display:block;margin:12px auto;"
+      >
+        ${connectionSvg}
+        ${elementSvg}
+      </svg>
+
+      ${g.description
+        ? `<div class="muted">${esc(g.description)}</div>`
+        : ""}
+    </div>
+  `;
+}
 function show(){
   const answered=answeredCount();
   const blank=qs.length-answered;
@@ -161,7 +274,7 @@ function show(){
           <div class="question-stem">
             ${k+1}. ${q.stem}
           </div>
-
+${renderGraphic(q)}
           <div>
             ${q.options.map((option,j)=>`
               <button
