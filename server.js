@@ -3657,7 +3657,7 @@ PREGUNTAS A VALIDAR:
   });
 
   const validation=JSON.parse(response.text);
-
+console.log("VALIDATOR RAW RESPONSE:", response.text);
  console.log(
   "VALIDACIÓN: preguntas=",
   questions.length,
