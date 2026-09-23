@@ -3652,7 +3652,7 @@ runtimeValidationSchema.properties.results.maxItems = questions.length;
     contents:validationPrompt,
     config:{
       responseMimeType:"application/json",
-      responseJsonSchema:runtimevalidationSchema
+      responseJsonSchema:runtimeValidationSchema
     }
   });
 
