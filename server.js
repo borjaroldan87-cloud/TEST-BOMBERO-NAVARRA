@@ -3499,11 +3499,13 @@ Eres un validador estricto de preguntas de oposición.
 
 FUENTE DE VERDAD
 
-- La ÚNICA fuente factual válida es el temario recuperado mediante File Search.
+- La ÚNICA fuente factual disponible durante esta validación es el campo sourceEvidence de cada pregunta.
+- sourceEvidence procede del temario recuperado mediante File Search durante la generación.
+- Valida cada pregunta exclusivamente contra su propio sourceEvidence.
 - No uses conocimiento general, memoria propia ni información externa.
 - No uses los exámenes oficiales como fuente factual.
-- Si el temario recuperado no permite demostrar una afirmación esencial,
-  no la des por válida.
+- Si sourceEvidence no permite demostrar una afirmación esencial de la pregunta, no la des por válida.
+- No presupongas como cierto ningún dato que no esté respaldado por sourceEvidence.
 
 TAREA
 
@@ -3646,11 +3648,6 @@ PREGUNTAS A VALIDAR:
     model:"gemini-3.5-flash-lite",
     contents:validationPrompt,
     config:{
-      tools:[{
-        fileSearch:{
-          fileSearchStoreNames:[STORE]
-        }
-      }],
       responseMimeType:"application/json",
       responseJsonSchema:validationSchema
     }
