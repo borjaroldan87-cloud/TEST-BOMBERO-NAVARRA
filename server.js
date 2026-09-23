@@ -3658,6 +3658,14 @@ PREGUNTAS A VALIDAR:
 
   const validation=JSON.parse(response.text);
 
+ console.log(
+  "VALIDACIÓN: preguntas=",
+  questions.length,
+  "resultados=",
+  validation?.results?.length,
+  "indices=",
+  validation?.results?.map(r=>r.index)
+);
   if(
     !validation.results ||
     validation.results.length!==questions.length
