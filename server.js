@@ -993,37 +993,85 @@ const questionSchema={
           "GRAFICA"
         ]
       },
-      graphic:{
-        type:["object","null"],
+graphic:{
+  type:["object","null"],
+  properties:{
+    type:{
+      type:"string",
+      enum:[
+        "technical",
+        "geometry",
+        "mechanism",
+        "configuration",
+        "circuit",
+        "forces"
+      ]
+    },
+    title:{type:"string"},
+    elements:{
+      type:"array",
+      items:{
+        type:"object",
         properties:{
-          type:{
+          id:{type:"string"},
+          shape:{
             type:"string",
-            enum:["diagram","geometry","sequence","components","spatial","forces"]
+            enum:[
+              "line",
+              "rect",
+              "circle",
+              "ellipse",
+              "polygon",
+              "polyline",
+              "arrow",
+              "text"
+            ]
           },
-          title:{type:"string"},
-          elements:{
+          label:{type:"string"},
+          x:{type:"number"},
+          y:{type:"number"},
+          x2:{type:["number","null"]},
+          y2:{type:["number","null"]},
+          width:{type:["number","null"]},
+          height:{type:["number","null"]},
+          radius:{type:["number","null"]},
+          points:{
             type:"array",
-            items:{type:"object",properties:{
-              id:{type:"string"},
-              label:{type:"string"},
-              kind:{type:"string"},
-              x:{type:"number"},
-              y:{type:"number"}
-            },required:["id","label","kind","x","y"]}
-          },
-          connections:{
-            type:"array",
-            items:{type:"object",properties:{
-              from:{type:"string"},
-              to:{type:"string"},
-              label:{type:"string"}
-            },required:["from","to","label"]}
-          },
-          description:{type:"string"}
+            items:{
+              type:"object",
+              properties:{
+                x:{type:"number"},
+                y:{type:"number"}
+              },
+              required:["x","y"]
+            }
+          }
         },
-        required:["type","title","elements","connections","description"]
+        required:[
+          "id",
+          "shape",
+          "label",
+          "x",
+          "y",
+          "x2",
+          "y2",
+          "width",
+          "height",
+          "radius",
+          "points"
+        ]
       }
-    },required:[
+    },
+    description:{type:"string"}
+  },
+  required:[
+    "type",
+    "title",
+    "elements",
+    "description"
+  ]
+}
+   },required:[
       "stem",
       "options",
       "correctIndex",
@@ -2086,73 +2134,265 @@ cuota. Aplica las reglas de sustitución/fallback definidas para las familias
 del test.
 E. INTERPRETACIÓN GRÁFICA
 
-Cuando la familia asignada sea GRAFICA, la información gráfica debe ser
-NECESARIA para resolver correctamente la pregunta.
+Cuando la familia asignada sea GRAFICA, debe existir una REPRESENTACIÓN
+TÉCNICA VISUAL REAL que sea necesaria para resolver la pregunta.
 
-NO generes un gráfico meramente decorativo ni un dibujo que pueda eliminarse
-sin afectar a la resolución de la pregunta.
+Una pregunta NO pertenece a la familia GRAFICA simplemente porque un contenido
+textual pueda convertirse en cajas, círculos, nodos, flechas o conexiones.
 
-La pregunta debe exigir interpretar visualmente, cuando la fuente lo permita:
+CRITERIO FUNDAMENTAL:
 
-- posición o ubicación relativa de elementos;
-- relaciones espaciales;
-- componentes y su identificación;
-- conexiones entre elementos;
-- secuencias representadas gráficamente;
-- geometría relevante;
-- direcciones o sentidos;
-- fuerzas o relaciones entre ellas;
-- cualquier otra relación visual respaldada expresamente por el temario.
+El dibujo debe representar una configuración, forma, disposición, geometría,
+recorrido, conexión, mecanismo o situación física/técnica que razonablemente
+podría aparecer representada mediante un esquema o dibujo en un examen técnico.
+
+La pregunta debe exigir conocimiento del temario para interpretar correctamente
+esa representación.
+
+Una persona que desconozca el contenido NO debe poder deducir fácilmente la
+respuesta simplemente leyendo etiquetas, siguiendo flechas o interpretando
+relaciones textuales evidentes.
+
+SON USOS VÁLIDOS, CUANDO ESTÉN RESPALDADOS POR LA FUENTE:
+
+- geometrías, formas y cortes técnicos;
+- identificación de partes de un corte o configuración;
+- comparación entre distintas configuraciones visuales;
+- posición relativa de elementos;
+- disposición espacial de equipos;
+- recorrido físico de cuerdas, cables, conductos o flujos;
+- sistemas de poleas y polipastos;
+- conexiones eléctricas o hidráulicas;
+- configuraciones serie/paralelo cuando estén respaldadas por el temario;
+- esquemas de fuerzas;
+- palancas, pistones u otros sistemas físicos;
+- problemas de cálculo cuya geometría o disposición sea necesaria;
+- ubicación relativa de equipos o elementos operativos;
+- identificación de componentes mediante su posición o geometría;
+- secuencias físicas representables visualmente;
+- cualquier otra configuración técnica cuya representación gráfica aporte
+  información imprescindible para resolver la pregunta.
+
+EJEMPLOS DEL TIPO DE RAZONAMIENTO VISUAL BUSCADO:
+
+Estos ejemplos describen FORMATOS posibles y NO aportan contenido factual.
+Solo pueden utilizarse cuando el temario recuperado respalde realmente
+los elementos y relaciones necesarios.
+
+- representar gráficamente distintos tipos de cortes de tala y exigir
+  identificar cuál corresponde al tipo preguntado;
+- mostrar un corte sobre un tronco e identificar una parte, posición,
+  orientación o geometría respaldada por el manual;
+- representar un sistema de poleas o polipasto y exigir identificar su
+  configuración o característica;
+- representar varias disposiciones de equipos y preguntar cuál corresponde
+  a la configuración descrita por el temario;
+- representar un sistema físico necesario para resolver un problema de
+  hidráulica, fuerzas u otra materia técnica;
+- representar conexiones o disposiciones técnicas y exigir reconocer la
+  configuración correcta.
+
+PROHIBICIONES ABSOLUTAS:
+
+NO generes como GRAFICA:
+
+- mapas conceptuales;
+- mapas mentales;
+- organigramas creados a partir de conceptos;
+- palabras o frases dentro de círculos o cajas unidas mediante líneas;
+- diagramas que simplemente conviertan una enumeración textual en nodos;
+- relaciones artificiales entre conceptos independientes;
+- esquemas cuya información esencial esté escrita literalmente en las etiquetas;
+- dibujos decorativos;
+- gráficos que puedan eliminarse sin cambiar la forma de resolver la pregunta;
+- jeroglíficos o representaciones abstractas creadas únicamente para cumplir
+  la cuota de GRAFICA;
+- representaciones cuya geometría, posición, conexión o relación técnica
+  necesite inventarse porque no está respaldada por la fuente.
+
+TEST DE NECESIDAD VISUAL:
+
+Antes de aceptar una pregunta GRAFICA realiza mentalmente esta comprobación:
+
+"Si elimino completamente graphic y dejo únicamente stem + options,
+¿puede resolverse esencialmente igual?"
+
+Si la respuesta es SÍ:
+NO es una pregunta GRAFICA válida.
+
+Aplica el fallback correspondiente.
+
+TEST DE REALIDAD TÉCNICA:
+
+Antes de generar graphic comprueba también:
+
+1. ¿Existe en la fuente una forma, disposición, conexión, geometría,
+   recorrido, mecanismo o relación espacial/física inequívoca que pueda
+   representarse?
+2. ¿El dibujo representa esa realidad técnica y no una relación conceptual
+   inventada?
+3. ¿La interpretación visual exige conocimiento del temario?
+4. ¿El gráfico aporta información necesaria para discriminar la respuesta?
+5. ¿Podría razonablemente utilizarse un dibujo de este tipo en una prueba
+   técnica de oposición?
+
+Si cualquiera de estas condiciones falla:
+NO generes GRAFICA y aplica el fallback.
+
+NO es obligatorio que la fuente contenga una imagen original.
+
+Puede construirse un dibujo técnico a partir de una descripción textual
+cuando la fuente determine de forma inequívoca la geometría, posición,
+conexión, recorrido o relación física representada.
+
+Está PROHIBIDO completar esa representación mediante conocimiento externo.
 
 ESTRUCTURA DEL CAMPO graphic:
 
 Para esta familia, graphic NO puede ser null.
 
 graphic.type debe utilizar exclusivamente uno de estos valores:
-"diagram", "geometry", "sequence", "components", "spatial" o "forces".
 
-graphic.title debe contener un título breve y neutral que NO revele la respuesta.
+- "technical"
+- "geometry"
+- "mechanism"
+- "configuration"
+- "circuit"
+- "forces"
 
-graphic.elements debe contener únicamente los elementos necesarios para
-representar el problema.
+Selecciona el tipo que mejor describa la representación técnica.
 
-Cada elemento debe incluir:
-- id: identificador único;
-- label: texto visible asociado al elemento;
-- kind: tipo funcional del elemento;
-- x: posición horizontal;
-- y: posición vertical.
+graphic.title debe contener un título breve y neutral que NO revele
+la respuesta.
 
-Utiliza x e y como coordenadas normalizadas entre 0 y 100 para permitir
-posteriormente un renderizado consistente.
+graphic.elements debe contener las PRIMITIVAS GRÁFICAS necesarias para
+construir el dibujo técnico.
 
-graphic.connections debe describir únicamente conexiones necesarias entre
-elementos mediante:
-- from;
-- to;
-- label.
+Cada elemento debe incluir SIEMPRE todos estos campos:
 
-Si no existen conexiones necesarias, devuelve un array vacío [].
+- id
+- shape
+- label
+- x
+- y
+- x2
+- y2
+- width
+- height
+- radius
+- points
 
-graphic.description debe describir de forma objetiva qué representa el gráfico
-para permitir su validación, pero NO debe revelar cuál es la respuesta correcta.
+shape debe utilizar exclusivamente uno de estos valores:
+
+- "line"
+- "rect"
+- "circle"
+- "ellipse"
+- "polygon"
+- "polyline"
+- "arrow"
+- "text"
+
+SIGNIFICADO DE LAS PRIMITIVAS:
+
+"line":
+línea recta técnica. Utiliza x, y como inicio y x2, y2 como final.
+
+"rect":
+elemento rectangular. Utiliza x, y como posición y width, height como
+dimensiones.
+
+"circle":
+elemento circular, por ejemplo una polea o una sección circular cuando
+proceda. Utiliza x, y como centro y radius como radio.
+
+"ellipse":
+elemento elíptico. Utiliza x, y como centro y width, height como dimensiones.
+
+"polygon":
+forma cerrada definida mediante points. Utilízala para cuñas, cortes,
+perfiles u otras geometrías poligonales.
+
+"polyline":
+recorrido abierto definido mediante points. Utilízala cuando proceda para
+cuerdas, cables, recorridos, conductos u otros trazados físicos.
+
+"arrow":
+flecha técnica para representar únicamente una dirección, sentido,
+movimiento o fuerza respaldados por la fuente.
+Utiliza x, y como origen y x2, y2 como destino.
+
+"text":
+texto breve necesario dentro del dibujo, especialmente identificadores
+como A, B, C, D, 1, 2, 3, etc.
+Utiliza x, y como posición.
+
+COORDENADAS:
+
+Todas las coordenadas y dimensiones deben expresarse en una escala
+normalizada de 0 a 100.
+
+Cuando un campo geométrico no sea aplicable a una determinada shape,
+devuelve null.
+
+Para points:
+- utiliza [] cuando la shape no necesite puntos;
+- cada punto debe contener x e y;
+- todas sus coordenadas deben estar entre 0 y 100.
+
+label:
+
+- debe ser una cadena;
+- utiliza "" cuando el elemento no necesite texto visible;
+- evita etiquetas explicativas largas;
+- NO escribas en label la respuesta ni la propiedad que el opositor
+  debe identificar.
+
+REGLAS DE CONSTRUCCIÓN:
+
+- combina varias primitivas para construir un único dibujo técnico;
+- NO representes cada concepto como un elemento independiente;
+- NO utilices círculos o rectángulos como simples contenedores de texto;
+- NO construyas mapas conceptuales;
+- NO conviertas relaciones textuales en conexiones visuales artificiales;
+- representa objetos, geometrías, posiciones, recorridos y configuraciones
+  físicas mediante sus formas;
+- utiliza "text" únicamente para referencias mínimas necesarias;
+- una polea, por ejemplo, debe representarse mediante geometría circular y
+  el recorrido físico de la cuerda, no mediante un círculo que contenga
+  la palabra "polea";
+- un corte debe representarse mediante líneas/polígonos que reproduzcan
+  su geometría, no mediante una caja que contenga el nombre del corte;
+- una conexión técnica debe representarse mediante líneas, recorridos o
+  elementos físicos, no mediante nodos conceptuales unidos por flechas;
+- pueden combinarse tantas primitivas como sean necesarias para que el
+  dibujo resulte claro, pero evita elementos decorativos.
+
+graphic ya NO utiliza el campo connections.
+Toda relación visual debe quedar representada mediante las propias
+primitivas de graphic.elements.
+
+graphic.description debe describir objetivamente qué representa el dibujo
+para permitir su validación, pero NO debe revelar la respuesta correcta.
 
 COHERENCIA OBLIGATORIA:
 
-- todo elemento mencionado en stem u options debe existir de forma inequívoca
-  en graphic cuando sea necesario visualizarlo;
-- toda conexión utilizada para resolver la pregunta debe estar representada;
-- el gráfico, el enunciado, las cuatro opciones y la respuesta correcta deben
-  ser mutuamente coherentes;
+- graphic debe contener toda la información visual necesaria;
+- stem debe obligar realmente a interpretar graphic;
+- las opciones deben evaluar el conocimiento técnico representado;
 - debe existir UNA única respuesta correcta;
-- la solución debe depender realmente de interpretar graphic;
-- toda información técnica representada debe estar respaldada por la fuente;
-- NO añadas elementos, relaciones, medidas, fuerzas, posiciones o datos
-  técnicos inventados para construir artificialmente una pregunta gráfica.
+- la solución debe depender de la representación visual;
+- toda geometría, posición, conexión, recorrido, medida, fuerza o relación
+  técnica debe estar respaldada por la fuente;
+- NO inventes elementos para hacer posible el dibujo.
 
-Si la fuente recuperada no contiene información suficiente para construir una
-pregunta gráfica factual, inequívoca y útil, NO fuerces esta familia.
-Aplica las reglas de sustitución/fallback del test.
+Si la fuente no permite construir una representación técnica real,
+factual, inequívoca y examinable:
+NO generes una GRAFICA.
+
+Aplica inmediatamente las reglas de sustitución/fallback del test.
+
+
 
 REGLAS DE SUSTITUCIÓN / FALLBACK DE FAMILIAS:
 
@@ -3413,7 +3653,7 @@ function buildQuestionFamilyPlan(count){
     "2026_RAZONAMIENTO",
     "2024_NUMERICA",
     "2024_NUMERICA",
-    "2024_LITERAL",
+    "2024_TEXTO",
     "CALCULO_FORMULACION",
     "GRAFICA"
   ];
@@ -3423,7 +3663,7 @@ function buildQuestionFamilyPlan(count){
       "2026_CORRECTA",
       "2026_INCORRECTA",
       "2026_RAZONAMIENTO",
-      "2024_LITERAL",
+      "2024_TEXTO",
       "CALCULO_FORMULACION"
     ],
     10: baseBlock,
@@ -3588,21 +3828,155 @@ CALCULO_FORMULACION:
 
 GRAFICA:
 - graphic debe existir y NO ser null;
-- el gráfico debe ser necesario para resolver correctamente la pregunta;
-- eliminar el gráfico debe impedir o alterar sustancialmente la resolución;
+- la representación debe ser una estructura TÉCNICA VISUAL REAL:
+  geometría, forma, corte, disposición espacial, configuración física,
+  recorrido, conexión técnica, mecanismo, sistema, fuerzas o situación
+  física representable;
+- NO consideres válida una representación por el mero hecho de contener
+  elementos unidos mediante líneas o flechas;
+- RECHAZA mapas conceptuales, mapas mentales, organigramas, palabras o
+  frases dentro de círculos/cajas conectados mediante líneas y cualquier
+  conversión artificial de contenido textual en nodos;
+- RECHAZA diagramas que representen relaciones conceptuales entre términos
+  en lugar de relaciones físicas, espaciales, geométricas o técnicas;
+- RECHAZA gráficos decorativos o cuya información esencial ya esté
+  explícitamente escrita en stem, options o labels;
+- las etiquetas deben ser mínimas y NO deben proporcionar directamente
+  el conocimiento que debería deducir el opositor;
+- el gráfico debe ser NECESARIO para resolver correctamente la pregunta;
+- aplica obligatoriamente este test:
+  "Si elimino completamente graphic y dejo stem + options,
+   ¿la pregunta puede resolverse esencialmente igual?"
+  Si la respuesta es sí, graphicValid=false;
+- la representación debe exigir interpretar visualmente una forma,
+  posición, geometría, conexión, recorrido, disposición, mecanismo,
+  fuerza u otra característica técnica;
+- la interpretación debe requerir conocimiento del temario y no poder
+  resolverse simplemente leyendo las etiquetas o siguiendo relaciones
+  textuales evidentes;
+- debe existir evidencia suficiente en sourceEvidence para respaldar la
+  geometría, posición, conexión, recorrido, disposición o relación técnica
+  utilizada para determinar la respuesta;
+- puede aceptarse un dibujo construido a partir de una descripción textual
+  aunque la fuente no contenga una imagen original, PERO únicamente cuando
+  sourceEvidence determine inequívocamente la estructura técnica representada;
+- RECHAZA cualquier geometría, posición, conexión, recorrido, medida,
+  orientación, fuerza o relación técnica introducida mediante conocimiento
+  externo o inventada para hacer posible el gráfico;
 - stem, options, correctIndex y graphic deben ser mutuamente coherentes;
-- los elementos y conexiones relevantes deben existir en graphic;
-- toda información técnica representada debe estar respaldada por el temario;
-- graphic.description no debe revelar la respuesta;
-- debe existir una única respuesta válida.
+- todo elemento mencionado mediante identificadores como A, B, C, D,
+  1, 2, 3, etc. debe aparecer inequívocamente identificado de la misma
+  forma en graphic;
+- si una opción menciona "elemento A", "posición B", "figura 2" o equivalente
+  y esa referencia no puede localizarse inequívocamente en graphic,
+  graphicValid=false;
+- los elementos físicos o técnicos necesarios para resolver la pregunta
+  deben existir en graphic;
+- las conexiones necesarias deben corresponder a relaciones físicas o
+  técnicas reales y NO a asociaciones conceptuales inventadas;
+- graphic.description debe describir objetivamente la representación y
+  NO revelar la respuesta;
+- debe existir UNA única respuesta válida;
+- si el dibujo resulta abstracto, arbitrario o no representa una
+  configuración técnica examinable, graphicValid=false;
+- si el contenido podría convertirse razonablemente en una pregunta textual
+  pero NO en un dibujo técnico real, graphicValid=false;
+- cuando cualquiera de estas condiciones falle, familyValid=false,
+  graphicValid=false y valid=false.
 
 REGLAS DEL CAMPO graphic
 
 - Para cualquier familia distinta de GRAFICA, graphic debe ser null.
-- Para GRAFICA, graphicValid debe ser true únicamente si el gráfico es
-  factual, coherente, suficiente y necesario para resolver la pregunta.
 - Para preguntas no gráficas devuelve graphicValid=null.
 - graphicIssues debe ser [] cuando no existan problemas gráficos.
+
+Para GRAFICA, graphic debe cumplir además TODAS estas condiciones estructurales:
+
+1. graphic debe ser un objeto y graphic.elements debe contener al menos un elemento.
+
+2. graphic.type debe ser exclusivamente uno de:
+   "technical",
+   "geometry",
+   "mechanism",
+   "configuration",
+   "circuit",
+   "forces".
+
+3. Cada elemento de graphic.elements debe utilizar exclusivamente una de estas shape:
+   "line",
+   "rect",
+   "circle",
+   "ellipse",
+   "polygon",
+   "polyline",
+   "arrow",
+   "text".
+
+4. Todas las coordenadas utilizadas deben estar comprendidas entre 0 y 100.
+
+5. Para shape="line":
+   x2 e y2 deben existir y definir el extremo final.
+
+6. Para shape="arrow":
+   x2 e y2 deben existir y definir el destino.
+   La dirección representada debe estar respaldada por sourceEvidence.
+
+7. Para shape="rect":
+   width y height deben existir y ser mayores que 0.
+
+8. Para shape="circle":
+   radius debe existir y ser mayor que 0.
+
+9. Para shape="ellipse":
+   width y height deben existir y ser mayores que 0.
+
+10. Para shape="polygon":
+    points debe contener al menos TRES puntos válidos.
+
+11. Para shape="polyline":
+    points debe contener al menos DOS puntos válidos.
+
+12. Para shape="text":
+    label debe contener texto visible y necesario.
+    Debe utilizarse únicamente para identificadores o referencias mínimas
+    y NO debe revelar la respuesta.
+
+13. Los campos geométricos no utilizados por una determinada shape pueden
+    ser null y points puede ser [] cuando no sea necesario.
+
+14. Las primitivas deben representar objetos, formas, recorridos, posiciones,
+    conexiones o configuraciones técnicas reales.
+    NO deben utilizarse como simples contenedores de conceptos escritos.
+
+15. graphic ya NO utiliza el campo connections.
+    Las relaciones visuales deben construirse mediante las propias primitivas
+    de graphic.elements.
+
+16. Si stem u options hacen referencia a A, B, C, D, 1, 2, 3 u otro
+    identificador visual, dicho identificador debe aparecer inequívocamente
+    en el gráfico.
+
+17. graphic.description debe ser neutral y NO revelar la solución.
+
+18. El conjunto de primitivas debe ser suficiente para que el dibujo resulte
+    interpretable sin imaginar elementos técnicos ausentes.
+
+19. Aunque la estructura sea formalmente válida, graphicValid=false si el
+    resultado sigue siendo un mapa conceptual, una representación abstracta,
+    un gráfico decorativo o un dibujo innecesario.
+
+20. graphicValid solo puede ser true cuando el gráfico sea simultáneamente:
+    - estructuralmente válido;
+    - factual;
+    - técnicamente coherente;
+    - visualmente interpretable;
+    - necesario para resolver la pregunta.
+
+Si incumple cualquiera de las condiciones aplicables:
+- graphicValid=false;
+- familyValid=false;
+- valid=false;
+- describe el motivo concreto en graphicIssues y familyIssues.
 
 RESULTADO
 
@@ -3935,10 +4309,12 @@ while(
         regenerated.questions[i];
     }else{
       stillInvalid.push({
-        index: originalIndex,
-        valid: false,
-        issues: validationResult.issues
-      });
+  index: originalIndex,
+  valid: false,
+  issues: validationResult.issues || [],
+  familyIssues: validationResult.familyIssues || [],
+  graphicIssues: validationResult.graphicIssues || []
+});
     }
   }
 
