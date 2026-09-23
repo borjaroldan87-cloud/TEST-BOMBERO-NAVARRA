@@ -3643,13 +3643,16 @@ PREGUNTAS A VALIDAR:
 \${JSON.stringify(questions)}
 `;
 
+const runtimeValidationSchema = structuredClone(validationSchema);
 
+runtimeValidationSchema.properties.results.minItems = questions.length;
+runtimeValidationSchema.properties.results.maxItems = questions.length;
   const response=await ai.models.generateContent({
     model:"gemini-3.5-flash-lite",
     contents:validationPrompt,
     config:{
       responseMimeType:"application/json",
-      responseJsonSchema:validationSchema
+      responseJsonSchema:runtimevalidationSchema
     }
   });
 
