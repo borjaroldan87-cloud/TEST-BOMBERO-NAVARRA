@@ -970,19 +970,73 @@ app.post("/api/upload", upload.single("pdf"), async(req,res)=>{
 });
 
 const questionSchema={
- type:"object",
- properties:{
-  questions:{type:"array",items:{type:"object",properties:{
-   stem:{type:"string"},
-   options:{type:"array",items:{type:"string"},minItems:4,maxItems:4},
-   correctIndex:{type:"integer",minimum:0,maximum:3},
-   explanation:{type:"string"},
- sourceEvidence:{type:"string"},
-sourcePage:{type:["integer","null"]},
-manualPage:{type:["integer","string","null"]},
-difficulty:{type:"string",enum:["media","alta"]}
-},required:["stem","options","correctIndex","explanation","sourceEvidence","sourcePage","manualPage","difficulty"] }}
- },required:["questions"]
+  type:"object",
+  properties:{
+    questions:{type:"array",items:{type:"object",properties:{
+      stem:{type:"string"},
+      options:{type:"array",items:{type:"string"},minItems:4,maxItems:4},
+      correctIndex:{type:"integer",minimum:0,maximum:3},
+      explanation:{type:"string"},
+      sourceEvidence:{type:"string"},
+      sourcePage:{type:["integer","null"]},
+      manualPage:{type:["integer","string","null"]},
+      difficulty:{type:"string",enum:["media","alta"]},
+      questionFamily:{
+        type:"string",
+        enum:[
+          "2026_CORRECTA",
+          "2026_INCORRECTA",
+          "2026_RAZONAMIENTO",
+          "2024_NUMERICA",
+          "2024_TEXTO",
+          "CALCULO_FORMULACION",
+          "GRAFICA"
+        ]
+      },
+      graphic:{
+        type:["object","null"],
+        properties:{
+          type:{
+            type:"string",
+            enum:["diagram","geometry","sequence","components","spatial","forces"]
+          },
+          title:{type:"string"},
+          elements:{
+            type:"array",
+            items:{type:"object",properties:{
+              id:{type:"string"},
+              label:{type:"string"},
+              kind:{type:"string"},
+              x:{type:"number"},
+              y:{type:"number"}
+            },required:["id","label","kind","x","y"]}
+          },
+          connections:{
+            type:"array",
+            items:{type:"object",properties:{
+              from:{type:"string"},
+              to:{type:"string"},
+              label:{type:"string"}
+            },required:["from","to","label"]}
+          },
+          description:{type:"string"}
+        },
+        required:["type","title","elements","connections","description"]
+      }
+    },required:[
+      "stem",
+      "options",
+      "correctIndex",
+      "explanation",
+      "sourceEvidence",
+      "sourcePage",
+      "manualPage",
+      "difficulty",
+      "questionFamily",
+      "graphic"
+    ]}}
+  },
+  required:["questions"]
 };
 const validationSchema={
   type:"object",
@@ -997,9 +1051,27 @@ const validationSchema={
           issues:{
             type:"array",
             items:{type:"string"}
+          },
+          familyValid:{type:"boolean"},
+          familyIssues:{
+            type:"array",
+            items:{type:"string"}
+          },
+          graphicValid:{type:["boolean","null"]},
+          graphicIssues:{
+            type:"array",
+            items:{type:"string"}
           }
         },
-        required:["index","valid","issues"]
+        required:[
+          "index",
+          "valid",
+          "issues",
+          "familyValid",
+          "familyIssues",
+          "graphicValid",
+          "graphicIssues"
+        ]
       }
     }
   },
@@ -1704,71 +1776,429 @@ más fiel la variedad observada en los exámenes oficiales de 2024 y 2026.
 
 FAMILIAS PRIORITARIAS:
 
-A. LITERAL / PRECISIÓN — ESTILO 2024
-Evalúa directamente información expresa del manual:
-- definiciones;
-- cifras;
-- unidades;
-- límites;
-- clasificaciones;
-- enumeraciones;
-- procedimientos;
-- condiciones;
-- excepciones;
-- detalles literales susceptibles de confusión.
+IDENTIFICACIÓN OBLIGATORIA DE FAMILIA:
 
-REGLA OBLIGATORIA:
-Cuando el objetivo de cobertura disponga de manualPage y la pregunta sea de
-esta familia, el enunciado DEBE comenzar con esta estructura:
+Cada pregunta generada debe incluir el campo questionFamily.
+
+questionFamily debe contener EXACTAMENTE uno de estos valores:
+
+- "2026_CORRECTA"
+- "2026_INCORRECTA"
+- "2026_RAZONAMIENTO"
+- "2024_NUMERICA"
+- "2024_TEXTO"
+- "CALCULO_FORMULACION"
+- "GRAFICA"
+
+El valor de questionFamily debe corresponder a la familia que realmente
+cumple la pregunta, no únicamente a la familia que se intentó generar.
+
+Para cualquier pregunta que NO pertenezca a la familia GRAFICA:
+graphic debe ser null.
+
+Para una pregunta de familia GRAFICA:
+questionFamily debe ser "GRAFICA" y graphic debe contener una estructura
+gráfica válida conforme al schema de salida.
+
+No utilices ningún otro valor para questionFamily.
+
+A. LITERAL / PRECISIÓN — ESTILO 2024
+
+Las preguntas de esta familia reproducen el estilo literal y de precisión
+característico del examen oficial de 2024.
+
+En un bloque completo de 10 preguntas deben generarse TRES preguntas de esta
+familia:
+
+- DOS preguntas 2024_NUMERICA, siempre que la fuente contenga datos numéricos
+  adecuados y suficientes.
+- UNA pregunta 2024_TEXTO.
+
+Las TRES son preguntas de estilo LITERAL 2024.
+La diferencia entre NUMÉRICA y TEXTO se refiere únicamente al contenido
+evaluado, NO al formato del enunciado.
+
+FORMATO DEL ENUNCIADO:
+
+Cuando el coverage item utilizado tenga manualPage disponible, utiliza la
+estructura:
 
 "Conforme al manual elaborado por el CEIS Guadalajara, [título o materia
 identificable del manual], página X, ..."
 
-X debe ser EXCLUSIVAMENTE manualPage.
+X debe proceder EXCLUSIVAMENTE de manualPage.
 
-Está PROHIBIDO:
-- omitir "CEIS Guadalajara";
-- omitir "página X";
-- utilizar sourcePage para esta referencia;
-- sustituir esta estructura por fórmulas genéricas como "según el manual",
-  "conforme al manual técnico", "conforme al manual de referencia" o equivalentes;
-- inventar el título de un manual si no puede identificarse con seguridad.
+NUNCA utilices sourcePage como número visible en el enunciado.
+NUNCA calcules manualPage mediante offsets.
+NUNCA inventes una página.
+NUNCA inventes el título o materia del manual.
 
-Si el título concreto no puede identificarse, utiliza una descripción breve
-y factual de la materia respaldada por el objetivo de cobertura, manteniendo
-OBLIGATORIAMENTE "CEIS Guadalajara" y "página X".
+Si manualPage es null o no existe una referencia segura para construir esa
+cita, formula una pregunta literal/precisa sin inventar la referencia de
+página.
 
-B. CORRECTA / INCORRECTA
-Genera preguntas en las que las cuatro alternativas sean afirmaciones
-técnicamente desarrolladas y próximas entre sí.
+A1. 2024_NUMERICA
 
-Utiliza tanto:
-- "Señale la opción CORRECTA";
-como
-- "Señale la opción INCORRECTA".
+Debe evaluar literalmente un dato numérico presente en la fuente.
 
-En un test con 5 o más preguntas, intenta incluir al menos UNA pregunta
-INCORRECTA siempre que la fuente permita construir cuatro afirmaciones
-inequívocas.
+Prioriza, cuando existan:
+- porcentajes;
+- distancias;
+- tiempos;
+- ángulos;
+- diámetros;
+- longitudes;
+- capacidades;
+- límites;
+- intervalos o rangos;
+- cantidades;
+- valores máximos o mínimos;
+- unidades;
+- cualquier otro dato numérico explícito y relevante del temario.
 
-La alternativa que resuelve una pregunta INCORRECTA debe ser la única
-afirmación falsa.
+La respuesta correcta debe corresponder al dato exacto de la fuente.
+VARIEDAD Y NIVEL DE LAS PREGUNTAS NUMÉRICAS:
 
-C. APLICACIÓN / RAZONAMIENTO — ESTILO 2026
-Evalúa:
-- comprensión;
-- comparación;
-- aplicación;
-- interpretación;
-- relaciones entre variables;
-- situaciones operativas;
-- consecuencias;
-- selección de actuaciones;
-- cálculos cuando la fuente los permita.
+No limites las preguntas numéricas al formato simple "¿cuál es el valor de X?".
 
-D. PROCEDIMIENTO / SECUENCIA / CLASIFICACIÓN / CÁLCULO
-Utiliza estas familias cuando el objetivo de cobertura y la información
-recuperada las permitan.
+Manteniendo siempre el carácter LITERAL 2024 y sin convertir la pregunta en
+un ejercicio de cálculo, utiliza también, cuando la fuente lo permita:
+
+- identificación de valores máximos o mínimos;
+- límites superiores o inferiores;
+- intervalos y rangos;
+- porcentajes;
+- distancias y separaciones;
+- tiempos y duraciones;
+- ángulos;
+- diámetros, longitudes y otras dimensiones;
+- capacidades y cantidades;
+- unidades asociadas correctamente a una magnitud;
+- correspondencia entre un dato numérico y el concepto, condición,
+  procedimiento o situación al que pertenece;
+- selección del dato exacto aplicable entre varios valores próximos
+  presentes o plausibles dentro del mismo contexto técnico.
+
+Cuando existan varios datos numéricos relacionados en la fuente, prioriza
+preguntas que obliguen a distinguir con precisión cuál corresponde al
+concepto o condición preguntados.
+
+No conviertas esta mayor exigencia en razonamiento 2026 ni en
+CÁLCULO/FORMULACIÓN: la respuesta de 2024_NUMERICA debe seguir estando
+literalmente respaldada por el dato del manual.
+
+Prioriza diversidad de datos. No reutilices el mismo dato numérico para
+crear preguntas esencialmente equivalentes mientras existan otros
+coverage_items numéricos adecuados sin trabajar.
+Los distractores deben ser valores numéricos próximos y plausibles,
+preferentemente del mismo orden de magnitud y con la misma unidad, de forma
+que la pregunta exija conocer con precisión el dato del manual.
+
+NO conviertas estas preguntas en ejercicios de cálculo salvo que la familia
+asignada sea específicamente CÁLCULO/FORMULACIÓN.
+
+NO preguntes repetidamente el mismo dato cambiando únicamente la redacción
+mientras existan otros coverage_items numéricos sin trabajar.
+
+Si no existen suficientes datos numéricos respaldados por la fuente, NO
+inventes datos para cumplir esta cuota. La sustitución se realizará conforme
+a las reglas de fallback del test.
+
+A2. 2024_TEXTO
+
+Debe evaluar de forma literal y precisa contenido textual del manual, por
+ejemplo:
+- definiciones;
+- clasificaciones;
+- enumeraciones;
+- condiciones;
+- procedimientos;
+- secuencias;
+- excepciones;
+- características;
+- relaciones expresamente establecidas en la fuente.
+
+La respuesta correcta debe reproducir fielmente el significado del contenido
+recuperado del temario.
+
+Los distractores deben seguir siendo plausibles y próximos al contenido real,
+pero sin alterar la literalidad factual de la respuesta correcta.
+
+REGLA DE PÁGINA PARA TODA LA FAMILIA 2024:
+
+Cuando se cite una página en el enunciado, dicha página debe ser manualPage.
+La misma manualPage es la que debe conservarse como página visible de la fuente
+en la corrección.
+
+sourcePage es exclusivamente una referencia interna del PDF y NO debe
+mostrarse al opositor como página del manual.
+
+B. CORRECTA / INCORRECTA — ESTILO 2026
+
+Estas preguntas pertenecen a la familia de RAZONAMIENTO / APLICACIÓN.
+NO conviertas una pregunta literal o de reconocimiento directo en estilo 2026
+limitándote a añadir "CORRECTA" o "INCORRECTA".
+
+La resolución debe exigir comprender, aplicar, comparar, relacionar,
+interpretar o discriminar información técnica del temario.
+
+B1. 2026 — CORRECTA
+
+Cuando la familia asignada sea 2026_CORRECTA:
+
+- formula el enunciado para buscar la opción CORRECTA;
+- construye las cuatro alternativas como afirmaciones completas,
+  técnicamente desarrolladas y de complejidad semejante;
+- EXACTAMENTE UNA de las cuatro afirmaciones debe ser correcta según la fuente;
+- las otras TRES deben ser falsas pero técnicamente plausibles;
+- las cuatro deben pertenecer al mismo campo conceptual;
+- evita que la correcta pueda localizarse por simple reconocimiento,
+  longitud, precisión de redacción o descarte superficial;
+- cuando la fuente lo permita, exige aplicar una condición, comparar conceptos
+  próximos, relacionar información o interpretar una situación técnica.
+
+La diferencia entre la correcta y los distractores debe ser técnicamente
+relevante y, especialmente en dificultad alta, preferentemente depender de
+uno o pocos detalles discriminantes.
+
+B2. 2026 — INCORRECTA
+
+Cuando la familia asignada sea 2026_INCORRECTA:
+
+- formula inequívocamente el enunciado para buscar la opción INCORRECTA;
+- construye las cuatro alternativas como afirmaciones completas,
+  técnicamente desarrolladas y de complejidad semejante;
+- EXACTAMENTE TRES afirmaciones deben ser verdaderas según la fuente;
+- EXACTAMENTE UNA debe ser falsa;
+- la afirmación falsa debe ser SUTIL y técnicamente plausible;
+- las cuatro deben pertenecer al mismo campo conceptual;
+- evita falsedades grotescas, extremas o detectables por sentido común;
+- cuando sea posible, crea la falsa modificando únicamente un detalle
+  técnicamente decisivo de una afirmación próxima a la verdadera:
+  cifra, unidad, límite, condición, categoría, término, relación,
+  posición, paso o secuencia;
+- la resolución debe exigir conocimiento del temario y razonamiento,
+  no detectar una palabra delatora.
+
+Antes de aceptar una 2026_INCORRECTA comprueba obligatoriamente:
+1. que existen exactamente TRES afirmaciones verdaderas;
+2. que existe exactamente UNA afirmación falsa;
+3. que la falsa es la única respuesta válida a lo preguntado;
+4. que no puede localizarse por tono, extremismo, longitud o redacción.
+
+C. RAZONAMIENTO PURO / APLICACIÓN — ESTILO 2026
+
+Cuando la familia asignada sea 2026_RAZONAMIENTO:
+
+Esta pregunta NO debe adoptar obligatoriamente la estructura
+"señale la CORRECTA" o "señale la INCORRECTA".
+
+Debe exigir aplicar o relacionar conocimiento del temario mediante,
+preferentemente:
+
+- una situación técnica;
+- un procedimiento;
+- una decisión operativa;
+- una relación entre conceptos;
+- una comparación de condiciones;
+- una consecuencia derivada de los datos disponibles;
+- una selección de actuación;
+- una interpretación técnica de información combinada.
+
+Evita preguntas cuya respuesta pueda obtenerse localizando literalmente
+una única frase del temario.
+
+Cuando la fuente lo permita, combina DOS o más elementos relacionados del
+mismo objetivo de cobertura o de información próxima recuperada por File Search.
+
+La dificultad debe proceder de aplicar correctamente el conocimiento,
+discriminar conceptos próximos o relacionar condiciones, NO de introducir
+ambigüedad, información externa o supuestos no respaldados por la fuente.
+
+Las cuatro alternativas deben ser técnicamente plausibles y competitivas.
+La respuesta correcta debe depender exclusivamente del contenido recuperado
+del temario.
+
+REGLA COMÚN PARA LAS CINCO PREGUNTAS ESTILO 2026:
+
+En un bloque completo de 10 preguntas, la distribución asignada a esta familia
+debe producir:
+
+- DOS preguntas 2026_CORRECTA;
+- DOS preguntas 2026_INCORRECTA;
+- UNA pregunta 2026_RAZONAMIENTO.
+
+Las cinco deben evaluar razonamiento o aplicación.
+Las cuatro CORRECTA/INCORRECTA NO cuentan como estilo 2026 si solo evalúan
+memorización literal disfrazada mediante esas fórmulas de enunciado.
+
+Si la fuente no permite construir de forma factual una situación compleja,
+reduce la complejidad de la situación, pero NO inventes hechos, condiciones,
+procedimientos ni relaciones ausentes del temario.
+
+D. CÁLCULO / FORMULACIÓN
+
+Cuando la familia asignada sea CALCULO_FORMULACION, la pregunta debe evaluar
+la comprensión y aplicación de cálculos, fórmulas o relaciones entre
+magnitudes expresamente respaldadas por el temario.
+
+Esta familia NO exige necesariamente realizar una operación numérica.
+
+Puede adoptar, cuando la fuente lo permita, cualquiera de estas formas:
+
+- resolver un cálculo convencional;
+- seleccionar la fórmula correcta aplicable a una situación;
+- identificar qué magnitud permite calcular una fórmula;
+- identificar las variables o magnitudes que intervienen en una fórmula;
+- seleccionar un despeje correcto de una fórmula;
+- reconocer la relación existente entre dos o más magnitudes;
+- determinar cómo varía una magnitud cuando cambia otra, únicamente cuando
+  esa relación esté respaldada por la fuente;
+- seleccionar, entre varias fórmulas plausibles, cuál corresponde al
+  problema o situación planteados;
+- aplicar correctamente unidades, conversiones o equivalencias cuando
+  formen parte del contenido del temario.
+
+Las fórmulas deben representarse mediante notación Unicode/ASCII clara y
+segura, manteniendo el sistema de representación matemática ya establecido.
+
+La respuesta correcta y todos los datos necesarios para resolver la pregunta
+deben estar respaldados por la información recuperada del temario.
+
+NO introduzcas fórmulas, constantes, relaciones, conversiones, datos ni
+procedimientos obtenidos de conocimiento externo.
+
+Los distractores deben ser técnicamente plausibles. Cuando sea apropiado,
+constrúyelos mediante:
+
+- intercambio de variables;
+- operadores incorrectos pero plausibles;
+- despejes próximos pero erróneos;
+- unidades o conversiones confundibles;
+- fórmulas reales próximas recuperadas de la fuente;
+- relaciones entre magnitudes invertidas o modificadas de forma sutil.
+
+Debe existir UNA única respuesta inequívocamente correcta.
+
+Si la fuente recuperada no contiene evidencia suficiente para construir una
+pregunta válida de CÁLCULO/FORMULACIÓN, NO inventes contenido para cumplir la
+cuota. Aplica las reglas de sustitución/fallback definidas para las familias
+del test.
+E. INTERPRETACIÓN GRÁFICA
+
+Cuando la familia asignada sea GRAFICA, la información gráfica debe ser
+NECESARIA para resolver correctamente la pregunta.
+
+NO generes un gráfico meramente decorativo ni un dibujo que pueda eliminarse
+sin afectar a la resolución de la pregunta.
+
+La pregunta debe exigir interpretar visualmente, cuando la fuente lo permita:
+
+- posición o ubicación relativa de elementos;
+- relaciones espaciales;
+- componentes y su identificación;
+- conexiones entre elementos;
+- secuencias representadas gráficamente;
+- geometría relevante;
+- direcciones o sentidos;
+- fuerzas o relaciones entre ellas;
+- cualquier otra relación visual respaldada expresamente por el temario.
+
+ESTRUCTURA DEL CAMPO graphic:
+
+Para esta familia, graphic NO puede ser null.
+
+graphic.type debe utilizar exclusivamente uno de estos valores:
+"diagram", "geometry", "sequence", "components", "spatial" o "forces".
+
+graphic.title debe contener un título breve y neutral que NO revele la respuesta.
+
+graphic.elements debe contener únicamente los elementos necesarios para
+representar el problema.
+
+Cada elemento debe incluir:
+- id: identificador único;
+- label: texto visible asociado al elemento;
+- kind: tipo funcional del elemento;
+- x: posición horizontal;
+- y: posición vertical.
+
+Utiliza x e y como coordenadas normalizadas entre 0 y 100 para permitir
+posteriormente un renderizado consistente.
+
+graphic.connections debe describir únicamente conexiones necesarias entre
+elementos mediante:
+- from;
+- to;
+- label.
+
+Si no existen conexiones necesarias, devuelve un array vacío [].
+
+graphic.description debe describir de forma objetiva qué representa el gráfico
+para permitir su validación, pero NO debe revelar cuál es la respuesta correcta.
+
+COHERENCIA OBLIGATORIA:
+
+- todo elemento mencionado en stem u options debe existir de forma inequívoca
+  en graphic cuando sea necesario visualizarlo;
+- toda conexión utilizada para resolver la pregunta debe estar representada;
+- el gráfico, el enunciado, las cuatro opciones y la respuesta correcta deben
+  ser mutuamente coherentes;
+- debe existir UNA única respuesta correcta;
+- la solución debe depender realmente de interpretar graphic;
+- toda información técnica representada debe estar respaldada por la fuente;
+- NO añadas elementos, relaciones, medidas, fuerzas, posiciones o datos
+  técnicos inventados para construir artificialmente una pregunta gráfica.
+
+Si la fuente recuperada no contiene información suficiente para construir una
+pregunta gráfica factual, inequívoca y útil, NO fuerces esta familia.
+Aplica las reglas de sustitución/fallback del test.
+
+REGLAS DE SUSTITUCIÓN / FALLBACK DE FAMILIAS:
+
+La distribución objetivo debe respetarse siempre que el contenido factual
+recuperado del temario permita construir preguntas válidas de cada familia.
+
+La fidelidad a la fuente tiene PRIORIDAD ABSOLUTA sobre el cumplimiento
+artificial de una cuota.
+
+Para las familias GRAFICA y CALCULO_FORMULACION aplica este orden:
+
+1. Distribución normal:
+   - UNA pregunta GRAFICA.
+   - UNA pregunta CALCULO_FORMULACION.
+
+2. Si NO existe evidencia suficiente para construir una GRAFICA válida,
+   pero sí existe contenido válido de cálculo o formulación:
+   - genera DOS preguntas CALCULO_FORMULACION.
+
+3. Si NO existe contenido válido para CALCULO_FORMULACION,
+   pero sí existen DOS posibilidades gráficas válidas y suficientemente
+   diferentes:
+   - genera DOS preguntas GRAFICA.
+
+4. Si NO existe contenido válido ni para GRAFICA ni para
+   CALCULO_FORMULACION:
+   - sustituye ambas por preguntas 2024_NUMERICA cuando existan datos
+     numéricos suficientes y diferentes en la fuente.
+
+5. Si tampoco existen suficientes datos numéricos:
+   - utiliza 2024_TEXTO para las plazas restantes.
+
+REGLAS OBLIGATORIAS DEL FALLBACK:
+
+- NUNCA inventes gráficos, fórmulas, datos, relaciones o procedimientos para
+  cumplir una cuota.
+- NUNCA sacrifiques factualidad para mantener la distribución prevista.
+- Las preguntas sustitutas deben seguir cumpliendo íntegramente las reglas
+  de su questionFamily final.
+- questionFamily debe reflejar SIEMPRE la familia realmente generada después
+  de aplicar el fallback.
+- Dos preguntas de la misma familia obtenidas mediante fallback deben evaluar
+  contenidos suficientemente diferentes; evita duplicados o reformulaciones
+  del mismo dato o concepto mientras existan alternativas válidas.
+- La sustitución afecta únicamente a las plazas que no puedan cubrirse con
+  evidencia suficiente; no altera innecesariamente las demás familias.
 
 DISTRIBUCIÓN DEL TEST:
 
@@ -1788,6 +2218,46 @@ Cuando count >= 10 y la fuente lo permita:
 
 Estas reglas de distribución NO autorizan a inventar contenido ni a forzar una
 familia incompatible con el objetivo de cobertura.
+
+DIFICULTAD Y NIVEL DE DISCRIMINACIÓN:
+
+Estas reglas se aplican transversalmente a TODAS las familias de preguntas,
+respetando siempre las reglas específicas de cada familia.
+
+En dificultad Alta:
+
+- reduce al mínimo las preguntas resolubles por reconocimiento superficial;
+- prioriza diferencias pequeñas pero técnicamente relevantes entre las opciones;
+- cuando la fuente lo permita, enfrenta conceptos, condiciones, datos,
+  procedimientos o categorías próximos entre sí;
+- evita que una opción pueda descartarse únicamente por sentido común,
+  redacción extraña, extremismo, falta de precisión o pertenecer claramente
+  a otro campo conceptual;
+- cuando la familia lo permita y la fuente aporte evidencia suficiente,
+  combina o relaciona DOS o más elementos del contenido recuperado;
+- exige aplicación, discriminación o precisión siempre que sea compatible
+  con la familia asignada;
+- una pregunta difícil NO debe ser ambigua: debe existir una única respuesta
+  inequívocamente válida según la fuente;
+- la dificultad debe proceder del dominio preciso del temario, NO de
+  información externa, trampas lingüísticas, supuestos inventados o
+  formulaciones confusas.
+
+En preguntas 2024_NUMERICA, aumenta la dificultad principalmente mediante
+distractores numéricos próximos, unidades plausibles y datos susceptibles
+de confusión dentro del propio temario, manteniendo el carácter literal.
+
+En preguntas 2024_TEXTO, aumenta la dificultad mediante alternativas
+conceptualmente próximas y pequeñas diferencias de término, condición,
+clasificación, secuencia o excepción, manteniendo el carácter literal.
+
+En las familias 2026, aumenta la dificultad mediante aplicación,
+comparación, relación de información y discriminación entre actuaciones
+o afirmaciones técnicamente próximas.
+
+En CÁLCULO/FORMULACIÓN y GRÁFICA, la dificultad debe proceder de interpretar
+y aplicar correctamente la información disponible, nunca de datos ausentes
+o supuestos no respaldados por la fuente.
 
 OPCIONES DESARROLLADAS:
 
@@ -2054,6 +2524,39 @@ rebuscado o ambiguo.
 En dificultad alta, al menos DOS de los tres distractores deben ser
 especialmente próximos a la respuesta correcta y exigir conocer con
 precisión el dato, condición, procedimiento o relación evaluada.
+REGLAS ADICIONALES PARA DIFICULTAD ALTA:
+
+La dificultad ALTA debe exigir discriminación técnica, aplicación o
+relación de conocimientos; no debe equivaler simplemente a una pregunta
+más detallada.
+
+- En preguntas de aplicación o razonamiento estilo 2026, cuando la fuente
+  lo permita, exige relacionar DOS O MÁS elementos recuperados del temario.
+
+- Cuando sea viable, plantea primero una situación o escenario en el que
+  el opositor deba identificar QUÉ regla, condición, procedimiento,
+  relación o fórmula resulta aplicable antes de resolver la pregunta.
+
+- En preguntas de cálculo, cuando la fuente lo permita, evita limitarte
+  a sustituir directamente un único dato en una fórmula. Exige seleccionar
+  los datos o la fórmula pertinentes y, cuando sea viable, realizar MÁS
+  DE UNA operación.
+
+- En preguntas formuladas como INCORRECTA, construye TRES afirmaciones
+  verdaderas, técnicamente próximas y difíciles de descartar; la respuesta
+  debe ser la ÚNICA afirmación falsa.
+
+- En preguntas formuladas como CORRECTA, construye TRES afirmaciones falsas
+  técnicamente próximas a la verdadera y evita falsedades caricaturescas
+  o detectables por sentido común.
+
+- En preguntas literales o de precisión estilo 2024, incrementa la
+  dificultad mediante datos, términos, límites, condiciones o confusores
+  próximos presentes en la fuente. NO la incrementes mediante redacción
+  enrevesada, ambigua o artificialmente extensa.
+
+Estas exigencias se aplican solo cuando la información recuperada permita
+construirlas sin inventar contenido ni introducir conocimiento externo.
 
 ESTILO DE REDACCIÓN:
 
@@ -2883,9 +3386,59 @@ async function getCoverageTargetsForGeneration(count){
     LIMIT $1
   `,[count]);
 
-  return result.rows;
+  const families = buildQuestionFamilyPlan(count);
+
+return result.rows.map((item,index)=>({
+  ...item,
+  questionFamily: families[index] || "GENERAL"
+}));
+}
+function shuffleArray(items){
+  const shuffled = [...items];
+
+  for(let i = shuffled.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  return shuffled;
 }
 
+function buildQuestionFamilyPlan(count){
+  const baseBlock = [
+    "2026_CORRECTA",
+    "2026_CORRECTA",
+    "2026_INCORRECTA",
+    "2026_INCORRECTA",
+    "2026_RAZONAMIENTO",
+    "2024_NUMERICA",
+    "2024_NUMERICA",
+    "2024_LITERAL",
+    "CALCULO_FORMULACION",
+    "GRAFICA"
+  ];
+
+  const plansByCount = {
+    5: [
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2026_RAZONAMIENTO",
+      "2024_LITERAL",
+      "CALCULO_FORMULACION"
+    ],
+    10: baseBlock,
+    20: [...baseBlock, ...baseBlock],
+    40: [...baseBlock, ...baseBlock, ...baseBlock, ...baseBlock]
+  };
+
+  const plan = plansByCount[count];
+
+  if(!plan){
+    throw new Error(`Cantidad de preguntas no soportada para distribución: ${count}`);
+  }
+
+  return shuffleArray(plan);
+}
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -2905,6 +3458,8 @@ OBJETIVOS:
 
 ${targets.map((item,index)=>`
 OBJETIVO ${index+1}
+- Familia de pregunta asignada: ${item.questionFamily || "GENERAL"}
+- Esta familia es OBLIGATORIA salvo imposibilidad factual demostrable.
 - Apartado: ${item.section || "No especificado"}
 - Concepto: ${item.concept}
 - Tipo de contenido: ${item.item_type}
@@ -2940,49 +3495,152 @@ async function markCoverageTargetsWorked(targets){
 }
 async function validateGeneratedQuestions(ai,questions){
   const validationPrompt=`
-Eres un validador factual estricto de preguntas de oposición.
+Eres un validador estricto de preguntas de oposición.
 
 FUENTE DE VERDAD
+
 - La ÚNICA fuente factual válida es el temario recuperado mediante File Search.
 - No uses conocimiento general, memoria propia ni información externa.
 - No uses los exámenes oficiales como fuente factual.
-- Si el temario recuperado no permite demostrar una afirmación, no la des por válida.
+- Si el temario recuperado no permite demostrar una afirmación esencial,
+  no la des por válida.
 
 TAREA
+
 Valida TODAS las preguntas recibidas.
 
-Para cada pregunta comprueba:
+Para cada pregunta debes realizar DOS validaciones:
+1. FIABILIDAD FACTUAL.
+2. CUMPLIMIENTO REAL DE questionFamily.
+
+VALIDACIÓN FACTUAL
+
+Comprueba:
 
 1. Que el enunciado pueda resolverse exclusivamente con el temario.
-2. Que la opción indicada por correctIndex sea correcta según el temario.
-3. Que exista exactamente UNA respuesta correcta.
-4. Que ninguna otra opción sea también defendible como correcta según el temario.
-5. Que sourceEvidence respalde realmente la respuesta correcta.
-6. Que explanation sea coherente con la respuesta correcta y con el temario.
-7. Que cifras, unidades, porcentajes, fórmulas, relaciones, límites y condiciones coincidan con el temario.
-8. Que las preguntas formuladas en negativo (NO, INCORRECTA, FALSA, EXCEPTO o equivalentes) estén resueltas en el sentido correcto.
-9. Que no se introduzcan datos o afirmaciones esenciales que requieran conocimiento externo.
-10. Que sourcePage represente exclusivamente la página física del archivo PDF y se use solo como referencia interna.
-11. Que manualPage represente exclusivamente la numeración impresa visible en el propio manual. Si no puede verificarse con seguridad mediante el documento recuperado, debe ser null.
-12. No deduzcas manualPage a partir de sourcePage, no calcules offsets entre ambas numeraciones y no consideres que tienen que coincidir.
+2. Que la opción indicada por correctIndex sea la respuesta válida según
+   el temario y la polaridad de la pregunta.
+3. Que exista exactamente UNA respuesta válida a lo preguntado.
+4. Que ninguna otra opción pueda defenderse también como respuesta válida.
+5. Que sourceEvidence respalde realmente la respuesta.
+6. Que explanation sea coherente con la respuesta y con el temario.
+7. Que cifras, unidades, porcentajes, fórmulas, relaciones, límites y
+   condiciones coincidan con el temario.
+8. Que NO, INCORRECTA, FALSA, EXCEPTO y expresiones equivalentes se
+   interpreten respetando exactamente su polaridad.
+9. Que no se introduzcan datos o afirmaciones esenciales que requieran
+   conocimiento externo.
+10. Que sourcePage represente exclusivamente la página física del PDF y
+    se utilice solo como referencia interna.
+11. Que manualPage represente exclusivamente la numeración impresa visible
+    del propio manual.
+12. Que nunca se deduzca manualPage a partir de sourcePage ni mediante offsets.
+13. Si el enunciado cita una página del manual, dicha página debe coincidir
+    con manualPage. Nunca debe utilizar sourcePage como página visible.
 
-CRITERIO
-- valid=true únicamente cuando la pregunta completa pueda defenderse con el temario.
+VALIDACIÓN DE FAMILIA
+
+Comprueba que questionFamily describe lo que la pregunta REALMENTE hace,
+no únicamente la familia que pretendía generar.
+
+2026_CORRECTA:
+- debe exigir razonamiento, aplicación, comparación, relación o discriminación;
+- debe buscar inequívocamente la opción correcta;
+- debe existir exactamente UNA afirmación correcta;
+- las otras tres deben ser falsas pero técnicamente plausibles;
+- no debe ser una pregunta meramente literal disfrazada mediante la palabra
+  CORRECTA.
+
+2026_INCORRECTA:
+- debe exigir razonamiento, aplicación, comparación, relación o discriminación;
+- debe buscar inequívocamente la opción incorrecta;
+- EXACTAMENTE TRES afirmaciones deben ser verdaderas según el temario;
+- EXACTAMENTE UNA afirmación debe ser falsa;
+- esa falsa debe ser la única respuesta válida;
+- no debe ser una pregunta meramente literal disfrazada mediante la palabra
+  INCORRECTA.
+
+2026_RAZONAMIENTO:
+- debe exigir aplicar o relacionar información;
+- no debe depender de una simple recuperación literal de una única frase;
+- no necesita adoptar formato CORRECTA/INCORRECTA;
+- todos los supuestos necesarios deben estar respaldados por el temario.
+
+2024_NUMERICA:
+- debe ser una pregunta literal/de precisión estilo 2024;
+- debe evaluar un dato numérico explícitamente respaldado por el temario;
+- no debe convertirse indebidamente en un ejercicio de cálculo;
+- si cita manual y página, la página visible debe coincidir con manualPage.
+
+2024_TEXTO:
+- debe ser una pregunta literal/de precisión estilo 2024;
+- debe evaluar contenido textual respaldado por el temario;
+- si cita manual y página, la página visible debe coincidir con manualPage.
+
+CALCULO_FORMULACION:
+- debe evaluar realmente cálculo, fórmula, despeje, magnitudes, unidades,
+  conversiones o relaciones entre magnitudes;
+- la fórmula o relación utilizada debe estar respaldada por el temario;
+- todos los datos necesarios para resolverla deben estar disponibles;
+- cualquier operación, despeje, equivalencia o relación debe ser correcta.
+
+GRAFICA:
+- graphic debe existir y NO ser null;
+- el gráfico debe ser necesario para resolver correctamente la pregunta;
+- eliminar el gráfico debe impedir o alterar sustancialmente la resolución;
+- stem, options, correctIndex y graphic deben ser mutuamente coherentes;
+- los elementos y conexiones relevantes deben existir en graphic;
+- toda información técnica representada debe estar respaldada por el temario;
+- graphic.description no debe revelar la respuesta;
+- debe existir una única respuesta válida.
+
+REGLAS DEL CAMPO graphic
+
+- Para cualquier familia distinta de GRAFICA, graphic debe ser null.
+- Para GRAFICA, graphicValid debe ser true únicamente si el gráfico es
+  factual, coherente, suficiente y necesario para resolver la pregunta.
+- Para preguntas no gráficas devuelve graphicValid=null.
+- graphicIssues debe ser [] cuando no existan problemas gráficos.
+
+RESULTADO
+
+Para cada pregunta devuelve:
+
+- index: índice original empezando en 0.
+- valid: true únicamente si la pregunta supera TODAS las comprobaciones
+  factuales Y de familia aplicables.
+- issues: problemas de fiabilidad factual. Si no existen, [].
+- familyValid: true únicamente si la pregunta cumple realmente las reglas
+  de questionFamily.
+- familyIssues: incumplimientos de familia. Si no existen, [].
+- graphicValid:
+    * true o false para GRAFICA;
+    * null para cualquier otra familia.
+- graphicIssues: problemas gráficos; [] cuando no existan.
+
+CRITERIO FINAL
+
 - Ante una contradicción factual clara, valid=false.
-- Si falta evidencia suficiente para verificar un aspecto esencial, valid=false.
+- Si falta evidencia suficiente para verificar un aspecto esencial,
+  valid=false.
+- Si familyValid=false, valid=false.
+- Si una pregunta GRAFICA tiene graphicValid=false, valid=false.
 - No corrijas ni reescribas preguntas.
-- No mejores estilo ni dificultad.
+- No mejores estilo ni dificultad durante la validación.
 - No evalúes si la pregunta te gusta.
-- Limítate a detectar problemas de fiabilidad factual.
+- Limítate a comprobar factualidad, unicidad de respuesta, polaridad,
+  cumplimiento de familia y coherencia gráfica conforme a estas reglas.
 
 ÍNDICES
+
 - index empieza en 0.
 - Devuelve exactamente un resultado por cada pregunta.
 - Conserva exactamente el mismo orden.
 
 PREGUNTAS A VALIDAR:
-${JSON.stringify(questions)}
+\${JSON.stringify(questions)}
 `;
+
 
   const response=await ai.models.generateContent({
     model:"gemini-3.5-flash-lite",
@@ -3034,11 +3692,13 @@ async function regenerateInvalidQuestions(
     invalidResults.map(result => targets[result.index]);
 
   const rejectedQuestions =
-    invalidResults.map(result => ({
-      index: result.index,
-      question: originalQuestions[result.index],
-      issues: result.issues
-    }));
+  invalidResults.map(result => ({
+    index: result.index,
+    question: originalQuestions[result.index],
+    issues: result.issues,
+    familyIssues: result.familyIssues || [],
+    graphicIssues: result.graphicIssues || []
+  }));
 
   const replacementPrompt =
     generationPrompt(replacementTargets.length, difficulty, mode) +
@@ -3063,6 +3723,13 @@ REGLAS OBLIGATORIAS:
 - File Search y el temario son la única fuente factual.
 - No inventes datos para completar información ausente.
 - Todas las reglas normales de generación siguen siendo obligatorias.
+- Conserva la questionFamily de la pregunta rechazada cuando exista evidencia
+  suficiente en el temario para corregirla dentro de esa misma familia.
+- Si esa familia no puede construirse válidamente con la evidencia recuperada,
+  aplica exclusivamente las reglas de fallback definidas en generationPrompt
+  y asigna a questionFamily la familia final realmente generada.
+- Si el rechazo contiene familyIssues o graphicIssues, corrige explícitamente
+  esos problemas además de cualquier problema factual indicado en issues.
 
 ========================================
 REFERENCIA DINÁMICA DE ESTILO
