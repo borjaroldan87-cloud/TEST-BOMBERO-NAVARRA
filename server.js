@@ -676,6 +676,49 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
     results
   };
 }
+async function getGraphicAssetForGeneration({ topicFolder = null } = {}){
+  const params = [];
+  const conditions = [
+    "is_usable = TRUE",
+    "analysis_status = 'analyzed'"
+  ];
+
+  if(topicFolder){
+    params.push(topicFolder);
+    conditions.push(`topic_folder = $${params.length}`);
+  }
+
+  const result = await db.query(
+    `SELECT
+       id,
+       source_id,
+       topic_folder,
+       source_file,
+       public_url,
+       asset_index,
+       asset_type,
+       concept,
+       description,
+       source_evidence,
+       crop_x,
+       crop_y,
+       crop_width,
+       crop_height,
+       is_official_reference,
+       times_asked,
+       last_asked_at
+     FROM graphic_assets
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY
+       times_asked ASC,
+       last_asked_at ASC NULLS FIRST,
+       RANDOM()
+     LIMIT 1`,
+    params
+  );
+
+  return result.rows[0] || null;
+}
 async function loadStore(){
   const result = await db.query(
     "SELECT value FROM app_state WHERE key = $1",
