@@ -240,6 +240,134 @@ async function syncGraphicAssets(){
     files
   };
 }
+const graphicAssetAnalysisSchema = {
+  type:"object",
+  properties:{
+    sourceType:{
+      type:"string",
+      enum:["technical_image","official_exam_reference","unusable"]
+    },
+
+    sourceCaption:{
+      type:["string","null"]
+    },
+
+    sourceText:{
+      type:["string","null"]
+    },
+
+    useAsGroup:{
+      type:"boolean"
+    },
+
+    groupReason:{
+      type:["string","null"]
+    },
+
+    assets:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          assetIndex:{type:"integer"},
+
+          concept:{type:"string"},
+
+          visualDescription:{type:"string"},
+
+          textToRemove:{
+            type:"array",
+            items:{type:"string"}
+          },
+
+          crop:{
+            type:["object","null"],
+            properties:{
+              x:{type:"number"},
+              y:{type:"number"},
+              width:{type:"number"},
+              height:{type:"number"}
+            },
+            required:["x","y","width","height"]
+          },
+
+          needsImageToAnswer:{
+            type:"boolean"
+          },
+
+          usableForGraphicQuestion:{
+            type:"boolean"
+          },
+
+          rejectionReason:{
+            type:["string","null"]
+          }
+        },
+        required:[
+          "assetIndex",
+          "concept",
+          "visualDescription",
+          "textToRemove",
+          "crop",
+          "needsImageToAnswer",
+          "usableForGraphicQuestion",
+          "rejectionReason"
+        ]
+      }
+    }
+  },
+
+  required:[
+    "sourceType",
+    "sourceCaption",
+    "sourceText",
+    "useAsGroup",
+    "groupReason",
+    "assets"
+  ]
+};
+const GRAPHIC_GROUP_RULES = {
+  nrbq:[
+    {
+      key:"clp_correspondences",
+      description:"Correspondencias entre pictogramas antiguos y pictogramas CLP"
+    }
+  ],
+
+  vehiculos:[
+    {
+      key:"two_stroke_cycle",
+      description:"Ciclo completo del motor de dos tiempos"
+    },
+    {
+      key:"gasoline_engine_cycle",
+      description:"Ciclo de trabajo completo del motor de gasolina"
+    }
+  ]
+};
+
+function graphicGroupRulesPrompt(topicFolder){
+  const rules = GRAPHIC_GROUP_RULES[topicFolder] || [];
+
+  if(!rules.length){
+    return `
+REGLA DE AGRUPACIÓN:
+- Trata los dibujos de esta imagen individualmente siempre que sean separables.
+- No mantengas varios dibujos juntos por comodidad.
+- Si una imagen contiene varios esquemas independientes, devuelve un asset distinto para cada uno.
+`;
+  }
+
+  return `
+REGLA DE AGRUPACIÓN:
+Estas son las ÚNICAS composiciones de este tema que pueden mantenerse como conjunto:
+
+${rules.map(rule => `- ${rule.description}`).join("\n")}
+
+Solo usa useAsGroup=true si la imagen corresponde realmente a una de esas composiciones.
+Cualquier otra imagen con varios dibujos debe dividirse en assets individuales siempre que sean separables.
+`;
+}
 async function loadStore(){
   const result = await db.query(
     "SELECT value FROM app_state WHERE key = $1",
