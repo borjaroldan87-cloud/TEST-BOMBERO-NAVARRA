@@ -519,11 +519,10 @@ async function saveGraphicAnalysis(graphicRow, analysis){
   }
 
   await db.query(
-    `DELETE FROM graphic_assets
-     WHERE source_id = $1
-     AND asset_index <> 0`,
-    [graphicRow.source_id]
-  );
+  `DELETE FROM graphic_assets
+   WHERE source_id = $1`,
+  [graphicRow.source_id]
+);
 
   for(const asset of assets){
     const assetIndex = Number(asset.assetIndex);
