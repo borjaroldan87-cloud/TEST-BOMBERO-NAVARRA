@@ -610,7 +610,7 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
        source_file,
        public_url
      FROM graphic_assets
-     WHERE analysis_status = 'error'
+     WHERE analysis_status = 'pending'
      ORDER BY source_id, asset_index ASC
      LIMIT $1`,
     [limit]
@@ -655,7 +655,7 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
        description = $2,
        updated_at = NOW()
      WHERE source_id = $1
-       AND analysis_status = 'error'`,
+       AND analysis_status = 'pending'`,
     [
       graphicRow.source_id,
       errorMessage
