@@ -1007,13 +1007,16 @@ graphic:{
         "forces"
       ]
     },
+
     title:{type:"string"},
+
     elements:{
       type:"array",
       items:{
         type:"object",
         properties:{
           id:{type:"string"},
+
           shape:{
             type:"string",
             enum:[
@@ -1024,17 +1027,62 @@ graphic:{
               "polygon",
               "polyline",
               "arrow",
+              "arc",
+              "path",
               "text"
             ]
           },
+
           label:{type:"string"},
+
+          /*
+            Coordenadas normalizadas 0-100.
+          */
           x:{type:"number"},
           y:{type:"number"},
+
           x2:{type:["number","null"]},
           y2:{type:["number","null"]},
+
           width:{type:["number","null"]},
           height:{type:["number","null"]},
+
           radius:{type:["number","null"]},
+
+          /*
+            Rotación del elemento en grados.
+            0 = sin rotación.
+          */
+          rotation:{type:"number"},
+
+          /*
+            Apariencia técnica.
+
+            stroke:
+            color CSS del contorno/trazo.
+
+            fill:
+            color CSS del relleno o "none".
+
+            strokeWidth:
+            grosor relativo del trazo.
+
+            dash:
+            patrón discontinuo.
+            [] = línea continua.
+          */
+          stroke:{type:"string"},
+          fill:{type:"string"},
+          strokeWidth:{type:"number"},
+
+          dash:{
+            type:"array",
+            items:{type:"number"}
+          },
+
+          /*
+            Puntos para polygon/polyline/path.
+          */
           points:{
             type:"array",
             items:{
@@ -1045,25 +1093,96 @@ graphic:{
               },
               required:["x","y"]
             }
+          },
+
+          /*
+            Datos específicos de ARC.
+
+            Centro = x,y
+            radius = radio
+            startAngle/endAngle = grados.
+          */
+          startAngle:{type:["number","null"]},
+          endAngle:{type:["number","null"]},
+
+          /*
+            PATH permite una trayectoria curva controlada.
+
+            pathData NO contendrá SVG libre.
+            Será una lista estructurada de operaciones.
+          */
+          pathData:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                command:{
+                  type:"string",
+                  enum:[
+                    "M",
+                    "L",
+                    "Q",
+                    "C"
+                  ]
+                },
+
+                x:{type:"number"},
+                y:{type:"number"},
+
+                cx1:{type:["number","null"]},
+                cy1:{type:["number","null"]},
+
+                cx2:{type:["number","null"]},
+                cy2:{type:["number","null"]}
+              },
+
+              required:[
+                "command",
+                "x",
+                "y",
+                "cx1",
+                "cy1",
+                "cx2",
+                "cy2"
+              ]
+            }
           }
         },
+
         required:[
           "id",
           "shape",
           "label",
+
           "x",
           "y",
           "x2",
           "y2",
+
           "width",
           "height",
           "radius",
-          "points"
+
+          "rotation",
+
+          "stroke",
+          "fill",
+          "strokeWidth",
+          "dash",
+
+          "points",
+
+          "startAngle",
+          "endAngle",
+
+          "pathData"
         ]
       }
     },
+
     description:{type:"string"}
   },
+
   required:[
     "type",
     "title",
@@ -1071,6 +1190,7 @@ graphic:{
     "description"
   ]
 }
+
    },required:[
       "stem",
       "options",
@@ -2266,7 +2386,14 @@ graphic.title debe contener un título breve y neutral que NO revele
 la respuesta.
 
 graphic.elements debe contener las PRIMITIVAS GRÁFICAS necesarias para
-construir el dibujo técnico.
+CONSTRUIR UN DIBUJO TÉCNICO RECONOCIBLE.
+
+IMPORTANTE:
+las primitivas son únicamente las piezas de construcción del dibujo.
+El resultado final NO debe percibirse como una colección de líneas,
+círculos, cajas o nodos independientes, sino como un objeto, mecanismo,
+corte, instalación, recorrido, configuración o situación técnica
+visualmente coherente.
 
 Cada elemento debe incluir SIEMPRE todos estos campos:
 
@@ -2280,7 +2407,15 @@ Cada elemento debe incluir SIEMPRE todos estos campos:
 - width
 - height
 - radius
+- rotation
+- stroke
+- fill
+- strokeWidth
+- dash
 - points
+- startAngle
+- endAngle
+- pathData
 
 shape debe utilizar exclusivamente uno de estos valores:
 
@@ -2291,90 +2426,229 @@ shape debe utilizar exclusivamente uno de estos valores:
 - "polygon"
 - "polyline"
 - "arrow"
+- "arc"
+- "path"
 - "text"
 
 SIGNIFICADO DE LAS PRIMITIVAS:
 
 "line":
-línea recta técnica. Utiliza x, y como inicio y x2, y2 como final.
+línea recta técnica.
+Utiliza x, y como inicio y x2, y2 como final.
 
 "rect":
-elemento rectangular. Utiliza x, y como posición y width, height como
-dimensiones.
+elemento rectangular.
+Utiliza x, y como posición y width, height como dimensiones.
+Puede utilizar rotation cuando el elemento deba aparecer inclinado.
 
 "circle":
-elemento circular, por ejemplo una polea o una sección circular cuando
-proceda. Utiliza x, y como centro y radius como radio.
+elemento circular.
+Utiliza x, y como centro y radius como radio.
 
 "ellipse":
-elemento elíptico. Utiliza x, y como centro y width, height como dimensiones.
+elemento elíptico.
+Utiliza x, y como centro y width, height como dimensiones.
+Puede utilizar rotation cuando proceda.
 
 "polygon":
-forma cerrada definida mediante points. Utilízala para cuñas, cortes,
-perfiles u otras geometrías poligonales.
+forma cerrada definida mediante points.
+Utilízala para perfiles, cuñas, cortes, piezas u otras geometrías cerradas.
 
 "polyline":
-recorrido abierto definido mediante points. Utilízala cuando proceda para
-cuerdas, cables, recorridos, conductos u otros trazados físicos.
+recorrido abierto definido mediante points.
+Utilízala para trazados físicos formados por segmentos.
 
 "arrow":
-flecha técnica para representar únicamente una dirección, sentido,
-movimiento o fuerza respaldados por la fuente.
+flecha técnica utilizada exclusivamente cuando la dirección, sentido,
+movimiento o fuerza formen parte de la información técnica.
 Utiliza x, y como origen y x2, y2 como destino.
 
+"arc":
+arco circular.
+Utiliza x, y como centro, radius como radio y startAngle/endAngle
+como ángulos expresados en grados.
+
+Úsalo cuando una geometría curva sea técnicamente necesaria:
+giro de una puerta, recorrido parcial alrededor de una polea,
+indicación angular, trayectoria circular u otra relación equivalente.
+
+"path":
+trayectoria técnica compuesta por segmentos rectos o curvos mediante
+pathData.
+
+Utilízala especialmente cuando una cuerda, cable, conducto, flujo,
+perfil o contorno necesite una trayectoria continua que no pueda
+representarse adecuadamente mediante una simple polyline.
+
 "text":
-texto breve necesario dentro del dibujo, especialmente identificadores
-como A, B, C, D, 1, 2, 3, etc.
-Utiliza x, y como posición.
+texto breve imprescindible dentro del dibujo.
+Utilízalo principalmente para identificadores A, B, C, D, 1, 2, 3,
+medidas o referencias técnicas que realmente deban aparecer.
 
-COORDENADAS:
+COORDENADAS Y DIMENSIONES:
 
-Todas las coordenadas y dimensiones deben expresarse en una escala
+Todas las coordenadas y dimensiones espaciales deben utilizar una escala
 normalizada de 0 a 100.
 
-Cuando un campo geométrico no sea aplicable a una determinada shape,
+Para campos geométricos que no sean aplicables a una determinada shape,
 devuelve null.
 
 Para points:
 - utiliza [] cuando la shape no necesite puntos;
 - cada punto debe contener x e y;
-- todas sus coordenadas deben estar entre 0 y 100.
+- todas las coordenadas deben estar entre 0 y 100.
 
-label:
+ROTACIÓN:
 
-- debe ser una cadena;
-- utiliza "" cuando el elemento no necesite texto visible;
-- evita etiquetas explicativas largas;
-- NO escribas en label la respuesta ni la propiedad que el opositor
-  debe identificar.
+rotation se expresa en grados.
 
-REGLAS DE CONSTRUCCIÓN:
+- utiliza 0 cuando no sea necesaria;
+- utilízala para representar elementos físicamente inclinados u orientados;
+- NO introduzcas inclinaciones arbitrarias que no estén justificadas
+  por la configuración representada.
 
-- combina varias primitivas para construir un único dibujo técnico;
-- NO representes cada concepto como un elemento independiente;
-- NO utilices círculos o rectángulos como simples contenedores de texto;
+ESTILO VISUAL:
+
+Cada elemento debe incluir:
+
+- stroke
+- fill
+- strokeWidth
+- dash
+
+stroke y fill deben contener valores CSS válidos.
+
+Utiliza preferentemente colores simples y funcionales.
+
+El color NO debe utilizarse como decoración.
+Solo debe diferenciar elementos cuando mejore la interpretación técnica
+o cuando el propio color tenga significado en la representación.
+
+Utiliza "none" en fill cuando el elemento no deba tener relleno.
+
+strokeWidth debe ser positivo y proporcionado al dibujo.
+
+dash debe ser:
+- [] para trazo continuo;
+- una lista numérica únicamente cuando sea necesario representar
+  una línea discontinua.
+
+El estilo visual nunca puede revelar por sí solo cuál es la respuesta
+correcta.
+
+ARCOS:
+
+Para shape "arc":
+
+- x, y = centro;
+- radius = radio;
+- startAngle = ángulo inicial;
+- endAngle = ángulo final;
+- points = [];
+- pathData = [].
+
+Los ángulos se expresan en grados.
+
+PATHS CURVOS Y COMPUESTOS:
+
+Para shape "path", utiliza pathData.
+
+pathData es una lista ordenada de operaciones y NO contiene SVG libre.
+
+Cada operación debe incluir SIEMPRE:
+
+- command
+- x
+- y
+- cx1
+- cy1
+- cx2
+- cy2
+
+command solo puede ser:
+
+- "M" = mover al punto x,y;
+- "L" = línea hasta x,y;
+- "Q" = curva cuadrática hasta x,y;
+- "C" = curva Bézier cúbica hasta x,y.
+
+Para "M" y "L":
+- cx1, cy1, cx2, cy2 deben ser null.
+
+Para "Q":
+- cx1, cy1 contienen el punto de control;
+- cx2, cy2 deben ser null.
+
+Para "C":
+- cx1, cy1 y cx2, cy2 contienen los dos puntos de control.
+
+Todas las coordenadas de pathData deben permanecer dentro de la escala 0-100.
+
+Cuando shape NO sea "path":
+pathData debe ser [].
+
+LABEL:
+
+label debe ser siempre una cadena.
+
+Utiliza "" cuando el elemento no necesite texto visible.
+
+NO utilices label para describir qué representa geométricamente el elemento.
+
+NO escribas en label:
+- la respuesta;
+- el nombre técnico que el opositor debe identificar;
+- explicaciones;
+- pistas que hagan innecesaria la interpretación visual.
+
+REGLAS DE CONSTRUCCIÓN DEL DIBUJO:
+
+- combina tantas primitivas como sean necesarias para obtener una
+  representación técnica reconocible y limpia;
+- construye OBJETOS y CONFIGURACIONES, no conceptos;
+- utiliza rotation para orientar físicamente piezas cuando proceda;
+- utiliza arc y path para representar curvas y recorridos reales cuando
+  una sucesión de líneas rectas resulte artificial;
+- representa la geometría relevante con proporciones visualmente coherentes;
+- evita solapamientos accidentales;
+- evita textos superpuestos sobre líneas o piezas;
+- reserva espacio suficiente entre alternativas visuales;
+- si se representan varias configuraciones A/B/C/D, cada una debe ser
+  visualmente independiente y estar identificada de forma inequívoca;
+- las alternativas A/B/C/D pueden compartir el mismo graphic cuando el
+  propio dibujo contenga las cuatro configuraciones claramente separadas;
+- una polea debe parecer visualmente una polea integrada en un sistema
+  de cuerda;
+- un árbol o tronco debe construirse como una forma física reconocible
+  sobre la que aparezcan los cortes pertinentes;
+- una puerta debe mostrar físicamente muro, hueco, hoja y, cuando sea
+  necesario, su recorrido de apertura;
+- un circuito debe representar conductores y componentes en una
+  configuración física comprensible;
+- un sistema de ventilación debe representar físicamente abertura,
+  equipo y recorrido/dirección cuando estos sean relevantes;
+- un apeo o estructura debe representar sus piezas en sus posiciones
+  relativas, no sus nombres dentro de cajas;
+- NO utilices círculos, rectángulos o elipses como simples contenedores
+  de conceptos;
 - NO construyas mapas conceptuales;
 - NO conviertas relaciones textuales en conexiones visuales artificiales;
-- representa objetos, geometrías, posiciones, recorridos y configuraciones
-  físicas mediante sus formas;
-- utiliza "text" únicamente para referencias mínimas necesarias;
-- una polea, por ejemplo, debe representarse mediante geometría circular y
-  el recorrido físico de la cuerda, no mediante un círculo que contenga
-  la palabra "polea";
-- un corte debe representarse mediante líneas/polígonos que reproduzcan
-  su geometría, no mediante una caja que contenga el nombre del corte;
-- una conexión técnica debe representarse mediante líneas, recorridos o
-  elementos físicos, no mediante nodos conceptuales unidos por flechas;
-- pueden combinarse tantas primitivas como sean necesarias para que el
-  dibujo resulte claro, pero evita elementos decorativos.
+- NO añadas elementos decorativos para hacer que el dibujo parezca
+  más complejo.
 
 graphic ya NO utiliza el campo connections.
-Toda relación visual debe quedar representada mediante las propias
-primitivas de graphic.elements.
+Toda relación visual debe quedar representada mediante los propios
+elementos de graphic.elements.
 
 graphic.description debe describir objetivamente qué representa el dibujo
 para permitir su validación, pero NO debe revelar la respuesta correcta.
 
+Antes de finalizar graphic, comprueba visualmente a nivel lógico que el
+conjunto de primitivas forma una representación técnica reconocible.
+Si el resultado sería únicamente una combinación abstracta de líneas,
+círculos, cajas, palabras o flechas, NO es válido y debe aplicarse el
+fallback.
+ 
 COHERENCIA OBLIGATORIA:
 
 - graphic debe contener toda la información visual necesaria;
@@ -3609,7 +3883,24 @@ app.get("/api/coverage-audit", async(req,res)=>{
   }
 });
 async function getCoverageTargetsForGeneration(count){
-  const result=await db.query(`
+  /*
+    1. Conservamos EXACTAMENTE la selección base que ya existía:
+       - count coverage_items sin trabajar
+       - ORDER BY RANDOM()
+       - LIMIT count
+
+    2. Conservamos EXACTAMENTE la asignación de familias existente.
+
+    3. ÚNICAMENTE si existe una plaza GRAFICA:
+       - comprobamos si SU coverage item es apto para dibujo;
+       - si no lo es, buscamos fuera de la selección base un candidato
+         gráfico y sustituimos SOLO el coverage item de GRAFICA.
+
+    Por tanto, los coverage items asignados al resto de familias
+    no se modifican.
+  */
+
+  const result = await db.query(`
     SELECT
       ci.id,
       ci.section,
@@ -3626,56 +3917,298 @@ async function getCoverageTargetsForGeneration(count){
     LIMIT $1
   `,[count]);
 
+  if(result.rows.length < count){
+    throw new Error(
+      `No hay suficientes coverage_items sin trabajar para generar ${count} preguntas.`
+    );
+  }
+
   const families = buildQuestionFamilyPlan(count);
 
-return result.rows.map((item,index)=>({
-  ...item,
-  questionFamily: families[index] || "GENERAL"
-}));
-}
-function shuffleArray(items){
-  const shuffled = [...items];
+  const selected = result.rows.map((item,index)=>({
+    ...item,
+    questionFamily: families[index] || "GENERAL"
+  }));
 
-  for(let i = shuffled.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  /*
+    Solo intervenimos sobre las plazas GRAFICA.
+    Ninguna otra familia cambia de coverage item.
+  */
+  const graphicIndexes = [];
+
+  for(let i = 0; i < selected.length; i++){
+    if(selected[i].questionFamily === "GRAFICA"){
+      graphicIndexes.push(i);
+    }
   }
 
-  return shuffled;
+  if(graphicIndexes.length === 0){
+    return selected;
+  }
+
+  /*
+    Detector conservador de POSIBLE contenido representable mediante
+    dibujo técnico.
+
+    Esto NO autoriza por sí solo el dibujo.
+    generationPrompt + validator siguen teniendo que comprobar que:
+    - existe una relación técnica/espacial real;
+    - el dibujo es necesario para resolver;
+    - no se inventa geometría o disposición;
+    - no es un mapa conceptual.
+  */
+  function isPotentialGraphicItem(item){
+    const evaluationType = String(item.evaluation_type || "")
+      .trim()
+      .toLowerCase();
+
+    if(
+      evaluationType === "interpretacion" ||
+      evaluationType === "interpretación"
+    ){
+      return true;
+    }
+
+    const text = [
+      item.section,
+      item.concept,
+      item.source_evidence
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    /*
+      Términos deliberadamente físicos, geométricos, espaciales,
+      mecánicos o de configuración.
+
+      Evitamos palabras genéricas como:
+      "elemento", "parte", "tipo", "sistema", "procedimiento",
+      porque producirían falsos candidatos gráficos.
+    */
+    const graphicSignals = [
+      "figura",
+      "dibujo",
+      "esquema",
+      "croquis",
+      "diagrama",
+      "sección",
+      "seccion",
+      "vista frontal",
+      "vista lateral",
+      "vista superior",
+      "planta",
+      "perfil",
+
+      "ángulo",
+      "angulo",
+      "inclinación",
+      "inclinacion",
+      "dirección",
+      "direccion",
+      "orientación",
+      "orientacion",
+      "posición",
+      "posicion",
+      "disposición",
+      "disposicion",
+
+      "corte",
+      "entalladura",
+      "bisagra",
+      "tocón",
+      "tocon",
+      "tronco",
+      "rama",
+      "compresión",
+      "compresion",
+      "tracción",
+      "traccion",
+
+      "polea",
+      "polipasto",
+      "reenvío",
+      "reenvio",
+      "anclaje",
+      "eslinga",
+      "ramal",
+      "cuerda",
+
+      "serie",
+      "paralelo",
+      "circuito",
+      "estrella",
+      "triángulo",
+      "triangulo",
+      "borne",
+      "batería",
+      "bateria",
+
+      "ventilador",
+      "abertura",
+      "entrada de aire",
+      "salida de aire",
+      "flujo de humo",
+      "flujo de gases",
+
+      "catenaria",
+      "espadín",
+      "espadin",
+      "aguja",
+      "corazón",
+      "corazon",
+
+      "puntal",
+      "tornapunta",
+      "sopanda",
+      "durmiente",
+      "pie derecho",
+      "apeo",
+      "arriostramiento",
+
+      "cabina",
+      "hueco de ascensor",
+      "puerta de acceso",
+
+      "colapso",
+      "plano inclinado",
+      "cono de escombros",
+
+      "panel naranja",
+      "placa-etiqueta",
+      "placa etiqueta",
+      "etiqueta de peligro",
+
+      "cisterna",
+      "neumático",
+      "neumatico",
+      "motor de cuatro tiempos",
+      "motor de dos tiempos"
+    ];
+
+    return graphicSignals.some(signal => text.includes(signal));
+  }
+
+  /*
+    Primero comprobamos las propias plazas GRAFICA.
+    Si alguna ya ha recibido un coverage item visualmente apto,
+    no tocamos absolutamente nada.
+  */
+  const indexesNeedingReplacement = graphicIndexes.filter(
+    index => !isPotentialGraphicItem(selected[index])
+  );
+
+  if(indexesNeedingReplacement.length === 0){
+    return selected;
+  }
+
+  /*
+    IDs de TODA la selección original.
+
+    Los candidatos gráficos de sustitución deben venir de fuera.
+    Así ningún coverage item perteneciente a otra familia es robado,
+    intercambiado ni reasignado.
+  */
+  const selectedIds = new Set(
+    selected.map(item => Number(item.id))
+  );
+
+  /*
+    Recuperamos candidatos adicionales SIN modificar selected.
+    Esta consulta solo alimenta las plazas GRAFICA que necesiten
+    sustitución.
+  */
+  const candidateResult = await db.query(`
+    SELECT
+      ci.id,
+      ci.section,
+      ci.concept,
+      ci.item_type,
+      ci.evaluation_type,
+      ci.source_page,
+      ci.manual_page,
+      ci.source_evidence
+    FROM coverage_items ci
+    JOIN topics t ON t.id = ci.topic_id
+    WHERE ci.worked = FALSE
+    ORDER BY RANDOM()
+  `);
+
+  const graphicCandidates = candidateResult.rows.filter(item => {
+    const id = Number(item.id);
+
+    return (
+      !selectedIds.has(id) &&
+      isPotentialGraphicItem(item)
+    );
+  });
+
+  /*
+    Sustituimos SOLO el contenido de las plazas GRAFICA.
+    El resto de posiciones de selected permanece intacto.
+  */
+  for(const graphicIndex of indexesNeedingReplacement){
+    const replacement = graphicCandidates.shift();
+
+if(!replacement){
+  /*
+    No existe un coverage item adicional con indicios suficientes
+    para justificar una pregunta gráfica.
+
+    Aplicamos el fallback ÚNICAMENTE sobre esta plaza.
+    No modificamos, intercambiamos ni consumimos los coverage items
+    asignados al resto de preguntas del test.
+  */
+
+  const originalItem = selected[graphicIndex];
+
+  const originalText = [
+    originalItem.section,
+    originalItem.concept,
+    originalItem.source_evidence
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const hasNumericData =
+    originalItem.item_type === "dato_numerico" ||
+    /\d/.test(originalText);
+
+  const hasCalculationPotential =
+    originalItem.item_type === "formula" ||
+    originalItem.evaluation_type === "calculo" ||
+    originalItem.evaluation_type === "relacion_variables";
+
+  if(hasCalculationPotential){
+    selected[graphicIndex] = {
+      ...originalItem,
+      questionFamily: "CALCULO_FORMULACION"
+    };
+  }else if(hasNumericData){
+    selected[graphicIndex] = {
+      ...originalItem,
+      questionFamily: "2024_NUMERICA"
+    };
+  }else{
+    selected[graphicIndex] = {
+      ...originalItem,
+      questionFamily: "2024_TEXTO"
+    };
+  }
+
+  continue;
 }
 
-function buildQuestionFamilyPlan(count){
-  const baseBlock = [
-    "2026_CORRECTA",
-    "2026_CORRECTA",
-    "2026_INCORRECTA",
-    "2026_INCORRECTA",
-    "2026_RAZONAMIENTO",
-    "2024_NUMERICA",
-    "2024_NUMERICA",
-    "2024_TEXTO",
-    "CALCULO_FORMULACION",
-    "GRAFICA"
-  ];
+    selected[graphicIndex] = {
+      ...replacement,
+      questionFamily: "GRAFICA"
+    };
 
-  const plansByCount = {
-    5: [
-      "2026_CORRECTA",
-      "2026_INCORRECTA",
-      "2026_RAZONAMIENTO",
-      "2024_TEXTO",
-      "CALCULO_FORMULACION"
-    ],
-    10: baseBlock,
-    20: [...baseBlock, ...baseBlock],
-    40: [...baseBlock, ...baseBlock, ...baseBlock, ...baseBlock]
-  };
-
-  const plan = plansByCount[count];
-
-  if(!plan){
-    throw new Error(`Cantidad de preguntas no soportada para distribución: ${count}`);
+    selectedIds.add(Number(replacement.id));
   }
+
+  return selected;
+}
 
   return shuffleArray(plan);
 }
@@ -3707,6 +4240,20 @@ OBJETIVO ${index+1}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
+${item.questionFamily === "GRAFICA" ? `
+- TRATAMIENTO GRÁFICO OBLIGATORIO:
+  Este objetivo ha sido seleccionado específicamente como candidato para interpretación mediante DIBUJO TÉCNICO.
+  Antes de construir la pregunta, recupera mediante File Search el contenido original que sustenta este objetivo y determina qué relación física, espacial, geométrica, mecánica, funcional o de configuración puede representarse fielmente.
+  El campo graphic debe representar un OBJETO, DISPOSICIÓN, CONFIGURACIÓN, CORTE, MECANISMO, RECORRIDO, CONEXIÓN, POSICIONAMIENTO, ESTRUCTURA, SECUENCIA TÉCNICA o SIMBOLOGÍA que esté respaldado por la fuente.
+  El resultado debe percibirse como un DIBUJO TÉCNICO reconocible, no como conceptos escritos dentro de figuras geométricas.
+  PROHIBIDO convertir palabras o conceptos abstractos en círculos, rectángulos, nodos, flechas o mapas conceptuales.
+  PROHIBIDO inventar posiciones, ángulos, conexiones, recorridos, geometrías, piezas o relaciones que la fuente no permita determinar.
+  La información visual debe ser NECESARIA para resolver la pregunta.
+  Si el enunciado y las opciones permiten resolverla igual eliminando el dibujo, la pregunta gráfica es inválida.
+  Los identificadores A/B/C/D, 1/2/3, etc. solo pueden utilizarse si están claramente visibles sobre las partes o configuraciones correspondientes del dibujo.
+  Las etiquetas visibles deben limitarse a las imprescindibles y nunca revelar directamente la respuesta.
+  La descripción textual del graphic debe ser neutral y no puede sustituir la interpretación visual.
+` : ""}
 `).join("\n")}
 
 REGLAS DE COBERTURA:
@@ -3718,8 +4265,10 @@ REGLAS DE COBERTURA:
 - File Search sigue siendo la fuente factual definitiva.
 - Verifica cada objetivo contra el documento recuperado antes de formular la pregunta.
 - Si la evidencia catalogada y el documento recuperado presentan alguna incompatibilidad, prevalece el documento original.
+- La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
 }
+
 
 async function markCoverageTargetsWorked(targets){
   if(!targets.length) return;
@@ -3892,7 +4441,8 @@ REGLAS DEL CAMPO graphic
 
 Para GRAFICA, graphic debe cumplir además TODAS estas condiciones estructurales:
 
-1. graphic debe ser un objeto y graphic.elements debe contener al menos un elemento.
+1. graphic debe ser un objeto y graphic.elements debe contener al menos
+   un elemento.
 
 2. graphic.type debe ser exclusivamente uno de:
    "technical",
@@ -3902,7 +4452,8 @@ Para GRAFICA, graphic debe cumplir además TODAS estas condiciones estructurales
    "circuit",
    "forces".
 
-3. Cada elemento de graphic.elements debe utilizar exclusivamente una de estas shape:
+3. Cada elemento de graphic.elements debe utilizar exclusivamente una de
+   estas shape:
    "line",
    "rect",
    "circle",
@@ -3910,67 +4461,221 @@ Para GRAFICA, graphic debe cumplir además TODAS estas condiciones estructurales
    "polygon",
    "polyline",
    "arrow",
+   "arc",
+   "path",
    "text".
 
-4. Todas las coordenadas utilizadas deben estar comprendidas entre 0 y 100.
+4. Cada elemento debe contener todos estos campos:
+   id,
+   shape,
+   label,
+   x,
+   y,
+   x2,
+   y2,
+   width,
+   height,
+   radius,
+   rotation,
+   stroke,
+   fill,
+   strokeWidth,
+   dash,
+   points,
+   startAngle,
+   endAngle,
+   pathData.
 
-5. Para shape="line":
+5. Todas las coordenadas espaciales utilizadas deben estar comprendidas
+   entre 0 y 100.
+
+6. rotation debe ser numérico.
+   Puede ser 0 cuando no exista rotación.
+   Toda rotación técnicamente significativa debe ser coherente con la
+   representación y no puede introducir una orientación factual inventada.
+
+7. stroke y fill deben ser cadenas.
+   strokeWidth debe ser numérico y mayor que 0.
+   dash debe ser un array.
+   El estilo debe utilizarse únicamente para mejorar o expresar información
+   técnica y NO para revelar visualmente la respuesta correcta.
+
+8. Para shape="line":
    x2 e y2 deben existir y definir el extremo final.
 
-6. Para shape="arrow":
+9. Para shape="arrow":
    x2 e y2 deben existir y definir el destino.
    La dirección representada debe estar respaldada por sourceEvidence.
 
-7. Para shape="rect":
-   width y height deben existir y ser mayores que 0.
+10. Para shape="rect":
+    width y height deben existir y ser mayores que 0.
 
-8. Para shape="circle":
-   radius debe existir y ser mayor que 0.
+11. Para shape="circle":
+    radius debe existir y ser mayor que 0.
 
-9. Para shape="ellipse":
-   width y height deben existir y ser mayores que 0.
+12. Para shape="ellipse":
+    width y height deben existir y ser mayores que 0.
 
-10. Para shape="polygon":
+13. Para shape="polygon":
     points debe contener al menos TRES puntos válidos.
 
-11. Para shape="polyline":
+14. Para shape="polyline":
     points debe contener al menos DOS puntos válidos.
 
-12. Para shape="text":
+15. Para shape="arc":
+    radius debe existir y ser mayor que 0;
+    startAngle y endAngle deben ser numéricos;
+    ambos deben definir un arco real y no una geometría degenerada;
+    la curva representada debe corresponder a una relación física,
+    geométrica o técnica necesaria.
+
+16. Para shape="path":
+    pathData debe contener al menos una operación válida.
+
+    Cada operación debe utilizar exclusivamente uno de:
+    "M",
+    "L",
+    "Q",
+    "C".
+
+    Cada operación debe contener:
+    command,
+    x,
+    y,
+    cx1,
+    cy1,
+    cx2,
+    cy2.
+
+    Para "M" y "L":
+    cx1, cy1, cx2 y cy2 deben ser null.
+
+    Para "Q":
+    cx1 y cy1 deben ser numéricos;
+    cx2 y cy2 deben ser null.
+
+    Para "C":
+    cx1, cy1, cx2 y cy2 deben ser numéricos.
+
+    Todas las coordenadas utilizadas por pathData deben estar entre 0 y 100.
+
+    La trayectoria resultante debe representar un recorrido, perfil,
+    contorno, cable, cuerda, conducto, flujo u otra geometría técnica real.
+    RECHAZA paths utilizados únicamente para producir decoración o
+    complejidad visual artificial.
+
+17. Para shape="text":
     label debe contener texto visible y necesario.
-    Debe utilizarse únicamente para identificadores o referencias mínimas
-    y NO debe revelar la respuesta.
+    Debe utilizarse únicamente para identificadores, medidas o referencias
+    mínimas y NO debe revelar la respuesta.
 
-13. Los campos geométricos no utilizados por una determinada shape pueden
-    ser null y points puede ser [] cuando no sea necesario.
+18. Los campos no utilizados por una determinada shape deben conservar
+    los valores neutros establecidos por el contrato:
+    - null para campos escalares opcionales;
+    - [] para points, dash o pathData cuando no sean necesarios;
+    - "" para label cuando no deba existir texto visible.
 
-14. Las primitivas deben representar objetos, formas, recorridos, posiciones,
-    conexiones o configuraciones técnicas reales.
-    NO deben utilizarse como simples contenedores de conceptos escritos.
+19. Las primitivas deben COMPONER un dibujo técnico reconocible.
+    No basta con que cada primitiva sea estructuralmente válida.
 
-15. graphic ya NO utiliza el campo connections.
-    Las relaciones visuales deben construirse mediante las propias primitivas
+    El resultado conjunto debe representar un objeto, mecanismo, corte,
+    instalación, configuración, recorrido, conexión, estructura, sistema
+    físico o situación técnica coherente.
+
+20. RECHAZA específicamente dibujos cuyo resultado visual sea principalmente:
+    - círculos con palabras;
+    - rectángulos con conceptos;
+    - nodos conectados;
+    - líneas entre términos;
+    - flechas entre conceptos;
+    - enumeraciones transformadas en geometría;
+    - formas arbitrarias sin correspondencia física o técnica.
+
+21. Los elementos que físicamente formen parte de un mismo sistema deben
+    aparecer relacionados espacialmente de forma coherente.
+
+    Ejemplos de criterio visual:
+    - una polea debe integrarse en un recorrido físico de cuerda;
+    - un corte debe aparecer sobre la geometría correspondiente;
+    - una puerta debe relacionarse físicamente con su hueco/muro;
+    - una conexión eléctrica debe mostrar la disposición de conductores
+      y elementos necesaria;
+    - un equipo de ventilación debe relacionarse espacialmente con las
+      aberturas o recorridos relevantes;
+    - las piezas de un apeo deben ocupar posiciones relativas coherentes.
+
+    Estos ejemplos son criterios de representación y NO aportan contenido
+    factual adicional.
+
+22. rotation, arc y path deben utilizarse cuando sean necesarios para
+    representar correctamente geometrías inclinadas, recorridos curvos o
+    configuraciones que resultarían artificiales mediante formas básicas.
+
+    Su mera utilización NO convierte el dibujo en válido.
+
+23. Las proporciones y posiciones deben ser visualmente coherentes con la
+    información que se pretende evaluar.
+
+    RECHAZA solapamientos, cruces o disposiciones accidentales que hagan
+    ambigua la interpretación.
+
+24. Si existen varias configuraciones visuales A/B/C/D o equivalentes:
+    - deben estar claramente separadas;
+    - cada una debe poder identificarse inequívocamente;
+    - ninguna debe recibir un tratamiento visual que delate cuál es correcta;
+    - las diferencias relevantes deben estar realmente representadas.
+
+25. graphic ya NO utiliza el campo connections.
+    Las relaciones visuales deben construirse mediante los propios elementos
     de graphic.elements.
 
-16. Si stem u options hacen referencia a A, B, C, D, 1, 2, 3 u otro
+26. Si stem u options hacen referencia a A, B, C, D, 1, 2, 3 u otro
     identificador visual, dicho identificador debe aparecer inequívocamente
-    en el gráfico.
+    en graphic.
 
-17. graphic.description debe ser neutral y NO revelar la solución.
+27. graphic.description debe ser neutral y NO revelar la solución.
 
-18. El conjunto de primitivas debe ser suficiente para que el dibujo resulte
-    interpretable sin imaginar elementos técnicos ausentes.
+28. El conjunto de elementos debe ser suficiente para que el dibujo pueda
+    interpretarse sin tener que imaginar piezas, conexiones, recorridos,
+    posiciones o geometrías técnicas ausentes.
 
-19. Aunque la estructura sea formalmente válida, graphicValid=false si el
-    resultado sigue siendo un mapa conceptual, una representación abstracta,
-    un gráfico decorativo o un dibujo innecesario.
+29. La existencia de un dibujo formalmente correcto NO basta.
+    Aplica nuevamente el test de necesidad:
 
-20. graphicValid solo puede ser true cuando el gráfico sea simultáneamente:
+    si eliminando graphic la pregunta sigue pudiendo resolverse
+    esencialmente igual mediante stem + options,
+    graphicValid=false.
+
+30. Toda característica del dibujo que intervenga en determinar la respuesta
+    debe estar respaldada por sourceEvidence.
+
+    Esto incluye, cuando sean relevantes:
+    geometría,
+    posición,
+    orientación,
+    conexión,
+    recorrido,
+    medida,
+    dirección,
+    fuerza,
+    disposición y relación entre elementos.
+
+31. graphicValid=false si el resultado sigue siendo:
+    - abstracto;
+    - conceptual;
+    - decorativo;
+    - ambiguo;
+    - técnicamente incompleto;
+    - factual o espacialmente inventado;
+    - innecesario para resolver la pregunta.
+
+32. graphicValid solo puede ser true cuando el gráfico sea simultáneamente:
     - estructuralmente válido;
     - factual;
     - técnicamente coherente;
-    - visualmente interpretable;
-    - necesario para resolver la pregunta.
+    - visualmente reconocible e interpretable;
+    - necesario para resolver la pregunta;
+    - suficiente para identificar una única respuesta correcta.
 
 Si incumple cualquiera de las condiciones aplicables:
 - graphicValid=false;
