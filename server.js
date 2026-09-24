@@ -23,7 +23,78 @@ function aiClient(){
 
 let STORE = null;
 let EXAM_STYLE_STORE = null;
+const GRAPHICS_ROOT = path.join(process.cwd(), "public", "graphics");
 
+const GRAPHIC_TOPIC_FOLDERS = Object.freeze([
+  "teoria-fuego",
+  "incendios-interior",
+  "hidraulica",
+  "tuneles",
+  "incendios-industriales",
+  "incendios-vegetacion",
+  "salvamento-altura",
+  "trafico",
+  "ferroviarios",
+  "apicola",
+  "edificacion-apeos",
+  "apeo-poda",
+  "estructuras-colapsadas",
+  "ascensores",
+  "electricidad",
+  "nrbq",
+  "herramientas",
+  "vehiculos"
+]);
+
+const GRAPHIC_GROUP_EXCEPTIONS = Object.freeze({
+  nrbq: ["correspondencias-pictogramas"],
+  vehiculos: ["ciclo-motor-2-tiempos", "ciclo-motor-4-tiempos"]
+});
+
+const GRAPHIC_IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp"
+]);
+function buildGraphicSourceInventory(){
+  const inventory = [];
+
+  for(const topicFolder of GRAPHIC_TOPIC_FOLDERS){
+    const folderPath = path.join(GRAPHICS_ROOT, topicFolder);
+
+    if(!fs.existsSync(folderPath)){
+      console.warn(`[graphics] Carpeta no encontrada: ${topicFolder}`);
+      continue;
+    }
+
+    const files = fs.readdirSync(folderPath, { withFileTypes: true });
+
+    for(const entry of files){
+      if(!entry.isFile()) continue;
+
+      const extension = path.extname(entry.name).toLowerCase();
+      if(!GRAPHIC_IMAGE_EXTENSIONS.has(extension)) continue;
+
+      inventory.push({
+        topicFolder,
+        fileName: entry.name,
+        absolutePath: path.join(folderPath, entry.name),
+        publicUrl: `/graphics/${topicFolder}/${encodeURIComponent(entry.name)}`,
+        sourceId: `${topicFolder}/${entry.name}`
+      });
+    }
+  }
+
+  return inventory;
+}
+
+const GRAPHIC_SOURCE_INVENTORY = buildGraphicSourceInventory();
+
+console.log(
+  `[graphics] ${GRAPHIC_SOURCE_INVENTORY.length} imágenes fuente detectadas en ` +
+  `${new Set(GRAPHIC_SOURCE_INVENTORY.map(item => item.topicFolder)).size} temas.`
+);
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 async function initDatabase(){
@@ -64,6 +135,110 @@ async function initDatabase(){
   ALTER TABLE coverage_items
   ADD COLUMN IF NOT EXISTS manual_page TEXT
 `);
+   await db.query(`
+    CREATE TABLE IF NOT EXISTS graphic_assets (
+      id SERIAL PRIMARY KEY,
+      source_id TEXT NOT NULL,
+      topic_folder TEXT NOT NULL,
+      source_file TEXT NOT NULL,
+      public_url TEXT NOT NULL,
+
+      asset_index INTEGER NOT NULL DEFAULT 0,
+      asset_type TEXT NOT NULL DEFAULT 'individual',
+
+      concept TEXT,
+      description TEXT,
+      source_evidence TEXT,
+
+      crop_x NUMERIC,
+      crop_y NUMERIC,
+      crop_width NUMERIC,
+      crop_height NUMERIC,
+
+      is_official_reference BOOLEAN NOT NULL DEFAULT FALSE,
+      is_usable BOOLEAN NOT NULL DEFAULT FALSE,
+      analysis_status TEXT NOT NULL DEFAULT 'pending',
+
+      times_asked INTEGER NOT NULL DEFAULT 0,
+      last_asked_at TIMESTAMPTZ,
+
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+      UNIQUE(source_id, asset_index)
+    )
+  `); 
+}
+async function syncGraphicAssets(){
+  const graphicsRoot = path.join(process.cwd(), "public", "graphics");
+
+  if(!fs.existsSync(graphicsRoot)){
+    console.log("GRAPHICS: carpeta public/graphics no encontrada");
+    return { folders:0, files:0 };
+  }
+
+  const imageExtensions = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp"
+  ]);
+
+  const topicFolders = fs.readdirSync(graphicsRoot, {
+    withFileTypes:true
+  }).filter(entry => entry.isDirectory());
+
+  let files = 0;
+
+  for(const folder of topicFolders){
+    const folderPath = path.join(graphicsRoot, folder.name);
+
+    const images = fs.readdirSync(folderPath, {
+      withFileTypes:true
+    }).filter(entry =>
+      entry.isFile() &&
+      imageExtensions.has(path.extname(entry.name).toLowerCase())
+    );
+
+    for(const image of images){
+      const sourceId = `${folder.name}/${image.name}`;
+      const publicUrl =
+        `/graphics/${encodeURIComponent(folder.name)}/${encodeURIComponent(image.name)}`;
+
+      await db.query(
+        `INSERT INTO graphic_assets (
+          source_id,
+          topic_folder,
+          source_file,
+          public_url
+        )
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (source_id, asset_index)
+        DO UPDATE SET
+          topic_folder = EXCLUDED.topic_folder,
+          source_file = EXCLUDED.source_file,
+          public_url = EXCLUDED.public_url,
+          updated_at = NOW()`,
+        [
+          sourceId,
+          folder.name,
+          image.name,
+          publicUrl
+        ]
+      );
+
+      files++;
+    }
+  }
+
+  console.log(
+    `GRAPHICS: ${files} imágenes registradas en ${topicFolders.length} temas`
+  );
+
+  return {
+    folders:topicFolders.length,
+    files
+  };
 }
 async function loadStore(){
   const result = await db.query(
@@ -5244,6 +5419,7 @@ app.get("/api/coverage-audit", async(req,res)=>{
 });
 async function startServer(){
   await initDatabase();
+  await syncGraphicAssets();
   await loadStore();
   await loadExamStyleStore();
 
