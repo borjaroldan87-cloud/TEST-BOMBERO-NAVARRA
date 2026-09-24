@@ -3915,7 +3915,7 @@ function buildQuestionFamilyPlan(count){
     throw new Error(`Número de preguntas no soportado para planificación de familias: ${count}`);
   }
 
-  return shuffleArray(plan);
+  return [...plan].sort(() => Math.random() - 0.5);
 }
 async function getCoverageTargetsForGeneration(count){
   /*
