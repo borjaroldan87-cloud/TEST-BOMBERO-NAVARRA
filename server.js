@@ -3882,6 +3882,41 @@ app.get("/api/coverage-audit", async(req,res)=>{
     });
   }
 });
+function buildQuestionFamilyPlan(count){
+  const basePlan = [
+    "2026_CORRECTA",
+    "2026_CORRECTA",
+    "2026_INCORRECTA",
+    "2026_INCORRECTA",
+    "2026_RAZONAMIENTO",
+    "2024_NUMERICA",
+    "2024_NUMERICA",
+    "2024_TEXTO",
+    "CALCULO_FORMULACION",
+    "GRAFICA"
+  ];
+
+  const plansByCount = {
+    5: [
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2026_RAZONAMIENTO",
+      "2024_NUMERICA",
+      "GRAFICA"
+    ],
+    10: basePlan,
+    20: [...basePlan, ...basePlan],
+    40: [...basePlan, ...basePlan, ...basePlan, ...basePlan]
+  };
+
+  const plan = plansByCount[count];
+
+  if(!plan){
+    throw new Error(`Número de preguntas no soportado para planificación de familias: ${count}`);
+  }
+
+  return shuffleArray(plan);
+}
 async function getCoverageTargetsForGeneration(count){
   /*
     1. Conservamos EXACTAMENTE la selección base que ya existía:
