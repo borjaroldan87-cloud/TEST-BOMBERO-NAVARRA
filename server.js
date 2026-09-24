@@ -5863,6 +5863,59 @@ app.get("/api/graphics/analyze-pending", async (req,res)=>{
     });
   }
 });
+app.get("/api/graphics/inspect-latest", async (req,res)=>{
+  try{
+    const result = await db.query(
+      `SELECT
+        id,
+        source_id,
+        topic_folder,
+        source_file,
+        public_url,
+        asset_index,
+        asset_type,
+        concept,
+        description,
+        source_evidence,
+        crop_x,
+        crop_y,
+        crop_width,
+        crop_height,
+        is_official_reference,
+        is_usable,
+        analysis_status,
+        times_asked,
+        last_asked_at,
+        updated_at
+      FROM graphic_assets
+      WHERE analysis_status IN ('analyzed','rejected')
+      ORDER BY updated_at DESC
+      LIMIT 1`
+    );
+
+    if(!result.rows.length){
+      return res.status(404).json({
+        ok:false,
+        error:"No hay assets gráficos analizados."
+      });
+    }
+
+    res.json({
+      ok:true,
+      asset:result.rows[0]
+    });
+  }catch(error){
+    console.error(
+      "[graphics] Error en /api/graphics/inspect-latest:",
+      error
+    );
+
+    res.status(500).json({
+      ok:false,
+      error:error?.message || String(error)
+    });
+  }
+});
 async function startServer(){
   await initDatabase();
   await syncGraphicAssets();
