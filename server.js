@@ -5839,11 +5839,12 @@ app.get("/api/coverage-audit", async(req,res)=>{
 });
 app.get("/api/graphics/analyze-pending", async (req,res)=>{
   try{
-    const requestedLimit = 1;
+    
+    const requestedLimit = Number(req.query?.limit ?? 10);
 
-    const limit = Number.isInteger(requestedLimit)
-      ? Math.min(Math.max(requestedLimit,1),10)
-      : 1;
+const limit = Number.isInteger(requestedLimit)
+  ? Math.min(Math.max(requestedLimit,1),10)
+  : 10;
 
     const result = await analyzePendingGraphicSources({ limit });
 
