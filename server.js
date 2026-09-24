@@ -640,18 +640,35 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
       console.log(
         `[graphics] OK ${graphicRow.source_id}: ${analysis.assets.length} assets`
       );
-    }catch(error){
-      console.error(
-        `[graphics] ERROR ${graphicRow.source_id}:`,
-        error?.message || error
-      );
+  }catch(error){
+  const errorMessage = error?.message || String(error);
 
-      results.push({
-        sourceId:graphicRow.source_id,
-        ok:false,
-        error:error?.message || String(error)
-      });
-    }
+  console.error(
+    `[graphics] ERROR ${graphicRow.source_id}:`,
+    errorMessage
+  );
+
+  await db.query(
+    `UPDATE graphic_assets
+     SET
+       analysis_status = 'error',
+       is_usable = FALSE,
+       description = $2,
+       updated_at = NOW()
+     WHERE source_id = $1
+       AND analysis_status = 'pending'`,
+    [
+      graphicRow.source_id,
+      errorMessage
+    ]
+  );
+
+  results.push({
+    sourceId:graphicRow.source_id,
+    ok:false,
+    error:errorMessage
+  });
+}
   }
 
   return {
