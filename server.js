@@ -368,6 +368,298 @@ Solo usa useAsGroup=true si la imagen corresponde realmente a una de esas compos
 Cualquier otra imagen con varios dibujos debe dividirse en assets individuales siempre que sean separables.
 `;
 }
+async function analyzeGraphicSource(ai, graphicRow){
+  const imagePath = path.join(
+    process.cwd(),
+    "public",
+    "graphics",
+    graphicRow.topic_folder,
+    graphicRow.source_file
+  );
+
+  if(!fs.existsSync(imagePath)){
+    throw new Error(`Imagen gráfica no encontrada: ${imagePath}`);
+  }
+
+  const imageBytes = fs.readFileSync(imagePath);
+  const extension = path.extname(graphicRow.source_file).toLowerCase();
+
+  const mimeTypes = {
+    ".png":"image/png",
+    ".jpg":"image/jpeg",
+    ".jpeg":"image/jpeg",
+    ".webp":"image/webp"
+  };
+
+  const mimeType = mimeTypes[extension];
+
+  if(!mimeType){
+    throw new Error(`Formato gráfico no soportado: ${extension}`);
+  }
+
+  const prompt = `
+Analiza esta imagen para incorporarla a una biblioteca cerrada de imágenes
+destinada exclusivamente a preguntas gráficas de una oposición de Bomberos
+de Navarra.
+
+TEMA/CARPETA:
+${graphicRow.topic_folder}
+
+${graphicGroupRulesPrompt(graphicRow.topic_folder)}
+
+OBJETIVO:
+Identificar exactamente qué material gráfico útil contiene la imagen y cómo
+debe utilizarse posteriormente para generar preguntas de interpretación visual.
+
+REGLAS OBLIGATORIAS:
+
+1. Determina si es una imagen técnica del temario, una referencia de examen
+oficial o una imagen no utilizable.
+
+2. No inventes contenido que no sea visible.
+
+3. Por defecto, cada dibujo, esquema o configuración independiente debe
+convertirse en un asset independiente.
+
+4. Solo conserva conjuntamente varios dibujos cuando las reglas específicas
+del tema lo permitan expresamente.
+
+5. Para cada asset devuelve crop con coordenadas NORMALIZADAS entre 0 y 1:
+x, y, width y height.
+
+6. El crop debe conservar íntegramente el dibujo necesario y excluir, cuando
+sea posible, pies de imagen, títulos, párrafos y texto ajeno al esquema.
+
+7. textToRemove debe contener únicamente textos que revelen directamente
+la respuesta o sean información externa innecesaria.
+
+8. No elimines A/B/C/D, números, símbolos, cotas, magnitudes o etiquetas
+cuando formen parte funcional del dibujo.
+
+9. usableForGraphicQuestion=true únicamente cuando pueda formularse una
+pregunta cuya resolución dependa realmente de observar la imagen.
+
+10. needsImageToAnswer=true únicamente cuando eliminar la imagen impediría
+resolver correctamente la pregunta prevista.
+
+11. concept debe identificar brevemente qué representa el asset.
+
+12. visualDescription debe describir únicamente lo visible, sin anticipar
+la respuesta correcta.
+
+13. Respeta estrictamente las reglas de agrupación específicas del tema.
+
+Devuelve exclusivamente la estructura solicitada.
+`;
+
+  const response = await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:[
+      {
+        role:"user",
+        parts:[
+          { text:prompt },
+          {
+            inlineData:{
+              mimeType,
+              data:imageBytes.toString("base64")
+            }
+          }
+        ]
+      }
+    ],
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:graphicAssetAnalysisSchema,
+      temperature:0.1
+    }
+  });
+
+  const rawText = response.text?.trim();
+
+  if(!rawText){
+    throw new Error(
+      `Gemini no devolvió análisis para ${graphicRow.source_id}`
+    );
+  }
+
+  let analysis;
+
+  try{
+    analysis = JSON.parse(rawText);
+  }catch{
+    throw new Error(
+      `Respuesta JSON inválida analizando ${graphicRow.source_id}`
+    );
+  }
+
+  if(!Array.isArray(analysis.assets)){
+    analysis.assets = [];
+  }
+
+  return analysis;
+}
+async function saveGraphicAnalysis(graphicRow, analysis){
+  const assets = Array.isArray(analysis.assets)
+    ? analysis.assets
+    : [];
+
+  if(!assets.length){
+    await db.query(
+      `UPDATE graphic_assets
+       SET
+         analysis_status = 'rejected',
+         is_usable = FALSE,
+         updated_at = NOW()
+       WHERE source_id = $1`,
+      [graphicRow.source_id]
+    );
+
+    return;
+  }
+
+  await db.query(
+    `DELETE FROM graphic_assets
+     WHERE source_id = $1
+     AND asset_index <> 0`,
+    [graphicRow.source_id]
+  );
+
+  for(const asset of assets){
+    const assetIndex = Number(asset.assetIndex);
+
+    if(!Number.isInteger(assetIndex) || assetIndex < 0){
+      throw new Error(
+        `assetIndex inválido en ${graphicRow.source_id}`
+      );
+    }
+
+    await db.query(
+      `INSERT INTO graphic_assets (
+        source_id,
+        topic_folder,
+        source_file,
+        public_url,
+        asset_index,
+        asset_type,
+        concept,
+        description,
+        source_evidence,
+        crop_x,
+        crop_y,
+        crop_width,
+        crop_height,
+        is_official_reference,
+        is_usable,
+        analysis_status
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,
+        $10,$11,$12,$13,$14,$15,'analyzed'
+      )
+      ON CONFLICT (source_id, asset_index)
+      DO UPDATE SET
+        topic_folder = EXCLUDED.topic_folder,
+        source_file = EXCLUDED.source_file,
+        public_url = EXCLUDED.public_url,
+        asset_type = EXCLUDED.asset_type,
+        concept = EXCLUDED.concept,
+        description = EXCLUDED.description,
+        source_evidence = EXCLUDED.source_evidence,
+        crop_x = EXCLUDED.crop_x,
+        crop_y = EXCLUDED.crop_y,
+        crop_width = EXCLUDED.crop_width,
+        crop_height = EXCLUDED.crop_height,
+        is_official_reference = EXCLUDED.is_official_reference,
+        is_usable = EXCLUDED.is_usable,
+        analysis_status = EXCLUDED.analysis_status,
+        updated_at = NOW()`,
+      [
+        graphicRow.source_id,
+        graphicRow.topic_folder,
+        graphicRow.source_file,
+        graphicRow.public_url,
+        assetIndex,
+        analysis.useAsGroup === true ? "group" : "individual",
+        asset.concept || null,
+        asset.visualDescription || null,
+        [
+          analysis.sourceCaption,
+          analysis.sourceText
+        ].filter(Boolean).join("\n") || null,
+        asset.crop?.x ?? null,
+        asset.crop?.y ?? null,
+        asset.crop?.width ?? null,
+        asset.crop?.height ?? null,
+        analysis.sourceType === "official_exam_reference",
+        asset.usableForGraphicQuestion === true &&
+          asset.needsImageToAnswer === true,
+        asset.usableForGraphicQuestion === true
+          ? "analyzed"
+          : "rejected"
+      ]
+    );
+  }
+}
+async function analyzePendingGraphicSources({ limit = 1 } = {}){
+  const ai = aiClient();
+
+  const pending = await db.query(
+    `SELECT DISTINCT ON (source_id)
+       source_id,
+       topic_folder,
+       source_file,
+       public_url
+     FROM graphic_assets
+     WHERE analysis_status = 'pending'
+     ORDER BY source_id, asset_index ASC
+     LIMIT $1`,
+    [limit]
+  );
+
+  const results = [];
+
+  for(const graphicRow of pending.rows){
+    try{
+      console.log(
+        `[graphics] Analizando ${graphicRow.source_id}`
+      );
+
+      const analysis = await analyzeGraphicSource(ai, graphicRow);
+
+      await saveGraphicAnalysis(graphicRow, analysis);
+
+      results.push({
+        sourceId:graphicRow.source_id,
+        ok:true,
+        sourceType:analysis.sourceType,
+        useAsGroup:analysis.useAsGroup,
+        assets:analysis.assets.length
+      });
+
+      console.log(
+        `[graphics] OK ${graphicRow.source_id}: ${analysis.assets.length} assets`
+      );
+    }catch(error){
+      console.error(
+        `[graphics] ERROR ${graphicRow.source_id}:`,
+        error?.message || error
+      );
+
+      results.push({
+        sourceId:graphicRow.source_id,
+        ok:false,
+        error:error?.message || String(error)
+      });
+    }
+  }
+
+  return {
+    requested:limit,
+    pendingFound:pending.rows.length,
+    results
+  };
+}
 async function loadStore(){
   const result = await db.query(
     "SELECT value FROM app_state WHERE key = $1",
@@ -5542,6 +5834,32 @@ app.get("/api/coverage-audit", async(req,res)=>{
     res.status(500).json({
       ok:false,
       error:e?.message || String(e)
+    });
+  }
+});
+app.post("/api/graphics/analyze-pending", async (req,res)=>{
+  try{
+    const requestedLimit = Number(req.body?.limit ?? 1);
+
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit,1),10)
+      : 1;
+
+    const result = await analyzePendingGraphicSources({ limit });
+
+    res.json({
+      ok:true,
+      ...result
+    });
+  }catch(error){
+    console.error(
+      "[graphics] Error en /api/graphics/analyze-pending:",
+      error
+    );
+
+    res.status(500).json({
+      ok:false,
+      error:error?.message || String(error)
     });
   }
 });
