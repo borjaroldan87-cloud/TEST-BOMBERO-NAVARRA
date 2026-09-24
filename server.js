@@ -4210,8 +4210,6 @@ if(!replacement){
   return selected;
 }
 
-  return shuffleArray(plan);
-}
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
