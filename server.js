@@ -5837,9 +5837,9 @@ app.get("/api/coverage-audit", async(req,res)=>{
     });
   }
 });
-app.post("/api/graphics/analyze-pending", async (req,res)=>{
+app.get("/api/graphics/analyze-pending", async (req,res)=>{
   try{
-    const requestedLimit = Number(req.body?.limit ?? 1);
+    const requestedLimit = 1;
 
     const limit = Number.isInteger(requestedLimit)
       ? Math.min(Math.max(requestedLimit,1),10)
