@@ -4663,7 +4663,7 @@ CRITERIO FINAL
 - Conserva exactamente el mismo orden.
 
 PREGUNTAS A VALIDAR:
-\${JSON.stringify(questions)}
+${JSON.stringify(questions)}
 `;
 
 const runtimeValidationSchema = structuredClone(validationSchema);
