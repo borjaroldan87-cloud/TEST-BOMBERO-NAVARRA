@@ -120,533 +120,91 @@ function updateTimer(){
 function answeredCount(){
   return ans.filter(x=>Number.isInteger(x)).length;
 }
-
-   function renderGraphic(q){
+function renderGraphic(q){
   const g=q?.graphic;
 
-  if(!g || !Array.isArray(g.elements) || g.elements.length===0){
+  if(
+    !g ||
+    !Number.isInteger(Number(g.assetId)) ||
+    !g.publicUrl
+  ){
     return "";
   }
 
-  const esc=(value)=>String(value??"")
+  const esc=value=>String(value??"")
     .replaceAll("&","&amp;")
     .replaceAll("<","&lt;")
     .replaceAll(">","&gt;")
     .replaceAll('"',"&quot;");
 
-  const clamp=(value,min=0,max=100)=>{
+  const clamp01=value=>{
     const n=Number(value);
-    if(!Number.isFinite(n)) return min;
-    return Math.min(max,Math.max(min,n));
+    if(!Number.isFinite(n)) return null;
+    return Math.min(1,Math.max(0,n));
   };
 
-  const finiteOrNull=value=>{
-    if(value==null) return null;
-    const n=Number(value);
-    return Number.isFinite(n) ? n : null;
-  };
+  const crop=g.crop ?? {};
 
-  const sx=value=>clamp(value)*6;
-  const sy=value=>clamp(value)*3.2;
+  const x=clamp01(crop.x) ?? 0;
+  const y=clamp01(crop.y) ?? 0;
+  const width=clamp01(crop.width) ?? 1;
+  const height=clamp01(crop.height) ?? 1;
 
-  const pointString=points=>{
-    if(!Array.isArray(points)) return "";
+  /*
+    El crop está almacenado en coordenadas normalizadas 0-1.
 
-    return points
-      .filter(p=>
-        Number.isFinite(Number(p?.x)) &&
-        Number.isFinite(Number(p?.y))
-      )
-      .map(p=>`${sx(p.x)},${sy(p.y)}`)
-      .join(" ");
-  };
+    Mostramos la imagen original dentro de una ventana proporcional al
+    recorte. No generamos ni modificamos el dibujo técnico.
+  */
+  const safeWidth=Math.max(0.001,Math.min(width,1-x));
+  const safeHeight=Math.max(0.001,Math.min(height,1-y));
 
-  const safeColor=(value,fallback)=>{
-    const color=String(value??"").trim();
+  const imageWidth=100/safeWidth;
+  const imageHeight=100/safeHeight;
 
-    if(!color){
-      return fallback;
-    }
+  const imageLeft=-(x/safeWidth)*100;
+  const imageTop=-(y/safeHeight)*100;
 
-    /*
-      Lista deliberadamente conservadora.
-      Evitamos introducir valores SVG/CSS arbitrarios.
-    */
-    const allowedNames=new Set([
-      "none",
-      "currentColor",
-      "black",
-      "white",
-      "gray",
-      "grey",
-      "red",
-      "green",
-      "blue",
-      "orange",
-      "yellow",
-      "brown"
-    ]);
-
-    if(allowedNames.has(color)){
-      return color;
-    }
-
-    if(/^#[0-9a-fA-F]{3}$/.test(color)){
-      return color;
-    }
-
-    if(/^#[0-9a-fA-F]{6}$/.test(color)){
-      return color;
-    }
-
-    return fallback;
-  };
-
-  const styleFor=el=>{
-    const stroke=safeColor(el?.stroke,"currentColor");
-    const fill=safeColor(el?.fill,"none");
-
-    const rawWidth=Number(el?.strokeWidth);
-    const strokeWidth=Number.isFinite(rawWidth)
-      ? Math.min(8,Math.max(0.5,rawWidth))
-      : 2.5;
-
-    const dash=Array.isArray(el?.dash)
-      ? el.dash
-          .map(Number)
-          .filter(n=>Number.isFinite(n) && n>0)
-          .slice(0,8)
-      : [];
-
-    return {
-      stroke,
-      fill,
-      strokeWidth,
-      dashAttribute:dash.length
-        ? `stroke-dasharray="${dash.join(" ")}"`
-        : ""
-    };
-  };
-
-  const rotationFor=(el,cx,cy)=>{
-    const rotation=finiteOrNull(el?.rotation);
-
-    if(rotation==null || rotation===0){
-      return "";
-    }
-
-    const safeRotation=Math.max(-360,Math.min(360,rotation));
-
-    return `transform="rotate(${safeRotation} ${cx} ${cy})"`;
-  };
-
-  const labelMarkup=(label,x,y)=>{
-    if(!label) return "";
-
-    return `
-      <text
-        x="${x}"
-        y="${y-7}"
-        text-anchor="middle"
-        font-size="13"
-        font-weight="600"
-        fill="currentColor"
-      >${esc(label)}</text>
-    `;
-  };
-
-  const arcPath=(el)=>{
-    const cx=sx(el?.x);
-    const cy=sy(el?.y);
-
-    const rawRadius=finiteOrNull(el?.radius);
-    const start=finiteOrNull(el?.startAngle);
-    const end=finiteOrNull(el?.endAngle);
-
-    if(rawRadius==null || rawRadius<=0 || start==null || end==null){
-      return null;
-    }
-
-    /*
-      sx y sy utilizan escalas distintas.
-      Por eso el arco se construye como arco elíptico visual para mantener
-      coherencia con el sistema normalizado 0-100.
-    */
-    const rx=Math.min(300,rawRadius*6);
-    const ry=Math.min(160,rawRadius*3.2);
-
-    const toRad=deg=>(deg*Math.PI)/180;
-
-    const startX=cx + rx*Math.cos(toRad(start));
-    const startY=cy + ry*Math.sin(toRad(start));
-
-    const endX=cx + rx*Math.cos(toRad(end));
-    const endY=cy + ry*Math.sin(toRad(end));
-
-    let delta=end-start;
-
-    while(delta<0) delta+=360;
-    while(delta>360) delta-=360;
-
-    if(delta===0){
-      return null;
-    }
-
-    const largeArc=delta>180 ? 1 : 0;
-    const sweep=1;
-
-    return `M ${startX} ${startY} A ${rx} ${ry} 0 ${largeArc} ${sweep} ${endX} ${endY}`;
-  };
-
-  const structuredPath=(pathData)=>{
-    if(!Array.isArray(pathData) || pathData.length===0){
-      return "";
-    }
-
-    const commands=[];
-
-    for(const part of pathData){
-      const command=String(part?.command??"").toUpperCase();
-
-      const x=finiteOrNull(part?.x);
-      const y=finiteOrNull(part?.y);
-
-      if(x==null || y==null){
-        return "";
-      }
-
-      const px=sx(x);
-      const py=sy(y);
-
-      if(command==="M" || command==="L"){
-        commands.push(`${command} ${px} ${py}`);
-        continue;
-      }
-
-      if(command==="Q"){
-        const cx1=finiteOrNull(part?.cx1);
-        const cy1=finiteOrNull(part?.cy1);
-
-        if(cx1==null || cy1==null){
-          return "";
-        }
-
-        commands.push(
-          `Q ${sx(cx1)} ${sy(cy1)} ${px} ${py}`
-        );
-
-        continue;
-      }
-
-      if(command==="C"){
-        const cx1=finiteOrNull(part?.cx1);
-        const cy1=finiteOrNull(part?.cy1);
-        const cx2=finiteOrNull(part?.cx2);
-        const cy2=finiteOrNull(part?.cy2);
-
-        if(
-          cx1==null ||
-          cy1==null ||
-          cx2==null ||
-          cy2==null
-        ){
-          return "";
-        }
-
-        commands.push(
-          `C ${sx(cx1)} ${sy(cy1)} ${sx(cx2)} ${sy(cy2)} ${px} ${py}`
-        );
-
-        continue;
-      }
-
-      return "";
-    }
-
-    return commands.join(" ");
-  };
-
-  const drawElement=(el,index)=>{
-    const shape=String(el?.shape??"");
-    const label=String(el?.label??"");
-
-    const x=sx(el?.x);
-    const y=sy(el?.y);
-
-    const x2=el?.x2==null ? null : sx(el.x2);
-    const y2=el?.y2==null ? null : sy(el.y2);
-
-    const width=el?.width==null
-      ? null
-      : clamp(el.width)*6;
-
-    const height=el?.height==null
-      ? null
-      : clamp(el.height)*3.2;
-
-    const radius=el?.radius==null
-      ? null
-      : clamp(el.radius)*3.2;
-
-    const points=pointString(el?.points);
-
-    const {
-      stroke,
-      fill,
-      strokeWidth,
-      dashAttribute
-    }=styleFor(el);
-
-    const text=labelMarkup(label,x,y);
-
-    switch(shape){
-
-      case "line":{
-        if(x2==null || y2==null) return "";
-
-        const centerX=(x+x2)/2;
-        const centerY=(y+y2)/2;
-
-        return `
-          <g ${rotationFor(el,centerX,centerY)}>
-            <line
-              x1="${x}" y1="${y}"
-              x2="${x2}" y2="${y2}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linecap="round"
-            />
-            ${text}
-          </g>
-        `;
-      }
-
-      case "rect":{
-        if(width==null || height==null) return "";
-
-        const centerX=x+width/2;
-        const centerY=y+height/2;
-
-        return `
-          <g ${rotationFor(el,centerX,centerY)}>
-            <rect
-              x="${x}"
-              y="${y}"
-              width="${width}"
-              height="${height}"
-              fill="${fill}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linejoin="round"
-            />
-            ${text}
-          </g>
-        `;
-      }
-
-      case "circle":
-        if(radius==null) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <circle
-              cx="${x}"
-              cy="${y}"
-              r="${radius}"
-              fill="${fill}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-            />
-            ${text}
-          </g>
-        `;
-
-      case "ellipse":
-        if(width==null || height==null) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <ellipse
-              cx="${x}"
-              cy="${y}"
-              rx="${width/2}"
-              ry="${height/2}"
-              fill="${fill}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-            />
-            ${text}
-          </g>
-        `;
-
-      case "polygon":
-        if(!points) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <polygon
-              points="${points}"
-              fill="${fill}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linejoin="round"
-            />
-            ${text}
-          </g>
-        `;
-
-      case "polyline":
-        if(!points) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <polyline
-              points="${points}"
-              fill="none"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            ${text}
-          </g>
-        `;
-
-      case "arrow":{
-        if(x2==null || y2==null) return "";
-
-        const markerId=`arrowhead-${index}`;
-        const centerX=(x+x2)/2;
-        const centerY=(y+y2)/2;
-
-        return `
-          <g ${rotationFor(el,centerX,centerY)}>
-            <defs>
-              <marker
-                id="${markerId}"
-                markerWidth="10"
-                markerHeight="7"
-                refX="9"
-                refY="3.5"
-                orient="auto"
-                markerUnits="strokeWidth"
-              >
-                <polygon
-                  points="0 0, 10 3.5, 0 7"
-                  fill="${stroke}"
-                />
-              </marker>
-            </defs>
-
-            <line
-              x1="${x}" y1="${y}"
-              x2="${x2}" y2="${y2}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linecap="round"
-              marker-end="url(#${markerId})"
-            />
-            ${text}
-          </g>
-        `;
-      }
-
-      case "arc":{
-        const d=arcPath(el);
-
-        if(!d) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <path
-              d="${d}"
-              fill="none"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linecap="round"
-            />
-            ${text}
-          </g>
-        `;
-      }
-
-      case "path":{
-        const d=structuredPath(el?.pathData);
-
-        if(!d) return "";
-
-        return `
-          <g ${rotationFor(el,x,y)}>
-            <path
-              d="${d}"
-              fill="${fill}"
-              stroke="${stroke}"
-              stroke-width="${strokeWidth}"
-              ${dashAttribute}
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            ${text}
-          </g>
-        `;
-      }
-
-      case "text":
-        return `
-          <text
-            x="${x}"
-            y="${y}"
-            text-anchor="middle"
-            font-size="14"
-            font-weight="700"
-            fill="${stroke}"
-            ${rotationFor(el,x,y)}
-          >${esc(label)}</text>
-        `;
-
-      default:
-        return "";
-    }
-  };
-
-  const drawing=g.elements
-    .map((el,index)=>drawElement(el,index))
-    .join("");
-
-  if(!drawing.trim()){
-    return "";
-  }
+  const aspectRatio=safeWidth/safeHeight;
 
   return `
-    <div class="question-graphic">
-      ${g.title
-        ? `<div><b>${esc(g.title)}</b></div>`
-        : ""}
-
-      <svg
-        viewBox="0 0 600 320"
-        role="img"
-        aria-label="${esc(g.description||g.title||"Dibujo técnico de la pregunta")}"
-        style="width:100%;max-width:700px;height:auto;display:block;margin:12px auto;"
+    <div
+      class="question-graphic"
+      data-graphic-asset-id="${esc(g.assetId)}"
+    >
+      <div
+        class="graphic-crop"
+        style="
+          position:relative;
+          width:100%;
+          max-width:700px;
+          aspect-ratio:${aspectRatio};
+          overflow:hidden;
+          margin:14px auto;
+          background:#fff;
+        "
       >
-        ${drawing}
-      </svg>
-
-      ${g.description
-        ? `<div class="muted">${esc(g.description)}</div>`
-        : ""}
+        <img
+          src="${esc(g.publicUrl)}"
+          alt="Imagen técnica de la pregunta"
+          draggable="false"
+          style="
+            position:absolute;
+            width:${imageWidth}%;
+            height:${imageHeight}%;
+            max-width:none;
+            left:${imageLeft}%;
+            top:${imageTop}%;
+            object-fit:fill;
+            filter:grayscale(1) contrast(1.08);
+            user-select:none;
+            -webkit-user-drag:none;
+          "
+        >
+      </div>
     </div>
   `;
-} 
-
+}
 function show(){
   const answered=answeredCount();
   const blank=qs.length-answered;
