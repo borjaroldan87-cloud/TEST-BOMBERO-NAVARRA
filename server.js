@@ -839,7 +839,14 @@ for(const asset of result.rows){
     bestAsset = asset;
   }
 }
-
+console.log("GRAPHIC_MATCH_DEBUG", JSON.stringify({
+  topicFolder,
+  coverageConcept: coverageItem?.concept || null,
+  candidates: result.rows.length,
+  bestScore,
+  bestAssetId: bestAsset?.id ?? null,
+  bestAssetConcept: bestAsset?.concept ?? null
+}));
 if(!bestAsset || bestScore < 5){
   return null;
 }
