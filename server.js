@@ -711,7 +711,10 @@ function graphicTopicFolderFromTopicName(topicName){
 
   return null;
 }
-async function getGraphicAssetForGeneration({ topicFolder = null } = {}){
+async function getGraphicAssetForGeneration({
+  topicFolder = null,
+  coverageItem = null
+} = {}){
   const params = [];
   const conditions = [
   "is_usable = TRUE",
@@ -723,38 +726,68 @@ async function getGraphicAssetForGeneration({ topicFolder = null } = {}){
     params.push(topicFolder);
     conditions.push(`topic_folder = $${params.length}`);
   }
+const coverageText = [
+  coverageItem?.section,
+  coverageItem?.concept,
+  coverageItem?.source_evidence
+]
+  .filter(Boolean)
+  .join(" ")
+  .trim();
 
-  const result = await db.query(
-    `SELECT
-       id,
-       source_id,
-       topic_folder,
-       source_file,
-       public_url,
-       asset_index,
-       asset_type,
-       concept,
-       description,
-       source_evidence,
-       crop_x,
-       crop_y,
-       crop_width,
-       crop_height,
-       is_official_reference,
-       times_asked,
-       last_asked_at
-     FROM graphic_assets
-     WHERE ${conditions.join(" AND ")}
-     ORDER BY
-       times_asked ASC,
-       last_asked_at ASC NULLS FIRST,
-       RANDOM()
-     LIMIT 1`,
-    params
-  );
-
-  return result.rows[0] || null;
+if(!coverageText){
+  return null;
 }
+
+params.push(coverageText);
+const coverageParam = `$${params.length}`;
+
+const result = await db.query(
+  `SELECT
+      id,
+      source_id,
+      topic_folder,
+      source_file,
+      public_url,
+      asset_index,
+      asset_type,
+      concept,
+      description,
+      source_evidence,
+      crop_x,
+      crop_y,
+      crop_width,
+      crop_height,
+      is_official_reference,
+      times_asked,
+      last_asked_at,
+      ts_rank_cd(
+        to_tsvector(
+          'simple',
+          COALESCE(concept,'') || ' ' ||
+          COALESCE(description,'') || ' ' ||
+          COALESCE(source_evidence,'')
+        ),
+        plainto_tsquery('simple', ${coverageParam})
+      ) AS semantic_rank
+    FROM graphic_assets
+    WHERE ${conditions.join(" AND ")}
+      AND to_tsvector(
+        'simple',
+        COALESCE(concept,'') || ' ' ||
+        COALESCE(description,'') || ' ' ||
+        COALESCE(source_evidence,'')
+      ) @@ plainto_tsquery('simple', ${coverageParam})
+    ORDER BY
+      semantic_rank DESC,
+      times_asked ASC,
+      last_asked_at ASC NULLS FIRST
+    LIMIT 1`,
+  params
+);
+
+return result.rows[0] || null;
+ } 
 
 async function loadStore(){
   const result = await db.query(
@@ -4218,7 +4251,8 @@ async function getCoverageTargetsForGeneration(count){
 
 const graphicAsset = graphicTopicFolder
   ? await getGraphicAssetForGeneration({
-      topicFolder: graphicTopicFolder
+      topicFolder: graphicTopicFolder,
+      coverageItem: selected[i]
     })
   : null;
 
@@ -4352,14 +4386,37 @@ El campo graphic de la pregunta debe devolver EXACTAMENTE:
 }
 
 REGLAS:
-- Conserva estos valores EXACTAMENTE.
-- No inventes otro asset.
-- No modifiques URL, identificadores ni crop.
+- Conserva assetId, sourceId, publicUrl, assetType, concept, description y crop EXACTAMENTE.
+- No inventes otro asset, no modifiques URL, identificadores ni crop y no generes ningún dibujo nuevo.
 - No construyas graphic.elements.
-- No generes ningún dibujo nuevo.
-- La imagen debe ser necesaria para resolver la pregunta.
-- El temario recuperado mediante File Search sigue siendo la única fuente factual.
-- No utilices concept, description, sourceId ni el nombre del archivo como pista en el enunciado o las opciones.
+
+- La imagen y sus metadatos visuales sirven EXCLUSIVAMENTE para identificar,
+  seleccionar y mostrar el asset.
+- concept, description, sourceId, nombre de archivo y cualquier descripción
+  obtenida del análisis visual NO son fuente factual.
+
+- TODA afirmación técnica de esta pregunta debe proceder del TEMARIO recuperado
+  mediante File Search: significado técnico, aplicación, condiciones de uso,
+  procedimiento, respuesta correcta, distractores, explanation y sourceEvidence.
+
+- La imagen determina QUÉ se observa.
+  El TEMARIO determina QUÉ significa técnicamente.
+
+- Antes de formular la pregunta, recupera del TEMARIO evidencia textual que
+  sustente específicamente el concepto representado por el asset.
+- Si esa evidencia no permite determinar con seguridad qué representa, para qué
+  se utiliza o cuáles son sus características, NO completes la información
+  mediante inferencia visual: aplica el fallback de familia.
+
+- sourceEvidence debe contener EXCLUSIVAMENTE texto factual recuperado del
+  TEMARIO. Nunca utilices como sourceEvidence la descripción visual del asset.
+- manualPage debe corresponder EXCLUSIVAMENTE a la evidencia factual recuperada
+  del TEMARIO. Nunca deduzcas la página desde el asset o sus metadatos.
+- correctIndex, options y explanation deben quedar completamente respaldados
+  por esa evidencia factual.
+- Si existe cualquier contradicción entre los metadatos visuales y el TEMARIO,
+  prevalece SIEMPRE el TEMARIO.
+- La imagen debe ser imprescindible para resolver la pregunta.
 ` : ""}
 `).join("\n")}
 
@@ -4487,59 +4544,73 @@ REGLAS DE VALIDEZ GRÁFICA
 Una pregunta GRAFICA solo puede tener graphicValid=true cuando se cumplen
 TODAS estas condiciones:
 
-1. graphic contiene un asset real con la estructura anterior.
+1. graphic debe contener un asset gráfico real:
+   assetId, sourceId, publicUrl, assetType y crop.
 
-2. La pregunta depende realmente de observar la imagen.
+2. La pregunta debe depender realmente de observar la imagen.
 
-Aplica el test de necesidad:
+   Aplica el test de necesidad:
+   si eliminando completamente graphic la pregunta puede resolverse
+   esencialmente igual mediante stem + options:
+   graphicValid=false.
 
-Si eliminando completamente graphic la pregunta puede resolverse
-esencialmente igual mediante stem + options:
-graphicValid=false.
+3. stem y options NO deben describir verbalmente la información visual
+   que el opositor debe obtener observando la imagen.
 
-3. stem no debe describir verbalmente aquello que el opositor debe obtener
-observando la imagen.
+4. concept, description, sourceId, publicUrl, sourceCaption, sourceText,
+   nombre de archivo y cualquier otro metadato del asset NO constituyen
+   evidencia factual y NO pueden utilizarse para determinar, completar
+   o justificar la respuesta.
 
-4. Las options no deben revelar mediante texto la información visual que
-debería interpretarse.
+5. Toda afirmación técnica contenida en stem, options y explanation debe
+   estar respaldada por sourceEvidence.
 
-5. concept, description, sourceId, publicUrl o cualquier metadato interno
-del asset no pueden utilizarse como pista para determinar la respuesta.
+6. sourceEvidence debe proceder exclusivamente del TEMARIO recuperado
+   mediante File Search. Si sourceEvidence contiene únicamente una
+   descripción visual del asset o información procedente de sus
+   metadatos:
+   graphicValid=false y valid=false.
 
-6. La respuesta correcta y cualquier afirmación factual evaluada deben estar
-respaldadas por sourceEvidence.
+7. La respuesta correcta debe poder justificarse completamente mediante
+   sourceEvidence. La imagen únicamente puede aportar la identificación
+   o interpretación visual necesaria para aplicar esa evidencia.
 
-7. La imagen NO autoriza a introducir conocimiento externo ni a completar
-información factual ausente de sourceEvidence.
+8. explanation debe justificar la respuesta mediante sourceEvidence y
+   NO mediante una reinterpretación libre del dibujo ni mediante los
+   metadatos del asset.
 
-8. La interpretación exigida debe corresponder a información que pueda
-observarse realmente en el asset descrito.
+9. manualPage debe corresponder exclusivamente a la evidencia factual
+   contenida en sourceEvidence. Nunca puede deducirse de graphic,
+   concept, description, sourceId, sourceCaption, sourceText o cualquier
+   otro metadato visual.
 
-9. Debe existir exactamente una respuesta correcta.
+10. Si sourceEvidence no permite establecer con seguridad el significado,
+    aplicación, procedimiento, condición, valor o característica técnica
+    necesaria para responder:
+    graphicValid=false y valid=false.
 
-10. Si assetType="group", la pregunta puede utilizar la composición completa,
-pero únicamente cuando la interpretación dependa realmente de dicha
-composición.
+11. Si existe contradicción entre cualquier metadato o descripción visual
+    del asset y sourceEvidence, prevalece SIEMPRE sourceEvidence.
 
-11. No se exige ni se permite graphic.elements, graphic.type, shapes,
-coordenadas 0-100, paths, primitivas SVG ni ningún dibujo generado.
+12. Debe existir exactamente una respuesta correcta según la polaridad
+    de la pregunta y sourceEvidence.
 
-12. No rechaces una pregunta por ausencia de graphic.elements: el sistema
-gráfico actual utiliza imágenes reales mediante assetId/publicUrl/crop.
+13. Si assetType="group", la composición completa solo puede utilizarse
+    cuando la interpretación dependa realmente de dicha composición.
 
-13. Si la pregunta exige identificar A, B, C, D, números, posiciones,
-componentes u otras referencias visuales, dichas referencias deben poder
-localizarse inequívocamente en la imagen.
+14. No se exige ni se permite graphic.elements, graphic.type, shapes,
+    coordenadas 0-100, paths, primitivas SVG ni ningún dibujo generado.
+    No rechaces una pregunta por ausencia de graphic.elements.
 
-14. graphic.description debe ser neutral y no revelar la respuesta correcta.
+15. Si la pregunta exige identificar A, B, C, D, números, posiciones,
+    componentes u otras referencias visuales, dichas referencias deben
+    poder localizarse inequívocamente en la imagen.
 
-15. Si la imagen es meramente decorativa, redundante, ambigua o innecesaria
-para resolver la pregunta:
-graphicValid=false.
+16. Si la imagen es decorativa, redundante, ambigua, innecesaria o algún
+    dato visual esencial no puede establecerse con seguridad a partir
+    del asset:
+    graphicValid=false.
 
-16. Si cualquier dato visual esencial para resolver la pregunta no puede
-establecerse con seguridad a partir del asset:
-graphicValid=false.
 
 COHERENCIA DE FAMILIA
 
@@ -4731,7 +4802,28 @@ FIN DE REFERENCIA
       "La regeneración no devolvió el número esperado de preguntas."
     );
   }
+for(let i=0;i<parsed.questions.length;i++){
+  const target = replacementTargets[i];
+  const question = parsed.questions[i];
 
+  if(target?.questionFamily === "GRAFICA" && target?.graphicAsset){
+    question.questionFamily = "GRAFICA";
+    question.graphic = {
+      assetId: target.graphicAsset.id,
+      sourceId: target.graphicAsset.source_id,
+      publicUrl: target.graphicAsset.public_url,
+      assetType: target.graphicAsset.asset_type,
+      concept: target.graphicAsset.concept || "",
+      description: target.graphicAsset.description || "",
+      crop: {
+        x: Number(target.graphicAsset.crop_x ?? 0),
+        y: Number(target.graphicAsset.crop_y ?? 0),
+        width: Number(target.graphicAsset.crop_width ?? 1),
+        height: Number(target.graphicAsset.crop_height ?? 1)
+      }
+    };
+  }
+}
   return {
     questions: parsed.questions,
     targets: replacementTargets
@@ -4816,7 +4908,28 @@ ${officialStyle}
     console.log("GENERATECONTENT: respuesta recibida");
 console.log("TEXTO GEMINI:", response.text.slice(0,1500));
     const parsed=JSON.parse(response.text);
+for(let i=0;i<parsed.questions.length;i++){
+  const target = targets[i];
+  const question = parsed.questions[i];
 
+  if(target?.questionFamily === "GRAFICA" && target?.graphicAsset){
+    question.questionFamily = "GRAFICA";
+    question.graphic = {
+      assetId: target.graphicAsset.id,
+      sourceId: target.graphicAsset.source_id,
+      publicUrl: target.graphicAsset.public_url,
+      assetType: target.graphicAsset.asset_type,
+      concept: target.graphicAsset.concept || "",
+      description: target.graphicAsset.description || "",
+      crop: {
+        x: Number(target.graphicAsset.crop_x ?? 0),
+        y: Number(target.graphicAsset.crop_y ?? 0),
+        width: Number(target.graphicAsset.crop_width ?? 1),
+        height: Number(target.graphicAsset.crop_height ?? 1)
+      }
+    };
+  }
+}
     if(
       !parsed.questions ||
       parsed.questions.length!==count
@@ -4883,8 +4996,31 @@ while(
     const validationResult = replacementValidation[i];
 
     if(validationResult.valid){
-      finalQuestions[originalIndex] =
-        regenerated.questions[i];
+  const replacementQuestion = regenerated.questions[i];
+  const originalTarget = targets[originalIndex];
+
+  if(
+    originalTarget?.questionFamily === "GRAFICA" &&
+    originalTarget?.graphicAsset
+  ){
+    replacementQuestion.questionFamily = "GRAFICA";
+    replacementQuestion.graphic = {
+      assetId: originalTarget.graphicAsset.id,
+      sourceId: originalTarget.graphicAsset.source_id,
+      publicUrl: originalTarget.graphicAsset.public_url,
+      assetType: originalTarget.graphicAsset.asset_type,
+      concept: originalTarget.graphicAsset.concept || "",
+      description: originalTarget.graphicAsset.description || "",
+      crop: {
+        x: Number(originalTarget.graphicAsset.crop_x ?? 0),
+        y: Number(originalTarget.graphicAsset.crop_y ?? 0),
+        width: Number(originalTarget.graphicAsset.crop_width ?? 1),
+        height: Number(originalTarget.graphicAsset.crop_height ?? 1)
+      }
+    };
+  }
+
+  finalQuestions[originalIndex] = replacementQuestion;
     }else{
       stillInvalid.push({
   index: originalIndex,
@@ -5000,10 +5136,10 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     }
 
     res.json({
-      ok:true,
-      completed:true,
-      questions:parsed.questions
-    });
+  ok:true,
+  completed:true,
+  questions:finalQuestions
+});
 
   }catch(e){
     console.error("ERROR GENERATE STATUS:",e);
