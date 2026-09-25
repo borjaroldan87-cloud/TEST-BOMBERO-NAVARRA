@@ -676,12 +676,48 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
     results
   };
 }
+function graphicTopicFolderFromTopicName(topicName){
+  const text = String(topicName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase();
+
+  const rules = [
+    ["teoria-fuego", ["teoria del fuego"]],
+    ["incendios-interior", ["incendios de interior", "incendio de interior"]],
+    ["hidraulica", ["hidraulica"]],
+    ["tuneles", ["tuneles", "tunel"]],
+    ["incendios-industriales", ["incendios industriales", "incendio industrial"]],
+    ["incendios-vegetacion", ["incendios de vegetacion", "incendio de vegetacion"]],
+    ["salvamento-altura", ["salvamento en altura", "salvamento altura"]],
+    ["trafico", ["trafico"]],
+    ["ferroviarios", ["ferroviario", "ferroviarios"]],
+    ["apicola", ["apicola"]],
+    ["edificacion-apeos", ["edificacion", "apeos"]],
+    ["apeo-poda", ["apeo y poda", "poda de arbolado", "apeo de arbolado"]],
+    ["estructuras-colapsadas", ["estructuras colapsadas", "estructura colapsada"]],
+    ["ascensores", ["ascensores", "ascensor"]],
+    ["electricidad", ["electricidad", "riesgo electrico"]],
+    ["nrbq", ["nrbq"]],
+    ["herramientas", ["herramientas"]],
+    ["vehiculos", ["vehiculos", "vehiculo", "motores", "motor"]]
+  ];
+
+  for(const [folder,aliases] of rules){
+    if(aliases.some(alias => text.includes(alias))){
+      return folder;
+    }
+  }
+
+  return null;
+}
 async function getGraphicAssetForGeneration({ topicFolder = null } = {}){
   const params = [];
   const conditions = [
-    "is_usable = TRUE",
-    "analysis_status = 'analyzed'"
-  ];
+  "is_usable = TRUE",
+  "analysis_status = 'analyzed'",
+  "is_official_reference = FALSE"
+];
 
   if(topicFolder){
     params.push(topicFolder);
@@ -4139,8 +4175,9 @@ async function getCoverageTargetsForGeneration(count){
 
   const result = await db.query(`
     SELECT
-      ci.id,
-      ci.section,
+  ci.id,
+  t.name AS topic_name,
+  ci.section,
       ci.concept,
       ci.item_type,
       ci.evaluation_type,
@@ -4176,16 +4213,34 @@ async function getCoverageTargetsForGeneration(count){
       continue;
     }
 
-    const graphicAsset = await getGraphicAssetForGeneration();
+    const graphicTopicFolder =
+  graphicTopicFolderFromTopicName(selected[i].topic_name);
+
+const graphicAsset = graphicTopicFolder
+  ? await getGraphicAssetForGeneration({
+      topicFolder: graphicTopicFolder
+    })
+  : null;
 
     if(graphicAsset){
-      selected[i] = {
-        ...selected[i],
-        graphicAsset
-      };
-
-      continue;
+  selected[i] = {
+    ...selected[i],
+    graphicAsset:{
+      id:Number(graphicAsset.id),
+      source_id:graphicAsset.source_id,
+      public_url:graphicAsset.public_url,
+      asset_type:graphicAsset.asset_type,
+      concept:graphicAsset.concept || "",
+      description:graphicAsset.description || "",
+      crop_x:Number(graphicAsset.crop_x ?? 0),
+      crop_y:Number(graphicAsset.crop_y ?? 0),
+      crop_width:Number(graphicAsset.crop_width ?? 1),
+      crop_height:Number(graphicAsset.crop_height ?? 1)
     }
+  };
+
+  continue;
+}
 
     /*
       Si no existe ningún asset gráfico utilizable,
@@ -4426,94 +4481,6 @@ CALCULO_FORMULACION:
 - la fórmula o relación utilizada debe estar respaldada por el temario;
 - todos los datos necesarios para resolverla deben estar disponibles;
 - cualquier operación, despeje, equivalencia o relación debe ser correcta.
-
-GRAFICA:
-- graphic debe existir y NO ser null;
-- la representación debe ser una estructura TÉCNICA VISUAL REAL:
-  geometría, forma, corte, disposición espacial, configuración física,
-  recorrido, conexión técnica, mecanismo, sistema, fuerzas o situación
-  física representable;
-- NO consideres válida una representación por el mero hecho de contener
-  elementos unidos mediante líneas o flechas;
-- RECHAZA mapas conceptuales, mapas mentales, organigramas, palabras o
-  frases dentro de círculos/cajas conectados mediante líneas y cualquier
-  conversión artificial de contenido textual en nodos;
-- RECHAZA diagramas que representen relaciones conceptuales entre términos
-  en lugar de relaciones físicas, espaciales, geométricas o técnicas;
-- RECHAZA gráficos decorativos o cuya información esencial ya esté
-  explícitamente escrita en stem, options o labels;
-- las etiquetas deben ser mínimas y NO deben proporcionar directamente
-  el conocimiento que debería deducir el opositor;
-- el gráfico debe ser NECESARIO para resolver correctamente la pregunta;
-- aplica obligatoriamente este test:
-  "Si elimino completamente graphic y dejo stem + options,
-   ¿la pregunta puede resolverse esencialmente igual?"
-  Si la respuesta es sí, graphicValid=false;
-- la representación debe exigir interpretar visualmente una forma,
-  posición, geometría, conexión, recorrido, disposición, mecanismo,
-  fuerza u otra característica técnica;
-- la interpretación debe requerir conocimiento del temario y no poder
-  resolverse simplemente leyendo las etiquetas o siguiendo relaciones
-  textuales evidentes;
-- debe existir evidencia suficiente en sourceEvidence para respaldar la
-  geometría, posición, conexión, recorrido, disposición o relación técnica
-  utilizada para determinar la respuesta;
-- puede aceptarse un dibujo construido a partir de una descripción textual
-  aunque la fuente no contenga una imagen original, PERO únicamente cuando
-  sourceEvidence determine inequívocamente la estructura técnica representada;
-- RECHAZA cualquier geometría, posición, conexión, recorrido, medida,
-  orientación, fuerza o relación técnica introducida mediante conocimiento
-  externo o inventada para hacer posible el gráfico;
-- stem, options, correctIndex y graphic deben ser mutuamente coherentes;
-- todo elemento mencionado mediante identificadores como A, B, C, D,
-  1, 2, 3, etc. debe aparecer inequívocamente identificado de la misma
-  forma en graphic;
-- si una opción menciona "elemento A", "posición B", "figura 2" o equivalente
-  y esa referencia no puede localizarse inequívocamente en graphic,
-  graphicValid=false;
-- los elementos físicos o técnicos necesarios para resolver la pregunta
-  deben existir en graphic;
-- las conexiones necesarias deben corresponder a relaciones físicas o
-  técnicas reales y NO a asociaciones conceptuales inventadas;
-- graphic.description debe describir objetivamente la representación y
-  NO revelar la respuesta;
-- debe existir UNA única respuesta válida;
-- si el dibujo resulta abstracto, arbitrario o no representa una
-  configuración técnica examinable, graphicValid=false;
-- si el contenido podría convertirse razonablemente en una pregunta textual
-  pero NO en un dibujo técnico real, graphicValid=false;
-- cuando cualquiera de estas condiciones falle, familyValid=false,
-  graphicValid=false y valid=false.
-
-REGLAS DEL CAMPO graphic
-
-- Para cualquier familia distinta de GRAFICA, graphic debe ser null.
-- Para preguntas no gráficas devuelve graphicValid=null.
-- graphicIssues debe ser [] cuando no existan problemas gráficos.
-
-Para una pregunta GRAFICA, graphic debe identificar un asset gráfico REAL
-previamente seleccionado de la biblioteca cerrada del sistema.
-
-VALIDACIÓN ESTRUCTURAL DEL ASSET
-
-Para GRAFICA deben existir obligatoriamente en graphic:
-
-- assetId: entero positivo;
-- sourceId: cadena no vacía;
-- publicUrl: cadena no vacía;
-- assetType: exclusivamente "individual" o "group";
-- concept: cadena;
-- description: cadena;
-- crop: objeto con x, y, width y height.
-
-Para crop:
-
-- x debe estar entre 0 y 1;
-- y debe estar entre 0 y 1;
-- width debe ser mayor que 0 y como máximo 1;
-- height debe ser mayor que 0 y como máximo 1;
-- x + width no debe superar 1;
-- y + height no debe superar 1.
 
 REGLAS DE VALIDEZ GRÁFICA
 
