@@ -739,9 +739,6 @@ if(!coverageText){
   return null;
 }
 
-params.push(coverageText);
-const coverageParam = `$${params.length}`;
-
 const result = await db.query(
   `SELECT
       id,
@@ -760,33 +757,94 @@ const result = await db.query(
       crop_height,
       is_official_reference,
       times_asked,
-      last_asked_at,
-      ts_rank_cd(
-        to_tsvector(
-          'simple',
-          COALESCE(concept,'') || ' ' ||
-          COALESCE(description,'') || ' ' ||
-          COALESCE(source_evidence,'')
-        ),
-        plainto_tsquery('simple', ${coverageParam})
-      ) AS semantic_rank
+      last_asked_at
     FROM graphic_assets
     WHERE ${conditions.join(" AND ")}
-      AND to_tsvector(
-        'simple',
-        COALESCE(concept,'') || ' ' ||
-        COALESCE(description,'') || ' ' ||
-        COALESCE(source_evidence,'')
-      ) @@ plainto_tsquery('simple', ${coverageParam})
     ORDER BY
-      semantic_rank DESC,
       times_asked ASC,
-      last_asked_at ASC NULLS FIRST
-    LIMIT 1`,
+      last_asked_at ASC NULLS FIRST,
+      id ASC
+    LIMIT 40`,
   params
 );
 
-return result.rows[0] || null;
+if(!result.rows.length){
+  return null;
+}
+
+const normalizeGraphicText = value =>
+  String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9ñ]+/g, " ")
+    .trim();
+
+const stopWords = new Set([
+  "para","como","con","sin","por","del","las","los","una","uno","unos","unas",
+  "que","sus","este","esta","estos","estas","desde","hasta","sobre","entre",
+  "segun","mediante","tipo","tipos","forma","formas","caso","casos","parte",
+  "partes","elemento","elementos","sistema","sistemas","procedimiento",
+  "procedimientos","aplicacion","aplicaciones"
+]);
+
+const tokens = value =>
+  new Set(
+    normalizeGraphicText(value)
+      .split(/\s+/)
+      .filter(word => word.length >= 4 && !stopWords.has(word))
+  );
+
+const targetConceptTokens = tokens(coverageItem?.concept);
+const targetSectionTokens = tokens(coverageItem?.section);
+const targetEvidenceTokens = tokens(coverageItem?.source_evidence);
+
+const overlap = (a,b) => {
+  let count = 0;
+  for(const token of a){
+    if(b.has(token)) count++;
+  }
+  return count;
+};
+
+let bestAsset = null;
+let bestScore = 0;
+
+for(const asset of result.rows){
+  const assetConceptTokens = tokens(asset.concept);
+  const assetDescriptionTokens = tokens(asset.description);
+  const assetEvidenceTokens = tokens(asset.source_evidence);
+
+  const conceptScore =
+    overlap(targetConceptTokens, assetConceptTokens) * 8 +
+    overlap(targetConceptTokens, assetDescriptionTokens) * 5 +
+    overlap(targetConceptTokens, assetEvidenceTokens) * 5;
+
+  const evidenceScore =
+    overlap(targetEvidenceTokens, assetConceptTokens) * 4 +
+    overlap(targetEvidenceTokens, assetDescriptionTokens) * 2 +
+    overlap(targetEvidenceTokens, assetEvidenceTokens) * 3;
+
+  const sectionScore =
+    overlap(targetSectionTokens, assetConceptTokens) * 2 +
+    overlap(targetSectionTokens, assetDescriptionTokens);
+
+  const score =
+    conceptScore +
+    evidenceScore +
+    sectionScore;
+
+  if(score > bestScore){
+    bestScore = score;
+    bestAsset = asset;
+  }
+}
+
+if(!bestAsset || bestScore < 5){
+  return null;
+}
+
+return bestAsset;
  } 
 
 async function loadStore(){
