@@ -4904,7 +4904,15 @@ ${officialStyle}
         responseJsonSchema:questionSchema
       }
     });
-
+console.log(
+  "TARGETS GRAFICOS:",
+  targets.map((t, i) => ({
+    index: i,
+    family: t.questionFamily,
+    graphicAssetId: t.graphicAsset?.id ?? null,
+    graphicSourceId: t.graphicAsset?.source_id ?? null
+  }))
+);
     console.log("GENERATECONTENT: respuesta recibida");
 console.log("TEXTO GEMINI:", response.text.slice(0,1500));
     const parsed=JSON.parse(response.text);
