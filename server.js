@@ -4819,6 +4819,19 @@ REGLAS OBLIGATORIAS:
 - File Search y el temario son la única fuente factual.
 - No inventes datos para completar información ausente.
 - Todas las reglas normales de generación siguen siendo obligatorias.
+- REGENERACIÓN POR FAMILIA:
+  La familia asignada al objetivo es obligatoria mientras exista evidencia suficiente en el temario para construirla correctamente.
+
+- Si questionFamily es CALCULO_FORMULACION:
+  la nueva pregunta DEBE exigir necesariamente una operación, fórmula, despeje, conversión de unidades, relación entre magnitudes o cálculo numérico respaldado por el temario.
+  No generes una pregunta meramente descriptiva, literal o conceptual.
+  Si el objetivo original no contiene evidencia suficiente para construir un cálculo válido, aplica el fallback de familia definido en generationPrompt y devuelve en questionFamily la familia realmente generada.
+
+- Si questionFamily es 2026_CORRECTA:
+  no te limites a reproducir literalmente una única frase del sourceEvidence.
+  Construye una pregunta que exija aplicación, comparación, discriminación técnica o razonamiento cuando la evidencia recuperada lo permita.
+
+- Antes de devolver cada sustitución, comprueba que el contenido REAL de la pregunta cumple la familia indicada en questionFamily.
 - Conserva la questionFamily de la pregunta rechazada cuando exista evidencia
   suficiente en el temario para corregirla dentro de esa misma familia.
 - Si esa familia no puede construirse válidamente con la evidencia recuperada,
