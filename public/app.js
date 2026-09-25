@@ -176,9 +176,9 @@ function renderGraphic(q){
         class="graphic-crop"
         style="
           position:relative;
-          width:100%;
-          max-width:700px;
-          aspect-ratio:${aspectRatio};
+          width:min(100%,480px);
+height:auto;
+max-height:220px;
           overflow:hidden;
           margin:14px auto;
           background:#fff;
@@ -190,15 +190,15 @@ function renderGraphic(q){
           draggable="false"
           style="
             position:absolute;
-            width:${imageWidth}%;
-            height:${imageHeight}%;
-            max-width:none;
-            left:${imageLeft}%;
-            top:${imageTop}%;
-            object-fit:fill;
-            filter:grayscale(1) contrast(1.08);
-            user-select:none;
-            -webkit-user-drag:none;
+width:${imageWidth}%;
+height:${imageHeight}%;
+max-width:none;
+left:${imageLeft}%;
+top:${imageTop}%;
+object-fit:fill;
+filter:grayscale(1) contrast(1.08);
+user-select:none;
+-webkit-user-drag:none;
           "
         >
       </div>
