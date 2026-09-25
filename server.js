@@ -5038,6 +5038,31 @@ for(let i=0;i<parsed.questions.length;i++){
 console.log("VALIDACIÓN FACTUAL: iniciando");
 
 let finalQuestions = [...parsed.questions];
+    for (let i = 0; i < finalQuestions.length; i++) {
+  const target = targets[i];
+  const q = finalQuestions[i];
+
+  if (target?.questionFamily === "GRAFICA" && target?.graphicAsset) {
+    q.questionFamily = "GRAFICA";
+
+    q.graphic = {
+      assetId: target.graphicAsset.id,
+      sourceId: target.graphicAsset.source_id,
+      publicUrl: target.graphicAsset.public_url,
+      assetType: target.graphicAsset.asset_type,
+      concept: target.graphicAsset.concept || "",
+      description: target.graphicAsset.description || "",
+      crop: {
+        x: Number(target.graphicAsset.crop_x ?? 0),
+        y: Number(target.graphicAsset.crop_y ?? 0),
+        width: Number(target.graphicAsset.crop_width ?? 1),
+        height: Number(target.graphicAsset.crop_height ?? 1)
+      }
+    };
+  } else {
+    q.graphic = null;
+  }
+}
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions);
 
