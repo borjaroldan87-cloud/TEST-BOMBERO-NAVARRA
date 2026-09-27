@@ -5350,12 +5350,19 @@ while(
 
 if(invalidQuestions.length > 0){
   const details = invalidQuestions
-    .map(result =>
-      `Pregunta ${result.index + 1}: ${
-        result.issues?.join(" | ") ||
-        "fallo factual no especificado"
-      }`
-    )
+    .map(result => {
+      const allIssues = [
+        ...(result.issues || []),
+        ...(result.familyIssues || []),
+        ...(result.graphicIssues || [])
+      ].filter(Boolean);
+
+      return `Pregunta ${result.index + 1}: ${
+        allIssues.length
+          ? allIssues.join(" | ")
+          : "rechazada por el validador sin motivo textual"
+      }`;
+    })
     .join(" || ");
 
   throw new Error(
