@@ -4323,8 +4323,9 @@ const graphicAsset = graphicTopicFolder
 
     if(graphicAsset){
   selected[i] = {
-    ...selected[i],
-    graphicAsset:{
+  ...selected[i],
+  questionFamily: "GRAFICA",
+  graphicAsset:{
       id:Number(graphicAsset.id),
       source_id:graphicAsset.source_id,
       public_url:graphicAsset.public_url,
