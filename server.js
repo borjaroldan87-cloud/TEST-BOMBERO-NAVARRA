@@ -4675,7 +4675,17 @@ REGLAS:
   por esa evidencia factual.
 - Si existe cualquier contradicción entre los metadatos visuales y el TEMARIO,
   prevalece SIEMPRE el TEMARIO.
-- La imagen debe ser imprescindible para resolver la pregunta.
+- La imagen debe formar parte real de la tarea: el opositor debe observar,
+  identificar, distinguir, comparar, localizar, interpretar o relacionar
+  algún elemento visual concreto del asset.
+- NO es necesario que la respuesta sea imposible de deducir para un opositor
+  que ya conozca perfectamente el contenido teórico.
+- La pregunta sigue siendo GRAFICA aunque el concepto representado también
+  esté definido textualmente en el TEMARIO.
+- La imagen solo será decorativa si el enunciado no exige observar ni
+  interpretar ningún elemento visual concreto de ella.
+- No describas en el enunciado ni en las opciones la característica visual
+  concreta que el opositor debe reconocer en la imagen.
 ` : ""}
 `).join("\n")}
 
@@ -4806,12 +4816,24 @@ TODAS estas condiciones:
 1. graphic debe contener un asset gráfico real:
    assetId, sourceId, publicUrl, assetType y crop.
 
-2. La pregunta debe depender realmente de observar la imagen.
+2. La imagen debe participar de forma real en la pregunta.
 
-   Aplica el test de necesidad:
-   si eliminando completamente graphic la pregunta puede resolverse
-   esencialmente igual mediante stem + options:
-   graphicValid=false.
+   NO apliques un test de imprescindibilidad absoluta.
+   Una pregunta GRAFICA sigue siendo válida aunque el mismo conocimiento
+   técnico pudiera evaluarse también mediante una pregunta puramente textual.
+
+   graphicValid=true cuando el opositor deba observar la imagen para
+   identificar, reconocer, comparar, localizar o interpretar el elemento,
+   configuración, procedimiento o situación técnica sobre la que pregunta
+   el enunciado.
+
+   NO marques graphicValid=false únicamente porque sourceEvidence permita
+   conocer o justificar textualmente la respuesta correcta.
+
+   Marca graphicValid=false solo cuando la imagen sea realmente decorativa:
+   es decir, cuando el enunciado y las opciones ya proporcionen explícitamente
+   toda la información visual necesaria y observar la imagen no aporte nada
+   a la tarea planteada.
 
 3. stem y options NO deben describir verbalmente la información visual
    que el opositor debe obtener observando la imagen.
@@ -4865,10 +4887,12 @@ TODAS estas condiciones:
     componentes u otras referencias visuales, dichas referencias deben
     poder localizarse inequívocamente en la imagen.
 
-16. Si la imagen es decorativa, redundante, ambigua, innecesaria o algún
-    dato visual esencial no puede establecerse con seguridad a partir
-    del asset:
-    graphicValid=false.
+16. Marca graphicValid=false si la imagen es meramente decorativa, es ambigua
+    para la identificación solicitada o no permite observar con seguridad
+    el dato visual que exige la pregunta.
+
+    NO consideres una imagen redundante o innecesaria por el mero hecho de que
+    el conocimiento técnico asociado también esté explicado en sourceEvidence.
 
 
 COHERENCIA DE FAMILIA
