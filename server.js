@@ -4264,18 +4264,23 @@ function buildQuestionFamilyPlan(count){
 }
 async function getCoverageTargetsForGeneration(count){
   /*
-    Conservamos exactamente la selección base de coverage_items
-    y la asignación de familias.
+    SELECCIÓN DE OBJETIVOS
 
-    ÚNICAMENTE las plazas GRAFICA reciben además un asset gráfico
-    real, previamente analizado y marcado como utilizable.
+    - Las familias no gráficas conservan el funcionamiento normal.
+    - La plaza GRAFICA se resuelve buscando una combinación REAL:
+        coverage_item + graphic_asset compatible.
+    - Nunca se utiliza un asset de otro tema.
+    - Nunca se reutiliza un asset agotado si quedan alternativas.
+    - Si no existe ninguna combinación gráfica válida:
+        CALCULO_FORMULACION -> 2024_NUMERICA -> 2024_TEXTO.
   */
 
-  const result = await db.query(`
+  const result = await db.query(
+    `
     SELECT
-  ci.id,
-  t.name AS topic_name,
-  ci.section,
+      ci.id,
+      t.name AS topic_name,
+      ci.section,
       ci.concept,
       ci.item_type,
       ci.evaluation_type,
@@ -4287,7 +4292,9 @@ async function getCoverageTargetsForGeneration(count){
     WHERE ci.worked = FALSE
     ORDER BY RANDOM()
     LIMIT $1
-  `,[count]);
+    `,
+    [count]
+  );
 
   if(result.rows.length < count){
     throw new Error(
@@ -4303,90 +4310,237 @@ async function getCoverageTargetsForGeneration(count){
   }));
 
   /*
-    Solo intervenimos sobre las plazas GRAFICA.
-    Ninguna otra familia ni coverage_item se modifica.
+    ============================================================
+    RESOLUCIÓN DE LA PLAZA GRAFICA
+    ============================================================
+
+    No intentamos forzar una imagen sobre el coverage_item
+    aleatorio que haya caído en la plaza GRAFICA.
+
+    Buscamos entre los coverage_items todavía no trabajados
+    una combinación que tenga un asset gráfico compatible.
   */
+
   for(let i = 0; i < selected.length; i++){
+
     if(selected[i].questionFamily !== "GRAFICA"){
       continue;
     }
 
-    const graphicTopicFolder =
-  graphicTopicFolderFromTopicName(selected[i].topic_name);
-
-const graphicAsset = graphicTopicFolder
-  ? await getGraphicAssetForGeneration({
-      topicFolder: graphicTopicFolder,
-      coverageItem: selected[i]
-    })
-  : null;
-
-    if(graphicAsset){
-  selected[i] = {
-  ...selected[i],
-  questionFamily: "GRAFICA",
-  graphicAsset:{
-      id:Number(graphicAsset.id),
-      source_id:graphicAsset.source_id,
-      public_url:graphicAsset.public_url,
-      asset_type:graphicAsset.asset_type,
-      concept:graphicAsset.concept || "",
-      description:graphicAsset.description || "",
-      crop_x:Number(graphicAsset.crop_x ?? 0),
-      crop_y:Number(graphicAsset.crop_y ?? 0),
-      crop_width:Number(graphicAsset.crop_width ?? 1),
-      crop_height:Number(graphicAsset.crop_height ?? 1)
-    }
-  };
-
-  continue;
-}
+    const originalGraphicSlot = selected[i];
 
     /*
-      Si no existe ningún asset gráfico utilizable,
-      aplicamos el fallback únicamente a esta plaza.
+      Primero probamos el coverage_item que ya ocupaba
+      naturalmente la plaza.
     */
-    const originalItem = selected[i];
+
+    const directTopicFolder =
+      graphicTopicFolderFromTopicName(originalGraphicSlot.topic_name);
+
+    let matchedCoverageItem = null;
+    let matchedGraphicAsset = null;
+
+    if(directTopicFolder){
+
+      const directAsset = await getGraphicAssetForGeneration({
+        topicFolder: directTopicFolder,
+        coverageItem: originalGraphicSlot
+      });
+
+      if(directAsset){
+        matchedCoverageItem = originalGraphicSlot;
+        matchedGraphicAsset = directAsset;
+      }
+    }
+
+    /*
+      Si el objetivo aleatorio no tiene una imagen suficientemente
+      compatible, buscamos OTRO coverage_item sin trabajar que sí
+      forme una pareja válida con un asset del mismo tema.
+
+      Esto evita perder la plaza GRAFICA simplemente porque la
+      selección aleatoria inicial cayó sobre un concepto no gráfico.
+    */
+
+    if(!matchedGraphicAsset){
+
+      const graphicCandidatesResult = await db.query(
+        `
+        SELECT
+          ci.id,
+          t.name AS topic_name,
+          ci.section,
+          ci.concept,
+          ci.item_type,
+          ci.evaluation_type,
+          ci.source_page,
+          ci.manual_page,
+          ci.source_evidence
+        FROM coverage_items ci
+        JOIN topics t ON t.id = ci.topic_id
+        WHERE ci.worked = FALSE
+          AND ci.id <> ALL($1::int[])
+        ORDER BY
+          ci.times_asked ASC,
+          ci.last_asked_at ASC NULLS FIRST,
+          ci.id ASC
+        LIMIT 120
+        `,
+        [selected.map(item => Number(item.id))]
+      );
+
+      for(const candidate of graphicCandidatesResult.rows){
+
+        const candidateTopicFolder =
+          graphicTopicFolderFromTopicName(candidate.topic_name);
+
+        if(!candidateTopicFolder){
+          continue;
+        }
+
+        const candidateAsset =
+          await getGraphicAssetForGeneration({
+            topicFolder: candidateTopicFolder,
+            coverageItem: candidate
+          });
+
+        if(!candidateAsset){
+          continue;
+        }
+
+        matchedCoverageItem = candidate;
+        matchedGraphicAsset = candidateAsset;
+        break;
+      }
+    }
+
+    /*
+      Si encontramos pareja válida, sustituimos ÚNICAMENTE
+      la plaza GRAFICA.
+
+      El resto de preguntas permanece intacto.
+    */
+
+    if(matchedCoverageItem && matchedGraphicAsset){
+
+      selected[i] = {
+        ...matchedCoverageItem,
+
+        questionFamily: "GRAFICA",
+
+        graphicAsset: {
+          id: Number(matchedGraphicAsset.id),
+          source_id: matchedGraphicAsset.source_id,
+          public_url: matchedGraphicAsset.public_url,
+          asset_type: matchedGraphicAsset.asset_type,
+          concept: matchedGraphicAsset.concept || "",
+          description: matchedGraphicAsset.description || "",
+
+          crop_x: Number(matchedGraphicAsset.crop_x ?? 0),
+          crop_y: Number(matchedGraphicAsset.crop_y ?? 0),
+          crop_width: Number(matchedGraphicAsset.crop_width ?? 1),
+          crop_height: Number(matchedGraphicAsset.crop_height ?? 1)
+        }
+      };
+
+      console.log(
+        "GRAPHIC_TARGET_SELECTED",
+        JSON.stringify({
+          coverageId: matchedCoverageItem.id,
+          topic: matchedCoverageItem.topic_name,
+          coverageConcept: matchedCoverageItem.concept,
+          assetId: matchedGraphicAsset.id,
+          assetConcept: matchedGraphicAsset.concept
+        })
+      );
+
+      continue;
+    }
+
+    /*
+      ============================================================
+      FALLBACK
+      ============================================================
+
+      Solo llegamos aquí cuando no existe ninguna combinación
+      coverage_item + asset que el selector gráfico considere válida.
+
+      Orden acordado:
+        1. cálculo
+        2. numérica
+        3. texto
+    */
 
     const originalText = [
-      originalItem.section,
-      originalItem.concept,
-      originalItem.source_evidence
+      originalGraphicSlot.section,
+      originalGraphicSlot.concept,
+      originalGraphicSlot.source_evidence
     ]
       .filter(Boolean)
       .join(" ");
 
     const hasNumericData =
-      originalItem.item_type === "dato_numerico" ||
+      originalGraphicSlot.item_type === "dato_numerico" ||
       /\d/.test(originalText);
 
     const hasCalculationPotential =
-      originalItem.item_type === "formula" ||
-      originalItem.evaluation_type === "calculo" ||
-      originalItem.evaluation_type === "relacion_variables";
+      originalGraphicSlot.item_type === "formula" ||
+      originalGraphicSlot.evaluation_type === "calculo" ||
+      originalGraphicSlot.evaluation_type === "relacion_variables";
 
     if(hasCalculationPotential){
+
       selected[i] = {
-        ...originalItem,
-        questionFamily:"CALCULO_FORMULACION"
+        ...originalGraphicSlot,
+        questionFamily: "CALCULO_FORMULACION"
       };
+
     }else if(hasNumericData){
+
       selected[i] = {
-        ...originalItem,
-        questionFamily:"2024_NUMERICA"
+        ...originalGraphicSlot,
+        questionFamily: "2024_NUMERICA"
       };
+
     }else{
+
       selected[i] = {
-        ...originalItem,
-        questionFamily:"2024_TEXTO"
+        ...originalGraphicSlot,
+        questionFamily: "2024_TEXTO"
       };
     }
+
+    console.log(
+      "GRAPHIC_TARGET_FALLBACK",
+      JSON.stringify({
+        coverageId: originalGraphicSlot.id,
+        topic: originalGraphicSlot.topic_name,
+        fallbackFamily: selected[i].questionFamily
+      })
+    );
+  }
+
+  /*
+    Evitamos que una sustitución de la plaza GRAFICA haya
+    introducido accidentalmente el mismo coverage_item dos veces.
+  */
+
+  const usedIds = new Set();
+
+  for(const item of selected){
+
+    if(usedIds.has(Number(item.id))){
+      throw new Error(
+        `Coverage duplicado durante la selección de objetivos: ${item.id}`
+      );
+    }
+
+    usedIds.add(Number(item.id));
   }
 
   return selected;
 }
-  
-  
+   
 
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
