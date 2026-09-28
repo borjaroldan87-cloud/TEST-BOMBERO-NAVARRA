@@ -509,16 +509,64 @@ async function loadStatistics(){
     );
   }
 }
+function performanceColor(percentage){
+  if(percentage===null || percentage===undefined){
+    return "#777";
+  }
+
+  if(percentage>=80) return "#16803a";
+  if(percentage>=60) return "#2563eb";
+  if(percentage>=40) return "#ca8a04";
+  if(percentage>=20) return "#ea580c";
+  return "#dc2626";
+}
+
+function performanceBadge(performance){
+  if(
+    performance?.percentage===null ||
+    performance?.percentage===undefined
+  ){
+    return `
+      <strong style="color:#777">
+        Sin respuestas
+      </strong>
+    `;
+  }
+
+  return `
+    <strong
+      style="
+        color:${performanceColor(performance.percentage)};
+        font-weight:800;
+      "
+    >
+      ${performance.percentage} %
+    </strong>
+    <span>
+      · ${performance.correct} aciertos
+      · ${performance.wrong} errores
+    </span>
+  `;
+}
+
 async function loadSectionStatistics(){
   try{
-    const data=
-      await api("/api/statistics/sections");
+    const [
+      sectionData,
+      knowledgeData
+    ] = await Promise.all([
+      api("/api/statistics/sections"),
+      api("/api/statistics/knowledge")
+    ]);
 
-    const sections=(data.sections||[])
-      .filter(
-        item=>
-          item.topic==="Apeo y poda de arbolado"
-      );
+    const topicName =
+      "Apeo y poda de arbolado";
+
+    const sections=(sectionData.sections||[])
+      .filter(item=>item.topic===topicName);
+
+    const knowledge=(knowledgeData.knowledge||[])
+      .filter(item=>item.topic===topicName);
 
     const container=$("sectionStats");
 
@@ -531,49 +579,120 @@ async function loadSectionStatistics(){
 
     container.innerHTML=`
       <div class="section-stats-title">
-        Desglose por sección
+        Desglose completo del tema
       </div>
 
       ${sections.map(item=>{
+
         const coverage=item.coverage;
         const performance=item.performance;
 
-        const performanceText=
-          performance.percentage===null
-            ? "Sin respuestas"
-            : `${performance.percentage} % · ${performance.correct} aciertos · ${performance.wrong} errores`;
+        const sectionKnowledge=
+          knowledge.filter(
+            knowledgeItem=>
+              (knowledgeItem.section || "Sin sección") ===
+              item.section
+          );
 
         return `
-          <div class="section-stat-row">
-
-            <div class="section-stat-name">
-              ${item.section}
-            </div>
-
-            <div class="section-stat-data">
+          <details
+            class="section-stat-row"
+            style="display:block"
+          >
+            <summary
+              style="
+                cursor:pointer;
+                list-style-position:outside;
+              "
+            >
               <strong>
-                Cobertura ${coverage.percentage} %
+                ${item.section}
               </strong>
 
-              <span>
-                ${coverage.workedItems}/${coverage.totalItems}
-                · ${coverage.pendingItems} pendientes
-              </span>
-            </div>
+              <div
+                class="section-stat-data"
+                style="margin-top:6px"
+              >
+                <span>
+                  Cobertura:
+                  ${coverage.percentage} %
+                  · ${coverage.workedItems}/${coverage.totalItems}
+                </span>
 
-            <div class="section-stat-data">
-              <strong>Rendimiento</strong>
-              <span>${performanceText}</span>
-            </div>
+                <span style="margin-left:10px">
+                  Rendimiento:
+                  ${performanceBadge(performance)}
+                </span>
+              </div>
+            </summary>
 
-          </div>
+            <div
+              style="
+                margin-top:10px;
+                padding-left:14px;
+              "
+            >
+              ${
+                sectionKnowledge.length
+                ? sectionKnowledge.map(k=>`
+                    <div
+                      style="
+                        padding:8px 0;
+                        border-top:1px solid #ddd;
+                      "
+                    >
+                      <div>
+                        ${k.concept}
+                      </div>
+
+                      <div
+                        style="
+                          margin-top:3px;
+                          font-size:.92em;
+                        "
+                      >
+                        ${performanceBadge(k.performance)}
+                      </div>
+
+                      <div
+                        style="
+                          margin-top:2px;
+                          font-size:.82em;
+                          color:#666;
+                        "
+                      >
+                        ${
+                          k.srs?.nextReviewAt
+                          ? `Próximo repaso: ${
+                              new Date(
+                                k.srs.nextReviewAt
+                              ).toLocaleDateString("es-ES")
+                            }`
+                          : "Sin repaso programado"
+                        }
+                      </div>
+                    </div>
+                  `).join("")
+                : `
+                    <div
+                      style="
+                        padding:8px 0;
+                        color:#777;
+                      "
+                    >
+                      Sin conocimientos respondidos
+                    </div>
+                  `
+              }
+            </div>
+          </details>
         `;
       }).join("")}
     `;
 
   }catch(e){
     console.error(
-      "ERROR CARGANDO ESTADÍSTICAS POR SECCIÓN:",
+      "ERROR CARGANDO DESGLOSE COMPLETO:",
       e
     );
   }
