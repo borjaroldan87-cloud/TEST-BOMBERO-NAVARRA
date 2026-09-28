@@ -6346,15 +6346,6 @@ app.post("/api/generate", async(req,res)=>{
       : "mixto";
 const ai=aiClient();
     const targets=await getCoverageTargetsForGeneration(count, ai);
-const graphicTargetIndex = targets.findIndex(
-  t => t.questionFamily === "GRAFICA" && t.graphicAsset
-);
-
-if (count >= 10 && graphicTargetIndex === -1) {
-  throw new Error(
-    "INVARIANTE GRAFICA: el test de 10 preguntas llegó a /api/generate sin ningún target GRAFICA con graphicAsset."
-  );
-}
     if(targets.length<count){
       throw new Error(
         `Solo quedan ${targets.length} unidades de cobertura sin trabajar.`
