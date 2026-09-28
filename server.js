@@ -4399,7 +4399,63 @@ async function getCoverageTargetsForGeneration(count){
     ...item,
     questionFamily: families[index] || "GENERAL"
   }));
+/*
+VALIDACIÓN PREVIA DE COMPATIBILIDAD DE FAMILIAS
 
+Evita enviar a Gemini objetivos que no contienen el tipo de
+información necesario para la familia asignada.
+*/
+for (let i = 0; i < selected.length; i++) {
+  const item = selected[i];
+
+  const evidenceText = [
+    item.concept,
+    item.source_evidence
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (item.questionFamily === "CALCULO_FORMULACION") {
+    const calculationCompatible =
+      item.item_type === "formula" ||
+      item.evaluation_type === "calculo" ||
+      item.evaluation_type === "relacion_variables";
+
+    if (!calculationCompatible) {
+      item.questionFamily = "2024_TEXTO";
+
+      console.log(
+        "FAMILY_COMPATIBILITY_FALLBACK",
+        JSON.stringify({
+          coverageId: item.id,
+          from: "CALCULO_FORMULACION",
+          to: "2024_TEXTO",
+          reason: "coverage_sin_capacidad_de_calculo"
+        })
+      );
+    }
+  }
+
+  if (item.questionFamily === "2024_NUMERICA") {
+    const numericCompatible =
+      item.item_type === "dato_numerico" ||
+      /\d/.test(evidenceText);
+
+    if (!numericCompatible) {
+      item.questionFamily = "2024_TEXTO";
+
+      console.log(
+        "FAMILY_COMPATIBILITY_FALLBACK",
+        JSON.stringify({
+          coverageId: item.id,
+          from: "2024_NUMERICA",
+          to: "2024_TEXTO",
+          reason: "coverage_sin_dato_numerico"
+        })
+      );
+    }
+  }
+}
   /*
     ============================================================
     RESOLUCIÓN DE LA PLAZA GRAFICA
