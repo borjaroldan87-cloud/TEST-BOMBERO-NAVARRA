@@ -910,3 +910,6 @@ async function ingestOfficialExams(){
     alert("ERROR: " + e.message);
   }
 }
+status();
+loadStatistics();
+loadSectionStatistics();
