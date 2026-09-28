@@ -5929,6 +5929,176 @@ for(let i=0;i<parsed.questions.length;i++){
     targets: replacementTargets
   };
 }
+app.get("/api/statistics", async(req,res)=>{
+  try{
+    const result = await db.query(`
+      SELECT
+        t.id AS topic_id,
+        t.name AS topic_name,
+
+        COUNT(ci.id)::int AS total_items,
+
+        COUNT(ci.id) FILTER (
+          WHERE ci.worked = TRUE
+        )::int AS worked_items,
+
+        COALESCE(SUM(ci.times_asked),0)::int AS times_asked,
+        COALESCE(SUM(ci.times_correct),0)::int AS times_correct,
+        COALESCE(SUM(ci.times_wrong),0)::int AS times_wrong
+
+      FROM topics t
+
+      LEFT JOIN coverage_items ci
+        ON ci.topic_id = t.id
+
+      GROUP BY
+        t.id,
+        t.name
+
+      ORDER BY t.id
+    `);
+
+    const topics = result.rows.map(row=>{
+      const totalItems = Number(row.total_items) || 0;
+      const workedItems = Number(row.worked_items) || 0;
+
+      const timesAsked = Number(row.times_asked) || 0;
+      const timesCorrect = Number(row.times_correct) || 0;
+      const timesWrong = Number(row.times_wrong) || 0;
+
+      const answered =
+        timesCorrect + timesWrong;
+
+      const coveragePercentage =
+        totalItems > 0
+          ? Number(
+              (
+                workedItems /
+                totalItems *
+                100
+              ).toFixed(1)
+            )
+          : 0;
+
+      const performancePercentage =
+        answered > 0
+          ? Number(
+              (
+                timesCorrect /
+                answered *
+                100
+              ).toFixed(1)
+            )
+          : null;
+
+      return {
+        topicId:Number(row.topic_id),
+        topic:row.topic_name,
+
+        coverage:{
+          totalItems,
+          workedItems,
+          pendingItems:
+            Math.max(0,totalItems-workedItems),
+          percentage:coveragePercentage
+        },
+
+        performance:{
+          timesAsked,
+          answered,
+          correct:timesCorrect,
+          wrong:timesWrong,
+          percentage:performancePercentage
+        }
+      };
+    });
+
+    const totals = topics.reduce(
+      (acc,topic)=>{
+        acc.totalItems +=
+          topic.coverage.totalItems;
+
+        acc.workedItems +=
+          topic.coverage.workedItems;
+
+        acc.timesAsked +=
+          topic.performance.timesAsked;
+
+        acc.correct +=
+          topic.performance.correct;
+
+        acc.wrong +=
+          topic.performance.wrong;
+
+        return acc;
+      },
+      {
+        totalItems:0,
+        workedItems:0,
+        timesAsked:0,
+        correct:0,
+        wrong:0
+      }
+    );
+
+    const totalAnswered =
+      totals.correct + totals.wrong;
+
+    res.json({
+      ok:true,
+
+      global:{
+        coverage:{
+          totalItems:totals.totalItems,
+          workedItems:totals.workedItems,
+          pendingItems:
+            Math.max(
+              0,
+              totals.totalItems -
+              totals.workedItems
+            ),
+          percentage:
+            totals.totalItems > 0
+              ? Number(
+                  (
+                    totals.workedItems /
+                    totals.totalItems *
+                    100
+                  ).toFixed(1)
+                )
+              : 0
+        },
+
+        performance:{
+          timesAsked:totals.timesAsked,
+          answered:totalAnswered,
+          correct:totals.correct,
+          wrong:totals.wrong,
+          percentage:
+            totalAnswered > 0
+              ? Number(
+                  (
+                    totals.correct /
+                    totalAnswered *
+                    100
+                  ).toFixed(1)
+                )
+              : null
+        }
+      },
+
+      topics
+    });
+
+  }catch(e){
+    console.error("ERROR STATISTICS:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/answer", async(req,res)=>{
   try{
     const sessionId = Number(req.body.sessionId);
