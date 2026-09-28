@@ -5406,7 +5406,7 @@ app.post("/api/generate", async(req,res)=>{
     const mode=["literal","mixto","calculos"].includes(req.body.mode)
       ? req.body.mode
       : "mixto";
-
+const ai=aiClient();
     const targets=await getCoverageTargetsForGeneration(count, ai);
 const graphicTargetIndex = targets.findIndex(
   t => t.questionFamily === "GRAFICA" && t.graphicAsset
@@ -5423,8 +5423,7 @@ if (count >= 10 && graphicTargetIndex === -1) {
       );
     }
 
-    const ai=aiClient();
-
+    
     console.log(
       "GENERATECONTENT: iniciando con",
       targets.length,
