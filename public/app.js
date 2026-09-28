@@ -1,4 +1,4 @@
-let qs=[],ans=[],i=0;
+let qs=[],ans=[],i=0,sessionId=null;
 const $=id=>document.getElementById(id);
 async function api(url,opts={}){let r=await fetch(url,{headers:{"Content-Type":"application/json"},...opts});let j=await r.json();if(!j.ok)throw Error(j.error||"Error");return j}
 async function status(){try{let j=await api("/api/status");$("status").textContent=j.keyConfigured?"API preparada":"Falta configurar GEMINI_API_KEY"}catch(e){$("status").textContent=e.message}}
@@ -31,6 +31,7 @@ async function generate(){
     }
 
     qs=j.questions;
+    sessionId=j.sessionId;
 ans=Array(qs.length).fill(null);
 i=0;
 
@@ -308,9 +309,45 @@ function requestFinish(){
   }
 }
 
-function finish(auto=false){
+async function finish(auto=false){
   clearInterval(timerInterval);
+  try{
+    if(!Number.isInteger(Number(sessionId))){
+      throw new Error("No existe una sesión válida para este test.");
+    }
 
+    const answeredQuestions=qs
+      .map((q,index)=>({
+        questionId:Number(q.questionId),
+        selectedIndex:ans[index]
+      }))
+      .filter(item=>Number.isInteger(item.selectedIndex));
+
+    await Promise.all(
+      answeredQuestions.map(item=>
+        api("/api/answer",{
+          method:"POST",
+          body:JSON.stringify({
+            sessionId:Number(sessionId),
+            questionId:item.questionId,
+            selectedIndex:item.selectedIndex
+          })
+        })
+      )
+    );
+    await api("/api/finish-test",{
+      method:"POST",
+      body:JSON.stringify({
+        sessionId:Number(sessionId)
+      })
+    });
+  }catch(e){
+    alert(
+      "No se pudieron guardar los resultados del test.\n\n"+
+      (e?.message||String(e))
+    );
+    return;
+  }
   const correct=ans.filter(
     (answer,index)=>answer===qs[index].correctIndex
   ).length;
