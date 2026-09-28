@@ -4353,7 +4353,134 @@ function buildQuestionFamilyPlan(count){
 
   return [...plan].sort(() => Math.random() - 0.5);
 }
-async function getCoverageTargetsForGeneration(count){
+async function selectSemanticGraphicPair(
+  ai,
+  coverageCandidates,
+  graphicAssets
+){
+  if(
+    !Array.isArray(coverageCandidates) ||
+    !coverageCandidates.length ||
+    !Array.isArray(graphicAssets) ||
+    !graphicAssets.length
+  ){
+    return null;
+  }
+
+  const coverageForModel = coverageCandidates.map(item => ({
+    id: Number(item.id),
+    topic: item.topic_name || "",
+    section: item.section || "",
+    concept: item.concept || ""
+  }));
+
+  const assetsForModel = graphicAssets.map(asset => ({
+    id: Number(asset.id),
+    topicFolder: asset.topic_folder || "",
+    concept: asset.concept || "",
+    description: asset.description || ""
+  }));
+
+  const semanticPrompt = `
+Actúas exclusivamente como emparejador semántico de material didáctico
+para una oposición de bomberos.
+
+Debes relacionar UNA imagen técnica ya analizada con UN objetivo curricular.
+
+IMPORTANTE:
+- NO generes ninguna pregunta.
+- NO determines ninguna respuesta correcta.
+- NO aportes conocimiento externo.
+- NO completes información que no esté presente.
+- Solo decides si ambos elementos representan EL MISMO CONCEPTO TÉCNICO.
+- Una coincidencia de palabras aisladas NO demuestra compatibilidad.
+- Ejemplo de incompatibilidad:
+  "tensión de la cadena de motosierra" NO es el mismo concepto que
+  "zonas de tensión y compresión de un fuste apoyado".
+- Debe existir correspondencia técnica clara entre lo representado
+  por la imagen y el concepto curricular.
+- description sirve únicamente para comprender qué representa la imagen.
+- Si no existe ninguna pareja inequívoca, devuelve compatible=false.
+- Es preferible rechazar todas las parejas antes que producir una
+  asociación dudosa.
+
+OBJETIVOS CURRICULARES:
+${JSON.stringify(coverageForModel)}
+
+IMÁGENES TÉCNICAS YA ANALIZADAS:
+${JSON.stringify(assetsForModel)}
+
+Selecciona la pareja con correspondencia técnica más clara.
+`;
+
+  const semanticSchema = {
+    type: "object",
+    properties: {
+      compatible: { type: "boolean" },
+      coverageId: {
+        type: ["integer","null"]
+      },
+      assetId: {
+        type: ["integer","null"]
+      },
+      reason: {
+        type: "string"
+      }
+    },
+    required: [
+      "compatible",
+      "coverageId",
+      "assetId",
+      "reason"
+    ]
+  };
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.5-flash-lite",
+    contents: semanticPrompt,
+    config: {
+      responseMimeType: "application/json",
+      responseJsonSchema: semanticSchema
+    }
+  });
+
+  const decision = JSON.parse(response.text);
+
+  console.log(
+    "GRAPHIC_SEMANTIC_DECISION",
+    JSON.stringify(decision)
+  );
+
+  if(
+    !decision?.compatible ||
+    !Number.isInteger(decision.coverageId) ||
+    !Number.isInteger(decision.assetId)
+  ){
+    return null;
+  }
+
+  const coverageItem = coverageCandidates.find(
+    item => Number(item.id) === Number(decision.coverageId)
+  );
+
+  const graphicAsset = graphicAssets.find(
+    asset => Number(asset.id) === Number(decision.assetId)
+  );
+
+  if(!coverageItem || !graphicAsset){
+    return null;
+  }
+
+  /*
+  Barrera determinista:
+  Gemini solo puede devolver IDs que realmente le hemos proporcionado.
+  */
+  return {
+    coverageItem,
+    graphicAsset
+  };
+}
+async function getCoverageTargetsForGeneration(count, ai){
   /*
     SELECCIÓN DE OBJETIVOS
 
@@ -5262,7 +5389,7 @@ app.post("/api/generate", async(req,res)=>{
       ? req.body.mode
       : "mixto";
 
-    const targets=await getCoverageTargetsForGeneration(count);
+    const targets=await getCoverageTargetsForGeneration(count, ai);
 const graphicTargetIndex = targets.findIndex(
   t => t.questionFamily === "GRAFICA" && t.graphicAsset
 );
