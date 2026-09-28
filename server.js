@@ -777,6 +777,7 @@ const normalizeGraphicText = value =>
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9ñ]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
 const stopWords = new Set([
@@ -784,60 +785,163 @@ const stopWords = new Set([
   "que","sus","este","esta","estos","estas","desde","hasta","sobre","entre",
   "segun","mediante","tipo","tipos","forma","formas","caso","casos","parte",
   "partes","elemento","elementos","sistema","sistemas","procedimiento",
-  "procedimientos","aplicacion","aplicaciones"
+  "procedimientos","aplicacion","aplicaciones","imagen","figura","esquema",
+  "ilustracion","representacion"
 ]);
 
-const tokens = value =>
+const tokenSet = value =>
   new Set(
     normalizeGraphicText(value)
       .split(/\s+/)
       .filter(word => word.length >= 4 && !stopWords.has(word))
   );
 
-const targetTokens = tokens([
-  coverageItem?.concept,
-  coverageItem?.section,
-  coverageItem?.source_evidence
-].filter(Boolean).join(" "));
+const intersection = (a, b) =>
+  [...a].filter(token => b.has(token));
 
-let bestAsset = null;
-let bestScore = 0;
+const coverageCore = [
+  coverageItem?.concept,
+  coverageItem?.section
+]
+  .filter(Boolean)
+  .join(" ");
+
+const coverageCoreTokens = tokenSet(coverageCore);
+
+if (!coverageCoreTokens.size) {
+  return null;
+}
+
+const compatibleAssets = [];
 
 for (const asset of result.rows) {
-  const assetTokens = tokens([
-    asset.concept,
+  /*
+  REGLA CLAVE:
+  La compatibilidad se decide primero usando el CONCEPTO del asset.
+  description y source_evidence NO pueden convertir por sí solos
+  una imagen incompatible en compatible.
+  */
+  const assetConcept = normalizeGraphicText(asset.concept);
+  const assetConceptTokens = tokenSet(asset.concept);
+
+  if (!assetConcept || !assetConceptTokens.size) {
+    continue;
+  }
+
+  const sharedCore = intersection(
+    assetConceptTokens,
+    coverageCoreTokens
+  );
+
+  const normalizedCoverageCore =
+    normalizeGraphicText(coverageCore);
+
+  const exactConceptRelation =
+    normalizedCoverageCore.includes(assetConcept) ||
+    assetConcept.includes(normalizedCoverageCore);
+
+  /*
+  Para conceptos de varias palabras exigimos coincidencia conceptual
+  suficiente. Una palabra aislada como "tension" o "corte" no basta.
+  */
+  const conceptCoverageRatio =
+    sharedCore.length / assetConceptTokens.size;
+
+  let conceptCompatible = false;
+
+  if (exactConceptRelation) {
+    conceptCompatible = true;
+  } else if (
+    assetConceptTokens.size >= 2 &&
+    sharedCore.length >= 2 &&
+    conceptCoverageRatio >= 0.5
+  ) {
+    conceptCompatible = true;
+  } else if (
+    assetConceptTokens.size === 1 &&
+    sharedCore.length === 1
+  ) {
+    /*
+    Un concepto gráfico de una sola palabra solo se acepta
+    si esa palabra aparece en el CONCEPTO curricular,
+    no únicamente en section/source_evidence.
+    */
+    const coverageConceptTokens =
+      tokenSet(coverageItem?.concept);
+
+    const onlyToken = [...assetConceptTokens][0];
+
+    conceptCompatible =
+      coverageConceptTokens.has(onlyToken);
+  }
+
+  if (!conceptCompatible) {
+    continue;
+  }
+
+  /*
+  Una vez demostrada la compatibilidad conceptual,
+  description/source_evidence solo sirven para desempatar.
+  Nunca para habilitar la pareja.
+  */
+  const supportingTokens = tokenSet([
     asset.description,
     asset.source_evidence
   ].filter(Boolean).join(" "));
 
-  let score = 0;
+  const coverageEvidenceTokens =
+    tokenSet(coverageItem?.source_evidence);
 
-  for (const token of targetTokens) {
-    if (assetTokens.has(token)) {
-      score++;
-    }
-  }
+  const supportMatches = intersection(
+    supportingTokens,
+    coverageEvidenceTokens
+  ).length;
 
-  if (score > bestScore) {
-    bestScore = score;
-    bestAsset = asset;
-  }
+  const score =
+    (exactConceptRelation ? 1000 : 0) +
+    (sharedCore.length * 100) +
+    Math.round(conceptCoverageRatio * 100) +
+    supportMatches;
+
+  compatibleAssets.push({
+    asset,
+    score,
+    sharedCore
+  });
 }
 
-console.log("GRAPHIC_MATCH_DEBUG", JSON.stringify({
-  topicFolder,
-  coverageConcept: coverageItem?.concept || null,
-  candidates: result.rows.length,
-  bestScore,
-  bestAssetId: bestAsset?.id ?? null,
-  bestAssetConcept: bestAsset?.concept ?? null
-}));
+compatibleAssets.sort((a, b) => {
+  if (b.score !== a.score) {
+    return b.score - a.score;
+  }
 
-if (!bestAsset || bestScore < 1) {
-  return null;
-}
+  if (a.asset.times_asked !== b.asset.times_asked) {
+    return a.asset.times_asked - b.asset.times_asked;
+  }
 
-return bestAsset;
+  return Number(a.asset.id) - Number(b.asset.id);
+});
+
+const selectedAsset =
+  compatibleAssets.length
+    ? compatibleAssets[0].asset
+    : null;
+
+console.log(
+  "GRAPHIC_MATCH_DEBUG",
+  JSON.stringify({
+    topicFolder,
+    coverageId: coverageItem?.id ?? null,
+    coverageConcept: coverageItem?.concept || null,
+    candidates: result.rows.length,
+    compatibleCandidates: compatibleAssets.length,
+    selectedAssetId: selectedAsset?.id ?? null,
+    selectedAssetConcept: selectedAsset?.concept ?? null,
+    sharedCore: compatibleAssets[0]?.sharedCore ?? []
+  })
+);
+
+return selectedAsset;
 
  } 
 
@@ -4596,7 +4700,19 @@ REGLAS:
 - Conserva assetId, sourceId, publicUrl, assetType, concept, description y crop EXACTAMENTE.
 - No inventes otro asset, no modifiques URL, identificadores ni crop y no generes ningún dibujo nuevo.
 - No construyas graphic.elements.
+- REGLA DE LENGUAJE VISIBLE OBLIGATORIA:
+  En stem, options y explanation está absolutamente prohibido mostrar
+  terminología interna de la aplicación.
 
+  Nunca escribas: "asset", "graphicAsset", "assetId", "sourceId",
+  "publicUrl", "crop", "metadata", "metadatos" ni nombres internos equivalentes.
+
+  Para referirte al contenido visual utiliza únicamente términos naturales
+  para un examen: "imagen", "figura", "esquema", "ilustración",
+  "representación" o directamente el elemento técnico mostrado.
+
+  El opositor nunca debe poder deducir que la imagen procede de un sistema
+  interno de assets.
 - La imagen y sus metadatos visuales sirven EXCLUSIVAMENTE para identificar,
   seleccionar y mostrar el asset.
 - concept, description, sourceId, nombre de archivo y cualquier descripción
@@ -4790,7 +4906,14 @@ TODAS estas condiciones:
    nombre de archivo y cualquier otro metadato del asset NO constituyen
    evidencia factual y NO pueden utilizarse para determinar, completar
    o justificar la respuesta.
+- SEGURIDAD DE LENGUAJE INTERNO:
+  Revisa conjuntamente stem, options y explanation.
+  Si cualquiera contiene terminología interna de la aplicación como
+  "asset", "graphicAsset", "assetId", "sourceId", "publicUrl", "crop",
+  "metadata" o "metadatos", la pregunta es INVALIDA.
 
+  No basta con que la pregunta sea técnicamente correcta:
+  cualquier exposición de terminología interna obliga a rechazarla.
 5. Toda afirmación técnica contenida en stem, options y explanation debe
    estar respaldada por sourceEvidence.
 
