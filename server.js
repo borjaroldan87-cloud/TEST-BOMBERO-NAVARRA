@@ -167,7 +167,125 @@ async function initDatabase(){
 
       UNIQUE(source_id, asset_index)
     )
-  `); 
+  `);   await db.query(`
+    CREATE TABLE IF NOT EXISTS question_bank (
+      id BIGSERIAL PRIMARY KEY,
+
+      coverage_item_id INTEGER NOT NULL
+        REFERENCES coverage_items(id) ON DELETE CASCADE,
+
+      stem TEXT NOT NULL,
+      options JSONB NOT NULL,
+      correct_index INTEGER NOT NULL
+        CHECK (correct_index BETWEEN 0 AND 3),
+
+      explanation TEXT,
+      source_evidence TEXT,
+      source_page INTEGER,
+      manual_page TEXT,
+
+      question_family TEXT NOT NULL,
+      difficulty TEXT NOT NULL,
+
+      graphic JSONB,
+
+      times_shown INTEGER NOT NULL DEFAULT 0,
+      times_correct INTEGER NOT NULL DEFAULT 0,
+      times_wrong INTEGER NOT NULL DEFAULT 0,
+      last_shown_at TIMESTAMPTZ,
+
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_question_bank_coverage
+    ON question_bank(coverage_item_id)
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS test_sessions (
+      id BIGSERIAL PRIMARY KEY,
+
+      requested_count INTEGER NOT NULL,
+      difficulty TEXT,
+      mode TEXT,
+
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at TIMESTAMPTZ,
+
+      total_questions INTEGER NOT NULL DEFAULT 0,
+      correct_answers INTEGER NOT NULL DEFAULT 0,
+      wrong_answers INTEGER NOT NULL DEFAULT 0,
+
+      completed BOOLEAN NOT NULL DEFAULT FALSE
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS test_session_questions (
+      id BIGSERIAL PRIMARY KEY,
+
+      session_id BIGINT NOT NULL
+        REFERENCES test_sessions(id) ON DELETE CASCADE,
+
+      question_id BIGINT NOT NULL
+        REFERENCES question_bank(id) ON DELETE RESTRICT,
+
+      coverage_item_id INTEGER NOT NULL
+        REFERENCES coverage_items(id) ON DELETE RESTRICT,
+
+      position INTEGER NOT NULL,
+
+      selected_index INTEGER,
+      is_correct BOOLEAN,
+
+      answered_at TIMESTAMPTZ,
+
+      UNIQUE(session_id, position)
+    )
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_test_questions_session
+    ON test_session_questions(session_id)
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_test_questions_coverage
+    ON test_session_questions(coverage_item_id)
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS coverage_review_state (
+      coverage_item_id INTEGER PRIMARY KEY
+        REFERENCES coverage_items(id) ON DELETE CASCADE,
+
+      review_stage INTEGER NOT NULL DEFAULT 0
+        CHECK (review_stage >= 0),
+
+      next_review_at TIMESTAMPTZ,
+      last_review_at TIMESTAMPTZ,
+
+      consecutive_correct INTEGER NOT NULL DEFAULT 0,
+      consecutive_wrong INTEGER NOT NULL DEFAULT 0,
+
+      total_reviews INTEGER NOT NULL DEFAULT 0,
+      total_correct INTEGER NOT NULL DEFAULT 0,
+      total_wrong INTEGER NOT NULL DEFAULT 0,
+
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_review_due
+    ON coverage_review_state(next_review_at)
+  `);
 }
 async function syncGraphicAssets(){
   const graphicsRoot = path.join(process.cwd(), "public", "graphics");
