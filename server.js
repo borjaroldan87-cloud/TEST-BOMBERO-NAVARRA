@@ -5500,6 +5500,46 @@ async function registerQuestionAnswer({
     client.release();
   }
 }
+app.get("/api/debug-srs", async(req,res)=>{
+  try{
+    const result = await db.query(`
+      SELECT
+        crs.coverage_item_id,
+        t.name AS topic,
+        ci.section,
+        ci.concept,
+        crs.review_stage,
+        crs.next_review_at,
+        crs.last_review_at,
+        crs.consecutive_correct,
+        crs.consecutive_wrong,
+        crs.total_reviews,
+        crs.total_correct,
+        crs.total_wrong
+      FROM coverage_review_state crs
+      JOIN coverage_items ci
+        ON ci.id = crs.coverage_item_id
+      JOIN topics t
+        ON t.id = ci.topic_id
+      ORDER BY crs.last_review_at DESC
+      LIMIT 50
+    `);
+
+    res.json({
+      ok:true,
+      count:result.rows.length,
+      reviews:result.rows
+    });
+
+  }catch(e){
+    console.error("ERROR DEBUG SRS:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 async function markCoverageTargetsWorked(targets){
   if(!targets.length) return;
 
