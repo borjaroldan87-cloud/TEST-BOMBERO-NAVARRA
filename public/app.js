@@ -518,8 +518,78 @@ async function loadStatistics(){
     );
   }
 }
+async function loadSectionStatistics(){
+  try{
+    const data=
+      await api("/api/statistics/sections");
+
+    const sections=(data.sections||[])
+      .filter(
+        item=>
+          item.topic==="Apeo y poda de arbolado"
+      );
+
+    const container=$("sectionStats");
+
+    if(!container) return;
+
+    if(!sections.length){
+      container.innerHTML="";
+      return;
+    }
+
+    container.innerHTML=`
+      <div class="section-stats-title">
+        Desglose por sección
+      </div>
+
+      ${sections.map(item=>{
+        const coverage=item.coverage;
+        const performance=item.performance;
+
+        const performanceText=
+          performance.percentage===null
+            ? "Sin respuestas"
+            : `${performance.percentage} % · ${performance.correct} aciertos · ${performance.wrong} errores`;
+
+        return `
+          <div class="section-stat-row">
+
+            <div class="section-stat-name">
+              ${item.section}
+            </div>
+
+            <div class="section-stat-data">
+              <strong>
+                Cobertura ${coverage.percentage} %
+              </strong>
+
+              <span>
+                ${coverage.workedItems}/${coverage.totalItems}
+                · ${coverage.pendingItems} pendientes
+              </span>
+            </div>
+
+            <div class="section-stat-data">
+              <strong>Rendimiento</strong>
+              <span>${performanceText}</span>
+            </div>
+
+          </div>
+        `;
+      }).join("")}
+    `;
+
+  }catch(e){
+    console.error(
+      "ERROR CARGANDO ESTADÍSTICAS POR SECCIÓN:",
+      e
+    );
+  }
+}
 status();
 loadStatistics();
+loadSectionStatistics();
 async function ingestOfficialExams(){
   const ok = confirm(
     "Se indexarán los exámenes oficiales 2024 y 2026 en el almacén independiente de estilo. ¿Continuar?"
