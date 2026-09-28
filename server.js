@@ -4408,45 +4408,6 @@ async function getCoverageTargetsForGeneration(count){
   continue;
 }
 
-const normalizeGraphicMatchText = value =>
-  String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-const coverageText = normalizeGraphicMatchText([
-  candidate.section,
-  candidate.concept,
-  candidate.source_evidence
-].filter(Boolean).join(" "));
-
-const assetText = normalizeGraphicMatchText([
-  candidateAsset.concept,
-  candidateAsset.description
-].filter(Boolean).join(" "));
-
-const STOP_WORDS = new Set([
-  "de","del","la","las","el","los","un","una","unos","unas",
-  "y","o","en","con","por","para","a","al","se","que","como",
-  "es","son","su","sus","tipo","tipos","imagen","figura",
-  "esquema","dibujo","representacion","tecnica","tecnico"
-]);
-
-const assetTerms = assetText
-  .split(" ")
-  .filter(term => term.length >= 4 && !STOP_WORDS.has(term));
-
-const graphicConceptCompatible =
-  assetTerms.length > 0 &&
-  assetTerms.some(term => coverageText.includes(term));
-
-if(!graphicConceptCompatible){
-  continue;
-}
-
 matchedCoverageItem = candidate;
 matchedGraphicAsset = candidateAsset;
 break;
