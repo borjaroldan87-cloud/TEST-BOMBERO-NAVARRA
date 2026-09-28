@@ -455,14 +455,90 @@ function review(){
       </button>
     `;
 }
+function performanceColor(percentage){
+  if(percentage===null || percentage===undefined){
+    return "#777";
+  }
+
+  if(percentage>=80) return "#16803a";
+  if(percentage>=60) return "#2563eb";
+  if(percentage>=40) return "#ca8a04";
+  if(percentage>=20) return "#ea580c";
+
+  return "#dc2626";
+}
+
+function performanceBar(percentage){
+  const hasData=
+    percentage!==null &&
+    percentage!==undefined;
+
+  const value=hasData
+    ? Math.min(100,Math.max(0,Number(percentage)))
+    : 0;
+
+  const color=performanceColor(percentage);
+
+  return `
+    <div
+      style="
+        width:100%;
+        height:10px;
+        background:#e5e7eb;
+        border-radius:999px;
+        overflow:hidden;
+        margin-top:5px;
+      "
+    >
+      <div
+        style="
+          width:${value}%;
+          height:100%;
+          background:${color};
+          border-radius:999px;
+        "
+      ></div>
+    </div>
+  `;
+}
+
+function performanceText(performance){
+  if(
+    performance?.percentage===null ||
+    performance?.percentage===undefined
+  ){
+    return `
+      <strong style="color:#777">
+        Sin respuestas
+      </strong>
+    `;
+  }
+
+  return `
+    <strong
+      style="color:${performanceColor(
+        performance.percentage
+      )}"
+    >
+      ${performance.percentage} %
+    </strong>
+
+    <span>
+      · ${performance.correct} aciertos
+      · ${performance.wrong} errores
+    </span>
+  `;
+}
 async function loadStatistics(){
   try{
     const data=await api("/api/statistics");
 
+    const topics=data.topics || [];
+
     const topic=
-      data.topics?.find(
+      topics.find(
         item=>item.topic==="Apeo y poda de arbolado"
-      ) || data.topics?.[0];
+      ) || topics[0];
 
     if(!topic) return;
 
@@ -476,21 +552,32 @@ async function loadStatistics(){
       `${coverage.workedItems} de ${coverage.totalItems} elementos trabajados`;
 
     $("coverageBar").style.width=
-      `${Math.min(100,Math.max(0,coverage.percentage))}%`;
+      `${Math.min(
+        100,
+        Math.max(0,coverage.percentage)
+      )}%`;
 
     if(performance.percentage===null){
 
       $("performanceValue").textContent="-- %";
 
+      $("performanceValue").style.color="#777";
+
       $("performanceDetail").textContent=
         "Sin respuestas registradas";
 
       $("performanceBar").style.width="0%";
+      $("performanceBar").style.backgroundColor="#777";
 
     }else{
 
+      const color=
+        performanceColor(performance.percentage);
+
       $("performanceValue").textContent=
         `${performance.percentage} %`;
+
+      $("performanceValue").style.color=color;
 
       $("performanceDetail").textContent=
         `${performance.correct} aciertos · ${performance.wrong} errores`;
@@ -500,6 +587,58 @@ async function loadStatistics(){
           100,
           Math.max(0,performance.percentage)
         )}%`;
+
+      $("performanceBar").style.backgroundColor=color;
+    }
+
+    const topicBars=$("topicPerformanceBars");
+
+    if(topicBars){
+
+      topicBars.innerHTML=
+        topics.map(item=>{
+
+          const p=item.performance;
+
+          return `
+            <div style="margin:14px 0">
+
+              <div
+                style="
+                  display:flex;
+                  justify-content:space-between;
+                  gap:12px;
+                  align-items:center;
+                "
+              >
+                <span>
+                  ${item.topic}
+                </span>
+
+                ${
+                  p.percentage===null
+                    ? `
+                      <strong style="color:#777">
+                        --
+                      </strong>
+                    `
+                    : `
+                      <strong
+                        style="color:${performanceColor(
+                          p.percentage
+                        )}"
+                      >
+                        ${p.percentage} %
+                      </strong>
+                    `
+                }
+              </div>
+
+              ${performanceBar(p.percentage)}
+
+            </div>
+          `;
+        }).join("");
     }
 
   }catch(e){
@@ -551,22 +690,29 @@ function performanceBadge(performance){
 
 async function loadSectionStatistics(){
   try{
+
     const [
       sectionData,
       knowledgeData
-    ] = await Promise.all([
+    ]=await Promise.all([
       api("/api/statistics/sections"),
       api("/api/statistics/knowledge")
     ]);
 
-    const topicName =
+    const topicName=
       "Apeo y poda de arbolado";
 
-    const sections=(sectionData.sections||[])
-      .filter(item=>item.topic===topicName);
+    const sections=
+      (sectionData.sections || [])
+        .filter(
+          item=>item.topic===topicName
+        );
 
-    const knowledge=(knowledgeData.knowledge||[])
-      .filter(item=>item.topic===topicName);
+    const knowledge=
+      (knowledgeData.knowledge || [])
+        .filter(
+          item=>item.topic===topicName
+        );
 
     const container=$("sectionStats");
 
@@ -578,8 +724,9 @@ async function loadSectionStatistics(){
     }
 
     container.innerHTML=`
+
       <div class="section-stats-title">
-        Desglose completo del tema
+        Rendimiento por secciones
       </div>
 
       ${sections.map(item=>{
@@ -589,58 +736,96 @@ async function loadSectionStatistics(){
 
         const sectionKnowledge=
           knowledge.filter(
-            knowledgeItem=>
-              (knowledgeItem.section || "Sin sección") ===
+            k=>
+              (k.section || "Sin sección")===
               item.section
           );
 
         return `
+
           <details
-            class="section-stat-row"
-            style="display:block"
+            style="
+              padding:12px 0;
+              border-bottom:1px solid #ddd;
+            "
           >
+
             <summary
               style="
                 cursor:pointer;
-                list-style-position:outside;
               "
             >
-              <strong>
-                ${item.section}
-              </strong>
 
               <div
-                class="section-stat-data"
-                style="margin-top:6px"
+                style="
+                  display:flex;
+                  justify-content:space-between;
+                  gap:12px;
+                  margin-bottom:4px;
+                "
               >
-                <span>
-                  Cobertura:
-                  ${coverage.percentage} %
-                  · ${coverage.workedItems}/${coverage.totalItems}
-                </span>
 
-                <span style="margin-left:10px">
-                  Rendimiento:
-                  ${performanceBadge(performance)}
-                </span>
+                <strong>
+                  ${item.section}
+                </strong>
+
+                ${
+                  performance.percentage===null
+                    ? `
+                      <strong style="color:#777">
+                        --
+                      </strong>
+                    `
+                    : `
+                      <strong
+                        style="color:${performanceColor(
+                          performance.percentage
+                        )}"
+                      >
+                        ${performance.percentage} %
+                      </strong>
+                    `
+                }
+
               </div>
+
+              ${performanceBar(
+                performance.percentage
+              )}
+
+              <div
+                style="
+                  margin-top:5px;
+                  font-size:.85em;
+                  color:#666;
+                "
+              >
+                Cobertura:
+                ${coverage.percentage} %
+                ·
+                ${coverage.workedItems}/${coverage.totalItems}
+              </div>
+
             </summary>
 
             <div
               style="
-                margin-top:10px;
-                padding-left:14px;
+                margin-top:12px;
+                padding-left:12px;
               "
             >
+
               ${
                 sectionKnowledge.length
-                ? sectionKnowledge.map(k=>`
+                  ? sectionKnowledge.map(k=>`
+
                     <div
                       style="
-                        padding:8px 0;
-                        border-top:1px solid #ddd;
+                        padding:9px 0;
+                        border-top:1px solid #eee;
                       "
                     >
+
                       <div>
                         ${k.concept}
                       </div>
@@ -648,35 +833,43 @@ async function loadSectionStatistics(){
                       <div
                         style="
                           margin-top:3px;
-                          font-size:.92em;
+                          font-size:.9em;
                         "
                       >
-                        ${performanceBadge(k.performance)}
+                        ${performanceText(
+                          k.performance
+                        )}
                       </div>
 
                       <div
                         style="
                           margin-top:2px;
-                          font-size:.82em;
-                          color:#666;
+                          font-size:.8em;
+                          color:#777;
                         "
                       >
                         ${
                           k.srs?.nextReviewAt
-                          ? `Próximo repaso: ${
-                              new Date(
+                            ? `
+                              Próximo repaso:
+                              ${new Date(
                                 k.srs.nextReviewAt
-                              ).toLocaleDateString("es-ES")
-                            }`
-                          : "Sin repaso programado"
+                              ).toLocaleDateString(
+                                "es-ES"
+                              )}
+                            `
+                            : "Sin repaso programado"
                         }
                       </div>
+
                     </div>
+
                   `).join("")
-                : `
+
+                  : `
                     <div
                       style="
-                        padding:8px 0;
+                        padding:9px 0;
                         color:#777;
                       "
                     >
@@ -684,22 +877,24 @@ async function loadSectionStatistics(){
                     </div>
                   `
               }
+
             </div>
+
           </details>
         `;
+
       }).join("")}
     `;
 
   }catch(e){
+
     console.error(
       "ERROR CARGANDO DESGLOSE COMPLETO:",
       e
     );
+
   }
 }
-status();
-loadStatistics();
-loadSectionStatistics();
 async function ingestOfficialExams(){
   const ok = confirm(
     "Se indexarán los exámenes oficiales 2024 y 2026 en el almacén independiente de estilo. ¿Continuar?"
