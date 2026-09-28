@@ -6099,6 +6099,132 @@ app.get("/api/statistics", async(req,res)=>{
     });
   }
 });
+app.get("/api/statistics/sections", async(req,res)=>{
+  try{
+    const result=await db.query(`
+      SELECT
+        t.id AS topic_id,
+        t.name AS topic_name,
+
+        COALESCE(
+          NULLIF(TRIM(ci.section),''),
+          'Sin sección'
+        ) AS section,
+
+        COUNT(ci.id)::int AS total_items,
+
+        COUNT(ci.id) FILTER (
+          WHERE ci.worked = TRUE
+        )::int AS worked_items,
+
+        COALESCE(SUM(ci.times_asked),0)::int
+          AS times_asked,
+
+        COALESCE(SUM(ci.times_correct),0)::int
+          AS times_correct,
+
+        COALESCE(SUM(ci.times_wrong),0)::int
+          AS times_wrong
+
+      FROM topics t
+
+      JOIN coverage_items ci
+        ON ci.topic_id = t.id
+
+      GROUP BY
+        t.id,
+        t.name,
+        COALESCE(
+          NULLIF(TRIM(ci.section),''),
+          'Sin sección'
+        )
+
+      ORDER BY
+        t.id,
+        section
+    `);
+
+    const sections=result.rows.map(row=>{
+      const totalItems=
+        Number(row.total_items)||0;
+
+      const workedItems=
+        Number(row.worked_items)||0;
+
+      const correct=
+        Number(row.times_correct)||0;
+
+      const wrong=
+        Number(row.times_wrong)||0;
+
+      const answered=correct+wrong;
+
+      return {
+        topicId:Number(row.topic_id),
+        topic:row.topic_name,
+        section:row.section,
+
+        coverage:{
+          totalItems,
+          workedItems,
+
+          pendingItems:
+            Math.max(
+              0,
+              totalItems-workedItems
+            ),
+
+          percentage:
+            totalItems>0
+              ? Number(
+                  (
+                    workedItems /
+                    totalItems *
+                    100
+                  ).toFixed(1)
+                )
+              : 0
+        },
+
+        performance:{
+          timesAsked:
+            Number(row.times_asked)||0,
+
+          answered,
+          correct,
+          wrong,
+
+          percentage:
+            answered>0
+              ? Number(
+                  (
+                    correct /
+                    answered *
+                    100
+                  ).toFixed(1)
+                )
+              : null
+        }
+      };
+    });
+
+    res.json({
+      ok:true,
+      sections
+    });
+
+  }catch(e){
+    console.error(
+      "ERROR STATISTICS SECTIONS:",
+      e
+    );
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/answer", async(req,res)=>{
   try{
     const sessionId = Number(req.body.sessionId);
