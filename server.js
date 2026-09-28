@@ -6265,6 +6265,114 @@ app.get("/api/statistics/sections", async(req,res)=>{
     });
   }
 });
+app.get("/api/statistics/knowledge", async(req,res)=>{
+  try{
+    const result = await db.query(`
+      SELECT
+        ci.id AS coverage_item_id,
+        t.id AS topic_id,
+        t.name AS topic_name,
+        ci.section,
+        ci.concept,
+        ci.times_asked,
+        ci.times_correct,
+        ci.times_wrong,
+        ci.last_asked_at,
+        crs.review_stage,
+        crs.next_review_at
+      FROM coverage_items ci
+
+      JOIN topics t
+        ON t.id = ci.topic_id
+
+      LEFT JOIN coverage_review_state crs
+        ON crs.coverage_item_id = ci.id
+
+      WHERE
+        ci.times_correct > 0
+        OR ci.times_wrong > 0
+
+      ORDER BY
+        t.id,
+        ci.section,
+        ci.id
+    `);
+
+    const knowledge = result.rows.map(row=>{
+      const correct =
+        Number(row.times_correct) || 0;
+
+      const wrong =
+        Number(row.times_wrong) || 0;
+
+      const answered = correct + wrong;
+
+      return {
+        coverageItemId:
+          Number(row.coverage_item_id),
+
+        topicId:
+          Number(row.topic_id),
+
+        topic:
+          row.topic_name,
+
+        section:
+          row.section,
+
+        concept:
+          row.concept,
+
+        performance:{
+          answered,
+          correct,
+          wrong,
+
+          percentage:
+            answered > 0
+              ? Number(
+                  (
+                    correct /
+                    answered *
+                    100
+                  ).toFixed(1)
+                )
+              : null
+        },
+
+        srs:{
+          reviewStage:
+            row.review_stage != null
+              ? Number(row.review_stage)
+              : null,
+
+          nextReviewAt:
+            row.next_review_at,
+
+          lastAskedAt:
+            row.last_asked_at
+        }
+      };
+    });
+
+    res.json({
+      ok:true,
+      count:knowledge.length,
+      knowledge
+    });
+
+  }catch(e){
+    console.error(
+      "ERROR STATISTICS KNOWLEDGE:",
+      e
+    );
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/answer", async(req,res)=>{
   try{
     const sessionId = Number(req.body.sessionId);
