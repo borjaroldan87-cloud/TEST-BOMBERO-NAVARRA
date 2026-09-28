@@ -771,7 +771,6 @@ const result = await db.query(
 if(!result.rows.length){
   return null;
 }
-
 const normalizeGraphicText = value =>
   String(value || "")
     .toLowerCase()
@@ -795,50 +794,36 @@ const tokens = value =>
       .filter(word => word.length >= 4 && !stopWords.has(word))
   );
 
-const targetConceptTokens = tokens(coverageItem?.concept);
-const targetSectionTokens = tokens(coverageItem?.section);
-const targetEvidenceTokens = tokens(coverageItem?.source_evidence);
-
-const overlap = (a,b) => {
-  let count = 0;
-  for(const token of a){
-    if(b.has(token)) count++;
-  }
-  return count;
-};
+const targetTokens = tokens([
+  coverageItem?.concept,
+  coverageItem?.section,
+  coverageItem?.source_evidence
+].filter(Boolean).join(" "));
 
 let bestAsset = null;
 let bestScore = 0;
 
-for(const asset of result.rows){
-  const assetConceptTokens = tokens(asset.concept);
-  const assetDescriptionTokens = tokens(asset.description);
-  const assetEvidenceTokens = tokens(asset.source_evidence);
+for (const asset of result.rows) {
+  const assetTokens = tokens([
+    asset.concept,
+    asset.description,
+    asset.source_evidence
+  ].filter(Boolean).join(" "));
 
-  const conceptScore =
-    overlap(targetConceptTokens, assetConceptTokens) * 8 +
-    overlap(targetConceptTokens, assetDescriptionTokens) * 5 +
-    overlap(targetConceptTokens, assetEvidenceTokens) * 5;
+  let score = 0;
 
-  const evidenceScore =
-    overlap(targetEvidenceTokens, assetConceptTokens) * 4 +
-    overlap(targetEvidenceTokens, assetDescriptionTokens) * 2 +
-    overlap(targetEvidenceTokens, assetEvidenceTokens) * 3;
+  for (const token of targetTokens) {
+    if (assetTokens.has(token)) {
+      score++;
+    }
+  }
 
-  const sectionScore =
-    overlap(targetSectionTokens, assetConceptTokens) * 2 +
-    overlap(targetSectionTokens, assetDescriptionTokens);
-
-  const score =
-    conceptScore +
-    evidenceScore +
-    sectionScore;
-
-  if(score > bestScore){
+  if (score > bestScore) {
     bestScore = score;
     bestAsset = asset;
   }
 }
+
 console.log("GRAPHIC_MATCH_DEBUG", JSON.stringify({
   topicFolder,
   coverageConcept: coverageItem?.concept || null,
@@ -847,11 +832,13 @@ console.log("GRAPHIC_MATCH_DEBUG", JSON.stringify({
   bestAssetId: bestAsset?.id ?? null,
   bestAssetConcept: bestAsset?.concept ?? null
 }));
-if(!bestAsset || bestScore < 5){
+
+if (!bestAsset || bestScore < 1) {
   return null;
 }
 
 return bestAsset;
+
  } 
 
 async function loadStore(){
