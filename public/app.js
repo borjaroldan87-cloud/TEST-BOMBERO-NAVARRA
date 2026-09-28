@@ -464,7 +464,62 @@ function review(){
       </button>
     `;
 }
+async function loadStatistics(){
+  try{
+    const data=await api("/api/statistics");
+
+    const topic=
+      data.topics?.find(
+        item=>item.topic==="Apeo y poda de arbolado"
+      ) || data.topics?.[0];
+
+    if(!topic) return;
+
+    const coverage=topic.coverage;
+    const performance=topic.performance;
+
+    $("coverageValue").textContent=
+      `${coverage.percentage} %`;
+
+    $("coverageDetail").textContent=
+      `${coverage.workedItems} de ${coverage.totalItems} elementos trabajados`;
+
+    $("coverageBar").style.width=
+      `${Math.min(100,Math.max(0,coverage.percentage))}%`;
+
+    if(performance.percentage===null){
+
+      $("performanceValue").textContent="-- %";
+
+      $("performanceDetail").textContent=
+        "Sin respuestas registradas";
+
+      $("performanceBar").style.width="0%";
+
+    }else{
+
+      $("performanceValue").textContent=
+        `${performance.percentage} %`;
+
+      $("performanceDetail").textContent=
+        `${performance.correct} aciertos · ${performance.wrong} errores`;
+
+      $("performanceBar").style.width=
+        `${Math.min(
+          100,
+          Math.max(0,performance.percentage)
+        )}%`;
+    }
+
+  }catch(e){
+    console.error(
+      "ERROR CARGANDO ESTADÍSTICAS:",
+      e
+    );
+  }
+}
 status();
+loadStatistics();
 async function ingestOfficialExams(){
   const ok = confirm(
     "Se indexarán los exámenes oficiales 2024 y 2026 en el almacén independiente de estilo. ¿Continuar?"
