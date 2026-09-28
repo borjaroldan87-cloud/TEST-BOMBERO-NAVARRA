@@ -124,11 +124,7 @@ function answeredCount(){
 function renderGraphic(q){
   const g=q?.graphic;
 
-  if(
-    !g ||
-    !Number.isInteger(Number(g.assetId)) ||
-    !g.publicUrl
-  ){
+  if(!g?.publicUrl){
     return "";
   }
 
@@ -151,60 +147,56 @@ function renderGraphic(q){
   const width=clamp01(crop.width) ?? 1;
   const height=clamp01(crop.height) ?? 1;
 
-  /*
-    El crop está almacenado en coordenadas normalizadas 0-1.
+  const safeWidth=Math.max(
+    0.001,
+    Math.min(width,1-x)
+  );
 
-    Mostramos la imagen original dentro de una ventana proporcional al
-    recorte. No generamos ni modificamos el dibujo técnico.
-  */
-  const safeWidth=Math.max(0.001,Math.min(width,1-x));
-  const safeHeight=Math.max(0.001,Math.min(height,1-y));
+  const safeHeight=Math.max(
+    0.001,
+    Math.min(height,1-y)
+  );
 
   const imageWidth=100/safeWidth;
-  const imageHeight=100/safeHeight;
-
   const imageLeft=-(x/safeWidth)*100;
   const imageTop=-(y/safeHeight)*100;
 
-  const aspectRatio=safeWidth/safeHeight;
+  const cropRatio=safeWidth/safeHeight;
 
   return `
     <div
       class="question-graphic"
-      data-graphic-asset-id="${esc(g.assetId)}"
+      style="
+        width:min(100%,480px);
+        aspect-ratio:${cropRatio};
+        max-height:320px;
+        overflow:hidden;
+        position:relative;
+        margin:14px auto;
+        background:#fff;
+      "
     >
-      <div
-        class="graphic-crop"
+      <img
+        src="${esc(g.publicUrl)}"
+        alt="Imagen técnica de la pregunta"
+        draggable="false"
         style="
-          position:relative;
-          width:min(100%,480px);
-height:220px;
-          overflow:hidden;
-          margin:14px auto;
-          background:#fff;
+          position:absolute;
+          display:block;
+          width:${imageWidth}%;
+          height:auto;
+          max-width:none;
+          left:${imageLeft}%;
+          top:${imageTop}%;
+          user-select:none;
+          -webkit-user-drag:none;
         "
       >
-        <img
-          src="${esc(g.publicUrl)}"
-          alt="Imagen técnica de la pregunta"
-          draggable="false"
-          style="
-            position:absolute;
-width:${imageWidth}%;
-height:${imageHeight}%;
-max-width:none;
-left:${imageLeft}%;
-top:${imageTop}%;
-object-fit:fill;
-filter:grayscale(1) contrast(1.08);
-user-select:none;
--webkit-user-drag:none;
-          "
-        >
-      </div>
     </div>
   `;
 }
+
+
 function show(){
   const answered=answeredCount();
   const blank=qs.length-answered;
