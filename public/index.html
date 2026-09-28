@@ -124,7 +124,80 @@ button:disabled{
 .muted{
   color:#666;
 }
+.stats-panel{
+  margin:20px 0;
+  padding:18px;
+  border:1px solid #d0d0d0;
+  background:#fafafa;
+}
 
+.stats-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.stats-refresh{
+  padding:6px 10px;
+  font-size:11px;
+}
+
+.stats-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+
+.stat-card{
+  padding:14px;
+  border:1px solid #d5d5d5;
+  background:#fff;
+}
+
+.stat-label,
+.stat-detail{
+  display:block;
+}
+
+.stat-label{
+  margin-bottom:4px;
+  font-size:13px;
+  font-weight:700;
+}
+
+.stat-value{
+  display:block;
+  font-size:25px;
+  line-height:1.2;
+}
+
+.stat-detail{
+  margin-top:4px;
+  font-size:12px;
+  color:#666;
+}
+
+.progress-track{
+  height:7px;
+  margin-top:12px;
+  overflow:hidden;
+  background:#ddd;
+}
+
+.progress-fill{
+  width:0;
+  height:100%;
+  background:#222;
+  transition:width .25s ease;
+}
+
+@media(max-width:650px){
+  .stats-grid{
+    grid-template-columns:1fr;
+  }
+}
 /* ZONA DE EXAMEN */
 
 #quiz{
@@ -409,7 +482,69 @@ hr{
   <p>
     <b>Benchmark actual:</b> Apeo y poda de arbolado
   </p>
+<div class="stats-panel" id="statsPanel">
 
+  <div class="stats-header">
+    <strong>Progreso del tema</strong>
+
+    <button
+      class="secondary stats-refresh"
+      onclick="loadStatistics()">
+      ACTUALIZAR
+    </button>
+  </div>
+
+  <div class="stats-grid">
+
+    <div class="stat-card">
+      <span class="stat-label">Cobertura</span>
+
+      <strong
+        class="stat-value"
+        id="coverageValue">
+        -- %
+      </strong>
+
+      <span
+        class="stat-detail"
+        id="coverageDetail">
+        -- de -- elementos trabajados
+      </span>
+
+      <div class="progress-track">
+        <div
+          class="progress-fill"
+          id="coverageBar">
+        </div>
+      </div>
+    </div>
+
+    <div class="stat-card">
+      <span class="stat-label">Rendimiento</span>
+
+      <strong
+        class="stat-value"
+        id="performanceValue">
+        -- %
+      </strong>
+
+      <span
+        class="stat-detail"
+        id="performanceDetail">
+        Sin respuestas registradas
+      </span>
+
+      <div class="progress-track">
+        <div
+          class="progress-fill"
+          id="performanceBar">
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
   <div class="technical">
     <p><b>Herramientas de desarrollo</b></p>
 
