@@ -178,8 +178,7 @@ function renderGraphic(q){
         style="
           position:relative;
           width:min(100%,480px);
-height:auto;
-max-height:220px;
+height:220px;
           overflow:hidden;
           margin:14px auto;
           background:#fff;
