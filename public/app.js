@@ -648,17 +648,6 @@ async function loadStatistics(){
     );
   }
 }
-function performanceColor(percentage){
-  if(percentage===null || percentage===undefined){
-    return "#777";
-  }
-
-  if(percentage>=80) return "#16803a";
-  if(percentage>=60) return "#2563eb";
-  if(percentage>=40) return "#ca8a04";
-  if(percentage>=20) return "#ea580c";
-  return "#dc2626";
-}
 
 function performanceBadge(performance){
   if(
