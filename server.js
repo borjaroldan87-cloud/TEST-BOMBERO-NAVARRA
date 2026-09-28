@@ -5085,7 +5085,421 @@ REGLAS DE COBERTURA:
 `;
 }
 
+async function persistGeneratedTest({
+  questions,
+  targets,
+  requestedCount,
+  difficulty,
+  mode
+}){
+  if(
+    !Array.isArray(questions) ||
+    !Array.isArray(targets) ||
+    questions.length !== targets.length
+  ){
+    throw new Error(
+      "PERSISTENCIA: questions y targets no tienen correspondencia 1:1."
+    );
+  }
 
+  const client = await db.connect();
+
+  try{
+    await client.query("BEGIN");
+
+    const sessionResult = await client.query(
+      `INSERT INTO test_sessions (
+        requested_count,
+        difficulty,
+        mode,
+        total_questions
+      )
+      VALUES ($1,$2,$3,$4)
+      RETURNING id`,
+      [
+        requestedCount,
+        difficulty,
+        mode,
+        questions.length
+      ]
+    );
+
+    const sessionId = Number(sessionResult.rows[0].id);
+    const persistedQuestions = [];
+
+    for(let i = 0; i < questions.length; i++){
+      const question = questions[i];
+      const target = targets[i];
+
+      if(!target?.id){
+        throw new Error(
+          `PERSISTENCIA: falta coverage_item_id en la pregunta ${i + 1}.`
+        );
+      }
+
+      const questionResult = await client.query(
+        `INSERT INTO question_bank (
+          coverage_item_id,
+          stem,
+          options,
+          correct_index,
+          explanation,
+          source_evidence,
+          source_page,
+          manual_page,
+          question_family,
+          difficulty,
+          graphic
+        )
+        VALUES (
+          $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb
+        )
+        RETURNING id`,
+        [
+          Number(target.id),
+          question.stem,
+          JSON.stringify(question.options),
+          Number(question.correctIndex),
+          question.explanation || null,
+          question.sourceEvidence || null,
+          question.sourcePage ?? null,
+          question.manualPage != null
+            ? String(question.manualPage)
+            : null,
+          question.questionFamily,
+          question.difficulty || difficulty,
+          question.graphic
+            ? JSON.stringify(question.graphic)
+            : null
+        ]
+      );
+
+      const questionId = Number(questionResult.rows[0].id);
+
+      await client.query(
+        `INSERT INTO test_session_questions (
+          session_id,
+          question_id,
+          coverage_item_id,
+          position
+        )
+        VALUES ($1,$2,$3,$4)`,
+        [
+          sessionId,
+          questionId,
+          Number(target.id),
+          i + 1
+        ]
+      );
+
+      persistedQuestions.push({
+        ...question,
+        questionId
+      });
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      sessionId,
+      questions:persistedQuestions
+    };
+
+  }catch(error){
+    await client.query("ROLLBACK");
+    throw error;
+
+  }finally{
+    client.release();
+  }
+}
+function getNextReviewDate(reviewStage, now = new Date()){
+  const next = new Date(now);
+
+  let days;
+
+  if(reviewStage <= 1){
+    days = 1;
+  }else if(reviewStage === 2){
+    days = 7;
+  }else if(reviewStage === 3){
+    days = 14;
+  }else{
+    days = 30;
+  }
+
+  next.setUTCDate(next.getUTCDate() + days);
+
+  return next;
+}
+
+async function registerQuestionAnswer({
+  sessionId,
+  questionId,
+  selectedIndex
+}){
+  if(
+    !Number.isInteger(Number(sessionId)) ||
+    !Number.isInteger(Number(questionId)) ||
+    !Number.isInteger(Number(selectedIndex)) ||
+    Number(selectedIndex) < 0 ||
+    Number(selectedIndex) > 3
+  ){
+    throw new Error("RESPUESTA: datos inválidos.");
+  }
+
+  const client = await db.connect();
+
+  try{
+    await client.query("BEGIN");
+
+    const result = await client.query(
+      `SELECT
+         tsq.id AS session_question_id,
+         tsq.coverage_item_id,
+         tsq.answered_at,
+         qb.correct_index
+       FROM test_session_questions tsq
+       JOIN question_bank qb
+         ON qb.id = tsq.question_id
+       WHERE tsq.session_id = $1
+         AND tsq.question_id = $2
+       FOR UPDATE`,
+      [
+        Number(sessionId),
+        Number(questionId)
+      ]
+    );
+
+    if(!result.rows.length){
+      throw new Error(
+        "RESPUESTA: la pregunta no pertenece a esta sesión."
+      );
+    }
+
+    const row = result.rows[0];
+
+    if(row.answered_at){
+      throw new Error(
+        "RESPUESTA: esta pregunta ya había sido contestada."
+      );
+    }
+
+    const coverageItemId = Number(row.coverage_item_id);
+    const correctIndex = Number(row.correct_index);
+    const isCorrect =
+      Number(selectedIndex) === correctIndex;
+
+    const now = new Date();
+
+    const reviewResult = await client.query(
+      `SELECT *
+       FROM coverage_review_state
+       WHERE coverage_item_id = $1
+       FOR UPDATE`,
+      [coverageItemId]
+    );
+
+    const current =
+      reviewResult.rows[0] || null;
+
+    let reviewStage;
+    let consecutiveCorrect;
+    let consecutiveWrong;
+
+    if(isCorrect){
+      reviewStage = current
+        ? Math.max(1, Number(current.review_stage) + 1)
+        : 1;
+
+      consecutiveCorrect =
+        current
+          ? Number(current.consecutive_correct) + 1
+          : 1;
+
+      consecutiveWrong = 0;
+
+    }else{
+      /*
+        Un fallo devuelve el conocimiento al ciclo corto.
+        Conservamos todo el historial acumulado.
+      */
+      reviewStage = 1;
+      consecutiveCorrect = 0;
+
+      consecutiveWrong =
+        current
+          ? Number(current.consecutive_wrong) + 1
+          : 1;
+    }
+
+    const nextReviewAt =
+      getNextReviewDate(reviewStage, now);
+
+    await client.query(
+      `INSERT INTO coverage_review_state (
+         coverage_item_id,
+         review_stage,
+         next_review_at,
+         last_review_at,
+         consecutive_correct,
+         consecutive_wrong,
+         total_reviews,
+         total_correct,
+         total_wrong,
+         updated_at
+       )
+       VALUES (
+         $1,$2,$3,$4,$5,$6,
+         1,$7,$8,NOW()
+       )
+       ON CONFLICT (coverage_item_id)
+       DO UPDATE SET
+         review_stage = EXCLUDED.review_stage,
+         next_review_at = EXCLUDED.next_review_at,
+         last_review_at = EXCLUDED.last_review_at,
+         consecutive_correct = EXCLUDED.consecutive_correct,
+         consecutive_wrong = EXCLUDED.consecutive_wrong,
+         total_reviews =
+           coverage_review_state.total_reviews + 1,
+         total_correct =
+           coverage_review_state.total_correct + EXCLUDED.total_correct,
+         total_wrong =
+           coverage_review_state.total_wrong + EXCLUDED.total_wrong,
+         updated_at = NOW()`,
+      [
+        coverageItemId,
+        reviewStage,
+        nextReviewAt,
+        now,
+        consecutiveCorrect,
+        consecutiveWrong,
+        isCorrect ? 1 : 0,
+        isCorrect ? 0 : 1
+      ]
+    );
+
+    await client.query(
+      `UPDATE test_session_questions
+       SET
+         selected_index = $1,
+         is_correct = $2,
+         answered_at = $3
+       WHERE id = $4`,
+      [
+        Number(selectedIndex),
+        isCorrect,
+        now,
+        Number(row.session_question_id)
+      ]
+    );
+
+    await client.query(
+      `UPDATE question_bank
+       SET
+         times_shown = times_shown + 1,
+         times_correct =
+           times_correct + $1,
+         times_wrong =
+           times_wrong + $2,
+         last_shown_at = $3,
+         updated_at = NOW()
+       WHERE id = $4`,
+      [
+        isCorrect ? 1 : 0,
+        isCorrect ? 0 : 1,
+        now,
+        Number(questionId)
+      ]
+    );
+
+    await client.query(
+      `UPDATE coverage_items
+       SET
+         times_asked = times_asked + 1,
+         times_correct =
+           times_correct + $1,
+         times_wrong =
+           times_wrong + $2,
+         last_asked_at = $3
+       WHERE id = $4`,
+      [
+        isCorrect ? 1 : 0,
+        isCorrect ? 0 : 1,
+        now,
+        coverageItemId
+      ]
+    );
+
+    const sessionStats = await client.query(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE answered_at IS NOT NULL
+         )::int AS answered,
+
+         COUNT(*) FILTER (
+           WHERE is_correct = TRUE
+         )::int AS correct,
+
+         COUNT(*) FILTER (
+           WHERE is_correct = FALSE
+         )::int AS wrong,
+
+         COUNT(*)::int AS total
+       FROM test_session_questions
+       WHERE session_id = $1`,
+      [Number(sessionId)]
+    );
+
+    const stats = sessionStats.rows[0];
+
+    const completed =
+      Number(stats.answered) === Number(stats.total);
+
+    await client.query(
+      `UPDATE test_sessions
+       SET
+         correct_answers = $1,
+         wrong_answers = $2,
+         completed = $3,
+         completed_at =
+           CASE
+             WHEN $3 = TRUE THEN NOW()
+             ELSE completed_at
+           END
+       WHERE id = $4`,
+      [
+        Number(stats.correct),
+        Number(stats.wrong),
+        completed,
+        Number(sessionId)
+      ]
+    );
+
+    await client.query("COMMIT");
+
+    return {
+      isCorrect,
+      correctIndex,
+      reviewStage,
+      nextReviewAt,
+      completed,
+      stats:{
+        answered:Number(stats.answered),
+        total:Number(stats.total),
+        correct:Number(stats.correct),
+        wrong:Number(stats.wrong)
+      }
+    };
+
+  }catch(error){
+    await client.query("ROLLBACK");
+    throw error;
+
+  }finally{
+    client.release();
+  }
+}
 async function markCoverageTargetsWorked(targets){
   if(!targets.length) return;
 
@@ -5515,6 +5929,116 @@ for(let i=0;i<parsed.questions.length;i++){
     targets: replacementTargets
   };
 }
+app.post("/api/answer", async(req,res)=>{
+  try{
+    const sessionId = Number(req.body.sessionId);
+    const questionId = Number(req.body.questionId);
+    const selectedIndex = Number(req.body.selectedIndex);
+
+    if(
+      !Number.isInteger(sessionId) ||
+      sessionId < 1 ||
+      !Number.isInteger(questionId) ||
+      questionId < 1 ||
+      !Number.isInteger(selectedIndex) ||
+      selectedIndex < 0 ||
+      selectedIndex > 3
+    ){
+      return res.status(400).json({
+        ok:false,
+        error:"Datos de respuesta inválidos."
+      });
+    }
+
+    const result = await registerQuestionAnswer({
+      sessionId,
+      questionId,
+      selectedIndex
+    });
+
+    res.json({
+      ok:true,
+      ...result
+    });
+
+  }catch(e){
+    console.error("ERROR REGISTER ANSWER:",e);
+
+    const message = e?.message || String(e);
+
+    const status =
+      message.includes("no pertenece") ||
+      message.includes("ya había sido contestada")
+        ? 409
+        : 500;
+
+    res.status(status).json({
+      ok:false,
+      error:message
+    });
+  }
+});
+app.post("/api/finish-test", async(req,res)=>{
+  try{
+    const sessionId = Number(req.body.sessionId);
+
+    if(
+      !Number.isInteger(sessionId) ||
+      sessionId < 1
+    ){
+      return res.status(400).json({
+        ok:false,
+        error:"Sesión inválida."
+      });
+    }
+
+    const result = await db.query(
+      `UPDATE test_sessions ts
+       SET
+         completed = TRUE,
+         completed_at = NOW(),
+         correct_answers = stats.correct,
+         wrong_answers = stats.wrong
+       FROM (
+         SELECT
+           session_id,
+           COUNT(*) FILTER (
+             WHERE is_correct = TRUE
+           )::int AS correct,
+           COUNT(*) FILTER (
+             WHERE is_correct = FALSE
+           )::int AS wrong
+         FROM test_session_questions
+         WHERE session_id = $1
+         GROUP BY session_id
+       ) stats
+       WHERE ts.id = stats.session_id
+         AND ts.id = $1
+       RETURNING ts.id`,
+      [sessionId]
+    );
+
+    if(!result.rows.length){
+      return res.status(404).json({
+        ok:false,
+        error:"Sesión no encontrada."
+      });
+    }
+
+    res.json({
+      ok:true,
+      sessionId
+    });
+
+  }catch(e){
+    console.error("ERROR FINISH TEST:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -5797,6 +6321,23 @@ parsed.questions = finalQuestions;
       Solo llegamos aquí después de recibir y validar
       exactamente el número solicitado de preguntas.
     */
+        const persistedTest = await persistGeneratedTest({
+      questions: parsed.questions,
+      targets,
+      requestedCount: count,
+      difficulty,
+      mode
+    });
+
+    console.log(
+      "PERSISTENCIA TEST:",
+      JSON.stringify({
+        sessionId: persistedTest.sessionId,
+        questions: persistedTest.questions.length
+      })
+    );
+
+    parsed.questions = persistedTest.questions;
     await markCoverageTargetsWorked(targets);
 
     console.log(
@@ -5805,13 +6346,14 @@ parsed.questions = finalQuestions;
     );
 
     res.json({
-      ok:true,
-      questions:parsed.questions,
-      coverage:{
-        targeted:targets.length,
-        markedWorked:targets.length
-      }
-    });
+  ok:true,
+  sessionId:persistedTest.sessionId,
+  questions:parsed.questions,
+  coverage:{
+    targeted:targets.length,
+    markedWorked:targets.length
+  }
+});
 
   }catch(e){
     console.error("ERROR GENERATECONTENT:",e);
