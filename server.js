@@ -4624,6 +4624,63 @@ Selecciona la pareja con correspondencia técnica más clara.
     graphicAsset
   };
 }
+async function getFailedCoverageTargets(count){
+  const result = await db.query(
+    `
+    WITH latest_answer AS (
+      SELECT DISTINCT ON (tsq.coverage_item_id)
+        tsq.coverage_item_id,
+        tsq.question_id,
+        tsq.is_correct,
+        tsq.is_blank,
+        tsq.answered_at
+
+      FROM test_session_questions tsq
+
+      WHERE
+        tsq.answered_at IS NOT NULL
+        AND tsq.is_blank = FALSE
+
+      ORDER BY
+        tsq.coverage_item_id,
+        tsq.answered_at DESC,
+        tsq.id DESC
+    )
+
+    SELECT
+      ci.id,
+      t.name AS topic_name,
+      ci.section,
+      ci.concept,
+      ci.item_type,
+      ci.evaluation_type,
+      ci.source_page,
+      ci.manual_page,
+      ci.source_evidence,
+
+      la.question_id AS failed_question_id,
+      la.answered_at AS failed_at
+
+    FROM latest_answer la
+
+    JOIN coverage_items ci
+      ON ci.id = la.coverage_item_id
+
+    JOIN topics t
+      ON t.id = ci.topic_id
+
+    WHERE la.is_correct = FALSE
+
+    ORDER BY
+      la.answered_at DESC
+
+    LIMIT $1
+    `,
+    [Number(count)]
+  );
+
+  return result.rows;
+}
 async function getCoverageTargetsForGeneration(count, ai){
   /*
     SELECCIÓN DE OBJETIVOS
