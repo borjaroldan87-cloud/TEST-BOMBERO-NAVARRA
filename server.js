@@ -6444,6 +6444,8 @@ app.post("/api/answer", async(req,res)=>{
   }
 });
 app.post("/api/finish-test", async(req,res)=>{
+  const client = await db.connect();
+
   try{
     const sessionId = Number(req.body.sessionId);
 
@@ -6457,51 +6459,163 @@ app.post("/api/finish-test", async(req,res)=>{
       });
     }
 
-    const result = await db.query(
-      `UPDATE test_sessions ts
+    await client.query("BEGIN");
+
+    /*
+      Toda pregunta todavía sin answered_at al entregar
+      el examen se convierte en BLANCO real.
+    */
+    const blankResult = await client.query(
+      `UPDATE test_session_questions
        SET
-         completed = TRUE,
-         completed_at = NOW(),
-         correct_answers = stats.correct,
-         wrong_answers = stats.wrong
-       FROM (
-         SELECT
-           session_id,
-           COUNT(*) FILTER (
-             WHERE is_correct = TRUE
-           )::int AS correct,
-           COUNT(*) FILTER (
-             WHERE is_correct = FALSE
-           )::int AS wrong
-         FROM test_session_questions
-         WHERE session_id = $1
-         GROUP BY session_id
-       ) stats
-       WHERE ts.id = stats.session_id
-         AND ts.id = $1
-       RETURNING ts.id`,
+         is_blank = TRUE,
+         answered_at = NOW()
+       WHERE session_id = $1
+         AND answered_at IS NULL
+       RETURNING
+         question_id,
+         coverage_item_id`,
       [sessionId]
     );
 
-    if(!result.rows.length){
-      return res.status(404).json({
-        ok:false,
-        error:"Sesión no encontrada."
-      });
+    /*
+      Los blancos cuentan como aparición de la pregunta,
+      pero NO como acierto ni como error.
+    */
+    for(const row of blankResult.rows){
+      await client.query(
+        `UPDATE question_bank
+         SET
+           times_shown = times_shown + 1,
+           times_blank = times_blank + 1,
+           last_shown_at = NOW(),
+           updated_at = NOW()
+         WHERE id = $1`,
+        [Number(row.question_id)]
+      );
+
+      await client.query(
+        `UPDATE coverage_items
+         SET
+           times_asked = times_asked + 1,
+           times_blank = times_blank + 1,
+           last_asked_at = NOW()
+         WHERE id = $1`,
+        [Number(row.coverage_item_id)]
+      );
+
+      await client.query(
+        `INSERT INTO coverage_review_state (
+           coverage_item_id,
+           review_stage,
+           next_review_at,
+           last_review_at,
+           consecutive_correct,
+           consecutive_wrong,
+           total_reviews,
+           total_correct,
+           total_wrong,
+           total_blank,
+           updated_at
+         )
+         VALUES (
+           $1,
+           1,
+           $2,
+           NOW(),
+           0,
+           0,
+           1,
+           0,
+           0,
+           1,
+           NOW()
+         )
+         ON CONFLICT (coverage_item_id)
+         DO UPDATE SET
+           review_stage = 1,
+           next_review_at = EXCLUDED.next_review_at,
+           last_review_at = NOW(),
+           consecutive_correct = 0,
+           consecutive_wrong = 0,
+           total_reviews =
+             coverage_review_state.total_reviews + 1,
+           total_blank =
+             coverage_review_state.total_blank + 1,
+           updated_at = NOW()`,
+        [
+          Number(row.coverage_item_id),
+          getNextReviewDate(1, new Date())
+        ]
+      );
     }
+
+    const statsResult = await client.query(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE is_correct = TRUE
+         )::int AS correct,
+
+         COUNT(*) FILTER (
+           WHERE is_correct = FALSE
+             AND is_blank = FALSE
+         )::int AS wrong,
+
+         COUNT(*) FILTER (
+           WHERE is_blank = TRUE
+         )::int AS blank
+
+       FROM test_session_questions
+       WHERE session_id = $1`,
+      [sessionId]
+    );
+
+    const stats = statsResult.rows[0];
+
+    const result = await client.query(
+      `UPDATE test_sessions
+       SET
+         completed = TRUE,
+         completed_at = NOW(),
+         correct_answers = $1,
+         wrong_answers = $2,
+         blank_answers = $3
+       WHERE id = $4
+       RETURNING id`,
+      [
+        Number(stats.correct),
+        Number(stats.wrong),
+        Number(stats.blank),
+        sessionId
+      ]
+    );
+
+    if(!result.rows.length){
+      throw new Error("Sesión no encontrada.");
+    }
+
+    await client.query("COMMIT");
 
     res.json({
       ok:true,
-      sessionId
+      sessionId,
+      correct:Number(stats.correct),
+      wrong:Number(stats.wrong),
+      blank:Number(stats.blank)
     });
 
   }catch(e){
+    await client.query("ROLLBACK");
+
     console.error("ERROR FINISH TEST:",e);
 
     res.status(500).json({
       ok:false,
       error:e?.message || String(e)
     });
+
+  }finally{
+    client.release();
   }
 });
 app.post("/api/generate", async(req,res)=>{
