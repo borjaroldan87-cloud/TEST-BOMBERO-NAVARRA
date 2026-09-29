@@ -5409,7 +5409,9 @@ async function getReusableQuestionForTarget(target, difficulty){
   if(!target?.id){
     return null;
   }
-
+if(target.questionFamily === "GRAFICA"){
+  return null;
+}
   /*
   No reutilizamos una pregunta literal cuando:
 
@@ -5451,10 +5453,11 @@ async function getReusableQuestionForTarget(target, difficulty){
     FROM question_bank
 
     WHERE
-      coverage_item_id = $1
-      AND active = TRUE
-      AND difficulty = $2
-      AND graphic IS NULL
+  coverage_item_id = $1
+  AND active = TRUE
+  AND difficulty = $2
+  AND question_family = $3
+  AND graphic IS NULL
 
     ORDER BY
       times_shown ASC,
@@ -5464,9 +5467,10 @@ async function getReusableQuestionForTarget(target, difficulty){
     LIMIT 1
     `,
     [
-      Number(target.id),
-      difficulty
-    ]
+  Number(target.id),
+  difficulty,
+  target.questionFamily
+]
   );
 
   if(!result.rows.length){
@@ -5562,7 +5566,96 @@ async function persistGeneratedTest({
     for(let i = 0; i < questions.length; i++){
       const question = questions[i];
       const target = targets[i];
+      let questionId;
 
+if(
+  question.reused === true &&
+  Number.isInteger(Number(question.questionId))
+){
+  const reusableCheck = await client.query(
+    `SELECT id
+     FROM question_bank
+     WHERE id = $1
+       AND coverage_item_id = $2
+       AND active = TRUE
+     LIMIT 1`,
+    [
+      Number(question.questionId),
+      Number(target.id)
+    ]
+  );
+
+  if(!reusableCheck.rows.length){
+    throw new Error(
+      `PERSISTENCIA: la pregunta reutilizada ${question.questionId} no corresponde al coverage_item ${target.id}.`
+    );
+  }
+
+  questionId = Number(question.questionId);
+
+}else{
+
+  const questionResult = await client.query(
+    `INSERT INTO question_bank (
+      coverage_item_id,
+      stem,
+      options,
+      correct_index,
+      explanation,
+      source_evidence,
+      source_page,
+      manual_page,
+      question_family,
+      difficulty,
+      graphic
+    )
+    VALUES (
+      $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb
+    )
+    RETURNING id`,
+    [
+      Number(target.id),
+      question.stem,
+      JSON.stringify(question.options),
+      Number(question.correctIndex),
+      question.explanation || null,
+      question.sourceEvidence || null,
+      question.sourcePage ?? null,
+      question.manualPage != null
+        ? String(question.manualPage)
+        : null,
+      question.questionFamily,
+      question.difficulty || difficulty,
+      question.graphic
+        ? JSON.stringify(question.graphic)
+        : null
+    ]
+  );
+
+  questionId = Number(questionResult.rows[0].id);
+}
+
+await client.query(
+  `INSERT INTO test_session_questions (
+    session_id,
+    question_id,
+    coverage_item_id,
+    position
+  )
+  VALUES ($1,$2,$3,$4)`,
+  [
+    sessionId,
+    questionId,
+    Number(target.id),
+    i + 1
+  ]
+);
+
+persistedQuestions.push({
+  ...question,
+  questionId,
+  coverageItemId:Number(target.id)
+});
       if(!target?.id){
         throw new Error(
           `PERSISTENCIA: falta coverage_item_id en la pregunta ${i + 1}.`
@@ -7087,18 +7180,72 @@ const targets=
 }
 
    const generationCount = targets.length; 
-    
+    const reusableQuestions = new Map();
+
+if(testType === "normal"){
+  for(let i = 0; i < targets.length; i++){
+
+    const reusable =
+      await getReusableQuestionForTarget(
+        targets[i],
+        difficulty
+      );
+
+    if(reusable){
+      reusableQuestions.set(i, reusable);
+    }
+  }
+}
+
+console.log(
+  "BANCO DE PREGUNTAS:",
+  reusableQuestions.size,
+  "reutilizables de",
+  targets.length
+);
     console.log(
       "GENERATECONTENT: iniciando con",
       targets.length,
       "objetivos de cobertura"
     );
+const generationTargets = [];
+const generationIndexes = [];
 
+for(let i = 0; i < targets.length; i++){
+
+  if(reusableQuestions.has(i)){
+    continue;
+  }
+
+  generationTargets.push(targets[i]);
+  generationIndexes.push(i);
+}
+
+console.log(
+  "GENERACIÓN NUEVA:",
+  generationTargets.length,
+  "objetivos de",
+  targets.length
+);
     const officialStyle = await getCachedOfficialExamStyleReference();
 
-const prompt =
-  generationPrompt(generationCount,difficulty,mode) +
-  coverageTargetsPrompt(targets) +
+const newGenerationCount =
+  generationTargets.length;
+
+let prompt = null;
+let finalQuestions = [];
+if(newGenerationCount > 0){
+
+  prompt =
+    generationPrompt(
+        newGenerationCount,
+        difficulty,
+        mode
+      ) +
+      coverageTargetsPrompt(
+        generationTargets
+      ) +
+      `
   `
 
 ===============================================
@@ -7156,7 +7303,7 @@ console.log(
 console.log("TEXTO GEMINI:", response.text.slice(0,1500));
     const parsed=JSON.parse(response.text);
 for(let i=0;i<parsed.questions.length;i++){
-  const target = targets[i];
+  const target = generationTargets[i];
   const question = parsed.questions[i];
 
   if(target?.questionFamily === "GRAFICA" && target?.graphicAsset){
@@ -7179,10 +7326,10 @@ for(let i=0;i<parsed.questions.length;i++){
 }
   if(
   !parsed.questions ||
-  parsed.questions.length!==generationCount
+  parsed.questions.length !== newGenerationCount
 ){
   throw new Error(
-    `Gemini debía devolver ${generationCount} preguntas y devolvió ${parsed.questions?.length || 0}.`
+    `Gemini debía devolver ${newGenerationCount} preguntas y devolvió ${parsed.questions?.length || 0}.`
   );
 }
 
@@ -7198,9 +7345,9 @@ for(let i=0;i<parsed.questions.length;i++){
     }
 console.log("VALIDACIÓN FACTUAL: iniciando");
 
-let finalQuestions = [...parsed.questions];
+finalQuestions = [...parsed.questions];
     for (let i = 0; i < finalQuestions.length; i++) {
-  const target = targets[i];
+  const target = generationTargets[i];
   const q = finalQuestions[i];
 
   if (target?.questionFamily === "GRAFICA" && target?.graphicAsset) {
@@ -7249,7 +7396,7 @@ while(
       ai,
       invalidQuestions,
       finalQuestions,
-      targets,
+      generationTargets,
       difficulty,
       mode,
       officialStyle
@@ -7269,7 +7416,7 @@ while(
 
     if(validationResult.valid){
   const replacementQuestion = regenerated.questions[i];
-  const originalTarget = targets[originalIndex];
+  const originalTarget = generationTargets[originalIndex];
 
   if(
     originalTarget?.questionFamily === "GRAFICA" &&
@@ -7332,7 +7479,26 @@ if(invalidQuestions.length > 0){
 console.log(
   "VALIDACIÓN FACTUAL: todas las preguntas superadas"
 );
+    }
+const completeQuestions =
+  new Array(targets.length);
 
+for(const [index, reusable] of reusableQuestions){
+  completeQuestions[index] = reusable;
+}
+
+for(let i = 0; i < finalQuestions.length; i++){
+  const originalIndex = generationIndexes[i];
+  completeQuestions[originalIndex] = finalQuestions[i];
+}
+
+if(completeQuestions.some(question => !question)){
+  throw new Error(
+    "No se pudo reconstruir el test completo."
+  );
+}
+
+finalQuestions = completeQuestions;
 parsed.questions = finalQuestions;
     /*
       Las preguntas mantienen el mismo orden que los objetivos:
