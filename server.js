@@ -4710,6 +4710,95 @@ questionFamily:
   }
 }));
 }
+async function getAdaptiveCoverageCandidates(limit = 120){
+  const result = await db.query(
+    `
+    SELECT
+      ci.id,
+      t.name AS topic_name,
+      ci.section,
+      ci.concept,
+      ci.item_type,
+      ci.evaluation_type,
+      ci.source_page,
+      ci.manual_page,
+      ci.source_evidence,
+      ci.worked,
+      ci.times_asked,
+      ci.times_correct,
+      ci.times_wrong,
+      ci.times_blank,
+      ci.last_asked_at,
+
+      crs.review_stage,
+      crs.next_review_at,
+      crs.last_review_at,
+      crs.consecutive_correct,
+      crs.consecutive_wrong,
+      crs.total_reviews,
+
+      CASE
+        WHEN
+          ci.worked = TRUE
+          AND crs.next_review_at IS NOT NULL
+          AND crs.next_review_at <= NOW()
+        THEN 1
+
+        WHEN
+          ci.worked = TRUE
+          AND ci.times_wrong > 0
+          AND ci.times_wrong > ci.times_correct
+        THEN 2
+
+        WHEN
+          ci.worked = TRUE
+          AND (ci.times_wrong + ci.times_blank) > 0
+          AND (
+            ci.times_correct::numeric /
+            NULLIF(
+              ci.times_correct +
+              ci.times_wrong +
+              ci.times_blank,
+              0
+            )
+          ) < 0.70
+        THEN 3
+
+        WHEN ci.worked = FALSE
+        THEN 4
+
+        ELSE 5
+      END AS adaptive_priority
+
+    FROM coverage_items ci
+
+    JOIN topics t
+      ON t.id = ci.topic_id
+
+    LEFT JOIN coverage_review_state crs
+      ON crs.coverage_item_id = ci.id
+
+    ORDER BY
+      adaptive_priority ASC,
+
+      CASE
+        WHEN crs.next_review_at IS NOT NULL
+        THEN crs.next_review_at
+      END ASC NULLS LAST,
+
+      ci.times_wrong DESC,
+      ci.times_blank DESC,
+      ci.times_asked ASC,
+      ci.last_asked_at ASC NULLS FIRST,
+      ci.id ASC
+
+    LIMIT $1
+    `,
+    [Number(limit)]
+  );
+
+  return result.rows;
+}
 async function getCoverageTargetsForGeneration(count, ai){
   /*
     SELECCIÓN DE OBJETIVOS
@@ -4723,32 +4812,23 @@ async function getCoverageTargetsForGeneration(count, ai){
         CALCULO_FORMULACION -> 2024_NUMERICA -> 2024_TEXTO.
   */
 
-  const result = await db.query(
-    `
-    SELECT
-      ci.id,
-      t.name AS topic_name,
-      ci.section,
-      ci.concept,
-      ci.item_type,
-      ci.evaluation_type,
-      ci.source_page,
-      ci.manual_page,
-      ci.source_evidence
-    FROM coverage_items ci
-    JOIN topics t ON t.id = ci.topic_id
-    WHERE ci.worked = FALSE
-    ORDER BY RANDOM()
-    LIMIT $1
-    `,
-    [count]
+const adaptiveCandidates =
+  await getAdaptiveCoverageCandidates(
+    Math.max(count * 12, 120)
   );
 
-  if(result.rows.length < count){
-    throw new Error(
-      `No hay suficientes coverage_items sin trabajar para generar ${count} preguntas.`
-    );
-  }
+if(adaptiveCandidates.length < count){
+  throw new Error(
+    `No hay suficientes coverage_items disponibles para generar ${count} preguntas.`
+  );
+}
+
+const result = {
+  rows: adaptiveCandidates.slice(0, count)
+};
+
+
+    
 
   const families = buildQuestionFamilyPlan(count);
 
