@@ -14,13 +14,14 @@ async function generate(){
     btn.textContent="GENERANDO TEST...";
 
     const j=await api("/api/generate",{
-      method:"POST",
-      body:JSON.stringify({
-        count:+$("count").value,
-        difficulty:$("difficulty").value,
-        mode:$("mode").value
-      })
-    });
+  method:"POST",
+  body:JSON.stringify({
+    count:+$("count").value,
+    difficulty:$("difficulty").value,
+    mode:$("mode").value,
+    testType:$("testType")?.value || "normal"
+  })
+});
 
     if(!j.ok){
       throw new Error(j.error||"No se pudo generar el test.");
