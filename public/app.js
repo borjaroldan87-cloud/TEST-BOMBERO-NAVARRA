@@ -524,9 +524,10 @@ function performanceText(performance){
     </strong>
 
     <span>
-      · ${performance.correct} aciertos
-      · ${performance.wrong} errores
-    </span>
+  · ${performance.correct} aciertos
+  · ${performance.wrong} errores
+  · ${performance.blank ?? 0} blancos
+</span>
   `;
 }
 async function loadStatistics(){
@@ -580,7 +581,7 @@ async function loadStatistics(){
       $("performanceValue").style.color=color;
 
       $("performanceDetail").textContent=
-        `${performance.correct} aciertos · ${performance.wrong} errores`;
+  `${performance.correct} aciertos · ${performance.wrong} errores · ${performance.blank ?? 0} blancos`;
 
       $("performanceBar").style.width=
         `${Math.min(
