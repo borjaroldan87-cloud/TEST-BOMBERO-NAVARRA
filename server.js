@@ -4745,10 +4745,9 @@ async function getAdaptiveCoverageCandidates(limit = 120){
         THEN 1
 
         WHEN
-          ci.worked = TRUE
-          AND ci.times_wrong > 0
-          AND ci.times_wrong > ci.times_correct
-        THEN 2
+  ci.worked = TRUE
+  AND last_nonblank_answer.is_correct = FALSE
+THEN 2
 
         WHEN
           ci.worked = TRUE
@@ -4777,7 +4776,21 @@ async function getAdaptiveCoverageCandidates(limit = 120){
 
     LEFT JOIN coverage_review_state crs
       ON crs.coverage_item_id = ci.id
-
+LEFT JOIN LATERAL (
+  SELECT
+    tsq.is_correct,
+    tsq.answered_at
+  FROM test_session_questions tsq
+  WHERE
+    tsq.coverage_item_id = ci.id
+    AND tsq.answered_at IS NOT NULL
+    AND tsq.is_blank = FALSE
+  ORDER BY
+    tsq.answered_at DESC,
+    tsq.id DESC
+  LIMIT 1
+) last_nonblank_answer
+  ON TRUE
     ORDER BY
       adaptive_priority ASC,
 
@@ -4823,10 +4836,92 @@ if(adaptiveCandidates.length < count){
   );
 }
 
-const result = {
-  rows: adaptiveCandidates.slice(0, count)
-};
+/*
+SELECCIÓN ANTI-SOLAPAMIENTO
 
+Evita incluir en el mismo test conocimientos prácticamente
+idénticos, sin eliminar ni fusionar coverage_items de la BD.
+
+La prioridad adaptativa ya viene ordenada desde SQL.
+Por tanto recorremos los candidatos en ese mismo orden y
+conservamos siempre el candidato de mayor prioridad.
+*/
+const selectedAdaptive = [];
+
+/*
+Mientras exista contenido nuevo, garantizamos una plaza
+para avance de cobertura.
+
+No fijamos porcentajes rígidos:
+el resto del test continúa gobernado por la prioridad adaptativa.
+*/
+const newCandidate =
+  adaptiveCandidates.find(
+    candidate => candidate.worked === false
+  );
+
+if(newCandidate){
+  selectedAdaptive.push(newCandidate);
+}
+
+for(const candidate of adaptiveCandidates){
+
+  if(
+    selectedAdaptive.some(
+      selected => Number(selected.id) === Number(candidate.id)
+    )
+  ){
+    continue;
+  }
+
+  const candidateConcept =
+    String(candidate.concept || "")
+      .trim()
+      .toLowerCase();
+
+  const candidateSection =
+    String(candidate.section || "")
+      .trim()
+      .toLowerCase();
+
+  const overlaps = selectedAdaptive.some(selected => {
+
+    const selectedConcept =
+      String(selected.concept || "")
+        .trim()
+        .toLowerCase();
+
+    const selectedSection =
+      String(selected.section || "")
+        .trim()
+        .toLowerCase();
+
+    return (
+      candidateConcept &&
+      candidateConcept === selectedConcept &&
+      candidateSection === selectedSection
+    );
+  });
+
+  if(overlaps){
+    continue;
+  }
+
+  selectedAdaptive.push(candidate);
+
+  if(selectedAdaptive.length === count){
+    break;
+  }
+}
+
+if(selectedAdaptive.length < count){
+  throw new Error(
+    `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
+  );
+}
+const result = {
+  rows: selectedAdaptive
+};
 
     
 
@@ -5154,7 +5249,15 @@ OBJETIVOS OBLIGATORIOS DE COBERTURA
 
 ${targets.some(item=>item.failedQuestion)
   ? `El sistema ha seleccionado ${targets.length} conocimientos previamente fallados que deben volver a evaluarse mediante variantes nuevas.`
-  : `El sistema ha seleccionado ${targets.length} unidades examinables que todavía NO han sido trabajadas.`
+  : `El sistema ha seleccionado ${targets.length} objetivos mediante selección adaptativa.
+
+Estos objetivos pueden corresponder a:
+- repasos SRS vencidos;
+- conocimientos con errores o rendimiento débil;
+- contenido todavía no trabajado;
+- conocimientos ya trabajados que requieren mantenimiento.
+
+Debes evaluar exactamente los objetivos seleccionados independientemente de que sean nuevos o ya hayan sido trabajados.`
 }
 
 Debes generar EXACTAMENTE UNA pregunta sobre CADA objetivo siguiente.
@@ -6874,14 +6977,6 @@ const targets=
   );
 }
 
-if(
-  testType==="normal" &&
-  targets.length<count
-){
-  throw new Error(
-    `Solo quedan ${targets.length} unidades de cobertura sin trabajar.`
-  );
-}
    const generationCount = targets.length; 
     
     console.log(
