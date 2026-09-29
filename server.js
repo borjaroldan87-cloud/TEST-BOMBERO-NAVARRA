@@ -6322,6 +6322,7 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
         ci.times_asked,
         ci.times_correct,
         ci.times_wrong,
+        ci.times_blank,
         ci.last_asked_at,
         crs.review_stage,
         crs.next_review_at
@@ -6344,9 +6345,13 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
         Number(row.times_correct) || 0;
 
       const wrong =
-        Number(row.times_wrong) || 0;
+  Number(row.times_wrong) || 0;
 
-      const answered = correct + wrong;
+const blank =
+  Number(row.times_blank) || 0;
+
+const answered =
+  correct + wrong + blank;
 
       return {
         coverageItemId:
@@ -6368,6 +6373,7 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
           answered,
           correct,
           wrong,
+          blank,
 
           percentage:
             answered > 0
