@@ -875,19 +875,7 @@ async function loadSectionStatistics(){
     }
   </div>
 </div>
-                            ? `
-                              Próximo repaso:
-                              ${new Date(
-                                k.srs.nextReviewAt
-                              ).toLocaleDateString(
-                                "es-ES"
-                              )}
-                            `
-                            : "Sin repaso programado"
-                        }
-                      </div>
-
-                    </div>
+                </div>
 
                   `).join("")
 
