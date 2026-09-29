@@ -5070,7 +5070,10 @@ function coverageTargetsPrompt(targets){
 OBJETIVOS OBLIGATORIOS DE COBERTURA
 ==================================================
 
-El sistema ha seleccionado ${targets.length} unidades examinables que todavía NO han sido trabajadas.
+${targets.some(item=>item.failedQuestion)
+  ? `El sistema ha seleccionado ${targets.length} conocimientos previamente fallados que deben volver a evaluarse mediante variantes nuevas.`
+  : `El sistema ha seleccionado ${targets.length} unidades examinables que todavía NO han sido trabajadas.`
+}
 
 Debes generar EXACTAMENTE UNA pregunta sobre CADA objetivo siguiente.
 No sustituyas estos objetivos por otros conceptos que te parezcan más interesantes.
