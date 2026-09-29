@@ -6288,10 +6288,6 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
       LEFT JOIN coverage_review_state crs
         ON crs.coverage_item_id = ci.id
 
-      WHERE
-        ci.times_correct > 0
-        OR ci.times_wrong > 0
-
       ORDER BY
         t.id,
         ci.section,
