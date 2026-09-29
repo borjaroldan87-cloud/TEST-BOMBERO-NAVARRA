@@ -4693,8 +4693,10 @@ WHERE la.is_correct = FALSE
   return result.rows.map(row=>({
   ...row,
 
-  questionFamily:
-    row.question_family || "2024_TEXTO",
+questionFamily:
+  row.question_family === "GRAFICA"
+    ? "2024_TEXTO"
+    : (row.question_family || "2024_TEXTO"),
 
   failedQuestion:{
     questionId:
