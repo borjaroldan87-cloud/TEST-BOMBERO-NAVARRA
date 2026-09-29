@@ -4659,7 +4659,11 @@ async function getFailedCoverageTargets(count){
       ci.source_evidence,
 
       la.question_id AS failed_question_id,
-      la.answered_at AS failed_at
+la.answered_at AS failed_at,
+
+qb.question_family AS question_family,
+qb.stem AS failed_stem,
+qb.options AS failed_options
 
     FROM latest_answer la
 
@@ -4667,9 +4671,12 @@ async function getFailedCoverageTargets(count){
       ON ci.id = la.coverage_item_id
 
     JOIN topics t
-      ON t.id = ci.topic_id
+  ON t.id = ci.topic_id
 
-    WHERE la.is_correct = FALSE
+JOIN question_bank qb
+  ON qb.id = la.question_id
+
+WHERE la.is_correct = FALSE
 
     ORDER BY
       la.answered_at DESC
@@ -4679,7 +4686,23 @@ async function getFailedCoverageTargets(count){
     [Number(count)]
   );
 
-  return result.rows;
+  return result.rows.map(row=>({
+  ...row,
+
+  questionFamily:
+    row.question_family || "2024_TEXTO",
+
+  failedQuestion:{
+    questionId:
+      Number(row.failed_question_id),
+
+    stem:
+      row.failed_stem,
+
+    options:
+      row.failed_options
+  }
+}));
 }
 async function getCoverageTargetsForGeneration(count, ai){
   /*
@@ -5062,6 +5085,29 @@ OBJETIVO ${index+1}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
+${item.failedQuestion ? `
+- MODO REPASO DE FALLO:
+  Este objetivo corresponde a un conocimiento previamente fallado.
+
+- PREGUNTA FALLADA ANTERIOR:
+  ${item.failedQuestion.stem}
+
+- OPCIONES ANTERIORES:
+  ${JSON.stringify(item.failedQuestion.options)}
+
+REGLAS OBLIGATORIAS PARA ESTA VARIANTE:
+- Evalúa EXACTAMENTE el mismo conocimiento del objetivo.
+- Genera una pregunta NUEVA.
+- NO copies ni parafrasees superficialmente el enunciado anterior.
+- NO reutilices el mismo conjunto de opciones.
+- NO mantengas deliberadamente la respuesta correcta en la misma posición.
+- Cambia el ángulo de evaluación cuando el temario lo permita:
+  aplicación, discriminación, relación, identificación, secuencia, cálculo o precisión.
+- La dificultad debe ser igual o superior a la pregunta anterior.
+- La respuesta debe seguir siendo demostrable exclusivamente con el temario.
+- El objetivo es comprobar que el opositor ha aprendido el CONOCIMIENTO,
+  no que recuerda la redacción o la posición de una respuesta.
+` : ""}
 ${item.questionFamily === "GRAFICA" && item.graphicAsset ? `
 - TRATAMIENTO GRÁFICO OBLIGATORIO:
   Esta pregunta dispone de un asset gráfico REAL previamente analizado.
@@ -6706,18 +6752,45 @@ app.post("/api/generate", async(req,res)=>{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
     const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
-    const difficulty=req.body.difficulty==="media" ? "media" : "alta";
-    const mode=["literal","mixto","calculos"].includes(req.body.mode)
-      ? req.body.mode
-      : "mixto";
-const ai=aiClient();
-    const targets=await getCoverageTargetsForGeneration(count, ai);
-    if(targets.length<count){
-      throw new Error(
-        `Solo quedan ${targets.length} unidades de cobertura sin trabajar.`
-      );
-    }
 
+const difficulty=
+  req.body.difficulty==="media"
+    ? "media"
+    : "alta";
+
+const mode=
+  ["literal","mixto","calculos"].includes(req.body.mode)
+    ? req.body.mode
+    : "mixto";
+
+const testType=
+  req.body.testType==="failed"
+    ? "failed"
+    : "normal";
+
+const ai=aiClient();
+
+const targets=
+  testType==="failed"
+    ? await getFailedCoverageTargets(count)
+    : await getCoverageTargetsForGeneration(count, ai);
+    if(targets.length===0){
+  throw new Error(
+    testType==="failed"
+      ? "No tienes conocimientos fallados pendientes."
+      : "No quedan unidades de cobertura disponibles."
+  );
+}
+
+if(
+  testType==="normal" &&
+  targets.length<count
+){
+  throw new Error(
+    `Solo quedan ${targets.length} unidades de cobertura sin trabajar.`
+  );
+}
+   const generationCount = targets.length; 
     
     console.log(
       "GENERATECONTENT: iniciando con",
@@ -6728,7 +6801,7 @@ const ai=aiClient();
     const officialStyle = await getCachedOfficialExamStyleReference();
 
 const prompt =
-  generationPrompt(count,difficulty,mode) +
+  generationPrompt(generationCount,difficulty,mode) +
   coverageTargetsPrompt(targets) +
   `
 
@@ -6808,14 +6881,14 @@ for(let i=0;i<parsed.questions.length;i++){
     };
   }
 }
-    if(
-      !parsed.questions ||
-      parsed.questions.length!==count
-    ){
-      throw new Error(
-        `Gemini debía devolver ${count} preguntas y devolvió ${parsed.questions?.length || 0}.`
-      );
-    }
+  if(
+  !parsed.questions ||
+  parsed.questions.length!==generationCount
+){
+  throw new Error(
+    `Gemini debía devolver ${generationCount} preguntas y devolvió ${parsed.questions?.length || 0}.`
+  );
+}
 
     for(const q of parsed.questions){
       if(
@@ -6991,12 +7064,20 @@ parsed.questions = finalQuestions;
     );
 
     parsed.questions = persistedTest.questions;
-    await markCoverageTargetsWorked(targets);
 
-    console.log(
-      "COBERTURA: marcados como trabajados",
-      targets.map(t=>t.id)
-    );
+if(testType==="normal"){
+  await markCoverageTargetsWorked(targets);
+
+  console.log(
+    "COBERTURA: marcados como trabajados",
+    targets.map(t=>t.id)
+  );
+}else{
+  console.log(
+    "REPASO DE FALLOS: cobertura no modificada",
+    targets.map(t=>t.id)
+  );
+}
 
     res.json({
   ok:true,
