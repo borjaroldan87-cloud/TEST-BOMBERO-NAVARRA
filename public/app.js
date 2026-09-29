@@ -829,16 +829,52 @@ async function loadSectionStatistics(){
                           k.performance
                         )}
                       </div>
+<div
+  style="
+    margin-top:4px;
+    font-size:.8em;
+    color:#777;
+    line-height:1.5;
+  "
+>
+  <div>
+    Respuestas:
+    ${k.performance?.answered ?? 0}
+    ·
+    Etapa SRS:
+    ${k.srs?.reviewStage ?? "--"}
+  </div>
 
-                      <div
-                        style="
-                          margin-top:2px;
-                          font-size:.8em;
-                          color:#777;
-                        "
-                      >
-                        ${
-                          k.srs?.nextReviewAt
+  <div>
+    ${
+      k.srs?.nextReviewAt
+        ? `
+          Próximo repaso:
+          ${new Date(
+            k.srs.nextReviewAt
+          ).toLocaleDateString(
+            "es-ES"
+          )}
+        `
+        : "Sin repaso programado"
+    }
+  </div>
+
+  <div>
+    ${
+      k.srs?.lastAskedAt
+        ? `
+          Última aparición:
+          ${new Date(
+            k.srs.lastAskedAt
+          ).toLocaleDateString(
+            "es-ES"
+          )}
+        `
+        : "Nunca preguntado"
+    }
+  </div>
+</div>
                             ? `
                               Próximo repaso:
                               ${new Date(
