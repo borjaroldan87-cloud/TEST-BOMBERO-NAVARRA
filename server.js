@@ -135,6 +135,7 @@ async function initDatabase(){
   ALTER TABLE coverage_items
   ADD COLUMN IF NOT EXISTS manual_page TEXT
 `);
+
    await db.query(`
     CREATE TABLE IF NOT EXISTS graphic_assets (
       id SERIAL PRIMARY KEY,
@@ -286,6 +287,30 @@ async function initDatabase(){
     CREATE INDEX IF NOT EXISTS idx_review_due
     ON coverage_review_state(next_review_at)
   `);
+    await db.query(`
+  ALTER TABLE coverage_items
+  ADD COLUMN IF NOT EXISTS times_blank INTEGER NOT NULL DEFAULT 0
+`);
+
+await db.query(`
+  ALTER TABLE question_bank
+  ADD COLUMN IF NOT EXISTS times_blank INTEGER NOT NULL DEFAULT 0
+`);
+
+await db.query(`
+  ALTER TABLE test_sessions
+  ADD COLUMN IF NOT EXISTS blank_answers INTEGER NOT NULL DEFAULT 0
+`);
+
+await db.query(`
+  ALTER TABLE test_session_questions
+  ADD COLUMN IF NOT EXISTS is_blank BOOLEAN NOT NULL DEFAULT FALSE
+`);
+
+await db.query(`
+  ALTER TABLE coverage_review_state
+  ADD COLUMN IF NOT EXISTS total_blank INTEGER NOT NULL DEFAULT 0
+`);
 }
 async function syncGraphicAssets(){
   const graphicsRoot = path.join(process.cwd(), "public", "graphics");
