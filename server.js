@@ -6009,7 +6009,8 @@ app.get("/api/statistics", async(req,res)=>{
 
         COALESCE(SUM(ci.times_asked),0)::int AS times_asked,
         COALESCE(SUM(ci.times_correct),0)::int AS times_correct,
-        COALESCE(SUM(ci.times_wrong),0)::int AS times_wrong
+        COALESCE(SUM(ci.times_wrong),0)::int AS times_wrong,
+        COALESCE(SUM(ci.times_blank),0)::int AS times_blank
 
       FROM topics t
 
@@ -6030,9 +6031,10 @@ app.get("/api/statistics", async(req,res)=>{
       const timesAsked = Number(row.times_asked) || 0;
       const timesCorrect = Number(row.times_correct) || 0;
       const timesWrong = Number(row.times_wrong) || 0;
+      const timesBlank = Number(row.times_blank) || 0;
 
       const answered =
-        timesCorrect + timesWrong;
+        timesCorrect + timesWrong + timesBlank;
 
       const coveragePercentage =
         totalItems > 0
@@ -6073,6 +6075,7 @@ app.get("/api/statistics", async(req,res)=>{
           answered,
           correct:timesCorrect,
           wrong:timesWrong,
+          blank:timesBlank,
           percentage:performancePercentage
         }
       };
@@ -6095,6 +6098,9 @@ app.get("/api/statistics", async(req,res)=>{
         acc.wrong +=
           topic.performance.wrong;
 
+        acc.blank +=
+          topic.performance.blank;
+
         return acc;
       },
       {
@@ -6102,12 +6108,15 @@ app.get("/api/statistics", async(req,res)=>{
         workedItems:0,
         timesAsked:0,
         correct:0,
-        wrong:0
+        wrong:0,
+        blank:0
       }
     );
 
     const totalAnswered =
-      totals.correct + totals.wrong;
+      totals.correct +
+      totals.wrong +
+      totals.blank;
 
     res.json({
       ok:true,
@@ -6139,6 +6148,7 @@ app.get("/api/statistics", async(req,res)=>{
           answered:totalAnswered,
           correct:totals.correct,
           wrong:totals.wrong,
+          blank:totals.blank,
           percentage:
             totalAnswered > 0
               ? Number(
@@ -6164,6 +6174,8 @@ app.get("/api/statistics", async(req,res)=>{
     });
   }
 });
+
+
 app.get("/api/statistics/sections", async(req,res)=>{
   try{
     const result=await db.query(`
