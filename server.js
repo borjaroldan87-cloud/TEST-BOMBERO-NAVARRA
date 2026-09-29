@@ -6201,7 +6201,10 @@ app.get("/api/statistics/sections", async(req,res)=>{
           AS times_correct,
 
         COALESCE(SUM(ci.times_wrong),0)::int
-          AS times_wrong
+  AS times_wrong,
+
+COALESCE(SUM(ci.times_blank),0)::int
+  AS times_blank
 
       FROM topics t
 
@@ -6232,9 +6235,13 @@ app.get("/api/statistics/sections", async(req,res)=>{
         Number(row.times_correct)||0;
 
       const wrong=
-        Number(row.times_wrong)||0;
+  Number(row.times_wrong)||0;
 
-      const answered=correct+wrong;
+const blank=
+  Number(row.times_blank)||0;
+
+const answered=
+  correct+wrong+blank;
 
       return {
         topicId:Number(row.topic_id),
@@ -6270,6 +6277,7 @@ app.get("/api/statistics/sections", async(req,res)=>{
           answered,
           correct,
           wrong,
+          blank,
 
           percentage:
             answered>0
