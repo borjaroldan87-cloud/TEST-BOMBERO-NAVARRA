@@ -301,7 +301,11 @@ await db.query(`
   ALTER TABLE test_sessions
   ADD COLUMN IF NOT EXISTS blank_answers INTEGER NOT NULL DEFAULT 0
 `);
-
+  
+await db.query(`
+  ALTER TABLE test_sessions
+  ADD COLUMN IF NOT EXISTS test_type TEXT NOT NULL DEFAULT 'normal'
+`);
 await db.query(`
   ALTER TABLE test_session_questions
   ADD COLUMN IF NOT EXISTS is_blank BOOLEAN NOT NULL DEFAULT FALSE
@@ -5218,7 +5222,8 @@ async function persistGeneratedTest({
   targets,
   requestedCount,
   difficulty,
-  mode
+  mode,
+  testType = "normal"
 }){
   if(
     !Array.isArray(questions) ||
@@ -5236,21 +5241,23 @@ async function persistGeneratedTest({
     await client.query("BEGIN");
 
     const sessionResult = await client.query(
-      `INSERT INTO test_sessions (
-        requested_count,
-        difficulty,
-        mode,
-        total_questions
-      )
-      VALUES ($1,$2,$3,$4)
-      RETURNING id`,
-      [
-        requestedCount,
-        difficulty,
-        mode,
-        questions.length
-      ]
-    );
+  `INSERT INTO test_sessions (
+    requested_count,
+    difficulty,
+    mode,
+    test_type,
+    total_questions
+  )
+  VALUES ($1,$2,$3,$4,$5)
+  RETURNING id`,
+  [
+    requestedCount,
+    difficulty,
+    mode,
+    testType,
+    questions.length
+  ]
+);
 
     const sessionId = Number(sessionResult.rows[0].id);
     const persistedQuestions = [];
@@ -7048,12 +7055,13 @@ parsed.questions = finalQuestions;
       exactamente el número solicitado de preguntas.
     */
         const persistedTest = await persistGeneratedTest({
-      questions: parsed.questions,
-      targets,
-      requestedCount: count,
-      difficulty,
-      mode
-    });
+  questions: parsed.questions,
+  targets,
+  requestedCount: count,
+  difficulty,
+  mode,
+  testType
+});
 
     console.log(
       "PERSISTENCIA TEST:",
