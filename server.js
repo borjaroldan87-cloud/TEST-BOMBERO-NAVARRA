@@ -5404,7 +5404,116 @@ REGLAS DE COBERTURA:
 - La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
 }
+async function getReusableQuestionForTarget(target, difficulty){
 
+  if(!target?.id){
+    return null;
+  }
+
+  /*
+  No reutilizamos una pregunta literal cuando:
+
+  - el conocimiento acaba de fallarse;
+  - es contenido nuevo;
+  - todavía no existe historial suficiente.
+
+  En esos casos interesa generar una variante nueva.
+  */
+  if(
+    target.failedQuestion ||
+    target.worked === false ||
+    Number(target.times_asked || 0) < 2
+  ){
+    return null;
+  }
+
+  const result = await db.query(
+    `
+    SELECT
+      id,
+      coverage_item_id,
+      stem,
+      options,
+      correct_index,
+      explanation,
+      source_evidence,
+      source_page,
+      manual_page,
+      question_family,
+      difficulty,
+      graphic,
+      times_shown,
+      times_correct,
+      times_wrong,
+      times_blank,
+      last_shown_at
+
+    FROM question_bank
+
+    WHERE
+      coverage_item_id = $1
+      AND active = TRUE
+      AND difficulty = $2
+      AND graphic IS NULL
+
+    ORDER BY
+      times_shown ASC,
+      last_shown_at ASC NULLS FIRST,
+      id ASC
+
+    LIMIT 1
+    `,
+    [
+      Number(target.id),
+      difficulty
+    ]
+  );
+
+  if(!result.rows.length){
+    return null;
+  }
+
+  const row = result.rows[0];
+
+  return {
+    questionId:Number(row.id),
+
+    coverageItemId:
+      Number(row.coverage_item_id),
+
+    stem:row.stem,
+
+    options:Array.isArray(row.options)
+      ? row.options
+      : [],
+
+    correctIndex:
+      Number(row.correct_index),
+
+    explanation:
+      row.explanation || "",
+
+    sourceEvidence:
+      row.source_evidence || "",
+
+    sourcePage:
+      row.source_page ?? null,
+
+    manualPage:
+      row.manual_page ?? null,
+
+    questionFamily:
+      row.question_family,
+
+    difficulty:
+      row.difficulty,
+
+    graphic:
+      row.graphic || null,
+
+    reused:true
+  };
+}
 async function persistGeneratedTest({
   questions,
   targets,
