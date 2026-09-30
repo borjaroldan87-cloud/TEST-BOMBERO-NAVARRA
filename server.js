@@ -4812,6 +4812,87 @@ LEFT JOIN LATERAL (
 
   return result.rows;
 }
+async function getNewCoverageCandidate(){
+  const result = await db.query(`
+    SELECT
+      ci.id,
+      t.name AS topic_name,
+      ci.section,
+      ci.concept,
+      ci.item_type,
+      ci.evaluation_type,
+      ci.source_page,
+      ci.manual_page,
+      ci.source_evidence,
+      ci.worked,
+      ci.times_asked,
+      ci.times_correct,
+      ci.times_wrong,
+      ci.times_blank,
+      ci.last_asked_at,
+      NULL::integer AS review_stage,
+      NULL::timestamptz AS next_review_at,
+      NULL::timestamptz AS last_review_at,
+      NULL::integer AS consecutive_correct,
+      NULL::integer AS consecutive_wrong,
+      NULL::integer AS total_reviews,
+      4 AS adaptive_priority
+    FROM coverage_items ci
+    JOIN topics t
+      ON t.id = ci.topic_id
+    WHERE ci.worked = FALSE
+    ORDER BY
+      ci.times_asked ASC,
+      ci.last_asked_at ASC NULLS FIRST,
+      ci.id ASC
+    LIMIT 1
+  `);
+
+  return result.rows[0] || null;
+}
+function getAdaptiveDifficulty(target, requestedDifficulty){
+
+  if(requestedDifficulty !== "Alta"){
+    return requestedDifficulty;
+  }
+
+  const asked =
+    Number(target.times_asked || 0);
+
+  const correct =
+    Number(target.times_correct || 0);
+
+  const wrong =
+    Number(target.times_wrong || 0);
+
+  const blank =
+    Number(target.times_blank || 0);
+
+  const attempts =
+    correct + wrong + blank;
+
+  if(attempts < 2){
+    return "Alta";
+  }
+
+  const performance =
+    correct / attempts;
+
+  if(
+    performance >= 0.85 &&
+    asked >= 3
+  ){
+    return "Muy alta";
+  }
+
+  if(
+    performance < 0.50
+  ){
+    return "Alta";
+  }
+
+  return "Alta";
+}
 async function getCoverageTargetsForGeneration(count, ai){
   /*
     SELECCIÓN DE OBJETIVOS
@@ -4855,10 +4936,14 @@ para avance de cobertura.
 No fijamos porcentajes rígidos:
 el resto del test continúa gobernado por la prioridad adaptativa.
 */
-const newCandidate =
+let newCandidate =
   adaptiveCandidates.find(
     candidate => candidate.worked === false
   );
+
+if(!newCandidate){
+  newCandidate = await getNewCoverageCandidate();
+}
 
 if(newCandidate){
   selectedAdaptive.push(newCandidate);
