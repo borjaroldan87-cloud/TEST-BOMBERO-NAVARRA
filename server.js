@@ -2121,14 +2121,16 @@ distractorIssues:{
           }
         },
         required:[
-          "index",
-          "valid",
-          "issues",
-          "familyValid",
-          "familyIssues",
-          "graphicValid",
-          "graphicIssues"
-        ]
+  "index",
+  "valid",
+  "issues",
+  "familyValid",
+  "familyIssues",
+  "distractorsValid",
+  "distractorIssues",
+  "graphicValid",
+  "graphicIssues"
+]
       }
     }
   },
@@ -4784,6 +4786,10 @@ async function getAdaptiveCoverageCandidates(limit = 120){
       crs.consecutive_wrong,
       crs.total_reviews,
 
+        COALESCE(
+        last_nonblank_answer.is_correct = FALSE,
+        FALSE
+      ) AS latest_nonblank_failed,
       CASE
         WHEN
           ci.worked = TRUE
@@ -5604,12 +5610,13 @@ if(target.questionFamily === "GRAFICA"){
   En esos casos interesa generar una variante nueva.
   */
   if(
-    target.failedQuestion ||
-    target.worked === false ||
-    Number(target.times_asked || 0) < 2
-  ){
-    return null;
-  }
+  target.failedQuestion ||
+  target.latest_nonblank_failed === true ||
+  target.worked === false ||
+  Number(target.times_asked || 0) < 2
+){
+  return null;
+}
 
   const result = await db.query(
     `
@@ -6460,7 +6467,8 @@ Para cada pregunta devuelve:
 
 - index: índice original empezando en 0.
 - valid: true únicamente si la pregunta supera TODAS las comprobaciones
-  factuales Y de familia aplicables.
+  factuales, de familia, de competitividad de distractores y gráficas
+  que resulten aplicables.
 - issues: problemas de fiabilidad factual. Si no existen, [].
 - familyValid: true únicamente si la pregunta cumple realmente las reglas
   de questionFamily.
@@ -6606,8 +6614,14 @@ REGLAS OBLIGATORIAS:
 - Si esa familia no puede construirse válidamente con la evidencia recuperada,
   aplica exclusivamente las reglas de fallback definidas en generationPrompt
   y asigna a questionFamily la familia final realmente generada.
-- Si el rechazo contiene familyIssues o graphicIssues, corrige explícitamente
-  esos problemas además de cualquier problema factual indicado en issues.
+- Si el rechazo contiene familyIssues, distractorIssues o graphicIssues,
+  corrige explícitamente esos problemas además de cualquier problema factual
+  indicado en issues.
+
+- Si existen distractorIssues, reconstruye los distractores defectuosos.
+  No te limites a cambiar palabras: corrige exactamente el problema de
+  plausibilidad, proximidad conceptual, simetría o descarte superficial
+  indicado por el validador.
 
 ========================================
 REFERENCIA DINÁMICA DE ESTILO
@@ -7637,7 +7651,9 @@ while(
 
   finalQuestions[originalIndex] = replacementQuestion;
     }else{
-      stillInvalid.push({
+  finalQuestions[originalIndex] = regenerated.questions[i];
+
+  stillInvalid.push({
   index: originalIndex,
   valid: false,
   issues: validationResult.issues || [],
