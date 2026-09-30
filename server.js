@@ -203,12 +203,14 @@ async function initDatabase(){
   `);
 
   await db.query(`
-    CREATE INDEX IF NOT EXISTS await db.query(`
   ALTER TABLE question_bank
   ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 1
-`); idx_question_bank_coverage
-    ON question_bank(coverage_item_id)
-  `);
+`);
+
+await db.query(`
+  CREATE INDEX IF NOT EXISTS idx_question_bank_coverage
+  ON question_bank(coverage_item_id)
+`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS test_sessions (
@@ -3467,9 +3469,37 @@ seriamente que esta opción es correcta?"
 
 Si la respuesta es NO, descarta ese distractor y crea otro.
 
-Los tres distractores deben ser inequívocamente falsos según la fuente,
-pero la falsedad debe depender del CONOCIMIENTO DEL TEMARIO, no de pistas
-lingüísticas.
+En preguntas donde se busca la opción CORRECTA:
+
+- los tres distractores deben ser inequívocamente falsos según la fuente,
+  pero técnicamente plausibles y muy próximos a la respuesta correcta;
+- su falsedad debe depender de un detalle discriminante del temario:
+  cifra, unidad, término, condición, categoría, límite, relación, paso,
+  secuencia, aplicación o excepción;
+- evita distractores que puedan descartarse por sentido común, por una
+  diferencia exagerada o por pertenecer a otro eje conceptual;
+- siempre que la fuente lo permita, al menos DOS distractores deben obligar
+  a discriminar conocimiento técnico muy próximo a la correcta.
+
+En preguntas donde se busca la opción INCORRECTA:
+
+- exactamente tres alternativas deben ser verdaderas según la fuente;
+- la única alternativa falsa debe ser la respuesta correcta;
+- esa falsedad debe ser sutil y depender igualmente de un detalle técnico
+  discriminante;
+- las tres alternativas verdaderas deben ser suficientemente próximas y
+  competitivas para que no pueda localizarse la falsa por descarte superficial.
+
+En ambos casos:
+
+- las cuatro alternativas deben mantener un nivel semejante de precisión,
+  extensión, tecnicidad y naturalidad;
+- la respuesta válida no debe destacar lingüística ni estructuralmente;
+- resolver la pregunta debe exigir haber estudiado con precisión el temario,
+  no detectar una opción absurda o una pista de redacción;
+- "inequívocamente falsa" o "inequívocamente verdadera" significa que su
+  condición queda determinada por la fuente, NO que resulte evidente para
+  el opositor.
 PRUEBA DE COMPETITIVIDAD ENTRE ALTERNATIVAS:
 
 No basta con que un distractor sea técnicamente falso. Debe ser una alternativa
@@ -5420,7 +5450,15 @@ OBJETIVO ${index+1}
 ${item.failedQuestion ? `
 - MODO REPASO DE FALLO:
   Este objetivo corresponde a un conocimiento previamente fallado.
+- Dificultad de la pregunta fallada anterior:
+  ${item.failed_difficulty || "alta"}
 
+- Si la pregunta fallada anterior tenía difficulty="muy alta",
+  esta nueva variante DEBE mantener difficulty="muy alta".
+  En ese caso NO está permitido aplicar el fallback general a "alta".
+  La nueva pregunta debe mantener como mínimo el nivel cognitivo y técnico
+  de la pregunta fallada, sin inventar contenido externo ni fabricar
+  dificultad artificial.
 - PREGUNTA FALLADA ANTERIOR:
   ${item.failedQuestion.stem}
 
@@ -6543,14 +6581,27 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
   }
 
   for(let i=0;i<validation.results.length;i++){
-    const result=validation.results[i];
+  const result=validation.results[i];
+  const question=questions[i];
 
-    if(result.index!==i){
-      throw new Error(
-        "El validador factual devolvió índices inconsistentes."
-      );
-    }
+  if(result.index!==i){
+    throw new Error(
+      "El validador factual devolvió índices inconsistentes."
+    );
   }
+
+  const graphicInvalid =
+    question?.questionFamily === "GRAFICA" &&
+    result.graphicValid !== true;
+
+  if(
+    result.familyValid !== true ||
+    result.distractorsValid !== true ||
+    graphicInvalid
+  ){
+    result.valid = false;
+  }
+}
 
   return validation.results;
 }
@@ -7583,6 +7634,25 @@ finalQuestions = [...parsed.questions];
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions);
 
+for(let i = 0; i < factualValidation.length; i++){
+  const target = generationTargets[i];
+  const question = finalQuestions[i];
+
+  if(
+    target?.failed_difficulty === "muy alta" &&
+    question?.difficulty !== "muy alta"
+  ){
+    factualValidation[i] = {
+      ...factualValidation[i],
+      valid:false,
+      issues:[
+        ...(factualValidation[i].issues || []),
+        'Una variante de una pregunta fallada con dificultad "muy alta" no puede bajar a "alta".'
+      ]
+    };
+  }
+}
+
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
@@ -7620,10 +7690,22 @@ while(
   const stillInvalid = [];
 
   for(let i=0;i<regenerated.questions.length;i++){
-    const originalIndex = invalidQuestions[i].index;
-    const validationResult = replacementValidation[i];
+  const originalIndex = invalidQuestions[i].index;
+  const validationResult = replacementValidation[i];
+  const targetForValidation = generationTargets[originalIndex];
 
-    if(validationResult.valid){
+  if(
+    targetForValidation?.failed_difficulty === "muy alta" &&
+    regenerated.questions[i]?.difficulty !== "muy alta"
+  ){
+    validationResult.valid = false;
+    validationResult.issues = [
+      ...(validationResult.issues || []),
+      'Una variante de una pregunta fallada con dificultad "muy alta" no puede bajar a "alta".'
+    ];
+  }
+
+  if(validationResult.valid){
   const replacementQuestion = regenerated.questions[i];
   const originalTarget = generationTargets[originalIndex];
      replacementQuestion.difficulty =
