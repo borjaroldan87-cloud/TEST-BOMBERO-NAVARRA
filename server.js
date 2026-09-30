@@ -5073,6 +5073,9 @@ for (let i = 0; i < selected.length; i++) {
     }
   }
 }
+ for(const target of selectedAdaptive){
+  target.adaptiveDifficulty = null;
+} 
   /*
 /*
 =================================================
@@ -5359,6 +5362,7 @@ OBJETIVO ${index+1}
 - Concepto: ${item.concept}
 - Tipo de contenido: ${item.item_type}
 - Tipo de evaluación solicitado: ${item.evaluation_type}
+- Dificultad adaptativa requerida: ${item.adaptiveDifficulty || "Alta"}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
@@ -5543,6 +5547,10 @@ if(target.questionFamily === "GRAFICA"){
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
+  AND (
+  last_shown_at IS NULL
+  OR last_shown_at <= NOW() - INTERVAL '30 days'
+)
 
     ORDER BY
       times_shown ASC,
@@ -7265,6 +7273,13 @@ const targets=
 }
 
    const generationCount = targets.length; 
+    for(const target of targets){
+  target.adaptiveDifficulty =
+    getAdaptiveDifficulty(
+      target,
+      difficulty
+    );
+}
     const reusableQuestions = new Map();
 
 if(testType === "normal"){
@@ -7273,7 +7288,7 @@ if(testType === "normal"){
     const reusable =
       await getReusableQuestionForTarget(
         targets[i],
-        difficulty
+        targets[i].adaptiveDifficulty || difficulty
       );
 
     if(reusable){
@@ -7376,7 +7391,7 @@ ${officialStyle}
     });
 console.log(
   "TARGETS GRAFICOS:",
-  targets.map((t, i) => ({
+  generationTargets.map((t, i) => ({
     index: i,
     family: t.questionFamily,
     graphicAssetId: t.graphicAsset?.id ?? null,
@@ -7583,7 +7598,6 @@ if(completeQuestions.some(question => !question)){
 }
 
 finalQuestions = completeQuestions;
-parsed.questions = finalQuestions;
     /*
       Las preguntas mantienen el mismo orden que los objetivos:
       pregunta 1 -> objetivo 1
@@ -7594,7 +7608,7 @@ parsed.questions = finalQuestions;
       exactamente el número solicitado de preguntas.
     */
         const persistedTest = await persistGeneratedTest({
-  questions: parsed.questions,
+  questions: finalQuestions,
   targets,
   requestedCount: count,
   difficulty,
@@ -7610,7 +7624,7 @@ parsed.questions = finalQuestions;
       })
     );
 
-    parsed.questions = persistedTest.questions;
+    finalQuestions = persistedTest.questions;
 
 if(testType==="normal"){
   await markCoverageTargetsWorked(targets);
