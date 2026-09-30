@@ -5685,6 +5685,7 @@ if(target.questionFamily === "GRAFICA"){
     WHERE
   coverage_item_id = $1
   AND active = TRUE
+  AND validation_version >= 2
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
@@ -5752,6 +5753,35 @@ if(target.questionFamily === "GRAFICA"){
     reused:true
   };
 }
+async function isExactBankDuplicate(target, question){
+  if(
+    !target?.id ||
+    !question?.stem ||
+    !Array.isArray(question?.options)
+  ){
+    return false;
+  }
+
+  const result = await db.query(
+    `
+    SELECT id
+    FROM question_bank
+    WHERE
+      coverage_item_id = $1
+      AND active = TRUE
+      AND LOWER(TRIM(stem)) = LOWER(TRIM($2))
+      AND options = $3::jsonb
+    LIMIT 1
+    `,
+    [
+      Number(target.id),
+      String(question.stem),
+      JSON.stringify(question.options)
+    ]
+  );
+
+  return result.rows.length > 0;
+}
 async function persistGeneratedTest({
   questions,
   targets,
@@ -5808,11 +5838,12 @@ if(
 ){
   const reusableCheck = await client.query(
     `SELECT id
-     FROM question_bank
-     WHERE id = $1
-       AND coverage_item_id = $2
-       AND active = TRUE
-     LIMIT 1`,
+FROM question_bank
+WHERE id = $1
+  AND coverage_item_id = $2
+  AND active = TRUE
+  AND validation_version >= 2
+LIMIT 1`,
     [
       Number(question.questionId),
       Number(target.id)
@@ -5849,10 +5880,11 @@ await client.query(
       question_family,
 difficulty,
 graphic,
+validation_version,
 last_shown_at
 )
-    VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,NOW()
+VALUES (
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,2,NOW()
 )
     RETURNING id`,
     [
@@ -7651,6 +7683,19 @@ for(let i = 0; i < factualValidation.length; i++){
       ]
     };
   }
+    const exactDuplicate =
+    await isExactBankDuplicate(target, question);
+
+  if(exactDuplicate){
+    factualValidation[i] = {
+      ...factualValidation[i],
+      valid:false,
+      issues:[
+        ...(factualValidation[i].issues || []),
+        "La pregunta generada duplica exactamente una pregunta ya existente del banco."
+      ]
+    };
+  }
 }
 
 let invalidQuestions =
@@ -7704,7 +7749,19 @@ while(
       'Una variante de una pregunta fallada con dificultad "muy alta" no puede bajar a "alta".'
     ];
   }
+  const exactDuplicate =
+    await isExactBankDuplicate(
+      targetForValidation,
+      regenerated.questions[i]
+    );
 
+  if(exactDuplicate){
+    validationResult.valid = false;
+    validationResult.issues = [
+      ...(validationResult.issues || []),
+      "La pregunta regenerada duplica exactamente una pregunta ya existente del banco."
+    ];
+  }
   if(validationResult.valid){
   const replacementQuestion = regenerated.questions[i];
   const originalTarget = generationTargets[originalIndex];
