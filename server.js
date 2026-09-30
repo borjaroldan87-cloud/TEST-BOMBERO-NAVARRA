@@ -7246,7 +7246,6 @@ if(newGenerationCount > 0){
         generationTargets
       ) +
       `
-  `
 
 ===============================================
 REFERENCIA DINÁMICA DE ESTILO — EXÁMENES OFICIALES
