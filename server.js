@@ -5685,7 +5685,7 @@ if(target.questionFamily === "GRAFICA"){
     WHERE
   coverage_item_id = $1
   AND active = TRUE
-  AND validation_version >= 2
+  AND validation_version >= 3
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
@@ -5842,7 +5842,7 @@ FROM question_bank
 WHERE id = $1
   AND coverage_item_id = $2
   AND active = TRUE
-  AND validation_version >= 2
+  AND validation_version >= 3
 LIMIT 1`,
     [
       Number(question.questionId),
@@ -5884,7 +5884,7 @@ validation_version,
 last_shown_at
 )
 VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,2,NOW()
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,3,NOW()
 )
     RETURNING id`,
     [
@@ -6286,6 +6286,152 @@ async function markCoverageTargetsWorked(targets){
      WHERE id = ANY($1::int[])`,
     [ids]
   );
+}
+async function validateDistractorCompetitiveness(ai, questions){
+  const schema = {
+    type:"object",
+    properties:{
+      results:{
+        type:"array",
+        items:{
+          type:"object",
+          properties:{
+            index:{type:"integer",minimum:0},
+            distractorsValid:{type:"boolean"},
+            distractorIssues:{
+              type:"array",
+              items:{type:"string"}
+            }
+          },
+          required:[
+            "index",
+            "distractorsValid",
+            "distractorIssues"
+          ]
+        }
+      }
+    },
+    required:["results"]
+  };
+
+  schema.properties.results.minItems = questions.length;
+  schema.properties.results.maxItems = questions.length;
+
+  const compactQuestions = questions.map((question,index)=>({
+    index,
+    stem:question.stem,
+    options:question.options,
+    correctIndex:question.correctIndex,
+    questionFamily:question.questionFamily,
+    difficulty:question.difficulty
+  }));
+
+  const prompt = `
+Actúa exclusivamente como AUDITOR ADVERSARIAL DE DISTRACTORES
+para preguntas tipo test de una oposición de Bomberos.
+
+NO debes comprobar factualidad.
+NO debes decidir si correctIndex es correcto.
+ASUME que correctIndex identifica la respuesta correcta.
+
+Tu única misión es determinar si las otras tres alternativas son
+REALMENTE COMPETITIVAS para un opositor preparado.
+
+Una pregunta de dificultad "alta" SOLO puede superar esta auditoría
+si al menos DOS distractores obligan a discriminar conocimiento técnico
+próximo a la respuesta correcta.
+
+Marca distractorsValid=false si ocurre CUALQUIERA de estas situaciones:
+
+1. Un distractor puede eliminarse por sentido común sin conocer el dato
+   concreto del temario.
+
+2. Un distractor pertenece a otro eje conceptual o responde realmente
+   a otra pregunta.
+
+3. La respuesta correcta destaca por ser claramente más técnica,
+   precisa, moderada, completa o natural.
+
+4. Un distractor contiene una exageración, condición extrema,
+   formulación absurda o acción manifiestamente improcedente.
+
+5. Expresiones como "exclusivamente", "únicamente", "siempre",
+   "nunca", "por completo", "instantáneamente", "rigurosamente"
+   o equivalentes convierten artificialmente una opción en fácil
+   de descartar.
+
+6. La falsa se obtiene añadiendo maquinaria, procedimientos,
+   condiciones o detalles claramente ajenos al conocimiento evaluado.
+
+7. Dos distractores son esencialmente dos versiones de la misma falsa.
+
+8. En una pregunta numérica, las alternativas falsas no mantienen
+   magnitud, unidad y proximidad razonables respecto al dato correcto.
+
+9. En una pregunta de fórmula o cálculo, los distractores son
+   dimensional o algebraicamente absurdos en lugar de representar
+   errores razonables de fórmula, variable, potencia, unidad o despeje.
+
+10. En una pregunta de secuencia, los distractores introducen pasos
+    ajenos al procedimiento en lugar de alterar de forma plausible
+    orden, posición o condición de pasos próximos.
+
+11. En una pregunta INCORRECTA, la opción falsa destaca visual,
+    lingüística o técnicamente frente a las tres verdaderas.
+
+12. Un opositor podría localizar la respuesta por descarte superficial
+    antes de necesitar recordar el conocimiento exacto preguntado.
+
+REGLA DE EXIGENCIA:
+
+- "alta": al menos DOS distractores deben ser técnicamente próximos
+  y competitivos.
+- "muy alta": los TRES distractores deben ser técnicamente próximos
+  y competitivos siempre que el formato de la pregunta lo permita.
+
+No seas benevolente.
+Que una opción sea falsa NO la convierte en buen distractor.
+
+Si una pregunta no supera claramente este estándar:
+distractorsValid=false.
+
+Indica en distractorIssues exactamente qué alternativas son débiles
+y por qué.
+
+PREGUNTAS:
+${JSON.stringify(compactQuestions)}
+`;
+
+  const response = await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:schema,
+      temperature:0.1
+    }
+  });
+
+  const parsed = JSON.parse(response.text);
+
+  if(
+    !Array.isArray(parsed.results) ||
+    parsed.results.length !== questions.length
+  ){
+    throw new Error(
+      "El auditor independiente de distractores devolvió un número incorrecto de resultados."
+    );
+  }
+
+  for(let i=0;i<parsed.results.length;i++){
+    if(parsed.results[i].index !== i){
+      throw new Error(
+        "El auditor independiente de distractores devolvió índices inconsistentes."
+      );
+    }
+  }
+
+  return parsed.results;
 }
 async function validateGeneratedQuestions(ai,questions){
   const validationPrompt=`
@@ -7665,11 +7811,35 @@ finalQuestions = [...parsed.questions];
 }
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions);
+const distractorValidation =
+  await validateDistractorCompetitiveness(
+    ai,
+    finalQuestions
+  );
 
+console.log(
+  "DISTRACTOR AUDIT:",
+  JSON.stringify(distractorValidation)
+);
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
+  const independentDistractorResult =
+    distractorValidation[i];
 
+  if(
+    independentDistractorResult?.distractorsValid !== true
+  ){
+    factualValidation[i] = {
+      ...factualValidation[i],
+      valid:false,
+      distractorsValid:false,
+      distractorIssues:[
+        ...(factualValidation[i].distractorIssues || []),
+        ...(independentDistractorResult?.distractorIssues || [])
+      ]
+    };
+  }
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
@@ -7731,14 +7901,35 @@ while(
       ai,
       regenerated.questions
     );
+const replacementDistractorValidation =
+  await validateDistractorCompetitiveness(
+    ai,
+    regenerated.questions
+  );
 
+console.log(
+  "DISTRACTOR AUDIT REGEN:",
+  JSON.stringify(replacementDistractorValidation)
+);
   const stillInvalid = [];
 
   for(let i=0;i<regenerated.questions.length;i++){
   const originalIndex = invalidQuestions[i].index;
   const validationResult = replacementValidation[i];
   const targetForValidation = generationTargets[originalIndex];
+  const independentDistractorResult =
+    replacementDistractorValidation[i];
 
+  if(
+    independentDistractorResult?.distractorsValid !== true
+  ){
+    validationResult.valid = false;
+    validationResult.distractorsValid = false;
+    validationResult.distractorIssues = [
+      ...(validationResult.distractorIssues || []),
+      ...(independentDistractorResult?.distractorIssues || [])
+    ];
+  }
   if(
     targetForValidation?.failed_difficulty === "muy alta" &&
     regenerated.questions[i]?.difficulty !== "muy alta"
