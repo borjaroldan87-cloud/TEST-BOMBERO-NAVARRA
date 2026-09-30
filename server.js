@@ -2007,7 +2007,7 @@ const questionSchema={
       sourceEvidence:{type:"string"},
       sourcePage:{type:["integer","null"]},
       manualPage:{type:["integer","string","null"]},
-      difficulty:{type:"string",enum:["media","alta","muy alta"]},
+      difficulty:{type:"string",enum:["alta","muy alta"]},
       questionFamily:{
         type:"string",
         enum:[
@@ -2413,7 +2413,8 @@ function generationPrompt(count,difficulty,mode){
   return `Eres el generador de preguntas de entrenamiento para la oposición de Bombero de Navarra.
 
 Debes generar EXACTAMENTE ${count} preguntas tipo test.
-Dificultad solicitada: ${difficulty}.
+Dificultad base mínima: ${difficulty}.
+La dificultad específica indicada para cada objetivo de cobertura tiene prioridad sobre esta dificultad base.
 Modo solicitado: ${mode}.
 
 ==================================================
@@ -3654,7 +3655,39 @@ más detallada.
 
 Estas exigencias se aplican solo cuando la información recuperada permita
 construirlas sin inventar contenido ni introducir conocimiento externo.
+DIFICULTAD MUY ALTA:
 
+Cuando un objetivo indique:
+Dificultad adaptativa requerida: muy alta
+
+aplica TODAS las reglas de dificultad alta y aumenta adicionalmente la
+exigencia cognitiva, sin introducir información externa ni ambigüedad.
+
+- Prioriza preguntas que obliguen a relacionar DOS O MÁS datos, condiciones,
+  reglas, conceptos, pasos o consecuencias respaldados por el temario.
+
+- Cuando la fuente lo permita, exige decidir primero qué principio,
+  procedimiento, condición, fórmula o excepción resulta aplicable y después
+  utilizarlo correctamente para resolver la pregunta.
+
+- Los TRES distractores deben ser técnicamente plausibles y próximos a la
+  respuesta correcta. Evita opciones descartables por sentido común,
+  diferencias exageradas o términos claramente impropios.
+
+- En preguntas numéricas o de cálculo, cuando la evidencia lo permita,
+  exige encadenar al menos DOS operaciones, conversiones, relaciones o
+  decisiones de cálculo, en lugar de una sustitución directa trivial.
+
+- En preguntas de razonamiento, prioriza diferencias de condición,
+  excepción, secuencia, límite, aplicación o consecuencia que obliguen a
+  dominar con precisión el conocimiento evaluado.
+
+- La dificultad MUY ALTA nunca debe proceder de hacer el enunciado más largo,
+  ambiguo, rebuscado o tramposo.
+
+- Si la evidencia disponible para ese objetivo no permite aumentar la
+  complejidad sin inventar información, genera una pregunta de dificultad
+  alta técnicamente sólida antes que fabricar dificultad artificial.
 ESTILO DE REDACCIÓN:
 
 Redacta de forma natural, sobria y administrativa, como un tribunal de
@@ -4661,9 +4694,14 @@ async function getFailedCoverageTargets(count){
       ci.source_page,
       ci.manual_page,
       ci.source_evidence,
+ci.times_asked,
+ci.times_correct,
+ci.times_wrong,
+ci.times_blank,
 
-      la.question_id AS failed_question_id,
+la.question_id AS failed_question_id,
 la.answered_at AS failed_at,
+qb.difficulty AS failed_difficulty,
 
 qb.question_family AS question_family,
 qb.stem AS failed_stem,
@@ -4850,12 +4888,10 @@ async function getNewCoverageCandidate(){
 
   return result.rows[0] || null;
 }
-function getAdaptiveDifficulty(target, requestedDifficulty){
-
-  if(requestedDifficulty !== "alta"){
-    return requestedDifficulty;
-  }
-
+function getAdaptiveDifficulty(target){
+if(target?.failed_difficulty === "muy alta"){
+  return "muy alta";
+}
   const asked =
     Number(target.times_asked || 0);
 
@@ -5072,13 +5108,6 @@ for (let i = 0; i < selected.length; i++) {
       );
     }
   }
-}
- for(const target of selectedAdaptive){
-  target.adaptiveDifficulty =
-    getAdaptiveDifficulty(
-      target,
-      "Alta"
-    );
 }
   /*
 /*
@@ -5366,7 +5395,7 @@ OBJETIVO ${index+1}
 - Concepto: ${item.concept}
 - Tipo de contenido: ${item.item_type}
 - Tipo de evaluación solicitado: ${item.evaluation_type}
-- Dificultad adaptativa requerida: ${item.adaptiveDifficulty || "Alta"}
+- Dificultad adaptativa requerida: ${item.adaptiveDifficulty || "alta"}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
@@ -5392,6 +5421,22 @@ REGLAS OBLIGATORIAS PARA ESTA VARIANTE:
 - La respuesta debe seguir siendo demostrable exclusivamente con el temario.
 - El objetivo es comprobar que el opositor ha aprendido el CONOCIMIENTO,
   no que recuerda la redacción o la posición de una respuesta.
+` : ""}
+${item.previousBankQuestion ? `
+- PREGUNTA RECIENTE DEL BANCO SOBRE ESTE MISMO CONOCIMIENTO:
+  ${item.previousBankQuestion.stem}
+
+- OPCIONES DE ESA PREGUNTA:
+  ${JSON.stringify(item.previousBankQuestion.options)}
+
+REGLAS ANTIRREPETICIÓN:
+- Evalúa el mismo conocimiento objetivo, pero genera una pregunta NUEVA.
+- NO copies el enunciado anterior.
+- NO hagas una paráfrasis superficial conservando la misma estructura.
+- NO reutilices el mismo conjunto de opciones.
+- Cambia el ángulo de evaluación cuando el temario lo permita.
+- Mantén la familia de pregunta asignada y la dificultad adaptativa requerida.
+- La variedad nunca autoriza a introducir información ajena al temario.
 ` : ""}
 ${item.questionFamily === "GRAFICA" && item.graphicAsset ? `
 - TRATAMIENTO GRÁFICO OBLIGATORIO:
@@ -5496,6 +5541,41 @@ REGLAS DE COBERTURA:
 - Si la evidencia catalogada y el documento recuperado presentan alguna incompatibilidad, prevalece el documento original.
 - La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
+}
+async function getLatestBankQuestionForTarget(target){
+
+  if(!target?.id){
+    return null;
+  }
+
+  const result = await db.query(
+    `
+    SELECT
+      stem,
+      options
+    FROM question_bank
+    WHERE
+      coverage_item_id = $1
+      AND active = TRUE
+      AND graphic IS NULL
+    ORDER BY
+      last_shown_at DESC NULLS LAST,
+      id DESC
+    LIMIT 1
+    `,
+    [Number(target.id)]
+  );
+
+  if(!result.rows.length){
+    return null;
+  }
+
+  return {
+    stem: result.rows[0].stem,
+    options: Array.isArray(result.rows[0].options)
+      ? result.rows[0].options
+      : []
+  };
 }
 async function getReusableQuestionForTarget(target, difficulty){
 
@@ -5689,7 +5769,14 @@ if(
   }
 
   questionId = Number(question.questionId);
-
+await client.query(
+  `UPDATE question_bank
+   SET
+     last_shown_at = NOW(),
+     updated_at = NOW()
+   WHERE id = $1`,
+  [questionId]
+);
 }else{
 
   const questionResult = await client.query(
@@ -5703,12 +5790,13 @@ if(
       source_page,
       manual_page,
       question_family,
-      difficulty,
-      graphic
-    )
+difficulty,
+graphic,
+last_shown_at
+)
     VALUES (
-      $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb
-    )
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,NOW()
+)
     RETURNING id`,
     [
       Number(target.id),
@@ -7184,9 +7272,7 @@ app.post("/api/generate", async(req,res)=>{
     const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
 
 const difficulty=
-  req.body.difficulty==="media"
-    ? "media"
-    : "alta";
+  const difficulty = "alta";
 
 const mode=
   ["literal","mixto","calculos"].includes(req.body.mode)
@@ -7215,10 +7301,7 @@ const targets=
    const generationCount = targets.length; 
     for(const target of targets){
   target.adaptiveDifficulty =
-    getAdaptiveDifficulty(
-      target,
-      difficulty
-    );
+  getAdaptiveDifficulty(target);
 }
     const reusableQuestions = new Map();
 
@@ -7260,6 +7343,12 @@ for(let i = 0; i < targets.length; i++){
   generationTargets.push(targets[i]);
   generationIndexes.push(i);
 }
+   if(testType === "normal"){
+  for(const target of generationTargets){
+    target.previousBankQuestion =
+      await getLatestBankQuestionForTarget(target);
+  }
+} 
 
 console.log(
   "GENERACIÓN NUEVA:",
@@ -7267,7 +7356,6 @@ console.log(
   "objetivos de",
   targets.length
 );
-    const officialStyle = await getCachedOfficialExamStyleReference();
 
 const newGenerationCount =
   generationTargets.length;
@@ -7275,7 +7363,8 @@ const newGenerationCount =
 let prompt = null;
 let finalQuestions = [];
 if(newGenerationCount > 0){
-
+const officialStyle =
+  await getCachedOfficialExamStyleReference();
   prompt =
     generationPrompt(
         newGenerationCount,
@@ -7388,6 +7477,7 @@ finalQuestions = [...parsed.questions];
     for (let i = 0; i < finalQuestions.length; i++) {
   const target = generationTargets[i];
   const q = finalQuestions[i];
+      q.difficulty = target?.adaptiveDifficulty || "alta";
 
   if (target?.questionFamily === "GRAFICA" && target?.graphicAsset) {
     q.questionFamily = "GRAFICA";
@@ -7456,6 +7546,8 @@ while(
     if(validationResult.valid){
   const replacementQuestion = regenerated.questions[i];
   const originalTarget = generationTargets[originalIndex];
+     replacementQuestion.difficulty =
+  originalTarget?.adaptiveDifficulty || "alta"; 
 
   if(
     originalTarget?.questionFamily === "GRAFICA" &&
@@ -7586,7 +7678,7 @@ if(testType==="normal"){
   questions:finalQuestions,
   coverage:{
     targeted:targets.length,
-    markedWorked:targets.length
+    markedWorked:testType === "normal" ? targets.length : 0
   }
 });
 
