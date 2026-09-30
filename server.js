@@ -5699,7 +5699,7 @@ persistedQuestions.push({
         ]
       );
 
-      const questionId = Number(questionResult.rows[0].id);
+      questionId = Number(questionResult.rows[0].id);
 
       await client.query(
         `INSERT INTO test_session_questions (
