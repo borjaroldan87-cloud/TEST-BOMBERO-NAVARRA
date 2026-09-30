@@ -203,7 +203,10 @@ async function initDatabase(){
   `);
 
   await db.query(`
-    CREATE INDEX IF NOT EXISTS idx_question_bank_coverage
+    CREATE INDEX IF NOT EXISTS await db.query(`
+  ALTER TABLE question_bank
+  ADD COLUMN IF NOT EXISTS validation_version INTEGER NOT NULL DEFAULT 1
+`); idx_question_bank_coverage
     ON question_bank(coverage_item_id)
   `);
 
