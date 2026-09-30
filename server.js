@@ -6557,11 +6557,12 @@ async function regenerateInvalidQuestions(
 
   const rejectedQuestions =
   invalidResults.map(result => ({
-    index: result.index,
-    question: originalQuestions[result.index],
-    issues: result.issues,
-    familyIssues: result.familyIssues || [],
-    graphicIssues: result.graphicIssues || []
+index: result.index,
+question: originalQuestions[result.index],
+issues: result.issues,
+familyIssues: result.familyIssues || [],
+distractorIssues: result.distractorIssues || [],
+graphicIssues: result.graphicIssues || []
   }));
 
   const replacementPrompt =
@@ -7641,6 +7642,7 @@ while(
   valid: false,
   issues: validationResult.issues || [],
   familyIssues: validationResult.familyIssues || [],
+  distractorIssues: validationResult.distractorIssues || [],
   graphicIssues: validationResult.graphicIssues || []
 });
     }
@@ -7653,10 +7655,11 @@ if(invalidQuestions.length > 0){
   const details = invalidQuestions
     .map(result => {
       const allIssues = [
-        ...(result.issues || []),
-        ...(result.familyIssues || []),
-        ...(result.graphicIssues || [])
-      ].filter(Boolean);
+  ...(result.issues || []),
+  ...(result.familyIssues || []),
+  ...(result.distractorIssues || []),
+  ...(result.graphicIssues || [])
+].filter(Boolean);
 
       return `Pregunta ${result.index + 1}: ${
         allIssues.length
