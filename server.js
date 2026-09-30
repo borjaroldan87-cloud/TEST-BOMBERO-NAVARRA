@@ -2007,7 +2007,7 @@ const questionSchema={
       sourceEvidence:{type:"string"},
       sourcePage:{type:["integer","null"]},
       manualPage:{type:["integer","string","null"]},
-      difficulty:{type:"string",enum:["media","alta"]},
+      difficulty:{type:"string",enum:["media","alta","muy alta"]},
       questionFamily:{
         type:"string",
         enum:[
@@ -4852,7 +4852,7 @@ async function getNewCoverageCandidate(){
 }
 function getAdaptiveDifficulty(target, requestedDifficulty){
 
-  if(requestedDifficulty !== "Alta"){
+  if(requestedDifficulty !== "alta"){
     return requestedDifficulty;
   }
 
@@ -4872,7 +4872,7 @@ function getAdaptiveDifficulty(target, requestedDifficulty){
     correct + wrong + blank;
 
   if(attempts < 2){
-    return "Alta";
+    return "alta";
   }
 
   const performance =
@@ -4882,16 +4882,16 @@ function getAdaptiveDifficulty(target, requestedDifficulty){
     performance >= 0.85 &&
     asked >= 3
   ){
-    return "Muy alta";
+    return "muy alta";
   }
 
   if(
     performance < 0.50
   ){
-    return "Alta";
+    return "alta";
   }
 
-  return "Alta";
+  return "alta";
 }
 async function getCoverageTargetsForGeneration(count, ai){
   /*
