@@ -5753,71 +5753,7 @@ persistedQuestions.push({
   questionId,
   coverageItemId:Number(target.id)
 });
-      if(!target?.id){
-        throw new Error(
-          `PERSISTENCIA: falta coverage_item_id en la pregunta ${i + 1}.`
-        );
-      }
 
-      const questionResult = await client.query(
-        `INSERT INTO question_bank (
-          coverage_item_id,
-          stem,
-          options,
-          correct_index,
-          explanation,
-          source_evidence,
-          source_page,
-          manual_page,
-          question_family,
-          difficulty,
-          graphic
-        )
-        VALUES (
-          $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb
-        )
-        RETURNING id`,
-        [
-          Number(target.id),
-          question.stem,
-          JSON.stringify(question.options),
-          Number(question.correctIndex),
-          question.explanation || null,
-          question.sourceEvidence || null,
-          question.sourcePage ?? null,
-          question.manualPage != null
-            ? String(question.manualPage)
-            : null,
-          question.questionFamily,
-          question.difficulty || difficulty,
-          question.graphic
-            ? JSON.stringify(question.graphic)
-            : null
-        ]
-      );
-
-      questionId = Number(questionResult.rows[0].id);
-
-      await client.query(
-        `INSERT INTO test_session_questions (
-          session_id,
-          question_id,
-          coverage_item_id,
-          position
-        )
-        VALUES ($1,$2,$3,$4)`,
-        [
-          sessionId,
-          questionId,
-          Number(target.id),
-          i + 1
-        ]
-      );
-
-      persistedQuestions.push({
-        ...question,
-        questionId
-      });
     }
 
     await client.query("COMMIT");
