@@ -7271,7 +7271,6 @@ app.post("/api/generate", async(req,res)=>{
 
     const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
 
-const difficulty=
   const difficulty = "alta";
 
 const mode=
