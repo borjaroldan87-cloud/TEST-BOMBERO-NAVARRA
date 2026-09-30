@@ -2105,6 +2105,11 @@ const validationSchema={
             items:{type:"string"}
           },
           familyValid:{type:"boolean"},
+          distractorsValid:{type:"boolean"},
+distractorIssues:{
+  type:"array",
+  items:{type:"string"}
+},
           familyIssues:{
             type:"array",
             items:{type:"string"}
@@ -6220,9 +6225,10 @@ TAREA
 
 Valida TODAS las preguntas recibidas.
 
-Para cada pregunta debes realizar DOS validaciones:
+Para cada pregunta debes realizar TRES validaciones:
 1. FIABILIDAD FACTUAL.
 2. CUMPLIMIENTO REAL DE questionFamily.
+3. COMPETITIVIDAD Y PLAUSIBILIDAD DE LOS DISTRACTORES.
 
 VALIDACIÓN FACTUAL
 
@@ -6294,7 +6300,51 @@ CALCULO_FORMULACION:
 - la fórmula o relación utilizada debe estar respaldada por el temario;
 - todos los datos necesarios para resolverla deben estar disponibles;
 - cualquier operación, despeje, equivalencia o relación debe ser correcta.
+VALIDACIÓN DE DISTRACTORES
 
+Evalúa la calidad competitiva de las cuatro alternativas, no solo su
+verdad o falsedad.
+
+distractorsValid=true únicamente cuando los distractores sean suficientemente
+plausibles para un opositor preparado que no recuerde con precisión el
+conocimiento evaluado.
+
+Marca distractorsValid=false cuando ocurra cualquiera de estas situaciones:
+
+1. Uno o más distractores pueden descartarse por sentido común sin conocer
+   el temario.
+
+2. Un distractor pertenece a un eje conceptual claramente distinto del que
+   determina la respuesta correcta y por ello resulta fácil eliminarlo.
+
+3. La correcta destaca por ser claramente más precisa, moderada, completa,
+   técnica o natural que las demás.
+
+4. Un distractor contiene una cifra, condición, término, maquinaria,
+   procedimiento o detalle arbitrario sin proximidad razonable con el
+   conocimiento evaluado.
+
+5. La falsedad del distractor depende de una exageración, término absoluto,
+   formulación absurda o pista lingüística evidente.
+
+6. Dos distractores son esencialmente la misma alternativa falsa expresada
+   con palabras diferentes.
+
+7. Cuando la fuente permite construir alternativas próximas, los distractores
+   se alejan innecesariamente de la respuesta correcta en lugar de variar una
+   cifra, condición, término, categoría, paso, límite o relación próxima.
+
+8. En dificultad alta, si menos de DOS distractores exigen discriminar
+   conocimiento técnico próximo a la respuesta correcta.
+
+9. En dificultad muy alta, si los TRES distractores no son técnicamente
+   competitivos y próximos cuando la evidencia disponible permite construirlos.
+
+No marques distractorsValid=false simplemente porque un distractor sea falso:
+debe ser falso según la fuente, pero además plausible.
+
+No inventes conocimiento externo para evaluar plausibilidad.
+Juzga exclusivamente a partir de stem, options, correctIndex y sourceEvidence.
 REGLAS DE VALIDEZ GRÁFICA
 
 Una pregunta GRAFICA solo puede tener graphicValid=true cuando se cumplen
@@ -6415,6 +6465,10 @@ Para cada pregunta devuelve:
 - familyValid: true únicamente si la pregunta cumple realmente las reglas
   de questionFamily.
 - familyIssues: incumplimientos de familia. Si no existen, [].
+- distractorsValid: true únicamente si los distractores superan la validación
+  de competitividad y plausibilidad.
+- distractorIssues: problemas concretos detectados en los distractores.
+  Si no existen, [].
 - graphicValid:
     * true o false para GRAFICA;
     * null para cualquier otra familia.
@@ -6426,12 +6480,14 @@ CRITERIO FINAL
 - Si falta evidencia suficiente para verificar un aspecto esencial,
   valid=false.
 - Si familyValid=false, valid=false.
+- Si distractorsValid=false, valid=false.
 - Si una pregunta GRAFICA tiene graphicValid=false, valid=false.
 - No corrijas ni reescribas preguntas.
 - No mejores estilo ni dificultad durante la validación.
 - No evalúes si la pregunta te gusta.
 - Limítate a comprobar factualidad, unicidad de respuesta, polaridad,
-  cumplimiento de familia y coherencia gráfica conforme a estas reglas.
+  cumplimiento de familia, competitividad de distractores y coherencia
+  gráfica conforme a estas reglas.
 
 ÍNDICES
 
