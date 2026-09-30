@@ -3688,6 +3688,10 @@ exigencia cognitiva, sin introducir información externa ni ambigüedad.
 - Si la evidencia disponible para ese objetivo no permite aumentar la
   complejidad sin inventar información, genera una pregunta de dificultad
   alta técnicamente sólida antes que fabricar dificultad artificial.
+  - El campo difficulty debe reflejar la dificultad REAL finalmente generada.
+  Devuelve "muy alta" únicamente cuando la pregunta cumpla realmente las
+  exigencias adicionales de dificultad muy alta.
+  Si has tenido que aplicar el fallback anterior, devuelve difficulty: "alta".
 ESTILO DE REDACCIÓN:
 
 Redacta de forma natural, sobria y administrativa, como un tribunal de
@@ -7476,7 +7480,10 @@ finalQuestions = [...parsed.questions];
     for (let i = 0; i < finalQuestions.length; i++) {
   const target = generationTargets[i];
   const q = finalQuestions[i];
-      q.difficulty = target?.adaptiveDifficulty || "alta";
+      q.difficulty =
+  target?.adaptiveDifficulty === "muy alta"
+    ? q.difficulty
+    : "alta";
 
   if (target?.questionFamily === "GRAFICA" && target?.graphicAsset) {
     q.questionFamily = "GRAFICA";
@@ -7546,7 +7553,9 @@ while(
   const replacementQuestion = regenerated.questions[i];
   const originalTarget = generationTargets[originalIndex];
      replacementQuestion.difficulty =
-  originalTarget?.adaptiveDifficulty || "alta"; 
+  originalTarget?.adaptiveDifficulty === "muy alta"
+    ? replacementQuestion.difficulty
+    : "alta";
 
   if(
     originalTarget?.questionFamily === "GRAFICA" &&
