@@ -5074,8 +5074,12 @@ for (let i = 0; i < selected.length; i++) {
   }
 }
  for(const target of selectedAdaptive){
-  target.adaptiveDifficulty = null;
-} 
+  target.adaptiveDifficulty =
+    getAdaptiveDifficulty(
+      target,
+      "Alta"
+    );
+}
   /*
 /*
 =================================================
@@ -7643,7 +7647,7 @@ if(testType==="normal"){
     res.json({
   ok:true,
   sessionId:persistedTest.sessionId,
-  questions:parsed.questions,
+  questions:finalQuestions,
   coverage:{
     targeted:targets.length,
     markedWorked:targets.length
