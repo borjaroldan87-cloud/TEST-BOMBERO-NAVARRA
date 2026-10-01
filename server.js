@@ -6596,9 +6596,6 @@ ${JSON.stringify(compactQuestions)}
     );
   }
 
-  const normalizedResults = [];
-
-  for(let i=0;i<parsed.results.length;i++){
   const resultsByIndex = new Map();
 
 for(const result of parsed.results){
