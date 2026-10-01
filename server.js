@@ -3478,8 +3478,8 @@ En preguntas donde se busca la opción CORRECTA:
   secuencia, aplicación o excepción;
 - evita distractores que puedan descartarse por sentido común, por una
   diferencia exagerada o por pertenecer a otro eje conceptual;
-- siempre que la fuente lo permita, al menos DOS distractores deben obligar
-  a discriminar conocimiento técnico muy próximo a la correcta.
+los TRES distractores deben obligar a discriminar conocimiento técnico
+muy próximo a la correcta.
 
 En preguntas donde se busca la opción INCORRECTA:
 
@@ -3519,7 +3519,7 @@ Para cada distractor exige simultáneamente:
 - que no pueda descartarse sin conocer el contenido concreto preguntado;
 - que no resulte más extraño, extremo, genérico o artificioso que la correcta.
 
-En dificultad alta, intenta que al menos DOS distractores obliguen a discriminar
+En dificultad alta, los TRES distractores deben obligar a discriminar
 con precisión entre información muy próxima.
 
 Cuando la fuente proporcione varios datos, categorías, pasos, límites,
@@ -3659,7 +3659,7 @@ condiciones, secuencias, cifras o cálculos.
 NO aumentes la dificultad haciendo el enunciado artificialmente largo,
 rebuscado o ambiguo.
 
-En dificultad alta, al menos DOS de los tres distractores deben ser
+En dificultad alta, los TRES distractores deben ser
 especialmente próximos a la respuesta correcta y exigir conocer con
 precisión el dato, condición, procedimiento o relación evaluada.
 REGLAS ADICIONALES PARA DIFICULTAD ALTA:
@@ -6556,9 +6556,38 @@ MARCA competitive=false si ocurre cualquiera de estas situaciones:
 
 Además evalúa answerStandsOut.
 
-answerStandsOut=true cuando la opción indicada por correctIndex destaca
-frente a las demás por ser claramente más natural, técnica, precisa,
-moderada, completa o coherente.
+answerStandsOut se refiere EXCLUSIVAMENTE a una pista visible de
+redacción, estructura o plausibilidad que permita localizar la opción
+correctIndex sin dominar el conocimiento preguntado.
+
+NO marques answerStandsOut=true simplemente porque la opción correctIndex:
+- coincida mejor con sourceEvidence;
+- reproduzca con mayor exactitud el dato verdadero;
+- sea factual o técnicamente correcta;
+- sea la única respaldada plenamente por el temario.
+
+Eso es normal y NO constituye una pista.
+
+Marca answerStandsOut=true únicamente cuando la opción correctIndex
+resulte identificable por su FORMA, por ejemplo:
+- lenguaje absoluto o extremo artificial;
+- afirmación manifiestamente absurda;
+- concepto perteneciente a otro eje técnico;
+- longitud o grado de detalle claramente diferente;
+- terminología impropia;
+- procedimiento evidentemente disparatado;
+- redacción artificial que la haga destacar.
+
+REGLA ESPECIAL PARA 2026_INCORRECTA:
+
+En esta familia correctIndex identifica precisamente la afirmación FALSA
+que debe marcar el opositor.
+
+Por tanto, answerStandsOut=true si esa afirmación falsa resulta demasiado
+fácil de localizar por ser extrema, absoluta, absurda, ajena al mismo eje
+conceptual o claramente menos plausible que las tres afirmaciones verdaderas.
+
+La falsedad debe ser sutil y técnicamente próxima.
 
 IMPORTANTE:
 
@@ -6659,11 +6688,7 @@ for(let i=0;i<questions.length;i++){
       item => item.competitive === true
     ).length;
 
-  const requiredCompetitive =
-    question.questionFamily === "2026_INCORRECTA" ||
-    question.difficulty === "muy alta"
-      ? 3
-      : 2;
+  const requiredCompetitive = 3;
 
   const distractorIssues = assessments
     .filter(item => item.competitive !== true)
@@ -6683,11 +6708,14 @@ for(let i=0;i<questions.length;i++){
       `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
     );
   }
-
+const incorrectAnswerStandsOut =
+  question.questionFamily === "2026_INCORRECTA" &&
+  result.answerStandsOut === true;
   normalizedResults.push({
     index:i,
     distractorsValid:
-      competitiveCount >= requiredCompetitive,
+  competitiveCount >= requiredCompetitive &&
+  !incorrectAnswerStandsOut,
     distractorIssues
   });
 }  
