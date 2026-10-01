@@ -5824,7 +5824,7 @@ if(target.questionFamily === "GRAFICA"){
     WHERE
   coverage_item_id = $1
   AND active = TRUE
-  AND validation_version >= 4
+  AND validation_version >= 5
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
@@ -5981,7 +5981,7 @@ FROM question_bank
 WHERE id = $1
   AND coverage_item_id = $2
   AND active = TRUE
-  AND validation_version >= 4
+  AND validation_version >= 5
 LIMIT 1`,
     [
       Number(question.questionId),
@@ -6023,7 +6023,7 @@ validation_version,
 last_shown_at
 )
 VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,4,NOW()
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,5,NOW()
 )
     RETURNING id`,
     [
@@ -8290,8 +8290,7 @@ while(invalidQuestions.length > 0){
   }
 
   replacementAttempt++;
-  replacementAttempt++;
-
+  
   console.log(
     `VALIDACIÓN FACTUAL: ${invalidQuestions.length} preguntas rechazadas. ` +
     `Intento de sustitución ${replacementAttempt}/${MAX_REPLACEMENT_ATTEMPTS}`
@@ -8411,7 +8410,11 @@ console.log(
 
   invalidQuestions = stillInvalid;
 }
-
+if(invalidQuestions.length > 0){
+  throw new Error(
+    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final.`
+  );
+}
 console.log(
   "VALIDACIÓN FACTUAL: todas las preguntas superadas"
 );
