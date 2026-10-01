@@ -122,6 +122,7 @@ function updateTimer(){
 function answeredCount(){
   return ans.filter(x=>Number.isInteger(x)).length;
 }
+
 function renderGraphic(q){
   const g=q?.graphic;
 
@@ -164,6 +165,72 @@ function renderGraphic(q){
 
   const cropRatio=safeWidth/safeHeight;
 
+  const maskRegions=
+    Array.isArray(g.maskRegions)
+      ? g.maskRegions
+      : [];
+
+  const masksHtml=maskRegions.map(region=>{
+    const rx=clamp01(region?.x);
+    const ry=clamp01(region?.y);
+    const rw=clamp01(region?.width);
+    const rh=clamp01(region?.height);
+
+    if(
+      rx===null ||
+      ry===null ||
+      rw===null ||
+      rh===null ||
+      rw<=0 ||
+      rh<=0
+    ){
+      return "";
+    }
+
+    const regionRight=Math.min(1,rx+rw);
+    const regionBottom=Math.min(1,ry+rh);
+
+    const visibleLeft=Math.max(x,rx);
+    const visibleTop=Math.max(y,ry);
+    const visibleRight=Math.min(x+safeWidth,regionRight);
+    const visibleBottom=Math.min(y+safeHeight,regionBottom);
+
+    if(
+      visibleRight<=visibleLeft ||
+      visibleBottom<=visibleTop
+    ){
+      return "";
+    }
+
+    const left=
+      ((visibleLeft-x)/safeWidth)*100;
+
+    const top=
+      ((visibleTop-y)/safeHeight)*100;
+
+    const maskWidth=
+      ((visibleRight-visibleLeft)/safeWidth)*100;
+
+    const maskHeight=
+      ((visibleBottom-visibleTop)/safeHeight)*100;
+
+    return `
+      <span
+        aria-hidden="true"
+        style="
+          position:absolute;
+          left:${left}%;
+          top:${top}%;
+          width:${maskWidth}%;
+          height:${maskHeight}%;
+          background:#fff;
+          z-index:2;
+          pointer-events:none;
+        "
+      ></span>
+    `;
+  }).join("");
+
   return `
     <div
       class="question-graphic"
@@ -191,8 +258,10 @@ function renderGraphic(q){
           top:${imageTop}%;
           user-select:none;
           -webkit-user-drag:none;
+          z-index:1;
         "
       >
+      ${masksHtml}
     </div>
   `;
 }
