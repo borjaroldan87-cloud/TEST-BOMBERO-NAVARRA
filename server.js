@@ -6452,25 +6452,25 @@ async function validateDistractorCompetitiveness(ai, questions){
               items:{
                 type:"object",
                 properties:{
-                  optionIndex:{
-                    type:"integer",
-                    minimum:0,
-                    maximum:3
-                  },
-                  
-                },competitive:{
-  type:"boolean"
+  optionIndex:{
+    type:"integer",
+    minimum:0,
+    maximum:3
+  },
+  competitive:{
+    type:"boolean"
+  },
+  sameTechnicalAxis:{
+    type:"boolean"
+  },
+  confusionAnchor:{
+    type:"string"
+  },
+  reason:{
+    type:"string"
+  }
 },
-sameTechnicalAxis:{
-  type:"boolean"
-},
-confusionAnchor:{
-  type:"string"
-},
-reason:{
-  type:"string"
-}
-                required:[
+required:[
   "optionIndex",
   "competitive",
   "sameTechnicalAxis",
@@ -6755,150 +6755,186 @@ if(resultsByIndex.size !== questions.length){
   );
 }
 
-const sourceNormalized =
-  normalizeAuditText(question.sourceEvidence);
+const normalizedResults = [];
 
-const auditedAssessments =
-  assessments.map(item => {
-    const optionIndex =
-      Number(item.optionIndex);
+for(let i=0;i<questions.length;i++){
+  const result = resultsByIndex.get(i);
+  const question = questions[i];
 
-    const optionText =
-      question.options?.[optionIndex] || "";
+  const expectedIndexes = [0,1,2,3]
+    .filter(index =>
+      index !== Number(question.correctIndex)
+    );
 
-    const anchorNormalized =
-      normalizeAuditText(item.confusionAnchor);
+  const assessments =
+    Array.isArray(result.assessments)
+      ? result.assessments
+      : [];
 
-    const anchorValid =
-      anchorNormalized.length >= 12 &&
-      sourceNormalized.includes(anchorNormalized);
+  const receivedIndexes = assessments
+    .map(item => Number(item.optionIndex))
+    .sort((a,b) => a-b);
 
-    const unsupportedAbsolutes =
+  const sortedExpected = [...expectedIndexes]
+    .sort((a,b) => a-b);
+
+  if(
+    assessments.length !== 3 ||
+    JSON.stringify(receivedIndexes) !==
+      JSON.stringify(sortedExpected)
+  ){
+    throw new Error(
+      `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
+    );
+  }
+
+  const sourceNormalized =
+    normalizeAuditText(question.sourceEvidence);
+
+  const auditedAssessments =
+    assessments.map(item => {
+      const optionIndex =
+        Number(item.optionIndex);
+
+      const optionText =
+        question.options?.[optionIndex] || "";
+
+      const anchorNormalized =
+        normalizeAuditText(item.confusionAnchor);
+
+      const anchorValid =
+        anchorNormalized.length >= 12 &&
+        sourceNormalized.includes(anchorNormalized);
+
+      const unsupportedAbsolutes =
+        unsupportedAbsoluteTerms(
+          optionText,
+          question.sourceEvidence
+        );
+
+      const axisCheck =
+        lexicalAxisCheck(
+          optionText,
+          question
+        );
+
+      const locallyCompetitive =
+        item.competitive === true &&
+        item.sameTechnicalAxis === true &&
+        anchorValid &&
+        unsupportedAbsolutes.length === 0 &&
+        axisCheck.valid === true;
+
+      const localIssues = [];
+
+      if(item.competitive !== true){
+        localIssues.push(item.reason);
+      }
+
+      if(item.sameTechnicalAxis !== true){
+        localIssues.push(
+          "No pertenece al mismo eje técnico concreto."
+        );
+      }
+
+      if(!anchorValid){
+        localIssues.push(
+          "No aporta un confusionAnchor literal y suficiente de sourceEvidence."
+        );
+      }
+
+      if(unsupportedAbsolutes.length){
+        localIssues.push(
+          `Usa absolutos no respaldados por sourceEvidence: ${unsupportedAbsolutes.join(", ")}.`
+        );
+      }
+
+      if(axisCheck.valid !== true){
+        localIssues.push(
+          `Se aleja léxicamente del conocimiento evaluado (ratio ${axisCheck.ratio.toFixed(2)}).`
+        );
+      }
+
+      return {
+        optionIndex,
+        locallyCompetitive,
+        localIssues
+      };
+    });
+
+  const competitiveCount =
+    auditedAssessments.filter(item =>
+      item.locallyCompetitive === true
+    ).length;
+
+  const distractorIssues =
+    auditedAssessments
+      .filter(item =>
+        item.locallyCompetitive !== true
+      )
+      .map(item =>
+        `Opción ${item.optionIndex + 1}: ${item.localIssues.join(" ")}`
+      );
+
+  if(result.answerStandsOut === true){
+    distractorIssues.push(
+      `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
+    );
+  }
+
+  let incorrectAnswerStandsOut =
+    question.questionFamily === "2026_INCORRECTA" &&
+    result.answerStandsOut === true;
+
+  if(question.questionFamily === "2026_INCORRECTA"){
+    const correctOption =
+      question.options?.[
+        Number(question.correctIndex)
+      ] || "";
+
+    const unsupportedCorrectAbsolutes =
       unsupportedAbsoluteTerms(
-        optionText,
+        correctOption,
         question.sourceEvidence
       );
 
-    const axisCheck =
+    const correctAxisCheck =
       lexicalAxisCheck(
-        optionText,
+        correctOption,
         question
       );
 
-    const locallyCompetitive =
-      item.competitive === true &&
-      item.sameTechnicalAxis === true &&
-      anchorValid &&
-      unsupportedAbsolutes.length === 0 &&
-      axisCheck.valid === true;
+    if(
+      unsupportedCorrectAbsolutes.length ||
+      correctAxisCheck.valid !== true
+    ){
+      incorrectAnswerStandsOut = true;
 
-    const localIssues = [];
+      if(unsupportedCorrectAbsolutes.length){
+        distractorIssues.push(
+          `OPCIÓN INCORRECTA DEMASIADO EVIDENTE: absolutos no respaldados por sourceEvidence: ${unsupportedCorrectAbsolutes.join(", ")}.`
+        );
+      }
 
-    if(item.competitive !== true){
-      localIssues.push(item.reason);
-    }
-
-    if(item.sameTechnicalAxis !== true){
-      localIssues.push(
-        "No pertenece al mismo eje técnico concreto."
-      );
-    }
-
-    if(!anchorValid){
-      localIssues.push(
-        "No aporta un confusionAnchor literal y suficiente de sourceEvidence."
-      );
-    }
-
-    if(unsupportedAbsolutes.length){
-      localIssues.push(
-        `Usa absolutos no respaldados por sourceEvidence: ${unsupportedAbsolutes.join(", ")}.`
-      );
-    }
-
-    if(axisCheck.valid !== true){
-      localIssues.push(
-        `Se aleja léxicamente del conocimiento evaluado (ratio ${axisCheck.ratio.toFixed(2)}).`
-      );
-    }
-
-    return {
-      optionIndex,
-      locallyCompetitive,
-      localIssues
-    };
-  });
-
-const competitiveCount =
-  auditedAssessments.filter(item =>
-    item.locallyCompetitive === true
-  ).length;
-
-const distractorIssues =
-  auditedAssessments
-    .filter(item =>
-      item.locallyCompetitive !== true
-    )
-    .map(item =>
-      `Opción ${item.optionIndex + 1}: ${item.localIssues.join(" ")}`
-    );
-
-if(result.answerStandsOut === true){
-  distractorIssues.push(
-    `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
-  );
-}
-
-let incorrectAnswerStandsOut =
-  question.questionFamily === "2026_INCORRECTA" &&
-  result.answerStandsOut === true;
-
-if(question.questionFamily === "2026_INCORRECTA"){
-  const correctOption =
-    question.options?.[
-      Number(question.correctIndex)
-    ] || "";
-
-  const unsupportedCorrectAbsolutes =
-    unsupportedAbsoluteTerms(
-      correctOption,
-      question.sourceEvidence
-    );
-
-  const correctAxisCheck =
-    lexicalAxisCheck(
-      correctOption,
-      question
-    );
-
-  if(
-    unsupportedCorrectAbsolutes.length ||
-    correctAxisCheck.valid !== true
-  ){
-    incorrectAnswerStandsOut = true;
-
-    if(unsupportedCorrectAbsolutes.length){
-      distractorIssues.push(
-        `OPCIÓN INCORRECTA DEMASIADO EVIDENTE: absolutos no respaldados por sourceEvidence: ${unsupportedCorrectAbsolutes.join(", ")}.`
-      );
-    }
-
-    if(correctAxisCheck.valid !== true){
-      distractorIssues.push(
-        `OPCIÓN INCORRECTA DEMASIADO ALEJADA DEL EJE TÉCNICO (ratio ${correctAxisCheck.ratio.toFixed(2)}).`
-      );
+      if(correctAxisCheck.valid !== true){
+        distractorIssues.push(
+          `OPCIÓN INCORRECTA DEMASIADO ALEJADA DEL EJE TÉCNICO (ratio ${correctAxisCheck.ratio.toFixed(2)}).`
+        );
+      }
     }
   }
+
+  normalizedResults.push({
+    index:i,
+    distractorsValid:
+      competitiveCount === 3 &&
+      !incorrectAnswerStandsOut,
+    distractorIssues
+  });
 }
 
-normalizedResults.push({
-  index:i,
-  distractorsValid:
-    competitiveCount === 3 &&
-    !incorrectAnswerStandsOut,
-  distractorIssues
-});
-}  
+
+  
 return normalizedResults;
 }
 
