@@ -169,6 +169,9 @@ async function initDatabase(){
       UNIQUE(source_id, asset_index)
     )
   `);   await db.query(`
+    ALTER TABLE graphic_assets
+    ADD COLUMN IF NOT EXISTS mask_regions JSONB NOT NULL DEFAULT '[]'::jsonb
+  `);  await db.query(`
     CREATE TABLE IF NOT EXISTS question_bank (
       id BIGSERIAL PRIMARY KEY,
 
@@ -431,7 +434,36 @@ const graphicAssetAnalysisSchema = {
             type:"array",
             items:{type:"string"}
           },
-
+          maskRegions:{
+            type:"array",
+            items:{
+              type:"object",
+              properties:{
+                x:{type:"number"},
+                y:{type:"number"},
+                width:{type:"number"},
+                height:{type:"number"},
+                visibleText:{type:"string"},
+                kind:{
+                  type:"string",
+                  enum:[
+                    "editorial_text",
+                    "three_cut_sequence_number"
+                  ]
+                },
+                reason:{type:"string"}
+              },
+              required:[
+                "x",
+                "y",
+                "width",
+                "height",
+                "visibleText",
+                "kind",
+                "reason"
+              ]
+            }
+          },
           crop:{
             type:["object","null"],
             properties:{
@@ -460,6 +492,7 @@ const graphicAssetAnalysisSchema = {
           "concept",
           "visualDescription",
           "textToRemove",
+          "maskRegions",
           "crop",
           "needsImageToAnswer",
           "usableForGraphicQuestion",
@@ -579,14 +612,36 @@ del tema lo permitan expresamente.
 5. Para cada asset devuelve crop con coordenadas NORMALIZADAS entre 0 y 1:
 x, y, width y height.
 
-6. El crop debe conservar íntegramente el dibujo necesario y excluir, cuando
-sea posible, pies de imagen, títulos, párrafos y texto ajeno al esquema.
+6. El crop debe conservar íntegramente el dibujo técnico necesario y excluir
+del encuadre TODO contenido editorial o periférico que no sea necesario para
+interpretar técnicamente la imagen.
 
-7. textToRemove debe contener únicamente textos que revelen directamente
-la respuesta o sean información externa innecesaria.
+Debe quedar FUERA del crop siempre que pueda excluirse sin cortar información
+técnica necesaria:
+- pies de imagen o pies de figura;
+- títulos y encabezados;
+- párrafos explicativos;
+- referencias editoriales como "Figura 3", "Fig. 3", "Imagen 4",
+  "Ilustración 2" o numeraciones equivalentes;
+- números que formen parte únicamente de la numeración de la figura;
+- cualquier texto exterior al dibujo que no sea necesario para resolver
+  una pregunta gráfica.
 
-8. No elimines A/B/C/D, números, símbolos, cotas, magnitudes o etiquetas
-cuando formen parte funcional del dibujo.
+No amplíes el crop para conservar un título, pie de imagen, número de figura
+o texto periférico.
+
+7. Si uno de esos textos invade físicamente el dibujo y no puede eliminarse
+mediante crop sin cortar una parte técnicamente necesaria, conserva íntegro
+el dibujo e incluye ese texto exacto en textToRemove para su posterior
+sanitización.
+
+8. textToRemove debe contener únicamente contenido visible que deba ocultarse:
+texto editorial que no haya podido excluirse mediante crop o información que
+revele directamente la respuesta.
+
+NO incluyas en textToRemove números, símbolos, cotas, magnitudes, letras o
+etiquetas cuando sean funcionales y necesarias para interpretar técnicamente
+el dibujo.
 
 9. usableForGraphicQuestion=true únicamente cuando pueda formularse una
 pregunta cuya resolución dependa realmente de observar la imagen.
