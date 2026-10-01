@@ -7871,7 +7871,7 @@ for(let i = 0; i < factualValidation.length; i++){
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
-const MAX_REPLACEMENT_ATTEMPTS = 2;
+const MAX_REPLACEMENT_ATTEMPTS = 3;
 let replacementAttempt = 0;
 
 while(
