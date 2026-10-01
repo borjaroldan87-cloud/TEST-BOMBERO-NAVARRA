@@ -5824,7 +5824,7 @@ if(target.questionFamily === "GRAFICA"){
     WHERE
   coverage_item_id = $1
   AND active = TRUE
-  AND validation_version >= 5
+  AND validation_version >= 6
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
@@ -5981,7 +5981,7 @@ FROM question_bank
 WHERE id = $1
   AND coverage_item_id = $2
   AND active = TRUE
-  AND validation_version >= 5
+  AND validation_version >= 6
 LIMIT 1`,
     [
       Number(question.questionId),
@@ -6023,7 +6023,7 @@ validation_version,
 last_shown_at
 )
 VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,5,NOW()
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,6,NOW()
 )
     RETURNING id`,
     [
@@ -6457,18 +6457,26 @@ async function validateDistractorCompetitiveness(ai, questions){
                     minimum:0,
                     maximum:3
                   },
-                  competitive:{
-                    type:"boolean"
-                  },
-                  reason:{
-                    type:"string"
-                  }
-                },
+                  
+                },competitive:{
+  type:"boolean"
+},
+sameTechnicalAxis:{
+  type:"boolean"
+},
+confusionAnchor:{
+  type:"string"
+},
+reason:{
+  type:"string"
+}
                 required:[
-                  "optionIndex",
-                  "competitive",
-                  "reason"
-                ]
+  "optionIndex",
+  "competitive",
+  "sameTechnicalAxis",
+  "confusionAnchor",
+  "reason"
+]
               }
             }
           },
@@ -6496,7 +6504,87 @@ async function validateDistractorCompetitiveness(ai, questions){
     difficulty:question.difficulty,
     sourceEvidence:question.sourceEvidence
   }));
+const normalizeAuditText = value =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .replace(/\s+/g," ")
+    .trim();
 
+const auditStopWords = new Set([
+  "para","como","desde","hasta","entre","sobre","donde","cuando",
+  "cual","cuales","esta","este","estos","estas","una","uno","unos",
+  "unas","del","las","los","que","con","sin","por","sus","se","al",
+  "de","la","el","y","o","en","un"
+]);
+
+const contentTokens = value =>
+  normalizeAuditText(value)
+    .split(" ")
+    .filter(token =>
+      token.length >= 5 &&
+      !auditStopWords.has(token)
+    );
+
+const absoluteTerms = [
+  "siempre",
+  "nunca",
+  "exclusivamente",
+  "unicamente",
+  "obligatoriamente",
+  "invariablemente",
+  "instantaneamente",
+  "rigurosamente",
+  "exactamente",
+  "completamente",
+  "cualquier",
+  "por completo"
+];
+
+const unsupportedAbsoluteTerms = (optionText,sourceEvidence) => {
+  const option = normalizeAuditText(optionText);
+  const source = normalizeAuditText(sourceEvidence);
+
+  return absoluteTerms.filter(term =>
+    option.includes(term) &&
+    !source.includes(term)
+  );
+};
+
+const lexicalAxisCheck = (optionText,question) => {
+  const optionTokens =
+    [...new Set(contentTokens(optionText))];
+
+  if(optionTokens.length < 6){
+    return {
+      valid:true,
+      ratio:1
+    };
+  }
+
+  const referenceTokens = new Set(
+    contentTokens(
+      `${question.stem || ""} ${question.sourceEvidence || ""}`
+    )
+  );
+
+  const shared =
+    optionTokens.filter(token =>
+      referenceTokens.has(token)
+    ).length;
+
+  const ratio =
+    optionTokens.length
+      ? shared / optionTokens.length
+      : 1;
+
+  return {
+    valid:ratio >= 0.35,
+    ratio
+  };
+};
   const prompt = `
 Actúa exclusivamente como AUDITOR ADVERSARIAL DE DISTRACTORES
 para preguntas tipo test de una oposición de Bomberos.
@@ -6511,17 +6599,33 @@ la pregunta.
 Tu trabajo consiste en auditar INDIVIDUALMENTE las TRES opciones cuyo
 índice sea distinto de correctIndex.
 
-Para cada una debes decidir:
+Para cada una debes devolver además:
+
+sameTechnicalAxis=true únicamente cuando la alternativa evalúa el MISMO
+dato, propiedad, procedimiento, condición, relación, magnitud o concepto
+concreto que la respuesta correcta. Compartir tema general no basta.
+
+confusionAnchor debe ser una COPIA LITERAL de un fragmento concreto de
+sourceEvidence que explique por qué la alternativa podría confundirse
+razonablemente con el conocimiento correcto.
+
+REGLAS PARA confusionAnchor:
+- debe aparecer literalmente en sourceEvidence;
+- no lo parafrasees;
+- debe contener suficiente información técnica para justificar la confusión;
+- no uses títulos genéricos ni palabras aisladas;
+- si no existe un fragmento real que justifique esa confusión,
+  devuelve confusionAnchor="" y competitive=false.
 
 competitive=true:
 solo cuando esa alternativa puede competir razonablemente con la
-respuesta correcta ante un opositor preparado y obliga a discriminar
-un detalle técnico próximo del conocimiento contenido en sourceEvidence.
+respuesta correcta ante un opositor preparado, sameTechnicalAxis=true
+y confusionAnchor contiene una base factual real de sourceEvidence.
 
 competitive=false:
 cuando pueda eliminarse sin recordar con precisión el conocimiento
-preguntado.
-
+preguntado, cuando no pertenezca al mismo eje técnico o cuando no exista
+una base concreta en sourceEvidence que justifique la confusión.
 MARCA competitive=false si ocurre cualquiera de estas situaciones:
 
 1. La opción pertenece a otro eje conceptual.
@@ -6599,7 +6703,8 @@ IMPORTANTE:
 - Cada distractor debe superar el estándar por sí mismo.
 - Que una alternativa sea falsa no significa que sea un buen distractor.
 - Que utilice vocabulario técnico tampoco significa que sea competitiva.
-
+- No inventes un confusionAnchor para justificar una opción débil.
+- Si dudas entre true y false, devuelve competitive=false.
 PREGUNTAS:
 ${JSON.stringify(compactQuestions)}
 `;
@@ -6650,74 +6755,149 @@ if(resultsByIndex.size !== questions.length){
   );
 }
 
-const normalizedResults = [];
+const sourceNormalized =
+  normalizeAuditText(question.sourceEvidence);
 
-for(let i=0;i<questions.length;i++){
-  const result = resultsByIndex.get(i);
-  const question = questions[i];
+const auditedAssessments =
+  assessments.map(item => {
+    const optionIndex =
+      Number(item.optionIndex);
 
-  const expectedIndexes = [0,1,2,3]
-    .filter(index =>
-      index !== Number(question.correctIndex)
-    );
+    const optionText =
+      question.options?.[optionIndex] || "";
 
-  const assessments =
-    Array.isArray(result.assessments)
-      ? result.assessments
-      : [];
+    const anchorNormalized =
+      normalizeAuditText(item.confusionAnchor);
 
-  const receivedIndexes = assessments
-    .map(item => Number(item.optionIndex))
-    .sort((a,b) => a-b);
+    const anchorValid =
+      anchorNormalized.length >= 12 &&
+      sourceNormalized.includes(anchorNormalized);
 
-  const sortedExpected = [...expectedIndexes]
-    .sort((a,b) => a-b);
+    const unsupportedAbsolutes =
+      unsupportedAbsoluteTerms(
+        optionText,
+        question.sourceEvidence
+      );
 
-  if(
-    assessments.length !== 3 ||
-    JSON.stringify(receivedIndexes) !==
-      JSON.stringify(sortedExpected)
-  ){
-    throw new Error(
-      `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
-    );
-  }
+    const axisCheck =
+      lexicalAxisCheck(
+        optionText,
+        question
+      );
 
-  const competitiveCount =
-    assessments.filter(
-      item => item.competitive === true
-    ).length;
+    const locallyCompetitive =
+      item.competitive === true &&
+      item.sameTechnicalAxis === true &&
+      anchorValid &&
+      unsupportedAbsolutes.length === 0 &&
+      axisCheck.valid === true;
 
-  const requiredCompetitive = 3;
+    const localIssues = [];
 
-  const distractorIssues = assessments
-    .filter(item => item.competitive !== true)
+    if(item.competitive !== true){
+      localIssues.push(item.reason);
+    }
+
+    if(item.sameTechnicalAxis !== true){
+      localIssues.push(
+        "No pertenece al mismo eje técnico concreto."
+      );
+    }
+
+    if(!anchorValid){
+      localIssues.push(
+        "No aporta un confusionAnchor literal y suficiente de sourceEvidence."
+      );
+    }
+
+    if(unsupportedAbsolutes.length){
+      localIssues.push(
+        `Usa absolutos no respaldados por sourceEvidence: ${unsupportedAbsolutes.join(", ")}.`
+      );
+    }
+
+    if(axisCheck.valid !== true){
+      localIssues.push(
+        `Se aleja léxicamente del conocimiento evaluado (ratio ${axisCheck.ratio.toFixed(2)}).`
+      );
+    }
+
+    return {
+      optionIndex,
+      locallyCompetitive,
+      localIssues
+    };
+  });
+
+const competitiveCount =
+  auditedAssessments.filter(item =>
+    item.locallyCompetitive === true
+  ).length;
+
+const distractorIssues =
+  auditedAssessments
+    .filter(item =>
+      item.locallyCompetitive !== true
+    )
     .map(item =>
-      `Opción ${Number(item.optionIndex) + 1}: ${item.reason}`
+      `Opción ${item.optionIndex + 1}: ${item.localIssues.join(" ")}`
     );
 
-  /*
-  answerStandsOut se conserva únicamente como información diagnóstica.
+if(result.answerStandsOut === true){
+  distractorIssues.push(
+    `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
+  );
+}
 
-  NO invalida la pregunta por sí mismo porque Gemini puede interpretar
-  erróneamente como "destacar" el simple hecho de que la respuesta
-  correcta sea más fiel a sourceEvidence.
-  */
-  if(result.answerStandsOut === true){
-    distractorIssues.push(
-      `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
-    );
-  }
-const incorrectAnswerStandsOut =
+let incorrectAnswerStandsOut =
   question.questionFamily === "2026_INCORRECTA" &&
   result.answerStandsOut === true;
-  normalizedResults.push({
-    index:i,
-    distractorsValid:
-  competitiveCount >= requiredCompetitive &&
-  !incorrectAnswerStandsOut,
-    distractorIssues
-  });
+
+if(question.questionFamily === "2026_INCORRECTA"){
+  const correctOption =
+    question.options?.[
+      Number(question.correctIndex)
+    ] || "";
+
+  const unsupportedCorrectAbsolutes =
+    unsupportedAbsoluteTerms(
+      correctOption,
+      question.sourceEvidence
+    );
+
+  const correctAxisCheck =
+    lexicalAxisCheck(
+      correctOption,
+      question
+    );
+
+  if(
+    unsupportedCorrectAbsolutes.length ||
+    correctAxisCheck.valid !== true
+  ){
+    incorrectAnswerStandsOut = true;
+
+    if(unsupportedCorrectAbsolutes.length){
+      distractorIssues.push(
+        `OPCIÓN INCORRECTA DEMASIADO EVIDENTE: absolutos no respaldados por sourceEvidence: ${unsupportedCorrectAbsolutes.join(", ")}.`
+      );
+    }
+
+    if(correctAxisCheck.valid !== true){
+      distractorIssues.push(
+        `OPCIÓN INCORRECTA DEMASIADO ALEJADA DEL EJE TÉCNICO (ratio ${correctAxisCheck.ratio.toFixed(2)}).`
+      );
+    }
+  }
+}
+
+normalizedResults.push({
+  index:i,
+  distractorsValid:
+    competitiveCount === 3 &&
+    !incorrectAnswerStandsOut,
+  distractorIssues
+});
 }  
 return normalizedResults;
 }
