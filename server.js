@@ -5685,7 +5685,7 @@ if(target.questionFamily === "GRAFICA"){
     WHERE
   coverage_item_id = $1
   AND active = TRUE
-  AND validation_version >= 3
+  AND validation_version >= 4
   AND difficulty = $2
   AND question_family = $3
   AND graphic IS NULL
@@ -5842,7 +5842,7 @@ FROM question_bank
 WHERE id = $1
   AND coverage_item_id = $2
   AND active = TRUE
-  AND validation_version >= 3
+  AND validation_version >= 4
 LIMIT 1`,
     [
       Number(question.questionId),
@@ -5884,7 +5884,7 @@ validation_version,
 last_shown_at
 )
 VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,3,NOW()
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,4,NOW()
 )
     RETURNING id`,
     [
@@ -6296,17 +6296,48 @@ async function validateDistractorCompetitiveness(ai, questions){
         items:{
           type:"object",
           properties:{
-            index:{type:"integer",minimum:0},
-            distractorsValid:{type:"boolean"},
-            distractorIssues:{
+            index:{
+              type:"integer",
+              minimum:0
+            },
+            answerStandsOut:{
+              type:"boolean"
+            },
+            answerStandoutReason:{
+              type:"string"
+            },
+            assessments:{
               type:"array",
-              items:{type:"string"}
+              minItems:3,
+              maxItems:3,
+              items:{
+                type:"object",
+                properties:{
+                  optionIndex:{
+                    type:"integer",
+                    minimum:0,
+                    maximum:3
+                  },
+                  competitive:{
+                    type:"boolean"
+                  },
+                  reason:{
+                    type:"string"
+                  }
+                },
+                required:[
+                  "optionIndex",
+                  "competitive",
+                  "reason"
+                ]
+              }
             }
           },
           required:[
             "index",
-            "distractorsValid",
-            "distractorIssues"
+            "answerStandsOut",
+            "answerStandoutReason",
+            "assessments"
           ]
         }
       }
@@ -6318,106 +6349,88 @@ async function validateDistractorCompetitiveness(ai, questions){
   schema.properties.results.maxItems = questions.length;
 
   const compactQuestions = questions.map((question,index)=>({
-  index,
-  stem:question.stem,
-  options:question.options,
-  correctIndex:question.correctIndex,
-  questionFamily:question.questionFamily,
-  difficulty:question.difficulty,
-  sourceEvidence:question.sourceEvidence
-}));
+    index,
+    stem:question.stem,
+    options:question.options,
+    correctIndex:question.correctIndex,
+    questionFamily:question.questionFamily,
+    difficulty:question.difficulty,
+    sourceEvidence:question.sourceEvidence
+  }));
 
   const prompt = `
 Actúa exclusivamente como AUDITOR ADVERSARIAL DE DISTRACTORES
 para preguntas tipo test de una oposición de Bomberos.
 
-NO debes comprobar factualidad.
-NO debes decidir si correctIndex es correcto.
-ASUME que correctIndex identifica la respuesta correcta.
+NO debes comprobar si correctIndex es correcto.
+ASUME siempre que correctIndex identifica la respuesta que debe marcar
+el opositor.
+
 sourceEvidence contiene el fragmento factual del temario que respalda
 la pregunta.
 
-NO debes usar sourceEvidence para cambiar correctIndex ni realizar una
-segunda validación factual.
+Tu trabajo consiste en auditar INDIVIDUALMENTE las TRES opciones cuyo
+índice sea distinto de correctIndex.
 
-Úsalo exclusivamente para determinar si cada alternativa compite en el
-MISMO EJE TÉCNICO que el conocimiento evaluado.
+Para cada una debes decidir:
 
-Un distractor NO es competitivo si introduce conceptos, maquinaria,
-magnitudes, procedimientos, condiciones o relaciones que no sean una
-confusión técnicamente próxima y razonable respecto al conocimiento
-contenido en sourceEvidence.
+competitive=true:
+solo cuando esa alternativa puede competir razonablemente con la
+respuesta correcta ante un opositor preparado y obliga a discriminar
+un detalle técnico próximo del conocimiento contenido en sourceEvidence.
 
-Para dificultad "alta", al menos DOS alternativas incorrectas deben
-poder confundirse razonablemente con la correcta por una variación
-próxima de dato, condición, término, relación, paso, magnitud o
-procedimiento.
+competitive=false:
+cuando pueda eliminarse sin recordar con precisión el conocimiento
+preguntado.
 
-No aceptes como distractor competitivo una afirmación simplemente porque
-suene técnica.
-Tu única misión es determinar si las otras tres alternativas son
-REALMENTE COMPETITIVAS para un opositor preparado.
+MARCA competitive=false si ocurre cualquiera de estas situaciones:
 
-Una pregunta de dificultad "alta" SOLO puede superar esta auditoría
-si al menos DOS distractores obligan a discriminar conocimiento técnico
-próximo a la respuesta correcta.
+1. La opción pertenece a otro eje conceptual.
 
-Marca distractorsValid=false si ocurre CUALQUIERA de estas situaciones:
+2. Introduce maquinaria, procedimientos, variables, magnitudes,
+   fenómenos o condiciones ajenos al conocimiento evaluado.
 
-1. Un distractor puede eliminarse por sentido común sin conocer el dato
-   concreto del temario.
+3. Puede eliminarse por sentido común.
 
-2. Un distractor pertenece a otro eje conceptual o responde realmente
-   a otra pregunta.
+4. Contiene una exageración, formulación extrema, acción manifiestamente
+   improcedente o detalle técnicamente pintoresco.
 
-3. La respuesta correcta destaca por ser claramente más técnica,
-   precisa, moderada, completa o natural.
+5. Utiliza palabras como "exclusivamente", "únicamente", "siempre",
+   "nunca", "por completo", "instantáneamente", "rigurosamente",
+   "exactamente" u otros absolutos de manera artificial.
 
-4. Un distractor contiene una exageración, condición extrema,
-   formulación absurda o acción manifiestamente improcedente.
+6. En una pregunta numérica utiliza otro tipo de magnitud o un valor
+   claramente lejano en vez de un dato próximo y confundible.
 
-5. Expresiones como "exclusivamente", "únicamente", "siempre",
-   "nunca", "por completo", "instantáneamente", "rigurosamente"
-   o equivalentes convierten artificialmente una opción en fácil
-   de descartar.
+7. En una pregunta de fórmula contiene una expresión dimensional o
+   algebraicamente absurda.
 
-6. La falsa se obtiene añadiendo maquinaria, procedimientos,
-   condiciones o detalles claramente ajenos al conocimiento evaluado.
+8. En una secuencia introduce pasos ajenos al procedimiento en lugar de
+   modificar plausiblemente el orden, posición o condición de pasos
+   reales próximos.
 
-7. Dos distractores son esencialmente dos versiones de la misma falsa.
+9. Suena técnica, pero no constituye una confusión razonable respecto
+   al contenido de sourceEvidence.
 
-8. En una pregunta numérica, las alternativas falsas no mantienen
-   magnitud, unidad y proximidad razonables respecto al dato correcto.
+10. Un opositor podría descartarla sin necesitar recordar el dato,
+    condición, procedimiento, relación o concepto exacto del temario.
 
-9. En una pregunta de fórmula o cálculo, los distractores son
-   dimensional o algebraicamente absurdos en lugar de representar
-   errores razonables de fórmula, variable, potencia, unidad o despeje.
+Además evalúa answerStandsOut.
 
-10. En una pregunta de secuencia, los distractores introducen pasos
-    ajenos al procedimiento en lugar de alterar de forma plausible
-    orden, posición o condición de pasos próximos.
+answerStandsOut=true cuando la opción indicada por correctIndex destaca
+frente a las demás por ser claramente más natural, técnica, precisa,
+moderada, completa o coherente.
 
-11. En una pregunta INCORRECTA, la opción falsa destaca visual,
-    lingüística o técnicamente frente a las tres verdaderas.
+IMPORTANTE:
 
-12. Un opositor podría localizar la respuesta por descarte superficial
-    antes de necesitar recordar el conocimiento exacto preguntado.
-
-REGLA DE EXIGENCIA:
-
-- "alta": al menos DOS distractores deben ser técnicamente próximos
-  y competitivos.
-- "muy alta": los TRES distractores deben ser técnicamente próximos
-  y competitivos siempre que el formato de la pregunta lo permita.
-
-No seas benevolente.
-Que una opción sea falsa NO la convierte en buen distractor.
-
-Si una pregunta no supera claramente este estándar:
-distractorsValid=false.
-
-Indica en distractorIssues exactamente qué alternativas son débiles
-y por qué.
+- Evalúa exactamente TRES alternativas por pregunta.
+- No evalúes como distractor la opción correctIndex.
+- Devuelve sus índices reales: 0, 1, 2 o 3.
+- No seas benevolente.
+- No agrupes el juicio de las tres alternativas.
+- Cada distractor debe superar el estándar por sí mismo.
+- Que una alternativa sea falsa no significa que sea un buen distractor.
+- Que utilice vocabulario técnico tampoco significa que sea competitiva.
 
 PREGUNTAS:
 ${JSON.stringify(compactQuestions)}
@@ -6444,16 +6457,80 @@ ${JSON.stringify(compactQuestions)}
     );
   }
 
+  const normalizedResults = [];
+
   for(let i=0;i<parsed.results.length;i++){
-    if(parsed.results[i].index !== i){
+    const result = parsed.results[i];
+    const question = questions[i];
+
+    if(result.index !== i){
       throw new Error(
         "El auditor independiente de distractores devolvió índices inconsistentes."
       );
     }
+
+    const expectedIndexes = [0,1,2,3]
+      .filter(index =>
+        index !== Number(question.correctIndex)
+      );
+
+    const assessments =
+      Array.isArray(result.assessments)
+        ? result.assessments
+        : [];
+
+    const receivedIndexes = assessments
+      .map(item => Number(item.optionIndex))
+      .sort((a,b) => a-b);
+
+    const sortedExpected = [...expectedIndexes]
+      .sort((a,b) => a-b);
+
+    if(
+      assessments.length !== 3 ||
+      JSON.stringify(receivedIndexes) !==
+        JSON.stringify(sortedExpected)
+    ){
+      throw new Error(
+        `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
+      );
+    }
+
+    const competitiveCount =
+      assessments.filter(
+        item => item.competitive === true
+      ).length;
+
+    const requiredCompetitive =
+      question.questionFamily === "2026_INCORRECTA" ||
+      question.difficulty === "muy alta"
+        ? 3
+        : 2;
+
+    const distractorIssues = assessments
+      .filter(item => item.competitive !== true)
+      .map(item =>
+        `Opción ${Number(item.optionIndex) + 1}: ${item.reason}`
+      );
+
+    if(result.answerStandsOut === true){
+      distractorIssues.push(
+        `La respuesta correcta destaca frente a las alternativas: ${result.answerStandoutReason}`
+      );
+    }
+
+    normalizedResults.push({
+      index:i,
+      distractorsValid:
+        result.answerStandsOut !== true &&
+        competitiveCount >= requiredCompetitive,
+      distractorIssues
+    });
   }
 
-  return parsed.results;
+  return normalizedResults;
 }
+
 async function validateGeneratedQuestions(ai,questions){
   const validationPrompt=`
 Eres un validador estricto de preguntas de oposición.
