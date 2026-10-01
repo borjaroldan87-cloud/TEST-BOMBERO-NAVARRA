@@ -8511,6 +8511,9 @@ finalQuestions = [...parsed.questions];
       assetType: target.graphicAsset.asset_type,
       concept: target.graphicAsset.concept || "",
       description: target.graphicAsset.description || "",
+      maskRegions: Array.isArray(target.graphicAsset.mask_regions)
+  ? target.graphicAsset.mask_regions
+  : [],
       crop: {
         x: Number(target.graphicAsset.crop_x ?? 0),
         y: Number(target.graphicAsset.crop_y ?? 0),
@@ -8808,9 +8811,9 @@ console.log(
       assetType: originalTarget.graphicAsset.asset_type,
       concept: originalTarget.graphicAsset.concept || "",
       description: originalTarget.graphicAsset.description || "",
-           maskRegions: Array.isArray(target.graphicAsset.mask_regions)
-        ? target.graphicAsset.mask_regions
-        : [],
+           maskRegions: Array.isArray(originalTarget.graphicAsset.mask_regions)
+  ? originalTarget.graphicAsset.mask_regions
+  : [],
       crop: {
         x: Number(originalTarget.graphicAsset.crop_x ?? 0),
         y: Number(originalTarget.graphicAsset.crop_y ?? 0),
