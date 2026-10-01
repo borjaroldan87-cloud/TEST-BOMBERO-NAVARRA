@@ -6318,13 +6318,14 @@ async function validateDistractorCompetitiveness(ai, questions){
   schema.properties.results.maxItems = questions.length;
 
   const compactQuestions = questions.map((question,index)=>({
-    index,
-    stem:question.stem,
-    options:question.options,
-    correctIndex:question.correctIndex,
-    questionFamily:question.questionFamily,
-    difficulty:question.difficulty
-  }));
+  index,
+  stem:question.stem,
+  options:question.options,
+  correctIndex:question.correctIndex,
+  questionFamily:question.questionFamily,
+  difficulty:question.difficulty,
+  sourceEvidence:question.sourceEvidence
+}));
 
   const prompt = `
 Actúa exclusivamente como AUDITOR ADVERSARIAL DE DISTRACTORES
@@ -6333,7 +6334,27 @@ para preguntas tipo test de una oposición de Bomberos.
 NO debes comprobar factualidad.
 NO debes decidir si correctIndex es correcto.
 ASUME que correctIndex identifica la respuesta correcta.
+sourceEvidence contiene el fragmento factual del temario que respalda
+la pregunta.
 
+NO debes usar sourceEvidence para cambiar correctIndex ni realizar una
+segunda validación factual.
+
+Úsalo exclusivamente para determinar si cada alternativa compite en el
+MISMO EJE TÉCNICO que el conocimiento evaluado.
+
+Un distractor NO es competitivo si introduce conceptos, maquinaria,
+magnitudes, procedimientos, condiciones o relaciones que no sean una
+confusión técnicamente próxima y razonable respecto al conocimiento
+contenido en sourceEvidence.
+
+Para dificultad "alta", al menos DOS alternativas incorrectas deben
+poder confundirse razonablemente con la correcta por una variación
+próxima de dato, condición, término, relación, paso, magnitud o
+procedimiento.
+
+No aceptes como distractor competitivo una afirmación simplemente porque
+suene técnica.
 Tu única misión es determinar si las otras tres alternativas son
 REALMENTE COMPETITIVAS para un opositor preparado.
 
