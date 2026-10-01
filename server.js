@@ -1091,6 +1091,7 @@ const result = await db.query(
       crop_y,
       crop_width,
       crop_height,
+      mask_regions,
       is_official_reference,
       times_asked,
       last_asked_at
@@ -5574,6 +5575,7 @@ for(let i = 0; i < selected.length; i++){
         crop_y,
         crop_width,
         crop_height,
+        mask_regions,
         is_official_reference,
         times_asked,
         last_asked_at
@@ -5643,7 +5645,10 @@ for(let i = 0; i < selected.length; i++){
         crop_x: Number(matchedGraphicAsset.crop_x ?? 0),
         crop_y: Number(matchedGraphicAsset.crop_y ?? 0),
         crop_width: Number(matchedGraphicAsset.crop_width ?? 1),
-        crop_height: Number(matchedGraphicAsset.crop_height ?? 1)
+                crop_height: Number(matchedGraphicAsset.crop_height ?? 1),
+        mask_regions: Array.isArray(matchedGraphicAsset.mask_regions)
+          ? matchedGraphicAsset.mask_regions
+          : []
       }
     };
 
@@ -7610,6 +7615,9 @@ for(let i=0;i<parsed.questions.length;i++){
       assetType: target.graphicAsset.asset_type,
       concept: target.graphicAsset.concept || "",
       description: target.graphicAsset.description || "",
+           maskRegions: Array.isArray(target.graphicAsset.mask_regions)
+        ? target.graphicAsset.mask_regions
+        : [],
       crop: {
         x: Number(target.graphicAsset.crop_x ?? 0),
         y: Number(target.graphicAsset.crop_y ?? 0),
@@ -8451,6 +8459,9 @@ for(let i=0;i<parsed.questions.length;i++){
       assetType: target.graphicAsset.asset_type,
       concept: target.graphicAsset.concept || "",
       description: target.graphicAsset.description || "",
+           maskRegions: Array.isArray(target.graphicAsset.mask_regions)
+        ? target.graphicAsset.mask_regions
+        : [],
       crop: {
         x: Number(target.graphicAsset.crop_x ?? 0),
         y: Number(target.graphicAsset.crop_y ?? 0),
@@ -8797,6 +8808,9 @@ console.log(
       assetType: originalTarget.graphicAsset.asset_type,
       concept: originalTarget.graphicAsset.concept || "",
       description: originalTarget.graphicAsset.description || "",
+           maskRegions: Array.isArray(target.graphicAsset.mask_regions)
+        ? target.graphicAsset.mask_regions
+        : [],
       crop: {
         x: Number(originalTarget.graphicAsset.crop_x ?? 0),
         y: Number(originalTarget.graphicAsset.crop_y ?? 0),
@@ -9086,6 +9100,7 @@ app.get("/api/graphics/inspect-latest", async (req,res)=>{
         crop_y,
         crop_width,
         crop_height,
+        mask_regions,
         is_official_reference,
         is_usable,
         analysis_status,
