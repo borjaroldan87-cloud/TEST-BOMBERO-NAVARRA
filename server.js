@@ -6063,7 +6063,20 @@ await client.query(
     i + 1
   ]
 );
-
+if(
+  question.questionFamily === "GRAFICA" &&
+  Number.isInteger(Number(question.graphic?.assetId))
+){
+  await client.query(
+    `UPDATE graphic_assets
+     SET
+       times_asked = times_asked + 1,
+       last_asked_at = NOW(),
+       updated_at = NOW()
+     WHERE id = $1`,
+    [Number(question.graphic.assetId)]
+  );
+}
 persistedQuestions.push({
   ...question,
   questionId,
