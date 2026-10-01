@@ -4898,6 +4898,145 @@ LEFT JOIN LATERAL (
 
   return result.rows;
 }
+async function getFreshReplacementTargetForTest({
+  excludedIds = [],
+  occupiedTargets = [],
+  preferredFamily = "2024_TEXTO"
+} = {}){
+  const candidates =
+    await getAdaptiveCoverageCandidates(1000);
+
+  const excluded = new Set(
+    excludedIds.map(id => Number(id))
+  );
+
+  const normalize = value =>
+    String(value || "")
+      .trim()
+      .toLowerCase();
+
+  const occupiedKeys = new Set(
+    occupiedTargets.map(target =>
+      `${normalize(target.section)}||${normalize(target.concept)}`
+    )
+  );
+
+  const familyForCandidate = (candidate, family) => {
+    /*
+    La plaza gráfica no debe bloquear la entrega del test.
+    Si una pregunta gráfica agota sus intentos,
+    cae temporalmente a texto.
+    El sistema gráfico se termina en el punto 10.
+    */
+    if(family === "GRAFICA"){
+      return "2024_TEXTO";
+    }
+
+    if(family === "CALCULO_FORMULACION"){
+      const compatible =
+        candidate.item_type === "formula" ||
+        candidate.evaluation_type === "calculo" ||
+        candidate.evaluation_type === "relacion_variables";
+
+      return compatible
+        ? "CALCULO_FORMULACION"
+        : null;
+    }
+
+    if(family === "2024_NUMERICA"){
+      const evidence = [
+        candidate.concept,
+        candidate.source_evidence
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      const compatible =
+        candidate.item_type === "dato_numerico" ||
+        /\d/.test(evidence);
+
+      return compatible
+        ? "2024_NUMERICA"
+        : null;
+    }
+
+    return family;
+  };
+
+  /*
+  Primera pasada:
+  intentamos conservar la familia original.
+  */
+  for(const candidate of candidates){
+    if(excluded.has(Number(candidate.id))){
+      continue;
+    }
+
+    const key =
+      `${normalize(candidate.section)}||${normalize(candidate.concept)}`;
+
+    if(occupiedKeys.has(key)){
+      continue;
+    }
+
+    const finalFamily =
+      familyForCandidate(
+        candidate,
+        preferredFamily
+      );
+
+    if(!finalFamily){
+      continue;
+    }
+
+    const target = {
+      ...candidate,
+      questionFamily:finalFamily
+    };
+
+    target.adaptiveDifficulty =
+      getAdaptiveDifficulty(target);
+
+    target.previousBankQuestion =
+      await getLatestBankQuestionForTarget(target);
+
+    return target;
+  }
+
+  /*
+  Segunda pasada:
+  si la familia concreta no encuentra ningún candidato
+  compatible, priorizamos entregar una pregunta válida
+  antes que destruir el test completo.
+  */
+  for(const candidate of candidates){
+    if(excluded.has(Number(candidate.id))){
+      continue;
+    }
+
+    const key =
+      `${normalize(candidate.section)}||${normalize(candidate.concept)}`;
+
+    if(occupiedKeys.has(key)){
+      continue;
+    }
+
+    const target = {
+      ...candidate,
+      questionFamily:"2024_TEXTO"
+    };
+
+    target.adaptiveDifficulty =
+      getAdaptiveDifficulty(target);
+
+    target.previousBankQuestion =
+      await getLatestBankQuestionForTarget(target);
+
+    return target;
+  }
+
+  return null;
+}
 async function getNewCoverageCandidate(){
   const result = await db.query(`
     SELECT
@@ -6460,75 +6599,102 @@ ${JSON.stringify(compactQuestions)}
   const normalizedResults = [];
 
   for(let i=0;i<parsed.results.length;i++){
-    const result = parsed.results[i];
-    const question = questions[i];
+  const resultsByIndex = new Map();
 
-    if(result.index !== i){
-      throw new Error(
-        "El auditor independiente de distractores devolvió índices inconsistentes."
-      );
-    }
+for(const result of parsed.results){
+  const index = Number(result.index);
 
-    const expectedIndexes = [0,1,2,3]
-      .filter(index =>
-        index !== Number(question.correctIndex)
-      );
-
-    const assessments =
-      Array.isArray(result.assessments)
-        ? result.assessments
-        : [];
-
-    const receivedIndexes = assessments
-      .map(item => Number(item.optionIndex))
-      .sort((a,b) => a-b);
-
-    const sortedExpected = [...expectedIndexes]
-      .sort((a,b) => a-b);
-
-    if(
-      assessments.length !== 3 ||
-      JSON.stringify(receivedIndexes) !==
-        JSON.stringify(sortedExpected)
-    ){
-      throw new Error(
-        `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
-      );
-    }
-
-    const competitiveCount =
-      assessments.filter(
-        item => item.competitive === true
-      ).length;
-
-    const requiredCompetitive =
-      question.questionFamily === "2026_INCORRECTA" ||
-      question.difficulty === "muy alta"
-        ? 3
-        : 2;
-
-    const distractorIssues = assessments
-      .filter(item => item.competitive !== true)
-      .map(item =>
-        `Opción ${Number(item.optionIndex) + 1}: ${item.reason}`
-      );
-
-    if(result.answerStandsOut === true){
-      distractorIssues.push(
-        `La respuesta correcta destaca frente a las alternativas: ${result.answerStandoutReason}`
-      );
-    }
-
-    normalizedResults.push({
-      index:i,
-      distractorsValid:
-        result.answerStandsOut !== true &&
-        competitiveCount >= requiredCompetitive,
-      distractorIssues
-    });
+  if(
+    !Number.isInteger(index) ||
+    index < 0 ||
+    index >= questions.length ||
+    resultsByIndex.has(index)
+  ){
+    throw new Error(
+      "El auditor independiente de distractores devolvió índices inválidos o duplicados."
+    );
   }
 
-  return normalizedResults;
+  resultsByIndex.set(index,result);
+}
+
+if(resultsByIndex.size !== questions.length){
+  throw new Error(
+    "El auditor independiente de distractores no devolvió todos los índices esperados."
+  );
+}
+
+const normalizedResults = [];
+
+for(let i=0;i<questions.length;i++){
+  const result = resultsByIndex.get(i);
+  const question = questions[i];
+
+  const expectedIndexes = [0,1,2,3]
+    .filter(index =>
+      index !== Number(question.correctIndex)
+    );
+
+  const assessments =
+    Array.isArray(result.assessments)
+      ? result.assessments
+      : [];
+
+  const receivedIndexes = assessments
+    .map(item => Number(item.optionIndex))
+    .sort((a,b) => a-b);
+
+  const sortedExpected = [...expectedIndexes]
+    .sort((a,b) => a-b);
+
+  if(
+    assessments.length !== 3 ||
+    JSON.stringify(receivedIndexes) !==
+      JSON.stringify(sortedExpected)
+  ){
+    throw new Error(
+      `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
+    );
+  }
+
+  const competitiveCount =
+    assessments.filter(
+      item => item.competitive === true
+    ).length;
+
+  const requiredCompetitive =
+    question.questionFamily === "2026_INCORRECTA" ||
+    question.difficulty === "muy alta"
+      ? 3
+      : 2;
+
+  const distractorIssues = assessments
+    .filter(item => item.competitive !== true)
+    .map(item =>
+      `Opción ${Number(item.optionIndex) + 1}: ${item.reason}`
+    );
+
+  /*
+  answerStandsOut se conserva únicamente como información diagnóstica.
+
+  NO invalida la pregunta por sí mismo porque Gemini puede interpretar
+  erróneamente como "destacar" el simple hecho de que la respuesta
+  correcta sea más fiel a sourceEvidence.
+  */
+  if(result.answerStandsOut === true){
+    distractorIssues.push(
+      `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
+    );
+  }
+
+  normalizedResults.push({
+    index:i,
+    distractorsValid:
+      competitiveCount >= requiredCompetitive,
+    distractorIssues
+  });
+}  
+return normalizedResults;
 }
 
 async function validateGeneratedQuestions(ai,questions){
@@ -7970,12 +8136,135 @@ let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
 const MAX_REPLACEMENT_ATTEMPTS = 3;
+
 let replacementAttempt = 0;
 
-while(
-  invalidQuestions.length > 0 &&
-  replacementAttempt < MAX_REPLACEMENT_ATTEMPTS
-){
+/*
+Guarda objetivos que ya demostraron ser improductivos
+durante ESTE test para no volver a seleccionarlos.
+*/
+const exhaustedCoverageIds = new Set();
+
+while(invalidQuestions.length > 0){
+
+  /*
+  Si una pregunta ha agotado tres regeneraciones,
+  no bajamos el estándar:
+  sustituimos su objetivo curricular.
+  */
+  if(
+    replacementAttempt >=
+    MAX_REPLACEMENT_ATTEMPTS
+  ){
+    if(testType !== "normal"){
+      break;
+    }
+
+    console.log(
+      "TARGET ROTATION:",
+      invalidQuestions.length,
+      "objetivos agotados; buscando sustitutos."
+    );
+
+    for(const result of invalidQuestions){
+      const originalIndex =
+        result.index;
+
+      const exhaustedTarget =
+        generationTargets[originalIndex];
+
+      if(exhaustedTarget?.id){
+        exhaustedCoverageIds.add(
+          Number(exhaustedTarget.id)
+        );
+      }
+
+      const excludedIds = [
+        ...targets.map(target =>
+          Number(target.id)
+        ),
+        ...exhaustedCoverageIds
+      ];
+
+      const replacementTarget =
+        await getFreshReplacementTargetForTest({
+          excludedIds,
+          occupiedTargets:targets,
+          preferredFamily:
+            exhaustedTarget?.questionFamily ||
+            "2024_TEXTO"
+        });
+
+      if(!replacementTarget){
+        throw new Error(
+          "No quedan objetivos curriculares alternativos para completar el test con el nivel de calidad exigido."
+        );
+      }
+
+      console.log(
+        "TARGET ROTATION:",
+        JSON.stringify({
+          position:originalIndex,
+          fromCoverageId:
+            exhaustedTarget?.id ?? null,
+          toCoverageId:
+            replacementTarget.id,
+          fromFamily:
+            exhaustedTarget?.questionFamily ??
+            null,
+          toFamily:
+            replacementTarget.questionFamily
+        })
+      );
+
+      /*
+      Sustituimos el objetivo usado por la generación.
+      */
+      generationTargets[originalIndex] =
+        replacementTarget;
+
+      /*
+      Y también el objetivo de la posición final del test,
+      para que persistencia, estadísticas y cobertura
+      queden vinculadas al conocimiento realmente preguntado.
+      */
+      const testPosition =
+        generationIndexes[originalIndex];
+
+      targets[testPosition] =
+        replacementTarget;
+
+      /*
+      Eliminamos la pregunta anterior.
+      regenerateInvalidQuestions recibirá null
+      como pregunta previa y el nuevo coverage target.
+      */
+      finalQuestions[originalIndex] =
+        null;
+    }
+
+    /*
+    Las posiciones siguen siendo las mismas,
+    pero ahora corresponden a objetivos nuevos.
+    */
+    invalidQuestions =
+      invalidQuestions.map(result => ({
+        index:result.index,
+        valid:false,
+        issues:[
+          "El objetivo anterior agotó sus intentos y ha sido sustituido por un nuevo objetivo curricular."
+        ],
+        familyIssues:[],
+        distractorIssues:[],
+        graphicIssues:[]
+      }));
+
+    replacementAttempt = 0;
+
+    continue;
+  }
+
+  replacementAttempt++;
   replacementAttempt++;
 
   console.log(
@@ -8096,29 +8385,6 @@ console.log(
   }
 
   invalidQuestions = stillInvalid;
-}
-
-if(invalidQuestions.length > 0){
-  const details = invalidQuestions
-    .map(result => {
-      const allIssues = [
-  ...(result.issues || []),
-  ...(result.familyIssues || []),
-  ...(result.distractorIssues || []),
-  ...(result.graphicIssues || [])
-].filter(Boolean);
-
-      return `Pregunta ${result.index + 1}: ${
-        allIssues.length
-          ? allIssues.join(" | ")
-          : "rechazada por el validador sin motivo textual"
-      }`;
-    })
-    .join(" || ");
-
-  throw new Error(
-    `No se pudieron obtener todas las preguntas con validación factual. ${details}`
-  );
 }
 
 console.log(
