@@ -643,6 +643,62 @@ NO incluyas en textToRemove números, símbolos, cotas, magnitudes, letras o
 etiquetas cuando sean funcionales y necesarias para interpretar técnicamente
 el dibujo.
 
+8.A. maskRegions debe contener las coordenadas exactas de las ÚNICAS zonas
+interiores que posteriormente deban ocultarse.
+
+Las coordenadas x, y, width y height de cada maskRegion están NORMALIZADAS
+entre 0 y 1 respecto a la IMAGEN FUENTE ORIGINAL, no respecto al crop.
+
+Por defecto:
+maskRegions debe ser [].
+
+Solo están permitidos estos dos casos:
+
+A) kind="editorial_text"
+
+Úsalo exclusivamente cuando un pie, número de figura, título o texto editorial
+innecesario quede dentro del dibujo útil y NO pueda eliminarse mediante crop
+sin cortar información técnica necesaria.
+
+La región debe cubrir únicamente ese texto, con el mínimo rectángulo posible.
+
+B) kind="three_cut_sequence_number"
+
+Esta excepción SOLO puede utilizarse cuando:
+- TEMA/CARPETA sea "apeo-poda";
+- la imagen represente visualmente la técnica de los tres cortes;
+- aparezcan los números 1, 2 o 3 indicando el orden de los cortes.
+
+En ese único caso crea una maskRegion independiente para cada número visible
+1, 2 y 3 que indique la secuencia.
+
+visibleText debe ser exactamente "1", "2" o "3".
+
+PROHIBICIONES ABSOLUTAS:
+
+- NO marques otros números de imágenes de Apeo y poda.
+- NO marques números de ningún otro tema.
+- NO marques cotas.
+- NO marques medidas.
+- NO marques ángulos.
+- NO marques magnitudes.
+- NO marques referencias funcionales.
+- NO marques A/B/C/D.
+- NO marques símbolos técnicos.
+- NO marques etiquetas necesarias para interpretar el dibujo.
+- NO uses three_cut_sequence_number fuera de la técnica de los tres cortes.
+
+Si existe cualquier duda sobre si una región debe ocultarse:
+NO la marques.
+
+Cada maskRegion debe quedar completamente dentro de la imagen:
+x >= 0
+y >= 0
+width > 0
+height > 0
+x + width <= 1
+y + height <= 1
+
 9. usableForGraphicQuestion=true únicamente cuando pueda formularse una
 pregunta cuya resolución dependa realmente de observar la imagen.
 
@@ -706,6 +762,71 @@ Devuelve exclusivamente la estructura solicitada.
 
   return analysis;
 }
+function normalizeGraphicMaskRegions(maskRegions, topicFolder){
+  if(!Array.isArray(maskRegions)){
+    return [];
+  }
+
+  const normalized=[];
+
+  for(const region of maskRegions){
+    const x=Number(region?.x);
+    const y=Number(region?.y);
+    const width=Number(region?.width);
+    const height=Number(region?.height);
+
+    if(
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(width) ||
+      !Number.isFinite(height) ||
+      x < 0 ||
+      y < 0 ||
+      width <= 0 ||
+      height <= 0 ||
+      x + width > 1 ||
+      y + height > 1
+    ){
+      continue;
+    }
+
+    const kind=String(region?.kind || "").trim();
+    const visibleText=String(region?.visibleText || "").trim();
+    const reason=String(region?.reason || "").trim();
+
+    if(
+      kind !== "editorial_text" &&
+      kind !== "three_cut_sequence_number"
+    ){
+      continue;
+    }
+
+    if(!visibleText){
+      continue;
+    }
+
+    if(kind === "three_cut_sequence_number"){
+      if(
+        topicFolder !== "apeo-poda" ||
+        !["1","2","3"].includes(visibleText)
+      ){
+        continue;
+      }
+    }
+
+    normalized.push({
+      x,
+      y,
+      width,
+      height,
+      visibleText,
+      kind,
+      reason
+    });
+  }
+
+  return normalized;
+}
 async function saveGraphicAnalysis(graphicRow, analysis){
   const assets = Array.isArray(analysis.assets)
     ? analysis.assets
@@ -755,13 +876,14 @@ async function saveGraphicAnalysis(graphicRow, analysis){
         crop_y,
         crop_width,
         crop_height,
+        mask_regions,
         is_official_reference,
         is_usable,
         analysis_status
       )
-      VALUES (
+            VALUES (
   $1,$2,$3,$4,$5,$6,$7,$8,$9,
-  $10,$11,$12,$13,$14,$15,$16
+  $10,$11,$12,$13,$14::jsonb,$15,$16,$17
 )
       ON CONFLICT (source_id, asset_index)
       DO UPDATE SET
@@ -776,6 +898,7 @@ async function saveGraphicAnalysis(graphicRow, analysis){
         crop_y = EXCLUDED.crop_y,
         crop_width = EXCLUDED.crop_width,
         crop_height = EXCLUDED.crop_height,
+        mask_regions = EXCLUDED.mask_regions,
         is_official_reference = EXCLUDED.is_official_reference,
         is_usable = EXCLUDED.is_usable,
         analysis_status = EXCLUDED.analysis_status,
@@ -797,6 +920,12 @@ async function saveGraphicAnalysis(graphicRow, analysis){
         asset.crop?.y ?? null,
         asset.crop?.width ?? null,
         asset.crop?.height ?? null,
+                JSON.stringify(
+          normalizeGraphicMaskRegions(
+            asset.maskRegions,
+            graphicRow.topic_folder
+          )
+        ),
         analysis.sourceType === "official_exam_reference",
         asset.usableForGraphicQuestion === true &&
           asset.needsImageToAnswer === true,
