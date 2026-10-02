@@ -2334,21 +2334,35 @@ app.post("/api/upload", upload.single("pdf"), async(req,res)=>{
       throw new Error("Falta PDF");
     }
 
-const originalName=
-  String(req.file.originalname || "");
+const pdfHeaderBuffer=Buffer.alloc(1024);
+let pdfHeaderLength=0;
+let pdfFd=null;
 
-const mimeType=
-  String(req.file.mimetype || "")
-    .toLowerCase();
+try{
+  pdfFd=fs.openSync(req.file.path,"r");
 
-const isPdf=
-  path.extname(originalName)
-    .toLowerCase() === ".pdf" ||
-  mimeType === "application/pdf";
+  pdfHeaderLength=fs.readSync(
+    pdfFd,
+    pdfHeaderBuffer,
+    0,
+    pdfHeaderBuffer.length,
+    0
+  );
 
-if(!isPdf){
+}finally{
+  if(pdfFd!==null){
+    fs.closeSync(pdfFd);
+  }
+}
+
+const pdfHeader=
+  pdfHeaderBuffer
+    .subarray(0,pdfHeaderLength)
+    .toString("latin1");
+
+if(!pdfHeader.includes("%PDF-")){
   throw new Error(
-    "El archivo debe ser PDF."
+    "El archivo seleccionado no contiene una firma PDF válida."
   );
 }
 
