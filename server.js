@@ -1045,7 +1045,10 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
     results
   };
 }
-async function reanalyzeGraphicSourcesForSanitization({ limit = 1 } = {}){
+async function reanalyzeGraphicSourcesForSanitization({
+  limit = 1,
+  retryErrors = false
+} = {}){
   const ai = aiClient();
 
   const pending = await db.query(
@@ -1055,11 +1058,17 @@ async function reanalyzeGraphicSourcesForSanitization({ limit = 1 } = {}){
        source_file,
        public_url
      FROM graphic_assets
-     WHERE sanitization_version < 2
-       AND analysis_status IN ('analyzed','rejected','error')
+          WHERE sanitization_version < 2
+       AND (
+         analysis_status IN ('analyzed','rejected','error')
+         OR (
+           $2::boolean = TRUE
+           AND analysis_status = 'sanitization_error'
+         )
+       )
      ORDER BY source_id, asset_index ASC
      LIMIT $1`,
-    [limit]
+    [limit,retryErrors]
   );
 
   const results = [];
@@ -9190,8 +9199,14 @@ app.get("/api/graphics/analyze-pending", async (req,res)=>{
 const limit = Number.isInteger(requestedLimit)
   ? Math.min(Math.max(requestedLimit,1),10)
   : 10;
-
-    const result = await analyzePendingGraphicSources({ limit });
+    const retryErrors =
+      String(req.query?.retryErrors ?? "")
+        .toLowerCase() === "true";
+        const result =
+      await reanalyzeGraphicSourcesForSanitization({
+        limit,
+        retryErrors
+      });
 
     res.json({
       ok:true,
