@@ -2334,11 +2334,23 @@ app.post("/api/upload", upload.single("pdf"), async(req,res)=>{
       throw new Error("Falta PDF");
     }
 
-    if(
-      path.extname(req.file.originalname || "").toLowerCase() !== ".pdf"
-    ){
-      throw new Error("El archivo debe ser PDF.");
-    }
+const originalName=
+  String(req.file.originalname || "");
+
+const mimeType=
+  String(req.file.mimetype || "")
+    .toLowerCase();
+
+const isPdf=
+  path.extname(originalName)
+    .toLowerCase() === ".pdf" ||
+  mimeType === "application/pdf";
+
+if(!isPdf){
+  throw new Error(
+    "El archivo debe ser PDF."
+  );
+}
 
     const topicName=
       String(
