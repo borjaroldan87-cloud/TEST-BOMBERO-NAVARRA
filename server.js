@@ -7399,12 +7399,16 @@ Marca distractorsValid=false cuando ocurra cualquiera de estas situaciones:
 7. Cuando la fuente permite construir alternativas próximas, los distractores
    se alejan innecesariamente de la respuesta correcta en lugar de variar una
    cifra, condición, término, categoría, paso, límite o relación próxima.
-
-8. En dificultad alta, si menos de DOS distractores exigen discriminar
+   
+8. En dificultad alta, los TRES distractores deben exigir discriminar
    conocimiento técnico próximo a la respuesta correcta.
+   Si UNO SOLO de los tres puede descartarse sin conocer con precisión
+   el contenido evaluado, distractorsValid=false.
 
-9. En dificultad muy alta, si los TRES distractores no son técnicamente
-   competitivos y próximos cuando la evidencia disponible permite construirlos.
+9. En dificultad muy alta, los TRES distractores deben ser técnicamente
+   competitivos y próximos. Si cualquiera de ellos no lo es,
+   distractorsValid=false.
+
 
 No marques distractorsValid=false simplemente porque un distractor sea falso:
 debe ser falso según la fuente, pero además plausible.
@@ -8658,37 +8662,14 @@ finalQuestions = [...parsed.questions];
     q.graphic = null;
   }
 }
+
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions);
-const distractorValidation =
-  await validateDistractorCompetitiveness(
-    ai,
-    finalQuestions
-  );
 
-console.log(
-  "DISTRACTOR AUDIT:",
-  JSON.stringify(distractorValidation)
-);
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
-  const independentDistractorResult =
-    distractorValidation[i];
 
-  if(
-    independentDistractorResult?.distractorsValid !== true
-  ){
-    factualValidation[i] = {
-      ...factualValidation[i],
-      valid:false,
-      distractorsValid:false,
-      distractorIssues:[
-        ...(factualValidation[i].distractorIssues || []),
-        ...(independentDistractorResult?.distractorIssues || [])
-      ]
-    };
-  }
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
@@ -8702,7 +8683,8 @@ for(let i = 0; i < factualValidation.length; i++){
       ]
     };
   }
-    const exactDuplicate =
+
+  const exactDuplicate =
     await isExactBankDuplicate(target, question);
 
   if(exactDuplicate){
@@ -8720,140 +8702,11 @@ for(let i = 0; i < factualValidation.length; i++){
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
-const MAX_REPLACEMENT_ATTEMPTS = 3;
-
-let replacementAttempt = 0;
-
-/*
-Guarda objetivos que ya demostraron ser improductivos
-durante ESTE test para no volver a seleccionarlos.
-*/
-const exhaustedCoverageIds = new Set();
-
-while(invalidQuestions.length > 0){
-
-  /*
-  Si una pregunta ha agotado tres regeneraciones,
-  no bajamos el estándar:
-  sustituimos su objetivo curricular.
-  */
-  if(
-    replacementAttempt >=
-    MAX_REPLACEMENT_ATTEMPTS
-  ){
-    if(testType !== "normal"){
-      break;
-    }
-
-    console.log(
-      "TARGET ROTATION:",
-      invalidQuestions.length,
-      "objetivos agotados; buscando sustitutos."
-    );
-
-    for(const result of invalidQuestions){
-      const originalIndex =
-        result.index;
-
-      const exhaustedTarget =
-        generationTargets[originalIndex];
-
-      if(exhaustedTarget?.id){
-        exhaustedCoverageIds.add(
-          Number(exhaustedTarget.id)
-        );
-      }
-
-      const excludedIds = [
-        ...targets.map(target =>
-          Number(target.id)
-        ),
-        ...exhaustedCoverageIds
-      ];
-
-      const replacementTarget =
-        await getFreshReplacementTargetForTest({
-          excludedIds,
-          occupiedTargets:targets,
-          preferredFamily:
-            exhaustedTarget?.questionFamily ||
-            "2024_TEXTO"
-        });
-
-      if(!replacementTarget){
-        throw new Error(
-          "No quedan objetivos curriculares alternativos para completar el test con el nivel de calidad exigido."
-        );
-      }
-
-      console.log(
-        "TARGET ROTATION:",
-        JSON.stringify({
-          position:originalIndex,
-          fromCoverageId:
-            exhaustedTarget?.id ?? null,
-          toCoverageId:
-            replacementTarget.id,
-          fromFamily:
-            exhaustedTarget?.questionFamily ??
-            null,
-          toFamily:
-            replacementTarget.questionFamily
-        })
-      );
-
-      /*
-      Sustituimos el objetivo usado por la generación.
-      */
-      generationTargets[originalIndex] =
-        replacementTarget;
-
-      /*
-      Y también el objetivo de la posición final del test,
-      para que persistencia, estadísticas y cobertura
-      queden vinculadas al conocimiento realmente preguntado.
-      */
-      const testPosition =
-        generationIndexes[originalIndex];
-
-      targets[testPosition] =
-        replacementTarget;
-
-      /*
-      Eliminamos la pregunta anterior.
-      regenerateInvalidQuestions recibirá null
-      como pregunta previa y el nuevo coverage target.
-      */
-      finalQuestions[originalIndex] =
-        null;
-    }
-
-    /*
-    Las posiciones siguen siendo las mismas,
-    pero ahora corresponden a objetivos nuevos.
-    */
-    invalidQuestions =
-      invalidQuestions.map(result => ({
-        index:result.index,
-        valid:false,
-        issues:[
-          "El objetivo anterior agotó sus intentos y ha sido sustituido por un nuevo objetivo curricular."
-        ],
-        familyIssues:[],
-        distractorIssues:[],
-        graphicIssues:[]
-      }));
-
-    replacementAttempt = 0;
-
-    continue;
-  }
-
-  replacementAttempt++;
-  
+if(invalidQuestions.length > 0){
   console.log(
-    `VALIDACIÓN FACTUAL: ${invalidQuestions.length} preguntas rechazadas. ` +
-    `Intento de sustitución ${replacementAttempt}/${MAX_REPLACEMENT_ATTEMPTS}`
+    "VALIDACIÓN FINAL:",
+    invalidQuestions.length,
+    "preguntas rechazadas. Se realizará una única regeneración."
   );
 
   const regenerated =
@@ -8872,116 +8725,120 @@ while(invalidQuestions.length > 0){
       ai,
       regenerated.questions
     );
-const replacementDistractorValidation =
-  await validateDistractorCompetitiveness(
-    ai,
-    regenerated.questions
-  );
 
-console.log(
-  "DISTRACTOR AUDIT REGEN:",
-  JSON.stringify(replacementDistractorValidation)
-);
   const stillInvalid = [];
 
-  for(let i=0;i<regenerated.questions.length;i++){
-  const originalIndex = invalidQuestions[i].index;
-  const validationResult = replacementValidation[i];
-  const targetForValidation = generationTargets[originalIndex];
-  const independentDistractorResult =
-    replacementDistractorValidation[i];
+  for(let i = 0; i < regenerated.questions.length; i++){
+    const originalIndex = invalidQuestions[i].index;
+    const validationResult = replacementValidation[i];
+    const targetForValidation =
+      generationTargets[originalIndex];
 
-  if(
-    independentDistractorResult?.distractorsValid !== true
-  ){
-    validationResult.valid = false;
-    validationResult.distractorsValid = false;
-    validationResult.distractorIssues = [
-      ...(validationResult.distractorIssues || []),
-      ...(independentDistractorResult?.distractorIssues || [])
-    ];
-  }
-  if(
-    targetForValidation?.failed_difficulty === "muy alta" &&
-    regenerated.questions[i]?.difficulty !== "muy alta"
-  ){
-    validationResult.valid = false;
-    validationResult.issues = [
-      ...(validationResult.issues || []),
-      'Una variante de una pregunta fallada con dificultad "muy alta" no puede bajar a "alta".'
-    ];
-  }
-  const exactDuplicate =
-    await isExactBankDuplicate(
-      targetForValidation,
-      regenerated.questions[i]
-    );
+    if(
+      targetForValidation?.failed_difficulty === "muy alta" &&
+      regenerated.questions[i]?.difficulty !== "muy alta"
+    ){
+      validationResult.valid = false;
+      validationResult.issues = [
+        ...(validationResult.issues || []),
+        'Una variante de una pregunta fallada con dificultad "muy alta" no puede bajar a "alta".'
+      ];
+    }
 
-  if(exactDuplicate){
-    validationResult.valid = false;
-    validationResult.issues = [
-      ...(validationResult.issues || []),
-      "La pregunta regenerada duplica exactamente una pregunta ya existente del banco."
-    ];
-  }
-  if(validationResult.valid){
-  const replacementQuestion = regenerated.questions[i];
-  const originalTarget = generationTargets[originalIndex];
-     replacementQuestion.difficulty =
-  originalTarget?.adaptiveDifficulty === "muy alta"
-    ? replacementQuestion.difficulty
-    : "alta";
+    const exactDuplicate =
+      await isExactBankDuplicate(
+        targetForValidation,
+        regenerated.questions[i]
+      );
 
-  if(
-    originalTarget?.questionFamily === "GRAFICA" &&
-    originalTarget?.graphicAsset
-  ){
-    replacementQuestion.questionFamily = "GRAFICA";
-    replacementQuestion.graphic = {
-      assetId: originalTarget.graphicAsset.id,
-      sourceId: originalTarget.graphicAsset.source_id,
-      publicUrl: originalTarget.graphicAsset.public_url,
-      assetType: originalTarget.graphicAsset.asset_type,
-      concept: originalTarget.graphicAsset.concept || "",
-      description: originalTarget.graphicAsset.description || "",
-           maskRegions: Array.isArray(originalTarget.graphicAsset.mask_regions)
-  ? originalTarget.graphicAsset.mask_regions
-  : [],
-      crop: {
-        x: Number(originalTarget.graphicAsset.crop_x ?? 0),
-        y: Number(originalTarget.graphicAsset.crop_y ?? 0),
-        width: Number(originalTarget.graphicAsset.crop_width ?? 1),
-        height: Number(originalTarget.graphicAsset.crop_height ?? 1)
+    if(exactDuplicate){
+      validationResult.valid = false;
+      validationResult.issues = [
+        ...(validationResult.issues || []),
+        "La pregunta regenerada duplica exactamente una pregunta ya existente del banco."
+      ];
+    }
+
+    if(validationResult.valid){
+      const replacementQuestion =
+        regenerated.questions[i];
+
+      const originalTarget =
+        generationTargets[originalIndex];
+
+      replacementQuestion.difficulty =
+        originalTarget?.adaptiveDifficulty === "muy alta"
+          ? replacementQuestion.difficulty
+          : "alta";
+
+      if(
+        originalTarget?.questionFamily === "GRAFICA" &&
+        originalTarget?.graphicAsset
+      ){
+        replacementQuestion.questionFamily = "GRAFICA";
+        replacementQuestion.graphic = {
+          assetId: originalTarget.graphicAsset.id,
+          sourceId: originalTarget.graphicAsset.source_id,
+          publicUrl: originalTarget.graphicAsset.public_url,
+          assetType: originalTarget.graphicAsset.asset_type,
+          concept: originalTarget.graphicAsset.concept || "",
+          description: originalTarget.graphicAsset.description || "",
+          maskRegions: Array.isArray(
+            originalTarget.graphicAsset.mask_regions
+          )
+            ? originalTarget.graphicAsset.mask_regions
+            : [],
+          crop: {
+            x: Number(
+              originalTarget.graphicAsset.crop_x ?? 0
+            ),
+            y: Number(
+              originalTarget.graphicAsset.crop_y ?? 0
+            ),
+            width: Number(
+              originalTarget.graphicAsset.crop_width ?? 1
+            ),
+            height: Number(
+              originalTarget.graphicAsset.crop_height ?? 1
+            )
+          }
+        };
       }
-    };
-  }
 
-  finalQuestions[originalIndex] = replacementQuestion;
+      finalQuestions[originalIndex] =
+        replacementQuestion;
     }else{
-  finalQuestions[originalIndex] = regenerated.questions[i];
-
-  stillInvalid.push({
-  index: originalIndex,
-  valid: false,
-  issues: validationResult.issues || [],
-  familyIssues: validationResult.familyIssues || [],
-  distractorIssues: validationResult.distractorIssues || [],
-  graphicIssues: validationResult.graphicIssues || []
-});
+      stillInvalid.push({
+        index:originalIndex,
+        valid:false,
+        issues:validationResult.issues || [],
+        familyIssues:
+          validationResult.familyIssues || [],
+        distractorIssues:
+          validationResult.distractorIssues || [],
+        graphicIssues:
+          validationResult.graphicIssues || []
+      });
     }
   }
 
   invalidQuestions = stillInvalid;
 }
+
 if(invalidQuestions.length > 0){
   throw new Error(
-    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final.`
+    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final tras una única regeneración.`
   );
 }
+
 console.log(
   "VALIDACIÓN FACTUAL: todas las preguntas superadas"
 );
     }
+      
+    
+
+
 const completeQuestions =
   new Array(targets.length);
 
