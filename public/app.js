@@ -4,7 +4,286 @@ async function api(url,opts={}){let r=await fetch(url,{headers:{"Content-Type":"
 async function status(){try{let j=await api("/api/status");$("status").textContent=j.keyConfigured?"API preparada":"Falta configurar GEMINI_API_KEY"}catch(e){$("status").textContent=e.message}}
 async function ingest(){try{$("ingest").textContent="Indexando…";await api("/api/ingest-benchmark",{method:"POST"});$("ingest").textContent="✓ PDF INDEXADO"}catch(e){alert(e.message);$("ingest").textContent="1. INDEXAR PDF"}}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function inferTopicOrder(fileName,fallbackOrder){
+  const base=
+    String(fileName || "")
+      .replace(/\.pdf$/i,"")
+      .trim();
 
+  const match=
+    base.match(
+      /^\s*(\d{1,3})(?:\s*[\.\-_\)]|\s+)/
+    );
+
+  if(match){
+    const parsed=Number(match[1]);
+
+    if(
+      Number.isInteger(parsed) &&
+      parsed > 0
+    ){
+      return parsed;
+    }
+  }
+
+  return fallbackOrder;
+}
+
+function topicNameFromFile(fileName){
+  return String(fileName || "")
+    .replace(/\.pdf$/i,"")
+    .replace(/_/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+async function readBatchResponse(response){
+  const raw=
+    await response.text();
+
+  let data;
+
+  try{
+    data=
+      raw
+        ? JSON.parse(raw)
+        : {};
+  }catch{
+    throw new Error(
+      `Respuesta no válida del servidor (${response.status}).`
+    );
+  }
+
+  if(
+    !response.ok ||
+    data.ok === false
+  ){
+    throw new Error(
+      data.error ||
+      `Error HTTP ${response.status}`
+    );
+  }
+
+  return data;
+}
+
+async function uploadTopicBatch(){
+  const input=
+    $("topicUploadFiles");
+
+  const block=
+    $("topicUploadBlock")?.value;
+
+  const btn=
+    $("uploadTopics");
+
+  const statusBox=
+    $("uploadTopicsStatus");
+
+  const files=
+    Array.from(
+      input?.files || []
+    );
+
+  if(!files.length){
+    alert(
+      "Selecciona al menos un PDF."
+    );
+    return;
+  }
+
+  if(
+    ![
+      "legislacion",
+      "geografia",
+      "especifico"
+    ].includes(block)
+  ){
+    alert(
+      "Selecciona un bloque válido."
+    );
+    return;
+  }
+
+  const entries=
+    files
+      .map((file,index)=>({
+        file,
+        topicName:
+          topicNameFromFile(
+            file.name
+          ),
+        topicOrder:
+          inferTopicOrder(
+            file.name,
+            index + 1
+          )
+      }))
+      .sort((a,b)=>
+        a.topicOrder - b.topicOrder ||
+        a.file.name.localeCompare(
+          b.file.name,
+          "es"
+        )
+      );
+
+  const errors=[];
+  let completed=0;
+
+  btn.disabled=true;
+
+  try{
+    for(
+      let index=0;
+      index<entries.length;
+      index++
+    ){
+      const entry=
+        entries[index];
+
+      const position=
+        index + 1;
+
+      try{
+        if(
+          !entry.file.name
+            .toLowerCase()
+            .endsWith(".pdf")
+        ){
+          throw new Error(
+            "El archivo no es PDF."
+          );
+        }
+
+        statusBox.textContent=
+          `${position}/${entries.length} · ` +
+          `Indexando ${entry.topicName}...`;
+
+        const formData=
+          new FormData();
+
+        formData.append(
+          "pdf",
+          entry.file
+        );
+
+        formData.append(
+          "topicName",
+          entry.topicName
+        );
+
+        formData.append(
+          "block",
+          block
+        );
+
+        formData.append(
+          "topicOrder",
+          String(entry.topicOrder)
+        );
+
+        const uploadResponse=
+          await fetch(
+            "/api/upload",
+            {
+              method:"POST",
+              body:formData
+            }
+          );
+
+        const uploaded=
+          await readBatchResponse(
+            uploadResponse
+          );
+
+        statusBox.textContent=
+          `${position}/${entries.length} · ` +
+          `Analizando cobertura de ${entry.topicName}...`;
+
+        const coverageResponse=
+          await fetch(
+            "/api/analyze-coverage",
+            {
+              method:"POST",
+              headers:{
+                "Content-Type":
+                  "application/json"
+              },
+              body:JSON.stringify({
+                topicId:
+                  uploaded.topicId,
+                uploadToken:
+                  uploaded.uploadToken
+              })
+            }
+          );
+
+        const analyzed=
+          await readBatchResponse(
+            coverageResponse
+          );
+
+        completed++;
+
+        statusBox.textContent=
+          `${position}/${entries.length} · ✓ ` +
+          `${entry.topicName} · ` +
+          `${analyzed.totalItems} elementos`;
+
+      }catch(error){
+        const message=
+          error?.message ||
+          String(error);
+
+        errors.push(
+          `${entry.file.name}: ${message}`
+        );
+
+        statusBox.textContent=
+          `${position}/${entries.length} · ERROR en ` +
+          `${entry.topicName}. Continuando...`;
+
+        await wait(600);
+      }
+    }
+
+    const failed=
+      errors.length;
+
+    statusBox.textContent=
+      `Carga terminada · ` +
+      `${completed} correctos · ` +
+      `${failed} con error`;
+
+    let summary=
+      "CARGA DE TEMAS COMPLETADA\n\n"+
+      "Procesados correctamente: "+
+      completed+
+      "\n"+
+      "Con error: "+
+      failed;
+
+    if(errors.length){
+      summary+=
+        "\n\nERRORES:\n"+
+        errors
+          .slice(0,10)
+          .join("\n");
+
+      if(errors.length>10){
+        summary+=
+          `\n... y ${
+            errors.length-10
+          } errores más.`;
+      }
+    }
+
+    alert(summary);
+
+  }finally{
+    btn.disabled=false;
+  }
+}
 async function generate(){
   const btn=$("generate");
   const originalText=btn.textContent;
