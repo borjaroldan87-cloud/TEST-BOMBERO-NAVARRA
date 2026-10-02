@@ -562,28 +562,53 @@ hr{
 </details>
 </div>
   <div class="technical">
-    <p><b>Herramientas de desarrollo</b></p>
+  <p><b>Carga masiva de temario</b></p>
 
-    <button
-      class="secondary"
-      id="ingest"
-      onclick="ingest()">
-      INDEXAR PDF
-    </button>
+  <label>
+    Bloque
+    <select id="topicUploadBlock">
+      <option value="legislacion">Legislación</option>
+      <option value="geografia">Geografía</option>
+      <option value="especifico" selected>Específico</option>
+    </select>
+  </label>
 
-    <button
-      class="secondary"
-      onclick="ingestOfficialExams()">
-      INDEXAR EXÁMENES OFICIALES
-    </button>
+  <br><br>
 
-    <button
-      class="secondary"
-      id="coverage"
-      onclick="analyzeCoverage()">
-      ANALIZAR COBERTURA
-    </button>
-  </div>
+  <label>
+    PDFs del bloque
+    <input
+      id="topicUploadFiles"
+      type="file"
+      accept=".pdf,application/pdf"
+      multiple
+    >
+  </label>
+
+  <br><br>
+
+  <button
+    class="secondary"
+    id="uploadTopics"
+    onclick="uploadTopicBatch()">
+    CARGAR Y ANALIZAR TEMAS
+  </button>
+
+  <p
+    class="muted"
+    id="uploadTopicsStatus"
+    style="margin-top:10px">
+    Selecciona todos los PDF de un mismo bloque.
+  </p>
+
+  <hr>
+
+  <button
+    class="secondary"
+    onclick="ingestOfficialExams()">
+    INDEXAR EXÁMENES OFICIALES
+  </button>
+</div>
 
   <div class="row">
 
