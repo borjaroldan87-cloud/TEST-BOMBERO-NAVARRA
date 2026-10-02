@@ -113,7 +113,20 @@ async function initDatabase(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+await db.query(`
+    ALTER TABLE topics
+    ADD COLUMN IF NOT EXISTS block TEXT
+  `);
 
+  await db.query(`
+    ALTER TABLE topics
+    ADD COLUMN IF NOT EXISTS topic_order INTEGER
+  `);
+
+  await db.query(`
+    ALTER TABLE topics
+    ADD COLUMN IF NOT EXISTS file_search_indexed BOOLEAN NOT NULL DEFAULT FALSE
+  `);
   await db.query(`
     CREATE TABLE IF NOT EXISTS coverage_items (
       id SERIAL PRIMARY KEY,
@@ -2311,11 +2324,131 @@ const exam2026 = path.resolve("data", file2026);
 });
 app.post("/api/upload", upload.single("pdf"), async(req,res)=>{
   try{
-    if(!req.file) throw new Error("Falta PDF");
-    const store=await ingest(req.file.path,req.file.originalname);
-    fs.unlink(req.file.path,()=>{});
-    res.json({ok:true,store});
-  }catch(e){res.status(500).json({ok:false,error:e.message})}
+    if(!req.file){
+      throw new Error("Falta PDF");
+    }
+
+    if(
+      path.extname(req.file.originalname || "").toLowerCase() !== ".pdf"
+    ){
+      throw new Error("El archivo debe ser PDF.");
+    }
+
+    const topicName=
+      String(
+        req.body?.topicName ||
+        path.basename(
+          req.file.originalname,
+          path.extname(req.file.originalname)
+        )
+      )
+        .replace(/[_-]+/g," ")
+        .replace(/\s+/g," ")
+        .trim();
+
+    if(!topicName){
+      throw new Error("Falta el nombre del tema.");
+    }
+
+    const normalizedBlock=
+      String(req.body?.block || "")
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g,"");
+
+    const blockAliases={
+      legislacion:"legislacion",
+      geografia:"geografia",
+      especifico:"especifico",
+      especificos:"especifico"
+    };
+
+    const block=
+      normalizedBlock
+        ? blockAliases[normalizedBlock]
+        : null;
+
+    if(normalizedBlock && !block){
+      throw new Error(
+        "Bloque inválido. Usa legislacion, geografia o especifico."
+      );
+    }
+
+    const rawOrder=
+      Number(req.body?.topicOrder);
+
+    const topicOrder=
+      Number.isInteger(rawOrder) &&
+      rawOrder > 0
+        ? rawOrder
+        : null;
+
+    let topic=
+      await getOrCreateTopic(
+        topicName,
+        req.file.originalname
+      );
+
+    const metadataResult=
+      await db.query(
+        `UPDATE topics
+         SET
+           source_file = $2,
+           block = COALESCE($3, block),
+           topic_order = COALESCE($4, topic_order)
+         WHERE id = $1
+         RETURNING *`,
+        [
+          Number(topic.id),
+          req.file.originalname,
+          block,
+          topicOrder
+        ]
+      );
+
+    topic=metadataResult.rows[0];
+
+    if(topic.file_search_indexed !== true){
+      await ingest(
+        req.file.path,
+        topicName
+      );
+
+      const indexedResult=
+        await db.query(
+          `UPDATE topics
+           SET file_search_indexed = TRUE
+           WHERE id = $1
+           RETURNING *`,
+          [Number(topic.id)]
+        );
+
+      topic=indexedResult.rows[0];
+    }
+
+    res.json({
+      ok:true,
+      topicId:Number(topic.id),
+      topic:topic.name,
+      block:topic.block,
+      topicOrder:topic.topic_order,
+      totalItems:Number(topic.total_items || 0),
+      uploadToken:req.file.filename,
+      fileSearchIndexed:
+        topic.file_search_indexed === true
+    });
+
+  }catch(e){
+    if(req.file?.path){
+      fs.unlink(req.file.path,()=>{});
+    }
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
 });
 
 const questionSchema={
@@ -4357,6 +4490,9 @@ async function getCachedOfficialExamStyleReference(){
   return styleReference;
 }
 app.post("/api/analyze-coverage", async(req,res)=>{
+  let uploadedPdfPath=null;
+  let topic=null;
+
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
@@ -4364,11 +4500,63 @@ app.post("/api/analyze-coverage", async(req,res)=>{
 
     console.log("COVERAGE: iniciando análisis");
 
-    const pdfPath=path.resolve("data/apeo-poda.pdf");
+    const requestedTopicId=
+      Number(req.body?.topicId);
 
-if(!fs.existsSync(pdfPath)){
-  throw new Error("No se encuentra el PDF para analizar.");
-}
+    const uploadToken=
+      String(req.body?.uploadToken || "")
+        .trim();
+
+    let pdfPath;
+
+    if(
+      Number.isInteger(requestedTopicId) &&
+      requestedTopicId > 0 &&
+      uploadToken
+    ){
+      const topicResult=
+        await db.query(
+          `SELECT *
+           FROM topics
+           WHERE id = $1
+           LIMIT 1`,
+          [requestedTopicId]
+        );
+
+      if(!topicResult.rows.length){
+        throw new Error(
+          "No existe el tema solicitado."
+        );
+      }
+
+      topic=topicResult.rows[0];
+
+      pdfPath=
+        path.resolve(
+          "uploads",
+          path.basename(uploadToken)
+        );
+
+      uploadedPdfPath=pdfPath;
+
+    }else{
+      pdfPath=
+        path.resolve(
+          "data/apeo-poda.pdf"
+        );
+
+      topic=
+        await getOrCreateTopic(
+          "Apeo y poda de arbolado",
+          "apeo-poda.pdf"
+        );
+    }
+
+    if(!fs.existsSync(pdfPath)){
+      throw new Error(
+        "No se encuentra el PDF para analizar."
+      );
+    }
 
 const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
 
@@ -4528,12 +4716,10 @@ const parsed={
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
 
-    const topic=await getOrCreateTopic(
-      "Apeo y poda de arbolado",
-      "apeo-poda.pdf"
+await saveCoverageItems(
+      topic.id,
+      validItems
     );
-
-    await saveCoverageItems(topic.id,validItems);
 
     const result=await db.query(
       `SELECT
@@ -4582,6 +4768,14 @@ const parsed={
       ok:false,
       error:e?.message || String(e)
     });
+
+  }finally{
+    if(uploadedPdfPath){
+      fs.unlink(
+        uploadedPdfPath,
+        ()=>{}
+      );
+    }
   }
 });
 app.post("/api/repair-manual-pages", async(req,res)=>{
@@ -5972,6 +6166,8 @@ OBJETIVOS:
 
 ${targets.map((item,index)=>`
 OBJETIVO ${index+1}
+- Tema/documento obligatorio: ${item.topic_name || "No especificado"}
+- Todo sourceEvidence de esta pregunta debe proceder de ese tema/documento. No mezcles hechos de otros temas aunque sean parecidos.
 - Familia de pregunta asignada: ${item.questionFamily || "GENERAL"}
 - Esta familia es OBLIGATORIA salvo imposibilidad factual demostrable.
 - Apartado: ${item.section || "No especificado"}
