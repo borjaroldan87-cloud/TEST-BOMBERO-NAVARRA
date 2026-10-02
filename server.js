@@ -5866,7 +5866,81 @@ for(let i = 0; i < selected.length; i++){
 
   return selected;
 }
-   
+ async function attachDistractorContextToTargets(targets){
+  if(!Array.isArray(targets) || !targets.length){
+    return;
+  }
+
+  for(const target of targets){
+    if(!target?.topic_name || !target?.id){
+      target.distractorContext = [];
+      continue;
+    }
+
+    const result = await db.query(
+      `
+      SELECT
+        ci.id,
+        ci.section,
+        ci.concept,
+        ci.item_type,
+        ci.evaluation_type,
+        ci.source_page,
+        ci.manual_page,
+        ci.source_evidence
+      FROM coverage_items ci
+      JOIN topics t
+        ON t.id = ci.topic_id
+      WHERE
+        t.name = $1
+        AND ci.id <> $2
+        AND ci.source_evidence IS NOT NULL
+        AND BTRIM(ci.source_evidence) <> ''
+        AND (
+          (
+            $3::text IS NOT NULL
+            AND BTRIM($3::text) <> ''
+            AND LOWER(BTRIM(COALESCE(ci.section,''))) =
+                LOWER(BTRIM($3::text))
+          )
+          OR
+          (
+            $4::int IS NOT NULL
+            AND ci.source_page IS NOT NULL
+            AND ci.source_page BETWEEN ($4::int - 2) AND ($4::int + 2)
+          )
+        )
+      ORDER BY
+        CASE
+          WHEN
+            $3::text IS NOT NULL
+            AND BTRIM($3::text) <> ''
+            AND LOWER(BTRIM(COALESCE(ci.section,''))) =
+                LOWER(BTRIM($3::text))
+          THEN 0
+          ELSE 1
+        END,
+        CASE WHEN ci.item_type = $5 THEN 0 ELSE 1 END,
+        CASE
+          WHEN $4::int IS NOT NULL AND ci.source_page IS NOT NULL
+          THEN ABS(ci.source_page - $4::int)
+          ELSE 999
+        END,
+        ci.id ASC
+      LIMIT 6
+      `,
+      [
+        target.topic_name,
+        Number(target.id),
+        target.section || null,
+        target.source_page ?? null,
+        target.item_type || null
+      ]
+    );
+
+    target.distractorContext = result.rows;
+  }
+}  
 
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
@@ -5908,6 +5982,19 @@ OBJETIVO ${index+1}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
+${Array.isArray(item.distractorContext) && item.distractorContext.length ? `
+- BANCO FACTUAL CERCANO PARA CONSTRUIR DISTRACTORES:
+${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${contextItem.concept} | Evidencia: ${contextItem.source_evidence}`).join("\n")}
+
+REGLAS DE USO DEL BANCO FACTUAL:
+- Este banco NO cambia el objetivo de la pregunta.
+- Procede de unidades próximas del mismo tema y sirve para localizar confusiones reales.
+- Prioriza estos hechos para construir los TRES distractores antes de inventar variantes.
+- Confirma mediante File Search cualquier hecho contextual que vayas a utilizar.
+- Puedes atribuir a propósito una propiedad real de un concepto próximo al elemento equivocado, intercambiar condiciones, pasos, cifras o categorías cercanas, siempre que la falsedad para ESTA pregunta quede demostrada por el temario.
+- Está prohibido introducir maquinaria, procedimientos, materiales, magnitudes o situaciones que no aparezcan en el objetivo, en este banco factual o en contenido próximo recuperado mediante File Search.
+- sourceEvidence debe incluir evidencia suficiente para demostrar la respuesta y, cuando se utilice este banco para los distractores, también la relación factual necesaria para explicar por qué esos distractores no son válidos para lo preguntado.
+` : ""}
 ${item.failedQuestion ? `
 - MODO REPASO DE FALLO:
   Este objetivo corresponde a un conocimiento previamente fallado.
@@ -8502,7 +8589,9 @@ for(let i = 0; i < targets.length; i++){
       await getLatestBankQuestionForTarget(target);
   }
 } 
-
+await attachDistractorContextToTargets(
+  generationTargets
+);
 console.log(
   "GENERACIÓN NUEVA:",
   generationTargets.length,
