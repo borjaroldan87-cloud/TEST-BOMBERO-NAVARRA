@@ -127,6 +127,12 @@ await db.query(`
     ALTER TABLE topics
     ADD COLUMN IF NOT EXISTS file_search_indexed BOOLEAN NOT NULL DEFAULT FALSE
   `);
+    await db.query(`
+    UPDATE topics
+    SET file_search_indexed = TRUE
+    WHERE total_items > 0
+      AND file_search_indexed = FALSE
+  `);
   await db.query(`
     CREATE TABLE IF NOT EXISTS coverage_items (
       id SERIAL PRIMARY KEY,
