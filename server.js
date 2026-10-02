@@ -9193,20 +9193,14 @@ app.get("/api/coverage-audit", async(req,res)=>{
 });
 app.get("/api/graphics/analyze-pending", async (req,res)=>{
   try{
-    
     const requestedLimit = Number(req.query?.limit ?? 10);
 
-const limit = Number.isInteger(requestedLimit)
-  ? Math.min(Math.max(requestedLimit,1),10)
-  : 10;
-    const retryErrors =
-      String(req.query?.retryErrors ?? "")
-        .toLowerCase() === "true";
-        const result =
-      await reanalyzeGraphicSourcesForSanitization({
-        limit,
-        retryErrors
-      });
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit,1),10)
+      : 10;
+
+    const result =
+      await analyzePendingGraphicSources({ limit });
 
     res.json({
       ok:true,
@@ -9224,6 +9218,7 @@ const limit = Number.isInteger(requestedLimit)
     });
   }
 });
+
 app.get("/api/graphics/reanalyze-sanitization", async (req,res)=>{
   try{
     const requestedLimit = Number(req.query?.limit ?? 10);
@@ -9232,8 +9227,15 @@ app.get("/api/graphics/reanalyze-sanitization", async (req,res)=>{
       ? Math.min(Math.max(requestedLimit,1),10)
       : 10;
 
+    const retryErrors =
+      String(req.query?.retryErrors ?? "")
+        .toLowerCase() === "true";
+
     const result =
-      await reanalyzeGraphicSourcesForSanitization({ limit });
+      await reanalyzeGraphicSourcesForSanitization({
+        limit,
+        retryErrors
+      });
 
     res.json({
       ok:true,
@@ -9251,6 +9253,8 @@ app.get("/api/graphics/reanalyze-sanitization", async (req,res)=>{
     });
   }
 });
+
+
 app.get("/api/graphics/inspect-latest", async (req,res)=>{
   try{
     const result = await db.query(
