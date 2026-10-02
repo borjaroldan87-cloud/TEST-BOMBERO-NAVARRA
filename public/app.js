@@ -145,16 +145,18 @@ async function uploadTopicBatch(){
         index + 1;
 
       try{
-        if(
-          !entry.file.name
-            .toLowerCase()
-            .endsWith(".pdf")
-        ){
-          throw new Error(
-            "El archivo no es PDF."
-          );
-        }
+      
+const isPdf=
+  entry.file.type === "application/pdf" ||
+  entry.file.name
+    .toLowerCase()
+    .endsWith(".pdf");
 
+if(!isPdf){
+  throw new Error(
+    "El archivo no es PDF."
+  );
+}
         statusBox.textContent=
           `${position}/${entries.length} · ` +
           `Indexando ${entry.topicName}...`;
