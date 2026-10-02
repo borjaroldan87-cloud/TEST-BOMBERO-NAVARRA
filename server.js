@@ -168,10 +168,19 @@ async function initDatabase(){
 
       UNIQUE(source_id, asset_index)
     )
-  `);   await db.query(`
+    `);
+
+  await db.query(`
     ALTER TABLE graphic_assets
     ADD COLUMN IF NOT EXISTS mask_regions JSONB NOT NULL DEFAULT '[]'::jsonb
-  `);  await db.query(`
+  `);
+
+  await db.query(`
+    ALTER TABLE graphic_assets
+    ADD COLUMN IF NOT EXISTS sanitization_version INTEGER NOT NULL DEFAULT 1
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS question_bank (
       id BIGSERIAL PRIMARY KEY,
 
@@ -832,110 +841,134 @@ async function saveGraphicAnalysis(graphicRow, analysis){
     ? analysis.assets
     : [];
 
-  if(!assets.length){
-    await db.query(
+  const client = await db.connect();
+
+  try{
+    await client.query("BEGIN");
+
+    if(!assets.length){
+      await client.query(
+        `UPDATE graphic_assets
+         SET
+           analysis_status = 'rejected',
+           is_usable = FALSE,
+           sanitization_version = 2,
+           updated_at = NOW()
+         WHERE source_id = $1`,
+        [graphicRow.source_id]
+      );
+
+      await client.query("COMMIT");
+      return;
+    }
+
+    await client.query(
       `UPDATE graphic_assets
        SET
-         analysis_status = 'rejected',
+         analysis_status = 'superseded',
          is_usable = FALSE,
+         sanitization_version = 2,
          updated_at = NOW()
        WHERE source_id = $1`,
       [graphicRow.source_id]
     );
 
-    return;
-  }
+    for(const asset of assets){
+      const assetIndex = Number(asset.assetIndex);
 
-  await db.query(
-  `DELETE FROM graphic_assets
-   WHERE source_id = $1`,
-  [graphicRow.source_id]
-);
+      if(!Number.isInteger(assetIndex) || assetIndex < 0){
+        throw new Error(
+          `assetIndex inválido en ${graphicRow.source_id}`
+        );
+      }
 
-  for(const asset of assets){
-    const assetIndex = Number(asset.assetIndex);
-
-    if(!Number.isInteger(assetIndex) || assetIndex < 0){
-      throw new Error(
-        `assetIndex inválido en ${graphicRow.source_id}`
+      await client.query(
+        `INSERT INTO graphic_assets (
+          source_id,
+          topic_folder,
+          source_file,
+          public_url,
+          asset_index,
+          asset_type,
+          concept,
+          description,
+          source_evidence,
+          crop_x,
+          crop_y,
+          crop_width,
+          crop_height,
+          mask_regions,
+          is_official_reference,
+          is_usable,
+          analysis_status,
+          sanitization_version
+        )
+        VALUES (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,
+          $10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18
+        )
+        ON CONFLICT (source_id, asset_index)
+        DO UPDATE SET
+          topic_folder = EXCLUDED.topic_folder,
+          source_file = EXCLUDED.source_file,
+          public_url = EXCLUDED.public_url,
+          asset_type = EXCLUDED.asset_type,
+          concept = EXCLUDED.concept,
+          description = EXCLUDED.description,
+          source_evidence = EXCLUDED.source_evidence,
+          crop_x = EXCLUDED.crop_x,
+          crop_y = EXCLUDED.crop_y,
+          crop_width = EXCLUDED.crop_width,
+          crop_height = EXCLUDED.crop_height,
+          mask_regions = EXCLUDED.mask_regions,
+          is_official_reference = EXCLUDED.is_official_reference,
+          is_usable = EXCLUDED.is_usable,
+          analysis_status = EXCLUDED.analysis_status,
+          sanitization_version = EXCLUDED.sanitization_version,
+          updated_at = NOW()`,
+        [
+          graphicRow.source_id,
+          graphicRow.topic_folder,
+          graphicRow.source_file,
+          graphicRow.public_url,
+          assetIndex,
+          analysis.useAsGroup === true ? "group" : "individual",
+          asset.concept || null,
+          asset.visualDescription || null,
+          [
+            analysis.sourceCaption,
+            analysis.sourceText
+          ].filter(Boolean).join("\n") || null,
+          asset.crop?.x ?? null,
+          asset.crop?.y ?? null,
+          asset.crop?.width ?? null,
+          asset.crop?.height ?? null,
+          JSON.stringify(
+            normalizeGraphicMaskRegions(
+              asset.maskRegions,
+              graphicRow.topic_folder
+            )
+          ),
+          analysis.sourceType === "official_exam_reference",
+          asset.usableForGraphicQuestion === true &&
+            asset.needsImageToAnswer === true,
+          asset.usableForGraphicQuestion === true
+            ? "analyzed"
+            : "rejected",
+          2
+        ]
       );
     }
 
-    await db.query(
-      `INSERT INTO graphic_assets (
-        source_id,
-        topic_folder,
-        source_file,
-        public_url,
-        asset_index,
-        asset_type,
-        concept,
-        description,
-        source_evidence,
-        crop_x,
-        crop_y,
-        crop_width,
-        crop_height,
-        mask_regions,
-        is_official_reference,
-        is_usable,
-        analysis_status
-      )
-            VALUES (
-  $1,$2,$3,$4,$5,$6,$7,$8,$9,
-  $10,$11,$12,$13,$14::jsonb,$15,$16,$17
-)
-      ON CONFLICT (source_id, asset_index)
-      DO UPDATE SET
-        topic_folder = EXCLUDED.topic_folder,
-        source_file = EXCLUDED.source_file,
-        public_url = EXCLUDED.public_url,
-        asset_type = EXCLUDED.asset_type,
-        concept = EXCLUDED.concept,
-        description = EXCLUDED.description,
-        source_evidence = EXCLUDED.source_evidence,
-        crop_x = EXCLUDED.crop_x,
-        crop_y = EXCLUDED.crop_y,
-        crop_width = EXCLUDED.crop_width,
-        crop_height = EXCLUDED.crop_height,
-        mask_regions = EXCLUDED.mask_regions,
-        is_official_reference = EXCLUDED.is_official_reference,
-        is_usable = EXCLUDED.is_usable,
-        analysis_status = EXCLUDED.analysis_status,
-        updated_at = NOW()`,
-      [
-        graphicRow.source_id,
-        graphicRow.topic_folder,
-        graphicRow.source_file,
-        graphicRow.public_url,
-        assetIndex,
-        analysis.useAsGroup === true ? "group" : "individual",
-        asset.concept || null,
-        asset.visualDescription || null,
-        [
-          analysis.sourceCaption,
-          analysis.sourceText
-        ].filter(Boolean).join("\n") || null,
-        asset.crop?.x ?? null,
-        asset.crop?.y ?? null,
-        asset.crop?.width ?? null,
-        asset.crop?.height ?? null,
-                JSON.stringify(
-          normalizeGraphicMaskRegions(
-            asset.maskRegions,
-            graphicRow.topic_folder
-          )
-        ),
-        analysis.sourceType === "official_exam_reference",
-        asset.usableForGraphicQuestion === true &&
-          asset.needsImageToAnswer === true,
-        asset.usableForGraphicQuestion === true
-          ? "analyzed"
-          : "rejected"
-      ]
-    );
+    await client.query("COMMIT");
+  }catch(error){
+    await client.query("ROLLBACK");
+    throw error;
+  }finally{
+    client.release();
   }
 }
+ 
 async function analyzePendingGraphicSources({ limit = 1 } = {}){
   const ai = aiClient();
 
@@ -1012,6 +1045,95 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
     results
   };
 }
+async function reanalyzeGraphicSourcesForSanitization({ limit = 1 } = {}){
+  const ai = aiClient();
+
+  const pending = await db.query(
+    `SELECT DISTINCT ON (source_id)
+       source_id,
+       topic_folder,
+       source_file,
+       public_url
+     FROM graphic_assets
+     WHERE sanitization_version < 2
+       AND analysis_status IN ('analyzed','rejected','error')
+     ORDER BY source_id, asset_index ASC
+     LIMIT $1`,
+    [limit]
+  );
+
+  const results = [];
+
+  for(const graphicRow of pending.rows){
+    try{
+      console.log(
+        `[graphics] Reanalizando sanitización ${graphicRow.source_id}`
+      );
+
+      const analysis = await analyzeGraphicSource(ai, graphicRow);
+
+      await saveGraphicAnalysis(graphicRow, analysis);
+
+      results.push({
+        sourceId:graphicRow.source_id,
+        ok:true,
+        sourceType:analysis.sourceType,
+        useAsGroup:analysis.useAsGroup,
+        assets:analysis.assets.length
+      });
+    }catch(error){
+      const errorMessage = error?.message || String(error);
+
+      console.error(
+        `[graphics] ERROR reanalizando ${graphicRow.source_id}:`,
+        errorMessage
+      );
+
+      await db.query(
+        `UPDATE graphic_assets
+         SET
+           analysis_status = 'sanitization_error',
+           is_usable = FALSE,
+           description = $2,
+           updated_at = NOW()
+         WHERE source_id = $1
+           AND sanitization_version < 2`,
+        [
+          graphicRow.source_id,
+          errorMessage
+        ]
+      );
+
+      results.push({
+        sourceId:graphicRow.source_id,
+        ok:false,
+        error:errorMessage
+      });
+    }
+  }
+
+  const remainingResult = await db.query(
+    `SELECT COUNT(DISTINCT source_id)::int AS total
+     FROM graphic_assets
+     WHERE sanitization_version < 2
+       AND analysis_status IN ('analyzed','rejected','error')`
+  );
+
+  const failedResult = await db.query(
+    `SELECT COUNT(DISTINCT source_id)::int AS total
+     FROM graphic_assets
+     WHERE sanitization_version < 2
+       AND analysis_status = 'sanitization_error'`
+  );
+
+  return {
+    requested:limit,
+    pendingFound:pending.rows.length,
+    remainingSources:Number(remainingResult.rows[0]?.total || 0),
+    failedSources:Number(failedResult.rows[0]?.total || 0),
+    results
+  };
+}
 function graphicTopicFolderFromTopicName(topicName){
   const text = String(topicName || "")
     .normalize("NFD")
@@ -1055,6 +1177,7 @@ async function getGraphicAssetForGeneration({
   const conditions = [
   "is_usable = TRUE",
   "analysis_status = 'analyzed'",
+      "sanitization_version >= 2",
   "is_official_reference = FALSE"
 ];
 
@@ -5582,6 +5705,7 @@ for(let i = 0; i < selected.length; i++){
       FROM graphic_assets
       WHERE is_usable = TRUE
         AND analysis_status = 'analyzed'
+        AND sanitization_version >= 2
         AND is_official_reference = FALSE
         AND topic_folder = ANY($1::text[])
       ORDER BY
@@ -9085,6 +9209,33 @@ const limit = Number.isInteger(requestedLimit)
     });
   }
 });
+app.get("/api/graphics/reanalyze-sanitization", async (req,res)=>{
+  try{
+    const requestedLimit = Number(req.query?.limit ?? 10);
+
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.min(Math.max(requestedLimit,1),10)
+      : 10;
+
+    const result =
+      await reanalyzeGraphicSourcesForSanitization({ limit });
+
+    res.json({
+      ok:true,
+      ...result
+    });
+  }catch(error){
+    console.error(
+      "[graphics] Error en /api/graphics/reanalyze-sanitization:",
+      error
+    );
+
+    res.status(500).json({
+      ok:false,
+      error:error?.message || String(error)
+    });
+  }
+});
 app.get("/api/graphics/inspect-latest", async (req,res)=>{
   try{
     const result = await db.query(
@@ -9104,6 +9255,7 @@ app.get("/api/graphics/inspect-latest", async (req,res)=>{
         crop_width,
         crop_height,
         mask_regions,
+        sanitization_version,
         is_official_reference,
         is_usable,
         analysis_status,
