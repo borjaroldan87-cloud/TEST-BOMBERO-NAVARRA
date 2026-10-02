@@ -2254,7 +2254,7 @@ async function ingest(filePath, displayName){
   const ai=aiClient(); const store=await ensureStore();
   let op=await ai.fileSearchStores.uploadToFileSearchStore({
     file:filePath, fileSearchStoreName:store,
-    config:{displayName}
+    config:{displayName,mimeType:"application/pdf"}
   });
   await waitOp(ai,op);
   return store;
