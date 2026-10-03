@@ -2205,7 +2205,266 @@ async function applyManualPageMapToTopic(topicId,pageMap){
 
   return updatedRows;
 }
-function coverageGapPrompt(existingItems, startPage, endPage){
+function coverageTopicNumber(topicName){
+  const normalized=String(topicName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+
+  const match=normalized.match(
+    /(?:^|\s)tema\s*(\d+)(?:\s|$)/
+  );
+
+  return match
+    ? Number(match[1])
+    : null;
+}
+function coverageTopicRulesPrompt(topicName){
+  const topicNumber=
+    coverageTopicNumber(topicName);
+
+  if(topicNumber===21){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 21 — PARQUES, MUNICIPIOS Y CONCEJOS:
+
+Este tema contiene relaciones territoriales que deben conservarse con absoluta precisión.
+
+OBJETIVO PRIORITARIO:
+Identificar qué parque o radio de actuación corresponde a cada municipio y concejo.
+
+REGLAS:
+
+1. Cada relación territorial es examinable de forma independiente.
+
+2. Conserva siempre la relación:
+   PARQUE/RADIO -> MUNICIPIO -> CONCEJO,
+   cuando el documento indique esos niveles.
+
+3. Si aparecen varios concejos debajo de un municipio,
+   cada concejo pertenece al mismo ámbito territorial indicado
+   para ese municipio.
+
+4. NO agrupes una lista completa de municipios en un único elemento.
+   Cada municipio debe poder ser preguntado individualmente.
+
+5. NO agrupes todos los concejos de un municipio en un único elemento
+   si eso impide preguntar individualmente por uno de ellos.
+
+6. Para cada municipio crea al menos una unidad examinable que permita
+   conocer qué parque/radio lo atiende.
+
+7. Para cada concejo crea una unidad examinable que permita conocer:
+   - a qué municipio pertenece, cuando el documento lo permita determinar;
+   - qué parque/radio le corresponde.
+
+8. Respeta estrictamente los cambios de encabezado de parque o sede.
+   NO atribuyas municipios de un bloque al parque del bloque anterior.
+
+9. REGLA ESPECÍFICA DE ESTUDIO:
+   existen 12 sedes físicas de parque pero 11 radios territoriales
+   generales de actuación.
+
+10. Pamplona dispone de las sedes de Trinitarios y Cordovilla.
+
+11. Para este proyecto:
+    - TRINITARIOS se considera exclusivamente para la ciudad de Pamplona/Iruña;
+    - el resto de municipios y concejos adscritos al ámbito central
+      deben asociarse a CORDOVILLA.
+
+12. No conviertas información descriptiva accesoria en relaciones
+    territoriales inexistentes.
+
+13. Prioriza especialmente preguntas del tipo:
+    - qué parque corresponde a un municipio;
+    - qué parque corresponde a un concejo;
+    - qué municipio contiene un determinado concejo;
+    - cuál de varias localidades pertenece a un parque determinado.
+`;
+  }
+
+  if(topicNumber===22){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 22 — POLÍGONOS INDUSTRIALES:
+
+Solo es materia de estudio la información correspondiente
+a POLÍGONOS INDUSTRIALES.
+
+REGLAS:
+
+1. EXCLUYE del inventario cualquier fila identificada como
+   "Área industrial".
+
+2. No generes unidades examinables sobre las áreas industriales
+   aunque aparezcan en la tabla del documento.
+
+3. Conserva cada polígono industrial como registro independiente.
+
+4. Para cada polígono conserva exactamente las relaciones
+   que aparezcan en su misma fila:
+   - nombre del polígono;
+   - municipio o municipios asociados;
+   - parque de bomberos asociado;
+   - superficie/área, si aparece;
+   - perímetro, si aparece.
+
+5. NO mezcles datos de filas consecutivas.
+
+6. NO atribuyas a un polígono el municipio, parque, área
+   o perímetro de otra fila.
+
+7. La relación POLÍGONO -> MUNICIPIO -> PARQUE
+   es especialmente importante y debe quedar representada
+   de forma examinable.
+`;
+  }
+
+  if(topicNumber===23){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 23 — PARQUES SOLARES:
+
+Cada fila representa un parque solar concreto.
+
+Conserva de forma vinculada y sin mezclar filas:
+- nombre del parque solar;
+- promotor;
+- municipio o municipios asociados;
+- parque de bomberos asociado;
+- potencia;
+- año de puesta en servicio.
+
+La relación PARQUE SOLAR -> MUNICIPIO -> PARQUE DE BOMBEROS
+debe quedar representada expresamente.
+
+Los valores numéricos de potencia y año son también examinables.
+
+NO mezcles columnas ni datos pertenecientes a instalaciones diferentes.
+`;
+  }
+
+  if(topicNumber===24){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 24 — PARQUES EÓLICOS:
+
+Cada fila representa un parque eólico concreto.
+
+Conserva exactamente:
+- nombre del parque eólico;
+- municipio o municipios asociados;
+- parque de bomberos asociado.
+
+La relación PARQUE EÓLICO -> MUNICIPIO -> PARQUE DE BOMBEROS
+es prioritaria.
+
+Si una instalación afecta a varios municipios,
+conserva todos los municipios asociados sin reducirlos a uno.
+
+NO mezcles información entre filas.
+`;
+  }
+
+  if(topicNumber===25){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 25 — HELIPUERTOS Y HELISUPERFICIES:
+
+Cada fila representa una instalación concreta.
+
+Conserva exactamente las relaciones entre:
+- nombre;
+- municipio;
+- uso o clase indicada;
+- estado;
+- tipo.
+
+Distingue expresamente cuando corresponda:
+- helisuperficie;
+- aeródromo;
+- aeropuerto;
+- hospital;
+- policía;
+- estadio;
+- parque de bomberos;
+- otras categorías que aparezcan literalmente.
+
+Conserva también si está activa o inoperativa
+y si es en superficie, terraza, pináculo o cualquier otro tipo indicado.
+
+NO mezcles datos de instalaciones distintas.
+`;
+  }
+
+  if(topicNumber===26){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 26 — RED DEL FERROCARRIL:
+
+Este tema contiene tablas complejas y relaciones entre varias columnas.
+
+Debes conservar cuidadosamente:
+- línea ferroviaria;
+- tramo;
+- longitud, cuando corresponda;
+- municipios o localidades;
+- estaciones o puntos ferroviarios;
+- dirección o ubicación indicada;
+- parque o parques de bomberos asociados.
+
+REGLA FUNDAMENTAL:
+NO interpretes por proximidad visual que dos valores pertenecen
+a la misma fila si la estructura de la tabla no lo confirma.
+
+Mantén las relaciones de cada registro exactamente como aparecen.
+
+Las relaciones LOCALIDAD/ESTACIÓN -> PARQUE DE BOMBEROS
+son especialmente examinables.
+
+También son examinables los recorridos y municipios atravesados
+por cada línea cuando el documento los indique.
+`;
+  }
+
+  if(topicNumber===27){
+    return `
+REGLAS ESPECÍFICAS DEL TEMA 27 — CAMINO DE SANTIAGO:
+
+La tabla contiene varias ordenaciones diferentes que NO deben mezclarse.
+
+Debes distinguir de forma independiente:
+
+A) Municipios por orden alfabético.
+
+B) Municipios ordenados de NORTE A SUR,
+   junto con el camino al que pertenecen.
+
+C) Municipios ordenados de ESTE A OESTE,
+   junto con el camino al que pertenecen.
+
+REGLA CRÍTICA:
+Que varios nombres aparezcan visualmente en la misma fila
+NO significa que exista una relación territorial entre ellos.
+
+Son tres columnas/listados independientes.
+
+Conserva:
+- pertenencia al Camino francés;
+- pertenencia al Camino aragonés;
+- puntos donde ambos recorridos confluyen;
+- orden de paso cuando pueda determinarse de la columna correspondiente.
+
+Permite posteriormente preguntar:
+- qué municipios atraviesa cada camino;
+- qué municipio va antes o después de otro;
+- cuál pertenece al Camino francés;
+- cuál pertenece al Camino aragonés;
+- dónde se unen ambos recorridos.
+
+NO inventes relaciones entre nombres que solo comparten una misma fila visual.
+`;
+  }
+
+  return "";
+}
+function coverageGapPrompt(existingItems, startPage, endPage, topicName){
   const existingSummary=existingItems.map(item=>({
     concept:item.concept,
     itemType:item.item_type,
@@ -2213,8 +2472,8 @@ function coverageGapPrompt(existingItems, startPage, endPage){
     sourcePage:item.source_page
   }));
 
-  return `
-ACTÚAS COMO AUDITOR EXHAUSTIVO DE COBERTURA DE UN TEMARIO DE OPOSICIÓN.
+    return `${coverageTopicRulesPrompt(topicName)}\nACTÚAS COMO AUDITOR EXHAUSTIVO DE COBERTURA DE UN TEMARIO DE OPOSICIÓN.
+
 
 Estás revisando únicamente las páginas ${startPage} a ${endPage}
 del documento original.
@@ -2731,8 +2990,8 @@ sourceEvidence:{type:"string"}
   },
   required:["items"]
 };
-function coverageAnalysisPrompt(){
-  return `Eres un analista de temario para una oposición de Bombero de Navarra.
+function coverageAnalysisPrompt(topicName){
+    return `${coverageTopicRulesPrompt(topicName)}\nEres un analista de temario para una oposición de Bombero de Navarra.
 
 MISIÓN:
 Analiza exhaustivamente el documento recuperado mediante File Search y crea un INVENTARIO DE CONTENIDO EXAMINABLE.
@@ -4774,7 +5033,7 @@ for(const chunk of chunks){
     contents:[
       {
         text:
-          coverageAnalysisPrompt()+
+                    coverageAnalysisPrompt(topic.name)+
           `
 
 IMPORTANTE:
@@ -4847,7 +5106,7 @@ for(const chunk of chunks){
             source_page:item.sourcePage
           })),
           chunk.startPage,
-          chunk.endPage
+          chunk.endPage, topic.name
         )
       },
       {
