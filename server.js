@@ -2509,24 +2509,6 @@ if(!pdfHeader.includes("%PDF-")){
 
     topic=metadataResult.rows[0];
 
-    if(topic.file_search_indexed !== true){
-      await ingest(
-        req.file.path,
-        topicName
-      );
-
-      const indexedResult=
-        await db.query(
-          `UPDATE topics
-           SET file_search_indexed = TRUE
-           WHERE id = $1
-           RETURNING *`,
-          [Number(topic.id)]
-        );
-
-      topic=indexedResult.rows[0];
-    }
-
     res.json({
       ok:true,
       topicId:Number(topic.id),
@@ -4746,6 +4728,31 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+        if(topic.file_search_indexed !== true){
+      console.log(
+        `COVERAGE: indexando en File Search ${topic.name}`
+      );
+
+      await ingest(
+        pdfPath,
+        topic.name
+      );
+
+      const indexedResult=
+        await db.query(
+          `UPDATE topics
+           SET file_search_indexed = TRUE
+           WHERE id = $1
+           RETURNING *`,
+          [Number(topic.id)]
+        );
+
+      topic=indexedResult.rows[0];
+
+      console.log(
+        `COVERAGE: File Search listo para ${topic.name}`
+      );
+    }
 const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
 
 console.log(
