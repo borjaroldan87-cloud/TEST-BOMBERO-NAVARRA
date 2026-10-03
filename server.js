@@ -2464,16 +2464,48 @@ NO inventes relaciones entre nombres que solo comparten una misma fila visual.
 
   return "";
 }
-function coverageGapPrompt(existingItems, startPage, endPage, topicName){
+function coverageContinuityPrompt(topicName, previousItems=[]){
+  const topicNumber=coverageTopicNumber(topicName);
+
+  if(
+    ![21,22,23,24,25,26,27].includes(topicNumber) ||
+    !Array.isArray(previousItems) ||
+    previousItems.length===0
+  ){
+    return "";
+  }
+
+  const context=previousItems
+    .slice(-12)
+    .map(item=>({
+      section:item.section ?? null,
+      concept:item.concept ?? null,
+      sourcePage:item.sourcePage ?? item.source_page ?? null,
+      sourceEvidence:item.sourceEvidence ?? item.source_evidence ?? null
+    }));
+
+  return `
+CONTEXTO DE CONTINUIDAD DE PÁGINAS ANTERIORES:
+${JSON.stringify(context)}
+
+Este contexto procede del MISMO documento y sirve únicamente para reconocer
+continuaciones de una tabla, lista o bloque iniciado en páginas anteriores.
+Úsalo para conservar correctamente la entidad padre o relación que continúa.
+NO crees elementos a partir del contexto si no existe contenido correspondiente
+en las páginas que estás analizando ahora.
+`;
+}
+function coverageGapPrompt(existingItems, startPage, endPage, topicName, previousItems=[]){
   const existingSummary=existingItems.map(item=>({
+    section:item.section ?? null,
     concept:item.concept,
-    itemType:item.item_type,
-    evaluationType:item.evaluation_type,
-    sourcePage:item.source_page
+    itemType:item.itemType ?? item.item_type,
+    evaluationType:item.evaluationType ?? item.evaluation_type,
+    sourcePage:item.sourcePage ?? item.source_page,
+    sourceEvidence:item.sourceEvidence ?? item.source_evidence ?? null
   }));
 
-    return `${coverageTopicRulesPrompt(topicName)}\nACTÚAS COMO AUDITOR EXHAUSTIVO DE COBERTURA DE UN TEMARIO DE OPOSICIÓN.
-
+  return `${coverageTopicRulesPrompt(topicName)}\n${coverageContinuityPrompt(topicName, previousItems)}\nACTÚAS COMO AUDITOR EXHAUSTIVO DE COBERTURA DE UN TEMARIO DE OPOSICIÓN.
 
 Estás revisando únicamente las páginas ${startPage} a ${endPage}
 del documento original.
@@ -2990,8 +3022,8 @@ sourceEvidence:{type:"string"}
   },
   required:["items"]
 };
-function coverageAnalysisPrompt(topicName){
-    return `${coverageTopicRulesPrompt(topicName)}\nEres un analista de temario para una oposición de Bombero de Navarra.
+function coverageAnalysisPrompt(topicName, previousItems=[]){
+  return `${coverageTopicRulesPrompt(topicName)}\n${coverageContinuityPrompt(topicName, previousItems)}\nEres un analista de temario para una oposición de Bombero de Navarra.
 
 MISIÓN:
 Analiza exhaustivamente el documento recuperado mediante File Search y crea un INVENTARIO DE CONTENIDO EXAMINABLE.
@@ -5033,7 +5065,10 @@ for(const chunk of chunks){
     contents:[
       {
         text:
-                    coverageAnalysisPrompt(topic.name)+
+    coverageAnalysisPrompt(
+  topic.name,
+  allItems
+)+
           `
 
 IMPORTANTE:
@@ -5099,14 +5134,13 @@ for(const chunk of chunks){
     contents:[
       {
         text:coverageGapPrompt(
-          existingChunkItems.map(item=>({
-            concept:item.concept,
-            item_type:item.itemType,
-            evaluation_type:item.evaluationType,
-            source_page:item.sourcePage
-          })),
-          chunk.startPage,
-          chunk.endPage, topic.name
+existingChunkItems,
+chunk.startPage,
+chunk.endPage,
+topic.name,
+allItems.filter(item=>
+  Number(item.sourcePage)<chunk.startPage
+)
         )
       },
       {
