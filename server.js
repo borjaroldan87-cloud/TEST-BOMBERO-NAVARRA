@@ -4521,6 +4521,62 @@ async function getCachedOfficialExamStyleReference(){
 
   return styleReference;
 }
+async function generateCoverageWithRetry(ai,request){
+  const retryDelays=[
+    3000,
+    7000,
+    15000,
+    30000,
+    60000
+  ];
+
+  for(let attempt=0;;attempt++){
+    try{
+      return await ai.models.generateContent(
+        request
+      );
+
+    }catch(error){
+      const status=
+        Number(
+          error?.status ??
+          error?.code ??
+          error?.error?.code
+        );
+
+      const message=
+        String(
+          error?.message ||
+          error ||
+          ""
+        );
+
+      const transient=
+        status===429 ||
+        status===503 ||
+        /RESOURCE_EXHAUSTED|UNAVAILABLE|high demand|temporar/i.test(
+          message
+        );
+
+      if(
+        !transient ||
+        attempt>=retryDelays.length
+      ){
+        throw error;
+      }
+
+      const delay=
+        retryDelays[attempt];
+
+      console.warn(
+        `COVERAGE RETRY: error temporal ${status || "desconocido"}. ` +
+        `Reintento ${attempt+2}/${retryDelays.length+1} en ${delay/1000}s.`
+      );
+
+      await sleep(delay);
+    }
+  }
+}
 async function setCoverageRunState(runId,state){
   if(!runId) return;
 
@@ -4549,7 +4605,12 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
     const ai=aiClient();
-
+    const coverageGenerate=
+      request =>
+        generateCoverageWithRetry(
+          ai,
+          request
+        );
     console.log("COVERAGE: iniciando análisis");
 
     const requestedTopicId=
@@ -4630,7 +4691,7 @@ for(const chunk of chunks){
     `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  const response=await ai.models.generateContent({
+  const response=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
       {
@@ -4696,7 +4757,7 @@ for(const chunk of chunks){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-    const auditResponse=await ai.models.generateContent({
+    const auditResponse=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
       {
