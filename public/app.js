@@ -66,7 +66,32 @@ async function readBatchResponse(response){
 
   return data;
 }
+async function waitForCoverageRun(runId,timeoutMs=1800000){
+  const startedAt=Date.now();
 
+  while(Date.now()-startedAt < timeoutMs){
+    const state=await api(
+      `/api/coverage-run/${encodeURIComponent(runId)}`
+    );
+
+    if(state.status === "completed"){
+      return state;
+    }
+
+    if(state.status === "error"){
+      throw new Error(
+        state.error ||
+        "El análisis de cobertura terminó con error."
+      );
+    }
+
+    await wait(3000);
+  }
+
+  throw new Error(
+    "El análisis sigue sin confirmar después de 30 minutos."
+  );
+}
 async function uploadTopicBatch(){
   const input=
     $("topicUploadFiles");
@@ -191,28 +216,52 @@ async function uploadTopicBatch(){
           `${position}/${entries.length} · ` +
           `Analizando cobertura de ${entry.topicName}...`;
 
-        const coverageResponse=
-          await fetch(
-            "/api/analyze-coverage",
-            {
-              method:"POST",
-              headers:{
-                "Content-Type":
-                  "application/json"
-              },
-              body:JSON.stringify({
-                topicId:
-                  uploaded.topicId,
-                uploadToken:
-                  uploaded.uploadToken
-              })
-            }
-          );
+        const runId=
+          globalThis.crypto?.randomUUID?.() ||
+          `coverage-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-        const analyzed=
-          await readBatchResponse(
-            coverageResponse
-          );
+        let analyzed;
+
+        try{
+          const coverageResponse=
+            await fetch(
+              "/api/analyze-coverage",
+              {
+                method:"POST",
+                headers:{
+                  "Content-Type":
+                    "application/json"
+                },
+                body:JSON.stringify({
+                  topicId:
+                    uploaded.topicId,
+                  uploadToken:
+                    uploaded.uploadToken,
+                  runId
+                })
+              }
+            );
+
+          analyzed=
+            await readBatchResponse(
+              coverageResponse
+            );
+
+        }catch(error){
+          if(
+            String(error?.message || error)
+              .includes("Failed to fetch")
+          ){
+            statusBox.textContent=
+              `${position}/${entries.length} · ` +
+              `Conexión interrumpida. Verificando ${entry.topicName}...`;
+
+            analyzed=
+              await waitForCoverageRun(runId);
+          }else{
+            throw error;
+          }
+        }
 
         completed++;
 
