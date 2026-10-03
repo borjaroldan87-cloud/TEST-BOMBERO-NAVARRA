@@ -4602,11 +4602,14 @@ async function generateCoverageWithRetry(ai,request){
         );
 
       const transient=
-        status===429 ||
-        status===503 ||
-        /RESOURCE_EXHAUSTED|UNAVAILABLE|high demand|temporar/i.test(
-          message
-        );
+  status!==402 &&
+  (
+    status===429 ||
+    status===503 ||
+    /UNAVAILABLE|high demand|temporar/i.test(
+      message
+    )
+  );
 
       if(
         !transient ||
