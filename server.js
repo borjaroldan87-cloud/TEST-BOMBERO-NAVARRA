@@ -1497,37 +1497,105 @@ async function getOrCreateTopic(name, sourceFile=null){
 }
 
 async function saveCoverageItems(topicId, items){
-  for(const item of items){
-    await db.query(
-      `INSERT INTO coverage_items
-  (topic_id, section, concept, item_type, evaluation_type,
-   source_page, manual_page, source_evidence)
- VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
- ON CONFLICT (topic_id, concept, item_type, evaluation_type)
- DO NOTHING`,
-[
-  topicId,
-  item.section || null,
-  item.concept,
-  item.itemType,
-  item.evaluationType,
-  item.sourcePage ?? null,
-  item.manualPage ?? null,
-  item.sourceEvidence || null
-]
-    );
-  }
+  const client=await db.connect();
 
-  await db.query(
-    `UPDATE topics
-     SET total_items = (
-       SELECT COUNT(*)
-       FROM coverage_items
-       WHERE topic_id = $1
-     )
-     WHERE id = $1`,
-    [topicId]
-  );
+  try{
+    await client.query("BEGIN");
+
+    const stateResult=await client.query(
+      `SELECT
+         EXISTS (
+           SELECT 1
+           FROM coverage_items
+           WHERE topic_id = $1
+             AND (
+               worked = TRUE OR
+               times_asked > 0 OR
+               times_correct > 0 OR
+               times_wrong > 0 OR
+               times_blank > 0
+             )
+         ) AS has_history,
+         EXISTS (
+           SELECT 1
+           FROM question_bank qb
+           JOIN coverage_items ci
+             ON ci.id = qb.coverage_item_id
+           WHERE ci.topic_id = $1
+         ) AS has_questions,
+         EXISTS (
+           SELECT 1
+           FROM coverage_items
+           WHERE topic_id = $1
+         ) AS has_existing`,
+      [topicId]
+    );
+
+    const state=stateResult.rows[0];
+
+    if(
+      state?.has_existing === true &&
+      (
+        state?.has_history === true ||
+        state?.has_questions === true
+      )
+    ){
+      throw new Error(
+        "COVERAGE: no se puede reemplazar automáticamente un tema que ya tiene historial de estudio o preguntas generadas."
+      );
+    }
+
+    if(state?.has_existing === true){
+      await client.query(
+        `DELETE FROM coverage_items
+         WHERE topic_id = $1`,
+        [topicId]
+      );
+    }
+
+    for(const item of items){
+      await client.query(
+        `INSERT INTO coverage_items
+          (topic_id, section, concept, item_type, evaluation_type,
+           source_page, manual_page, source_evidence)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (topic_id, concept, item_type, evaluation_type)
+         DO NOTHING`,
+        [
+          topicId,
+          item.section || null,
+          item.concept,
+          item.itemType,
+          item.evaluationType,
+          item.sourcePage ?? null,
+          item.manualPage ?? null,
+          item.sourceEvidence || null
+        ]
+      );
+    }
+
+    await client.query(
+      `UPDATE topics
+       SET
+         total_items = (
+           SELECT COUNT(*)
+           FROM coverage_items
+           WHERE topic_id = $1
+         ),
+         worked_items = 0
+       WHERE id = $1`,
+      [topicId]
+    );
+
+    await client.query("COMMIT");
+
+  }catch(error){
+    await client.query("ROLLBACK");
+    throw error;
+
+  }finally{
+    client.release();
+  }
 }
 function normalizeCoverageItem(item){
   const clean = value =>
