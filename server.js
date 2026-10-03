@@ -4521,10 +4521,30 @@ async function getCachedOfficialExamStyleReference(){
 
   return styleReference;
 }
+async function setCoverageRunState(runId,state){
+  if(!runId) return;
+
+  await db.query(
+    `INSERT INTO app_state (key,value)
+     VALUES ($1,$2)
+     ON CONFLICT (key)
+     DO UPDATE SET value=EXCLUDED.value`,
+    [
+      `coverage_run:${runId}`,
+      JSON.stringify({
+        ...state,
+        updatedAt:new Date().toISOString()
+      })
+    ]
+  );
+}
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
-
+  const coverageRunId=
+    String(req.body?.runId || "")
+      .trim()
+      .slice(0,120);
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
@@ -4589,7 +4609,14 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         "No se encuentra el PDF para analizar."
       );
     }
-
+    await setCoverageRunState(
+      coverageRunId,
+      {
+        status:"processing",
+        topicId:Number(topic.id),
+        topic:topic.name
+      }
+    );
 const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
 
 console.log(
@@ -4669,48 +4696,41 @@ for(const chunk of chunks){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  try{
     const auditResponse=await ai.models.generateContent({
-      model:"gemini-3.6-flash",
-      contents:[
-        {
-          text:coverageGapPrompt(
-            existingChunkItems.map(item=>({
-              concept:item.concept,
-              item_type:item.itemType,
-              evaluation_type:item.evaluationType,
-              source_page:item.sourcePage
-            })),
-            chunk.startPage,
-            chunk.endPage
-          )
-        },
-        {
-          inlineData:{
-            mimeType:"application/pdf",
-            data:chunk.data
-          }
+    model:"gemini-3.5-flash-lite",
+    contents:[
+      {
+        text:coverageGapPrompt(
+          existingChunkItems.map(item=>({
+            concept:item.concept,
+            item_type:item.itemType,
+            evaluation_type:item.evaluationType,
+            source_page:item.sourcePage
+          })),
+          chunk.startPage,
+          chunk.endPage
+        )
+      },
+      {
+        inlineData:{
+          mimeType:"application/pdf",
+          data:chunk.data
         }
-      ],
-      config:{
-        responseMimeType:"application/json",
-        responseJsonSchema:coverageSchema
       }
-    });
-
-    const parsedAudit=JSON.parse(auditResponse.text);
-
-    if(parsedAudit.items && Array.isArray(parsedAudit.items)){
-      auditItems.push(...parsedAudit.items);
-
-      console.log(
-        `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
-      );
+    ],
+    config:{
+      responseMimeType:"application/json",
+      responseJsonSchema:coverageSchema
     }
+  });
 
-  }catch(e){
-    console.warn(
-      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage} no auditadas por error temporal: ${e.message}`
+  const parsedAudit=JSON.parse(auditResponse.text);
+
+  if(parsedAudit.items && Array.isArray(parsedAudit.items)){
+    auditItems.push(...parsedAudit.items);
+
+    console.log(
+      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
     );
   }
 }
@@ -4782,7 +4802,18 @@ await saveCoverageItems(
       total,
       "elementos"
     );
-
+    await setCoverageRunState(
+      coverageRunId,
+      {
+        status:"completed",
+        topicId:Number(summary.id),
+        topic:summary.name,
+        totalItems:total,
+        workedItems:worked,
+        pendingItems:Number(summary.pending_items)||0,
+        coveragePercentage
+      }
+    );
     res.json({
       ok:true,
       topicId:summary.id,
@@ -4793,13 +4824,32 @@ await saveCoverageItems(
       coveragePercentage
     });
 
-  }catch(e){
+    }catch(e){
     console.error("ERROR COVERAGE:",e);
 
-    res.status(500).json({
-      ok:false,
-      error:e?.message || String(e)
-    });
+    try{
+      await setCoverageRunState(
+        coverageRunId,
+        {
+          status:"error",
+          topicId:topic?.id ? Number(topic.id) : null,
+          topic:topic?.name || null,
+          error:e?.message || String(e)
+        }
+      );
+    }catch(runStateError){
+      console.error(
+        "ERROR GUARDANDO ESTADO COVERAGE:",
+        runStateError
+      );
+    }
+
+    if(!res.headersSent){
+      res.status(500).json({
+        ok:false,
+        error:e?.message || String(e)
+      });
+    }
 
   }finally{
     if(uploadedPdfPath){
@@ -4808,6 +4858,57 @@ await saveCoverageItems(
         ()=>{}
       );
     }
+  }
+});
+app.get("/api/coverage-run/:runId", async(req,res)=>{
+  try{
+    const runId=
+      String(req.params?.runId || "")
+        .trim()
+        .slice(0,120);
+
+    if(!runId){
+      return res.status(400).json({
+        ok:false,
+        error:"Falta runId."
+      });
+    }
+
+    const result=await db.query(
+      `SELECT value
+       FROM app_state
+       WHERE key=$1
+       LIMIT 1`,
+      [`coverage_run:${runId}`]
+    );
+
+    if(!result.rows.length){
+      return res.json({
+        ok:true,
+        found:false,
+        status:"unknown"
+      });
+    }
+
+    let state={};
+
+    try{
+      state=JSON.parse(result.rows[0].value);
+    }catch{
+      state={status:"unknown"};
+    }
+
+    res.json({
+      ok:true,
+      found:true,
+      ...state
+    });
+
+  }catch(e){
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
   }
 });
 app.post("/api/repair-manual-pages", async(req,res)=>{
