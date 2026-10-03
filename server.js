@@ -5138,9 +5138,12 @@ existingChunkItems,
 chunk.startPage,
 chunk.endPage,
 topic.name,
-allItems.filter(item=>
-  Number(item.sourcePage)<chunk.startPage
-)
+allItems.filter(item=>{
+  const sourcePage=Number(item.sourcePage);
+  return Number.isFinite(sourcePage) &&
+    sourcePage >= 1 &&
+    sourcePage < chunk.startPage;
+})
         )
       },
       {
