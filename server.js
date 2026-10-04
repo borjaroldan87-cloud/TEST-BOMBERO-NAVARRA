@@ -2236,64 +2236,186 @@ function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
 
-  if(topicNumber===21){
-    return `
+   if(topicNumber===21){
+  return `
 REGLAS ESPECÍFICAS DEL TEMA 21 — PARQUES, MUNICIPIOS Y CONCEJOS:
 
-Este tema contiene relaciones territoriales que deben conservarse con absoluta precisión.
+Este tema contiene relaciones territoriales que deben conservarse
+con absoluta precisión.
 
-OBJETIVO PRIORITARIO:
-Identificar qué parque o radio de actuación corresponde a cada municipio y concejo.
+IMPORTANTE:
+Estas reglas estructurales se aplican especialmente al apartado
+"1.9. ANEXO I. POBLACIÓN QUE ATIENDEN INICIALMENTE LOS PARQUES DE BOMBEROS".
 
-REGLAS:
+El resto del documento debe seguir analizándose normalmente y también deben
+extraerse todos sus demás datos examinables: características de los parques,
+cifras, clasificaciones, mapas de riesgos, sedes, intervenciones, efectivos,
+mando y cualquier otro contenido sustentado por el PDF.
 
-1. Cada relación territorial es examinable de forma independiente.
+==================================================
+A) MUNICIPIOS, ENTIDADES O ÁMBITOS PRINCIPALES
+==================================================
 
-2. Conserva siempre la relación:
-   PARQUE/RADIO -> MUNICIPIO -> CONCEJO,
-   cuando el documento indique esos niveles.
+En el ANEXO I, cada municipio, entidad territorial o ámbito principal
+que aparece directamente bajo un parque o una sede debe convertirse
+en UN elemento independiente.
 
-3. Si aparecen varios concejos debajo de un municipio,
-   cada concejo pertenece al mismo ámbito territorial indicado
-   para ese municipio.
+NO agrupes varios municipios en un mismo elemento.
 
-4. NO agrupes una lista completa de municipios en un único elemento.
-   Cada municipio debe poder ser preguntado individualmente.
+Para CADA relación territorial principal usa obligatoriamente:
 
-5. NO agrupes todos los concejos de un municipio en un único elemento
-   si eso impide preguntar individualmente por uno de ellos.
+section="Tema 21 - municipios y ámbitos"
+itemType="relacion"
+evaluationType="pertenencia_exclusion"
 
-6. Para cada municipio crea al menos una unidad examinable que permita
-   conocer qué parque/radio lo atiende.
+El concept debe identificar inequívocamente:
 
-7. Para cada concejo crea una unidad examinable que permita conocer:
-   - a qué municipio pertenece, cuando el documento lo permita determinar;
-   - qué parque/radio le corresponde.
+ENTIDAD -> PARQUE/SEDE O RADIO QUE LA ATIENDE
 
-8. Respeta estrictamente los cambios de encabezado de parque o sede.
-   NO atribuyas municipios de un bloque al parque del bloque anterior.
+Ejemplos de estructura conceptual:
 
-9. REGLA ESPECÍFICA DE ESTUDIO:
-   existen 12 sedes físicas de parque pero 11 radios territoriales
-   generales de actuación.
+"Municipio de Andosilla -> Sede de Lodosa"
+"Municipio de Ituren -> Parque de Oronoz"
+"Pamplona/Iruña -> Trinitarios"
 
-10. Pamplona dispone de las sedes de Trinitarios y Cordovilla.
+NO uses conceptos genéricos como:
+"municipios atendidos por Estella-Lizarra"
+o
+"municipios desde X hasta Y".
 
-11. Para este proyecto:
-    - TRINITARIOS se considera exclusivamente para la ciudad de Pamplona/Iruña;
-    - el resto de municipios y concejos adscritos al ámbito central
-      deben asociarse a CORDOVILLA.
+Cada municipio debe existir individualmente.
 
-12. No conviertas información descriptiva accesoria en relaciones
-    territoriales inexistentes.
+Si la misma denominación territorial aparece legítimamente asociada
+a dos ámbitos distintos, conserva AMBAS relaciones como conocimientos
+diferentes. No las deduzcas ni fusiones por compartir nombre.
 
-13. Prioriza especialmente preguntas del tipo:
-    - qué parque corresponde a un municipio;
-    - qué parque corresponde a un concejo;
-    - qué municipio contiene un determinado concejo;
-    - cuál de varias localidades pertenece a un parque determinado.
+Bardenas Reales debe tratarse como una entidad/ámbito territorial
+principal aunque no sea un municipio.
+
+OBJETIVO ESTRUCTURAL GLOBAL DEL ANEXO I:
+deben existir al menos 275 relaciones independientes de esta categoría.
+
+==================================================
+B) CONCEJOS Y LOCALIDADES SUBORDINADAS
+==================================================
+
+Cada concejo o localidad subordinada debe convertirse también
+en UN elemento independiente.
+
+NO agrupes varios concejos o localidades en un mismo concept.
+
+Para CADA concejo o localidad usa obligatoriamente:
+
+section="Tema 21 - concejos y localidades"
+itemType="relacion"
+evaluationType="pertenencia_exclusion"
+
+El concept debe conservar, siempre que el PDF permita determinarlo:
+
+CONCEJO/LOCALIDAD -> MUNICIPIO PADRE -> PARQUE/SEDE O RADIO
+
+Ejemplo:
+
+"Aritzu -> Anue -> Cordovilla"
+
+Si el documento dice:
+
+"Concejos: Aritzu, Burutain, Egozkue..."
+
+debes crear un elemento independiente para Aritzu,
+otro para Burutain, otro para Egozkue, etc.
+
+También debes tratar de forma individual:
+
+- los casos escritos en singular como "Concejo: Rada";
+- las localidades subordinadas que aparecen bajo un municipio aunque
+  el documento no utilice expresamente la palabra "Concejos";
+- las localidades de Baztan enumeradas inmediatamente bajo Baztan.
+
+NO crees un único elemento como:
+
+"Concejos de Anue: Aritzu, Burutain, Egozkue..."
+
+porque eso impide controlar individualmente cada relación.
+
+OBJETIVO ESTRUCTURAL GLOBAL DEL ANEXO I:
+deben existir al menos 357 relaciones independientes de esta categoría.
+
+==================================================
+C) RELACIÓN PARQUE -> MUNICIPIO -> CONCEJO
+==================================================
+
+Conserva siempre los tres niveles cuando el documento permita determinarlos:
+
+PARQUE/RADIO -> MUNICIPIO -> CONCEJO O LOCALIDAD
+
+Respeta estrictamente los cambios de:
+
+- parque;
+- sede;
+- municipio padre;
+- página.
+
+NO atribuyas automáticamente a una nueva página el último municipio,
+parque o sede de la página anterior si la continuidad del documento
+no lo confirma.
+
+Usa el contexto de continuidad únicamente cuando la estructura del PDF
+demuestre que el listado continúa.
+
+==================================================
+D) REGLA ESPECÍFICA DEL PARQUE CENTRAL
+==================================================
+
+Para este proyecto:
+
+- existen 12 sedes físicas de parque pero 11 radios territoriales
+  generales de actuación;
+- Pamplona dispone de las sedes de Trinitarios y Cordovilla;
+- TRINITARIOS se considera exclusivamente para la ciudad
+  de Pamplona/Iruña;
+- el resto de municipios, concejos y localidades adscritos al
+  Parque Central deben asociarse a CORDOVILLA.
+
+Por tanto:
+
+Pamplona/Iruña -> Trinitarios
+
+y las restantes relaciones del ámbito territorial del Parque Central:
+
+municipio/concejo/localidad -> Cordovilla
+
+==================================================
+E) PROHIBICIONES
+==================================================
+
+NO:
+
+- agrupes varios municipios en una misma unidad;
+- agrupes varios concejos en una misma unidad;
+- sustituyas entradas individuales por resúmenes de listas;
+- elimines una relación porque otra tenga un nombre parecido;
+- mezcles concejos pertenecientes a municipios distintos;
+- mezcles municipios de parques o sedes distintos;
+- inventes relaciones territoriales;
+- deduzcas relaciones que el PDF no permita establecer;
+- utilices conocimiento externo para completar el documento.
+
+sourceEvidence debe conservar siempre evidencia literal suficiente
+para comprobar la relación concreta.
+
+Antes de finalizar el análisis completo del documento verifica que,
+como mínimo, el ANEXO I contiene:
+
+- 275 relaciones independientes en
+  "Tema 21 - municipios y ámbitos";
+- 357 relaciones independientes en
+  "Tema 21 - concejos y localidades".
+
+Estas unidades estructurales NO sustituyen al resto del contenido
+examinable del Tema 21, que también debe conservarse.
 `;
-  }
+}
 
   if(topicNumber===22){
     return `
@@ -5259,6 +5381,47 @@ const parsed={
     if(validItems.length===0){
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
+    if(coverageTopicNumber(topic.name)===21){
+  const structuralKey=value=>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g," ")
+      .replace(/\s+/g," ")
+      .trim();
+
+  const municipalityKeys=new Set(
+    validItems
+      .filter(item=>
+        structuralKey(item.section)==="tema 21 municipios y ambitos" &&
+        String(item.itemType || "").toLowerCase()==="relacion" &&
+        String(item.evaluationType || "").toLowerCase()==="pertenencia_exclusion"
+      )
+      .map(item=>structuralKey(item.concept))
+  );
+
+  const subordinateKeys=new Set(
+    validItems
+      .filter(item=>
+        structuralKey(item.section)==="tema 21 concejos y localidades" &&
+        String(item.itemType || "").toLowerCase()==="relacion" &&
+        String(item.evaluationType || "").toLowerCase()==="pertenencia_exclusion"
+      )
+      .map(item=>structuralKey(item.concept))
+  );
+
+  if(
+    municipalityKeys.size<275 ||
+    subordinateKeys.size<357
+  ){
+    throw new Error(
+      `COVERAGE TEMA 21 incompleta: ` +
+      `${municipalityKeys.size}/275 municipios o ámbitos y ` +
+      `${subordinateKeys.size}/357 concejos o localidades.`
+    );
+  }
+}
     if(
       coverageTopicNumber(topic.name)===27 &&
       validItems.length<86
