@@ -2423,45 +2423,91 @@ por cada línea cuando el documento los indique.
 `;
   }
 
+  
   if(topicNumber===27){
     return `
 REGLAS ESPECÍFICAS DEL TEMA 27 — CAMINO DE SANTIAGO:
 
-La tabla contiene varias ordenaciones diferentes que NO deben mezclarse.
+ESTE TEMA NO ADMITE RESÚMENES DE LISTAS.
+Cada entrada territorial y cada posición de recorrido debe quedar representada
+como una unidad examinable independiente.
 
-Debes distinguir de forma independiente:
+La página contiene TRES LISTADOS DISTINTOS.
+NO relaciones horizontalmente nombres que solo coinciden visualmente en una fila.
 
-A) Municipios por orden alfabético.
+A) MUNICIPIOS POR LOS QUE PASA EL CAMINO DE SANTIAGO
 
-B) Municipios ordenados de NORTE A SUR,
-   junto con el camino al que pertenecen.
+- La primera columna contiene EXACTAMENTE 42 municipios.
+- Genera EXACTAMENTE 42 elementos independientes para esta columna:
+  UNO por cada municipio, sin agrupar dos municipios en un mismo elemento.
+- Cada elemento debe permitir preguntar si ese municipio pertenece al conjunto
+  de municipios por los que pasa el Camino de Santiago.
+- Usa section exactamente: "Camino de Santiago - municipios".
+- Usa itemType="relacion".
+- Usa evaluationType="pertenencia_exclusion".
+- El concept debe identificar un único municipio.
 
-C) Municipios ordenados de ESTE A OESTE,
-   junto con el camino al que pertenecen.
+B) ORDEN NORTE A SUR
 
-REGLA CRÍTICA:
-Que varios nombres aparezcan visualmente en la misma fila
-NO significa que exista una relación territorial entre ellos.
+- La columna "Municipios de Norte a Sur" contiene EXACTAMENTE 30 posiciones.
+- Genera EXACTAMENTE 30 elementos independientes:
+  UNO por cada posición/municipio de esa columna.
+- Conserva en cada elemento:
+  * el municipio;
+  * su posición relativa dentro de esta secuencia;
+  * si la tabla lo identifica como Camino francés, Camino aragonés
+    o Camino francés/Camino aragonés.
+- Usa section exactamente: "Camino de Santiago - Norte a Sur".
+- Usa itemType="relacion".
+- Usa evaluationType="secuencia".
+- NO resumas toda la secuencia en un único elemento.
 
-Son tres columnas/listados independientes.
+C) ORDEN ESTE A OESTE
 
-Conserva:
-- pertenencia al Camino francés;
-- pertenencia al Camino aragonés;
-- puntos donde ambos recorridos confluyen;
-- orden de paso cuando pueda determinarse de la columna correspondiente.
+- La columna "Municipios de Este a Oeste" contiene EXACTAMENTE 14 posiciones.
+- Genera EXACTAMENTE 14 elementos independientes:
+  UNO por cada posición/municipio de esa columna.
+- Conserva en cada elemento:
+  * el municipio;
+  * su posición relativa dentro de esta secuencia;
+  * si la tabla lo identifica como Camino francés, Camino aragonés
+    o Camino francés/Camino aragonés.
+- Usa section exactamente: "Camino de Santiago - Este a Oeste".
+- Usa itemType="relacion".
+- Usa evaluationType="secuencia".
+- NO resumas toda la secuencia en un único elemento.
 
-Permite posteriormente preguntar:
-- qué municipios atraviesa cada camino;
-- qué municipio va antes o después de otro;
-- cuál pertenece al Camino francés;
-- cuál pertenece al Camino aragonés;
-- dónde se unen ambos recorridos.
+D) TRAZADO GENERAL
 
-NO inventes relaciones entre nombres que solo comparten una misma fila visual.
+Extrae también como conocimientos independientes los datos expresos del texto
+superior de la página sobre:
+- por dónde entra el Camino francés;
+- por qué localidad indicada pasa el Camino francés;
+- por dónde entra el Camino aragonés;
+- dónde se une el Camino aragonés al Camino francés.
+
+Usa para ellos section: "Camino de Santiago - trazado general".
+
+REGLAS CRÍTICAS:
+
+1. Los tres listados son independientes.
+2. Que tres nombres aparezcan en la misma fila visual NO crea una relación entre ellos.
+3. Un mismo municipio puede aparecer legítimamente en más de un listado.
+   NO lo elimines por ello: pertenencia y posición son conocimientos diferentes.
+4. NO agrupes varios municipios en un único concept.
+5. NO devuelvas conceptos globales del tipo "orden del Camino francés"
+   sustituyendo las entradas individuales.
+6. sourceEvidence debe conservar el dato literal suficiente para comprobar
+   el municipio, su listado y, cuando proceda, su adscripción al camino.
+7. No inventes municipios, posiciones ni adscripciones.
+8. Antes de responder verifica obligatoriamente que has creado, como mínimo:
+   - 42 elementos de municipios;
+   - 30 elementos de Norte a Sur;
+   - 14 elementos de Este a Oeste.
+   Es decir, un mínimo estructural de 86 elementos antes de añadir
+   los conocimientos generales del trazado.
 `;
   }
-
   return "";
 }
 function coverageContinuityPrompt(topicName, previousItems=[]){
@@ -5202,7 +5248,14 @@ const parsed={
     if(validItems.length===0){
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
-
+    if(
+      coverageTopicNumber(topic.name)===27 &&
+      validItems.length<86
+    ){
+      throw new Error(
+        `COVERAGE TEMA 27 incompleta: ${validItems.length} elementos válidos; mínimo estructural esperado: 86.`
+      );
+    }
 await saveCoverageItems(
       topic.id,
       validItems
