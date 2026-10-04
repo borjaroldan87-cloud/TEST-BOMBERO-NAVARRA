@@ -5399,6 +5399,120 @@ app.get("/api/coverage-run/:runId", async(req,res)=>{
     });
   }
 });
+app.get("/api/geography-coverage-audit", async(req,res)=>{
+  try{
+    const topicOrder=Number(req.query?.topicOrder);
+
+    if(!Number.isInteger(topicOrder) || topicOrder < 1){
+      return res.status(400).json({
+        ok:false,
+        error:"topicOrder debe ser un entero positivo."
+      });
+    }
+
+    const search=
+      String(req.query?.q || "")
+        .trim()
+        .slice(0,200);
+
+    const rawLimit=Number(req.query?.limit);
+    const limit=
+      Number.isInteger(rawLimit)
+        ? Math.min(Math.max(rawLimit,1),250)
+        : 100;
+
+    const rawOffset=Number(req.query?.offset);
+    const offset=
+      Number.isInteger(rawOffset) && rawOffset >= 0
+        ? rawOffset
+        : 0;
+
+    const topicResult=await db.query(
+      `SELECT
+         id,
+         name,
+         total_items,
+         worked_items
+       FROM topics
+       WHERE block = 'geografia'
+         AND topic_order = $1
+       ORDER BY id ASC
+       LIMIT 1`,
+      [topicOrder]
+    );
+
+    if(!topicResult.rows.length){
+      return res.status(404).json({
+        ok:false,
+        error:"No se encontró ese tema de Geografía."
+      });
+    }
+
+    const topic=topicResult.rows[0];
+
+    const countResult=await db.query(
+      `SELECT COUNT(*)::int AS total
+       FROM coverage_items
+       WHERE topic_id = $1
+         AND (
+           $2 = '' OR
+           COALESCE(section,'') ILIKE '%' || $2 || '%' OR
+           concept ILIKE '%' || $2 || '%' OR
+           COALESCE(source_evidence,'') ILIKE '%' || $2 || '%'
+         )`,
+      [topic.id,search]
+    );
+
+    const itemsResult=await db.query(
+      `SELECT
+         id,
+         section,
+         concept,
+         item_type,
+         evaluation_type,
+         source_page,
+         manual_page,
+         source_evidence
+       FROM coverage_items
+       WHERE topic_id = $1
+         AND (
+           $2 = '' OR
+           COALESCE(section,'') ILIKE '%' || $2 || '%' OR
+           concept ILIKE '%' || $2 || '%' OR
+           COALESCE(source_evidence,'') ILIKE '%' || $2 || '%'
+         )
+       ORDER BY
+         source_page ASC NULLS LAST,
+         section ASC NULLS LAST,
+         id ASC
+       LIMIT $3
+       OFFSET $4`,
+      [topic.id,search,limit,offset]
+    );
+
+    res.json({
+      ok:true,
+      topicOrder,
+      topic:topic.name,
+      totalItems:Number(topic.total_items || 0),
+      workedItems:Number(topic.worked_items || 0),
+      filter:search || null,
+      totalMatching:Number(countResult.rows[0]?.total || 0),
+      returned:itemsResult.rows.length,
+      limit,
+      offset,
+      items:itemsResult.rows
+    });
+
+  }catch(e){
+    console.error("ERROR GEOGRAPHY COVERAGE AUDIT:",e);
+
+    res.status(500).json({
+      ok:false,
+      error:e?.message || String(e)
+    });
+  }
+});
 app.post("/api/repair-manual-pages", async(req,res)=>{
   try{
     const pdfPath=path.resolve("data/apeo-poda.pdf");
