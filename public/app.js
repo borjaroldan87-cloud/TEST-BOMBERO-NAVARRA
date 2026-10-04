@@ -12,7 +12,7 @@ function inferTopicOrder(fileName,fallbackOrder){
 
   const match=
     base.match(
-      /^\s*(\d{1,3})(?:\s*[\.\-_\)]|\s+)/
+    /^\s*(?:tema\s*)?(\d{1,3})(?=(?:\s*[\.\-_\)]|\s+|$))/i
     );
 
   if(match){
