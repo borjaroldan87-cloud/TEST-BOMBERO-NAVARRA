@@ -122,7 +122,18 @@ await db.query(`
     ALTER TABLE topics
     ADD COLUMN IF NOT EXISTS topic_order INTEGER
   `);
-
+await db.query(`
+  UPDATE topics
+  SET topic_order =
+    (
+      regexp_match(
+        name,
+        '^\\s*TEMA\\s*([0-9]{1,3})',
+        'i'
+      )
+    )[1]::integer
+  WHERE name ~* '^\\s*TEMA\\s*[0-9]{1,3}'
+`);
   await db.query(`
     ALTER TABLE topics
     ADD COLUMN IF NOT EXISTS file_search_indexed BOOLEAN NOT NULL DEFAULT FALSE
