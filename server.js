@@ -2354,7 +2354,43 @@ Respeta estrictamente los cambios de:
 - parque;
 - sede;
 - municipio padre;
-- página.
+- página;
+- posición vertical y orden de lectura dentro de la misma página.
+
+REGLA DE ORDEN DENTRO DE UNA PÁGINA:
+
+Una cabecera de parque, sede o municipio SOLO afecta a los elementos
+que aparecen DESPUÉS de esa cabecera en el orden normal de lectura.
+
+NUNCA apliques una cabecera hacia atrás a municipios, concejos o
+localidades que aparecen antes de ella en la misma página.
+
+Si una página contiene primero la continuación de un parque anterior
+y más abajo comienza un parque nuevo:
+
+1. los elementos anteriores a la nueva cabecera siguen perteneciendo
+   al parque o sede que venía de la página anterior;
+
+2. únicamente los elementos posteriores a la nueva cabecera pertenecen
+   al nuevo parque o sede.
+
+EJEMPLOS REALES DE ESTE DOCUMENTO:
+
+- En la página manual 19, Ituren, Lesaka, Oiz, Saldias, Sunbilla,
+  Urdazubi/Urdax, Urroz, Zubieta y Zugarramurdi siguen perteneciendo
+  al PARQUE DE ORONOZ.
+
+  Solo DESPUÉS de la cabecera
+  "f) Parque Central de Pamplona/Iruña"
+  comienza el ámbito del Parque Central/Cordovilla.
+
+- En la página manual 13, Orbaizeta, Orbara,
+  Oroz-Betelu/Orotz-Betelu y Orreaga/Roncesvalles siguen perteneciendo
+  a la SEDE DE AURITZ/BURGUETE.
+
+  Solo DESPUÉS de la cabecera
+  "b) Parque de Estella-Lizarra"
+  comienzan los municipios de Estella-Lizarra.
 
 NO atribuyas automáticamente a una nueva página el último municipio,
 parque o sede de la página anterior si la continuidad del documento
@@ -2363,6 +2399,9 @@ no lo confirma.
 Usa el contexto de continuidad únicamente cuando la estructura del PDF
 demuestre que el listado continúa.
 
+Ante cualquier conflicto entre una cabecera anterior y una cabecera
+posterior de la misma página, manda siempre el ORDEN REAL DE LECTURA
+DEL PDF.
 ==================================================
 D) REGLA ESPECÍFICA DEL PARQUE CENTRAL
 ==================================================
@@ -5231,7 +5270,55 @@ const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
 console.log(
   `COVERAGE: ${totalPages} páginas divididas en ${chunks.length} bloques`
 );
+const normalizeChunkSourcePages=(items,chunk)=>{
+  const list=
+    Array.isArray(items)
+      ? items
+      : [];
 
+  const chunkSize=
+    chunk.endPage-chunk.startPage+1;
+
+  const returnedPages=
+    list
+      .map(item=>Number(item?.sourcePage))
+      .filter(page=>Number.isInteger(page));
+
+  const usesRelativePages=
+    chunk.startPage>1 &&
+    returnedPages.length>0 &&
+    returnedPages.every(
+      page=>page>=1 && page<=chunkSize
+    ) &&
+    (
+      chunk.startPage>chunkSize ||
+      returnedPages.some(
+        page=>page<chunk.startPage
+      )
+    );
+
+  if(!usesRelativePages){
+    return list;
+  }
+
+  return list.map(item=>{
+    const page=Number(item?.sourcePage);
+
+    if(
+      Number.isInteger(page) &&
+      page>=1 &&
+      page<=chunkSize
+    ){
+      return {
+        ...item,
+        sourcePage:
+          chunk.startPage+page-1
+      };
+    }
+
+    return item;
+  });
+};
 const allItems=[];
 
 for(const chunk of chunks){
@@ -5284,7 +5371,15 @@ Cuando indiques manualPage, utiliza exclusivamente el número de página impreso
     );
   }
 
-  allItems.push(...parsedChunk.items);
+  const normalizedChunkItems=
+  normalizeChunkSourcePages(
+    parsedChunk.items,
+    chunk
+  );
+
+allItems.push(
+  ...normalizedChunkItems
+);
 
   console.log(
     `COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${parsedChunk.items.length} elementos`
@@ -5374,7 +5469,15 @@ allItems.filter(item=>{
   const parsedAudit=JSON.parse(auditResponse.text);
 
   if(parsedAudit.items && Array.isArray(parsedAudit.items)){
-    auditItems.push(...parsedAudit.items);
+    const normalizedAuditItems=
+  normalizeChunkSourcePages(
+    parsedAudit.items,
+    chunk
+  );
+
+auditItems.push(
+  ...normalizedAuditItems
+);
 
     console.log(
       `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
