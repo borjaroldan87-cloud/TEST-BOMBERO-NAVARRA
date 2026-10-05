@@ -10395,10 +10395,21 @@ app.get("/api/graphics/inspect-latest", async (req,res)=>{
   }
 });
 async function startServer(){
+  console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  console.log("STARTUP 1/4 OK");
+
+  console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
+  console.log("STARTUP 2/4 OK");
+
+  console.log("STARTUP 3/4: loadStore");
   await loadStore();
+  console.log("STARTUP 3/4 OK");
+
+  console.log("STARTUP 4/4: loadExamStyleStore");
   await loadExamStyleStore();
+  console.log("STARTUP 4/4 OK");
 
   app.listen(process.env.PORT || 3000, ()=>{
     console.log("Test Bombero V2 listo");
