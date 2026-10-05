@@ -5296,9 +5296,42 @@ console.log(
 );
 console.log("COVERAGE AUDIT: iniciando segunda pasada para detectar omisiones");
 
+let auditChunks=chunks;
+
+if(coverageTopicNumber(topic.name)===21){
+  const fineAudit=
+    await splitPdfIntoChunks(pdfPath,2);
+
+  const denseStartPage=11;
+  const denseEndPage=30;
+
+  const coarseOutsideDenseArea=
+    chunks.filter(chunk =>
+      chunk.endPage < denseStartPage ||
+      chunk.startPage > denseEndPage
+    );
+
+  const fineDenseArea=
+    fineAudit.chunks.filter(chunk =>
+      chunk.startPage >= denseStartPage &&
+      chunk.endPage <= denseEndPage
+    );
+
+  auditChunks=[
+    ...coarseOutsideDenseArea,
+    ...fineDenseArea
+  ].sort(
+    (a,b)=>a.startPage-b.startPage
+  );
+
+  console.log(
+    `COVERAGE AUDIT TEMA 21: auditoría fina en páginas ${denseStartPage}-${denseEndPage}; ${auditChunks.length} bloques de auditoría`
+  );
+}
+
 const auditItems=[];
 
-for(const chunk of chunks){
+for(const chunk of auditChunks){
   const existingChunkItems=allItems.filter(item=>
     Number(item.sourcePage)>=chunk.startPage &&
     Number(item.sourcePage)<=chunk.endPage
