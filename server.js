@@ -2540,13 +2540,14 @@ REGISTRO -> MUNICIPIO -> PARQUE DE BOMBEROS
 
 debe quedar expresamente representada y ser preguntable.
 
-También son preguntables los valores de:
+Los valores de área/superficie, perímetro y número de fila
+deben conservarse por fidelidad documental e identificación
+del registro, pero NO constituyen por sí mismos objetivos
+prioritarios de pregunta en la generación automática.
 
-- área/superficie;
-- perímetro;
-- número de fila;
-- denominación exacta.
+La prioridad examinable es:
 
+REGISTRO -> MUNICIPIO -> PARQUE DE BOMBEROS.
 NO:
 
 - mezcles datos de filas consecutivas;
@@ -2579,7 +2580,13 @@ Conserva de forma vinculada y sin mezclar filas:
 La relación PARQUE SOLAR -> MUNICIPIO -> PARQUE DE BOMBEROS
 debe quedar representada expresamente.
 
-Los valores numéricos de potencia y año son también examinables.
+Promotor, potencia y año deben conservarse para mantener
+íntegra la información de la fila, pero NO deben convertirse
+por sí mismos en objetivos de pregunta automática.
+
+La prioridad examinable es:
+
+PARQUE SOLAR -> MUNICIPIO -> PARQUE DE BOMBEROS.
 
 NO mezcles columnas ni datos pertenecientes a instalaciones diferentes.
 `;
@@ -5335,8 +5342,11 @@ Extrae patrones útiles sobre:
    infraestructuras, ámbitos o elementos territoriales.
 3. Asociaciones entre dos o más datos.
 4. Forma de preguntar listas y conjuntos.
-5. Forma de preguntar cifras, longitudes, superficies,
-   altitudes, porcentajes u otros datos numéricos.
+5. Identifica QUÉ tipos concretos de datos numéricos pregunta realmente
+   el tribunal y cuáles NO aparecen como objeto de pregunta.
+   NO presupongas que superficie, perímetro, potencia, producción,
+   promotor, año de puesta en servicio u otros campos de tablas
+   sean examinables por el mero hecho de existir en el temario.
 6. Relaciones entre municipios, parques, infraestructuras,
    líneas, recorridos o ámbitos territoriales.
 7. Uso de preguntas CORRECTA, INCORRECTA, NO u otras
@@ -5423,7 +5433,7 @@ B) preguntas de interpretación cartográfica/orientación
 async function getCachedOfficialGeographyStyleReference(){
   const cached = await db.query(
     "SELECT value FROM app_state WHERE key=$1 LIMIT 1",
-    ["official_geography_style_reference"]
+    ["official_geography_style_reference_v2"]
   );
 
   if(cached.rows.length && cached.rows[0].value?.trim()){
@@ -5446,7 +5456,7 @@ async function getCachedOfficialGeographyStyleReference(){
     ON CONFLICT (key)
     DO UPDATE SET value=EXCLUDED.value
   `,[
-    "official_geography_style_reference",
+    "official_geography_style_reference_v2",
     styleReference
   ]);
 
@@ -7768,7 +7778,42 @@ for(let i = 0; i < selected.length; i++){
   );
 }
 
+/*
+GEOGRAFÍA T21-T27:
+las familias numéricas genéricas no deben forzar
+preguntas sobre metadatos de tablas.
+*/
+for(let index = 0; index < selected.length; index++){
+  const item = selected[index];
 
+  const topicNumber =
+    coverageTopicNumber(item.topic_name);
+
+  const isOperationalGeography =
+    Number.isInteger(topicNumber) &&
+    topicNumber >= 21 &&
+    topicNumber <= 27;
+
+  if(
+    isOperationalGeography &&
+    (
+      item.questionFamily === "2024_NUMERICA" ||
+      item.questionFamily === "CALCULO_FORMULACION"
+    )
+  ){
+    const geographyFamilies = [
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2026_RAZONAMIENTO",
+      "2024_TEXTO"
+    ];
+
+    item.questionFamily =
+      geographyFamilies[
+        index % geographyFamilies.length
+      ];
+  }
+}
 
   const usedIds = new Set();
 
@@ -7860,7 +7905,184 @@ for(let i = 0; i < selected.length; i++){
     target.distractorContext = result.rows;
   }
 }  
+function geographyExamQuestionPolicy(target){
+  const topicNumber=
+    coverageTopicNumber(target?.topic_name);
 
+  if(
+    !Number.isInteger(topicNumber) ||
+    topicNumber < 21 ||
+    topicNumber > 27
+  ){
+    return "";
+  }
+
+  const common = `
+- CRITERIO DE RELEVANCIA DE EXAMEN:
+  Los exámenes oficiales de Bomberos de Navarra utilizan estos temas
+  principalmente para evaluar conocimiento territorial y operativo.
+- Que un dato aparezca en una tabla NO significa que tenga la misma
+  relevancia como pregunta de oposición.
+- No conviertas metadatos incidentales de una tabla en el objeto de la pregunta.
+- Prioriza relaciones útiles para localizar una emergencia, determinar
+  el parque competente, reconocer una instalación o comprender un recorrido.
+- Carreteras, accesos, proximidades u orientación SOLO pueden preguntarse
+  cuando estén respaldados expresamente por la fuente factual disponible.
+- Nunca deduzcas una ruta o posición utilizando conocimiento externo.
+`;
+
+  if(topicNumber === 21){
+    return `
+${common}
+
+TEMA 21 — PARQUES, MUNICIPIOS Y CONCEJOS
+
+PRIORIDAD:
+1. municipio/localidad/concejo -> parque o sede;
+2. parque/sede -> ámbito territorial;
+3. pertenencia o exclusión territorial.
+
+NO conviertas automáticamente en pregunta:
+- estadísticas de intervenciones;
+- cifras de plantilla;
+- cantidades administrativas;
+- otros datos numéricos secundarios
+cuando el mismo registro permite evaluar la relación territorial.
+`;
+  }
+
+  if(topicNumber === 22){
+    return `
+${common}
+
+TEMA 22 — POLÍGONOS Y EMPLAZAMIENTOS INDUSTRIALES
+
+PREGUNTABLE:
+1. polígono/emplazamiento -> municipio;
+2. polígono/emplazamiento -> parque de bomberos;
+3. combinación polígono -> municipio -> parque;
+4. pertenencia/exclusión entre instalaciones y municipios;
+5. acceso por carretera SOLO si la fuente factual lo expresa.
+
+PROHIBIDO COMO OBJETO DE PREGUNTA:
+- superficie;
+- área;
+- perímetro;
+- número de fila de la tabla.
+
+Esos campos pueden conservarse en sourceEvidence para identificar
+correctamente el registro, pero NO deben aparecer como dato solicitado
+ni como eje de los distractores.
+`;
+  }
+
+  if(topicNumber === 23){
+    return `
+${common}
+
+TEMA 23 — PARQUES SOLARES
+
+PREGUNTABLE:
+1. instalación solar -> municipio;
+2. instalación solar -> parque de bomberos;
+3. combinación instalación -> municipio -> parque;
+4. pertenencia/exclusión entre instalaciones y ámbitos territoriales;
+5. acceso SOLO si está expresamente respaldado por la fuente.
+
+PROHIBIDO COMO OBJETO DE PREGUNTA:
+- promotor;
+- potencia instalada o nominal;
+- año de puesta en servicio.
+
+Estos datos se conservan por fidelidad documental,
+pero NO constituyen objetivos normales de examen.
+`;
+  }
+
+  if(topicNumber === 24){
+    return `
+${common}
+
+TEMA 24 — PARQUES EÓLICOS
+
+PREGUNTABLE:
+1. parque eólico -> municipio o municipios;
+2. parque eólico -> parque de bomberos;
+3. combinación instalación -> municipio -> parque;
+4. acceso por carretera SOLO cuando la fuente lo respalde expresamente.
+
+NO preguntes metadatos técnicos o empresariales tales como:
+- promotor;
+- potencia;
+- producción;
+- fecha de puesta en servicio;
+- número de aerogeneradores,
+salvo que una futura evidencia oficial demuestre expresamente
+que el tribunal utiliza ese campo.
+`;
+  }
+
+  if(topicNumber === 25){
+    return `
+${common}
+
+TEMA 25 — HELIPUERTOS Y HELISUPERFICIES
+
+PREGUNTABLE:
+- instalación -> municipio;
+- tipo o uso operativo;
+- estado cuando sea relevante;
+- identificación de una instalación.
+
+No preguntes cuál es la instalación "más cercana"
+si esa proximidad exige una deducción cartográfica no disponible.
+
+No conviertas coordenadas, dimensiones, códigos internos
+o datos administrativos en preguntas.
+`;
+  }
+
+  if(topicNumber === 26){
+    return `
+${common}
+
+TEMA 26 — RED FERROVIARIA
+
+PRIORIDAD:
+1. estación/punto -> parque de bomberos;
+2. existencia o identificación de estación/punto;
+3. estación -> línea/tramo;
+4. estación -> municipio;
+5. relaciones generales línea -> tramo -> municipios.
+
+NO preguntes como objetivo principal:
+- dirección postal exacta;
+- longitud;
+- número de registro.
+
+Estos datos pueden conservarse como apoyo documental.
+`;
+  }
+
+  if(topicNumber === 27){
+    return `
+${common}
+
+TEMA 27 — CAMINO DE SANTIAGO
+
+PREGUNTABLE:
+- pertenencia de un municipio al recorrido;
+- orden Norte-Sur cuando figure expresamente;
+- orden Este-Oeste cuando figure expresamente;
+- entrada, paso y unión de recorridos cuando estén escritos en la fuente.
+
+Las secuencias textuales explícitas SÍ son preguntables.
+No deduzcas orientación ni recorrido a partir de conocimiento cartográfico externo.
+`;
+  }
+
+  return "";
+}
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -7903,6 +8125,9 @@ OBJETIVO ${index+1}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
+
+${geographyExamQuestionPolicy(item)}
+
 ${Array.isArray(item.distractorContext) && item.distractorContext.length ? `
 - BANCO FACTUAL CERCANO PARA CONSTRUIR DISTRACTORES:
 ${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${contextItem.concept} | Evidencia: ${contextItem.source_evidence}`).join("\n")}
@@ -9280,7 +9505,74 @@ for(let i=0;i<questions.length;i++){
   
 return normalizedResults;
 }
+function geographyForbiddenQuestionIssue(target,question){
+  const topicNumber=
+    coverageTopicNumber(target?.topic_name);
 
+  const rules={
+    22:[
+      /\bsuperficie\b/,
+      /\bperimetro\b/,
+      /\barea\s+(?:total|exacta|registrada|del|de la)\b/,
+      /\bm2\b/,
+      /\bmetros?\s+cuadrados?\b/,
+      /\bnumero\s+de\s+fila\b/,
+      /\bfila\s+\d+\b/
+    ],
+    23:[
+      /\bpromotor(?:a)?\b/,
+      /\bpotencia\b/,
+      /\bmegavatios?\b/,
+      /\bkilovatios?\b/,
+      /\bmw\b/,
+      /\bkw\b/,
+      /\b(?:puesta|entrada|entro)\s+en\s+servicio\b/,
+      /\bano\s+(?:de\s+)?(?:puesta|entrada)\s+en\s+servicio\b/
+    ],
+    24:[
+      /\bpromotor(?:a)?\b/,
+      /\bpotencia\b/,
+      /\bproduccion\b/,
+      /\bmegavatios?\b/,
+      /\bkilovatios?\b/,
+      /\bmw\b/,
+      /\bkw\b/,
+      /\b(?:puesta|entrada|entro)\s+en\s+servicio\b/,
+      /\bnumero\s+de\s+aerogeneradores\b/,
+      /\bcuantos?\s+aerogeneradores\b/
+    ]
+  };
+
+  const forbidden=
+    rules[topicNumber];
+
+  if(!forbidden){
+    return null;
+  }
+
+  const visibleText=[
+    question?.stem,
+    ...(Array.isArray(question?.options)
+      ? question.options
+      : []),
+    question?.explanation
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .replace(/²/g,"2")
+    .toLowerCase();
+
+  if(forbidden.some(pattern=>pattern.test(visibleText))){
+    return (
+      `RELEVANCIA GEOGRÁFICA: la pregunta del Tema ${topicNumber} ` +
+      `contiene datos expresamente prohibidos para esta oposición.`
+    );
+  }
+
+  return null;
+}
 async function validateGeneratedQuestions(ai,questions){
   const validationPrompt=`
 Eres un validador estricto de preguntas de oposición.
@@ -10510,7 +10802,18 @@ const allowedTopicIds =
 
 if(testType === "normal"){
   for(let i = 0; i < targets.length; i++){
+    const topicNumber =
+      coverageTopicNumber(
+        targets[i]?.topic_name
+      );
 
+    if(
+      Number.isInteger(topicNumber) &&
+      topicNumber >= 21 &&
+      topicNumber <= 27
+    ){
+      continue;
+    }
     const reusable =
       await getReusableQuestionForTarget(
         targets[i],
@@ -10806,7 +11109,22 @@ let factualValidation =
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
+  const geographyRelevanceIssue =
+    geographyForbiddenQuestionIssue(
+      target,
+      question
+    );
 
+  if(geographyRelevanceIssue){
+    factualValidation[i] = {
+      ...factualValidation[i],
+      valid:false,
+      issues:[
+        ...(factualValidation[i].issues || []),
+        geographyRelevanceIssue
+      ]
+    };
+  }
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
@@ -10870,7 +11188,19 @@ if(invalidQuestions.length > 0){
     const validationResult = replacementValidation[i];
     const targetForValidation =
       generationTargets[originalIndex];
+    const geographyRelevanceIssue =
+      geographyForbiddenQuestionIssue(
+        targetForValidation,
+        regenerated.questions[i]
+      );
 
+    if(geographyRelevanceIssue){
+      validationResult.valid = false;
+      validationResult.issues = [
+        ...(validationResult.issues || []),
+        geographyRelevanceIssue
+      ];
+    }
     if(
       targetForValidation?.failed_difficulty === "muy alta" &&
       regenerated.questions[i]?.difficulty !== "muy alta"
