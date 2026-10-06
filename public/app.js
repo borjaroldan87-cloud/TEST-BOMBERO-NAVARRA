@@ -356,7 +356,8 @@ const j=await api("/api/generate",{
     mode:$("mode").value,
     testType:
       $("testType")?.value || "normal",
-
+examMode:
+  $("examMode")?.value || "training",
     selectedBlocks:
       allScope
         ? []
@@ -962,7 +963,55 @@ const selectedTopicIds=new Set();
 
 let statsFocusTopicId=null;
 let currentTestLabel="Todo el temario";
+function syncExamMode(){
+  const simulation =
+    $("examMode")?.value === "simulation";
 
+  const testType=
+    $("testType");
+
+  const generateButton=
+    $("generate");
+
+  const kicker=
+    document.querySelector(
+      ".panel-kicker"
+    );
+
+  if(simulation){
+
+    if(testType){
+      testType.value="normal";
+      testType.disabled=true;
+    }
+
+    if(generateButton){
+      generateButton.textContent=
+        "INICIAR SIMULACRO";
+    }
+
+    if(kicker){
+      kicker.textContent=
+        "SIMULACRO";
+    }
+
+  }else{
+
+    if(testType){
+      testType.disabled=false;
+    }
+
+    if(generateButton){
+      generateButton.textContent=
+        "GENERAR TEST";
+    }
+
+    if(kicker){
+      kicker.textContent=
+        "ENTRENAMIENTO";
+    }
+  }
+}
 const BLOCK_META={
   legislacion:{
     label:"Legislación",
@@ -1810,4 +1859,5 @@ async function ingestOfficialExams(){
 }
 status();
 loadStatistics();
+syncExamMode();
 
