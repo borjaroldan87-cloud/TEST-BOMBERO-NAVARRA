@@ -6585,6 +6585,15 @@ app.get("/api/coverage-audit", async(req,res)=>{
   }
 });
 function buildQuestionFamilyPlan(count){
+  const allowedCounts =
+    new Set([5,10,20,30,40,45,60,75]);
+
+  if(!allowedCounts.has(Number(count))){
+    throw new Error(
+      `Número de preguntas no soportado: ${count}`
+    );
+  }
+
   const basePlan = [
     "2026_CORRECTA",
     "2026_CORRECTA",
@@ -6598,26 +6607,15 @@ function buildQuestionFamilyPlan(count){
     "GRAFICA"
   ];
 
-  const plansByCount = {
-    5: [
-      "2026_CORRECTA",
-      "2026_INCORRECTA",
-      "2026_RAZONAMIENTO",
-      "2024_NUMERICA",
-      "GRAFICA"
-    ],
-    10: basePlan,
-    20: [...basePlan, ...basePlan],
-    40: [...basePlan, ...basePlan, ...basePlan, ...basePlan]
-  };
+  const plan=[];
 
-  const plan = plansByCount[count];
-
-  if(!plan){
-    throw new Error(`Número de preguntas no soportado para planificación de familias: ${count}`);
+  while(plan.length < count){
+    plan.push(...basePlan);
   }
 
-  return [...plan].sort(() => Math.random() - 0.5);
+  return plan
+    .slice(0,count)
+    .sort(()=>Math.random()-0.5);
 }
 async function selectSemanticGraphicPair(
   ai,
@@ -6866,7 +6864,10 @@ async function resolveGenerationTopicScope(body = {}){
 
   return allowedTopicIds;
 }
-async function getFailedCoverageTargets(count){
+async function getFailedCoverageTargets(
+  count,
+  allowedTopicIds = null
+){
   const result = await db.query(
     `
     WITH latest_answer AS (
@@ -6923,14 +6924,24 @@ qb.options AS failed_options
 JOIN question_bank qb
   ON qb.id = la.question_id
 
-WHERE la.is_correct = FALSE
+WHERE
+  la.is_correct = FALSE
+  AND (
+    $2::int[] IS NULL
+    OR ci.topic_id = ANY($2::int[])
+  )
 
-    ORDER BY
+ORDER BY
       la.answered_at DESC
 
     LIMIT $1
     `,
-    [Number(count)]
+  [
+  Number(count),
+  Array.isArray(allowedTopicIds)
+    ? allowedTopicIds
+    : null
+]
   );
 
   return result.rows.map(row=>({
@@ -6953,7 +6964,10 @@ questionFamily:
   }
 }));
 }
-async function getAdaptiveCoverageCandidates(limit = 120){
+async function getAdaptiveCoverageCandidates(
+  limit = 120,
+  allowedTopicIds = null
+){
   const result = await db.query(
     `
     SELECT
@@ -7018,10 +7032,33 @@ THEN 2
 
     FROM coverage_items ci
 
-    JOIN topics t
-      ON t.id = ci.topic_id
+JOIN topics t
+  ON t.id = ci.topic_id
 
-    LEFT JOIN coverage_review_state crs
+LEFT JOIN coverage_review_state crs
+  ON crs.coverage_item_id = ci.id
+
+LEFT JOIN LATERAL (
+  SELECT
+    tsq.is_correct,
+    tsq.answered_at
+  FROM test_session_questions tsq
+  WHERE
+    tsq.coverage_item_id = ci.id
+    AND tsq.answered_at IS NOT NULL
+    AND tsq.is_blank = FALSE
+  ORDER BY
+    tsq.answered_at DESC,
+    tsq.id DESC
+  LIMIT 1
+) last_nonblank_answer
+  ON TRUE
+
+WHERE
+  (
+    $2::int[] IS NULL
+    OR ci.topic_id = ANY($2::int[])
+  )
       ON crs.coverage_item_id = ci.id
 LEFT JOIN LATERAL (
   SELECT
@@ -7054,7 +7091,12 @@ LEFT JOIN LATERAL (
 
     LIMIT $1
     `,
-    [Number(limit)]
+    [
+  Number(limit),
+  Array.isArray(allowedTopicIds)
+    ? allowedTopicIds
+    : null
+]
   );
 
   return result.rows;
@@ -7277,7 +7319,11 @@ if(target?.failed_difficulty === "muy alta"){
 
   return "alta";
 }
-async function getCoverageTargetsForGeneration(count, ai){
+async function getCoverageTargetsForGeneration(
+  count,
+  ai,
+  allowedTopicIds = null
+){
   /*
     SELECCIÓN DE OBJETIVOS
 
@@ -7292,7 +7338,8 @@ async function getCoverageTargetsForGeneration(count, ai){
 
 const adaptiveCandidates =
   await getAdaptiveCoverageCandidates(
-    Math.max(count * 12, 120)
+    Math.max(count * 12,120),
+    allowedTopicIds
   );
 
 if(adaptiveCandidates.length < count){
@@ -10356,7 +10403,19 @@ app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
-    const count=Math.min(Math.max(Number(req.body.count)||10,5),40);
+    const requestedCount =
+  Number(req.body.count) || 10;
+
+const allowedCounts =
+  new Set([5,10,20,30,40,45,60,75]);
+
+if(!allowedCounts.has(requestedCount)){
+  throw new Error(
+    "Número de preguntas no válido."
+  );
+}
+
+const count=requestedCount;
 
   const difficulty = "alta";
 
@@ -10371,11 +10430,19 @@ const testType=
     : "normal";
 
 const ai=aiClient();
-
+const allowedTopicIds =
+  await resolveGenerationTopicScope(req.body);
 const targets=
   testType==="failed"
-    ? await getFailedCoverageTargets(count)
-    : await getCoverageTargetsForGeneration(count, ai);
+    ? await getFailedCoverageTargets(
+        count,
+        allowedTopicIds
+      )
+    : await getCoverageTargetsForGeneration(
+        count,
+        ai,
+        allowedTopicIds
+      );
     if(targets.length===0){
   throw new Error(
     testType==="failed"
