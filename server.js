@@ -10456,9 +10456,6 @@ en los exámenes oficiales 2024/2026 siempre que puedan construirse
     : ""
 );
 
---- FIN DE REFERENCIA DE ESTILO ---
-`;
-
     const response=await ai.models.generateContent({
       model:"gemini-3.5-flash-lite",
       contents:prompt,
