@@ -462,6 +462,456 @@ hr{
     padding:10px 12px;
   }
 }
+ /* =========================================
+   DASHBOARD PRINCIPAL
+========================================= */
+
+body{
+  background:
+    linear-gradient(
+      180deg,
+      #eef2f7 0,
+      #f8fafc 330px,
+      #eef2f7 100%
+    );
+}
+
+.w{
+  max-width:1100px;
+  padding:22px;
+}
+
+.app-hero{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:24px;
+  margin:8px 0 18px;
+  padding:28px 30px;
+  border-radius:18px;
+  background:
+    linear-gradient(
+      135deg,
+      #0f172a,
+      #1e293b
+    );
+  color:#fff;
+  box-shadow:
+    0 14px 40px rgba(15,23,42,.16);
+}
+
+.app-eyebrow,
+.panel-kicker{
+  display:block;
+  margin-bottom:6px;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:1.4px;
+}
+
+.app-eyebrow{
+  color:#94a3b8;
+}
+
+.app-hero h1{
+  margin:0;
+  font-size:30px;
+  line-height:1.05;
+}
+
+.app-hero p{
+  margin:8px 0 0;
+  color:#cbd5e1;
+  font-size:14px;
+}
+
+.system-status{
+  flex:none;
+  padding:8px 12px;
+  border:1px solid rgba(255,255,255,.2);
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  font-size:12px;
+  font-weight:700;
+}
+
+.dashboard-shell{
+  padding:0;
+  border:0;
+  background:transparent;
+}
+
+.study-panel,
+.progress-panel{
+  margin-bottom:18px;
+  padding:24px;
+  border:1px solid #e2e8f0;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:
+    0 8px 28px rgba(15,23,42,.06);
+}
+
+.panel-heading h2,
+.stats-header h2{
+  margin:0;
+  font-size:22px;
+}
+
+.panel-heading p{
+  margin:5px 0 0;
+  color:#64748b;
+  font-size:13px;
+}
+
+.panel-kicker{
+  color:#64748b;
+}
+
+.config-grid{
+  display:grid;
+  grid-template-columns:
+    repeat(4,minmax(0,1fr));
+  gap:12px;
+  margin-top:22px;
+}
+
+.config-grid label{
+  color:#334155;
+  font-size:12px;
+}
+
+.config-grid select{
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  padding:11px 12px;
+  background:#f8fafc;
+}
+
+.content-panel{
+  margin-top:20px;
+  padding:18px;
+  border:1px solid #dbe3ec;
+  border-radius:14px;
+  background:#f8fafc;
+}
+
+.content-heading{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:12px;
+}
+
+.content-heading strong{
+  display:block;
+  font-size:15px;
+}
+
+.content-heading span{
+  display:block;
+  margin-top:2px;
+  color:#64748b;
+  font-size:12px;
+}
+
+.all-content-option{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:13px 14px;
+  border:1px solid #cbd5e1;
+  border-radius:11px;
+  background:#fff;
+  cursor:pointer;
+}
+
+.all-content-option input,
+.block-check input,
+.topic-check input{
+  width:18px;
+  height:18px;
+  accent-color:#1d4ed8;
+}
+
+.all-content-option span{
+  display:flex;
+  flex-direction:column;
+}
+
+.all-content-option small{
+  margin-top:2px;
+  color:#64748b;
+  font-weight:400;
+}
+
+.block-selector{
+  display:grid;
+  grid-template-columns:
+    repeat(3,minmax(0,1fr));
+  gap:10px;
+  margin-top:12px;
+}
+
+.block-card{
+  overflow:hidden;
+  border:1px solid #dbe3ec;
+  border-radius:11px;
+  background:#fff;
+}
+
+.block-card summary{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  padding:12px;
+  cursor:pointer;
+  list-style:none;
+}
+
+.block-card summary::-webkit-details-marker{
+  display:none;
+}
+
+.block-summary-text{
+  flex:1;
+}
+
+.block-summary-text strong{
+  display:block;
+  font-size:13px;
+}
+
+.block-summary-text small{
+  color:#64748b;
+  font-size:11px;
+  font-weight:400;
+}
+
+.topic-check-list{
+  max-height:310px;
+  overflow:auto;
+  padding:
+    4px 10px 10px;
+  border-top:1px solid #eef2f7;
+}
+
+.topic-check{
+  display:flex;
+  gap:9px;
+  align-items:flex-start;
+  padding:8px 4px;
+  font-size:12px;
+  font-weight:500;
+  cursor:pointer;
+}
+
+.selection-summary{
+  margin-top:12px;
+  color:#475569;
+  font-size:12px;
+  font-weight:700;
+}
+
+.generate-button{
+  width:100%;
+  margin-top:18px;
+  padding:15px 20px;
+  border:0;
+  border-radius:12px;
+  background:
+    linear-gradient(
+      135deg,
+      #1d4ed8,
+      #2563eb
+    );
+  color:#fff;
+  font-size:14px;
+  font-weight:800;
+  letter-spacing:.3px;
+  box-shadow:
+    0 8px 20px rgba(37,99,235,.2);
+}
+
+.stats-header{
+  margin-bottom:18px;
+}
+
+.refresh-button{
+  padding:8px 11px;
+  border:1px solid #cbd5e1;
+  border-radius:9px;
+  background:#fff;
+  color:#334155;
+  font-size:11px;
+  font-weight:800;
+}
+
+.dashboard-stats{
+  display:grid;
+  grid-template-columns:
+    repeat(4,minmax(0,1fr));
+  gap:10px;
+}
+
+.dashboard-stat{
+  min-height:116px;
+  padding:15px;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#f8fafc;
+}
+
+.dashboard-stat>span{
+  display:block;
+  color:#64748b;
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:.5px;
+}
+
+.dashboard-stat>strong{
+  display:block;
+  margin-top:7px;
+  font-size:25px;
+  color:#0f172a;
+}
+
+.dashboard-stat small{
+  display:block;
+  margin-top:3px;
+  color:#64748b;
+  font-size:11px;
+}
+
+.modern-progress{
+  height:6px;
+  margin-top:12px;
+  overflow:hidden;
+  border-radius:999px;
+  background:#e2e8f0;
+}
+
+.modern-progress>div{
+  width:0;
+  height:100%;
+  border-radius:999px;
+  background:#2563eb;
+  transition:width .25s ease;
+}
+
+.topic-stats-container{
+  margin-top:18px;
+}
+
+.stats-block{
+  margin-top:10px;
+  border:1px solid #e2e8f0;
+  border-radius:12px;
+  background:#fff;
+}
+
+.stats-block>summary{
+  padding:13px 15px;
+  cursor:pointer;
+  font-weight:800;
+}
+
+.topic-card-grid{
+  display:grid;
+  grid-template-columns:
+    repeat(2,minmax(0,1fr));
+  gap:9px;
+  padding:0 12px 12px;
+}
+
+.topic-stat-card{
+  width:100%;
+  padding:12px;
+  border:1px solid #e2e8f0;
+  border-radius:10px;
+  background:#f8fafc;
+  text-align:left;
+}
+
+.topic-stat-card strong{
+  display:block;
+  margin-bottom:6px;
+  color:#0f172a;
+  font-size:12px;
+}
+
+.topic-stat-meta{
+  display:flex;
+  justify-content:space-between;
+  gap:8px;
+  color:#64748b;
+  font-size:11px;
+}
+
+.topic-detail-panel{
+  margin-top:18px;
+  border-top:1px solid #e2e8f0;
+}
+
+.topic-detail-panel>summary{
+  padding:16px 0 8px;
+  cursor:pointer;
+  color:#0f172a;
+  font-weight:800;
+}
+
+.admin-panel{
+  margin-bottom:28px;
+  border:1px solid #dbe3ec;
+  border-radius:14px;
+  background:#fff;
+}
+
+.admin-panel>summary{
+  padding:16px 20px;
+  cursor:pointer;
+  color:#475569;
+  font-size:13px;
+  font-weight:800;
+}
+
+.admin-content{
+  display:grid;
+  gap:14px;
+  padding:0 20px 20px;
+}
+
+@media(max-width:800px){
+  .config-grid,
+  .dashboard-stats{
+    grid-template-columns:
+      repeat(2,minmax(0,1fr));
+  }
+
+  .block-selector{
+    grid-template-columns:1fr;
+  }
+}
+
+@media(max-width:520px){
+  .app-hero{
+    align-items:flex-start;
+    flex-direction:column;
+    padding:22px;
+  }
+
+  .config-grid,
+  .dashboard-stats,
+  .topic-card-grid{
+    grid-template-columns:1fr;
+  }
+
+  .study-panel,
+  .progress-panel{
+    padding:17px;
+  }
+} 
 </style>
 </head>
 
@@ -469,200 +919,313 @@ hr{
 
 <div class="w">
 
-<h1 class="app-title">Test Bombero Navarra</h1>
+<header class="app-hero">
+  <div>
+    <div class="app-eyebrow">
+      PREPARACIÓN BOMBEROS DE NAVARRA
+    </div>
 
-<div class="c" id="setup">
+    <h1>Test Bombero Navarra</h1>
 
-  <h2 class="setup-title">Preparar test</h2>
+    <p>
+      Entrenamiento inteligente, seguimiento de progreso
+      y simulación de examen.
+    </p>
+  </div>
 
-  <p>
-    <span class="pill" id="status">Comprobando…</span>
-  </p>
+  <span
+    class="system-status"
+    id="status">
+    Comprobando…
+  </span>
+</header>
 
-  <p>
-    <b>Benchmark actual:</b> Apeo y poda de arbolado
-  </p>
-<div class="stats-panel" id="statsPanel">
+<div class="c dashboard-shell" id="setup">
 
-  <div class="stats-header">
-    <strong>Progreso del tema</strong>
+  <section class="study-panel">
+
+    <div class="panel-heading">
+      <div>
+        <span class="panel-kicker">
+          ENTRENAMIENTO
+        </span>
+
+        <h2>Preparar test</h2>
+
+        <p>
+          Elige exactamente qué quieres trabajar.
+        </p>
+      </div>
+    </div>
+
+    <div class="config-grid">
+
+      <label>
+        Tipo de test
+        <select id="testType">
+          <option value="normal" selected>
+            Entrenamiento normal
+          </option>
+          <option value="failed">
+            Solo preguntas falladas
+          </option>
+        </select>
+      </label>
+
+      <label>
+        Preguntas
+        <select id="count">
+          <option>5</option>
+          <option selected>10</option>
+          <option>20</option>
+          <option>30</option>
+          <option>45</option>
+          <option>60</option>
+          <option>75</option>
+        </select>
+      </label>
+
+      <label>
+        Dificultad
+        <select id="difficulty">
+          <option value="media">
+            Media
+          </option>
+          <option value="alta" selected>
+            Alta
+          </option>
+        </select>
+      </label>
+
+      <label>
+        Modo
+        <select id="mode">
+          <option value="mixto">
+            Mixto
+          </option>
+          <option value="literal">
+            Literal
+          </option>
+          <option value="calculos">
+            Cálculos
+          </option>
+        </select>
+      </label>
+
+    </div>
+
+    <div class="content-panel">
+
+      <div class="content-heading">
+        <div>
+          <strong>Contenido del test</strong>
+          <span>
+            Selecciona bloques completos o temas concretos.
+          </span>
+        </div>
+      </div>
+
+      <label class="all-content-option">
+        <input
+          type="checkbox"
+          id="scopeAll"
+          checked
+          onchange="setAllScope(this.checked)">
+        <span>
+          <strong>Todo el temario</strong>
+          <small>
+            Legislación · Geografía · Específico
+          </small>
+        </span>
+      </label>
+
+      <div
+        class="block-selector"
+        id="topicSelector">
+      </div>
+
+      <div
+        class="selection-summary"
+        id="selectionSummary">
+        Todo el temario
+      </div>
+
+    </div>
 
     <button
-      class="secondary stats-refresh"
-      onclick="loadStatistics()">
-      ACTUALIZAR
+      class="generate-button"
+      id="generate"
+      onclick="generate()">
+      GENERAR TEST
     </button>
-  </div>
 
-  <div class="stats-grid">
+  </section>
 
-    <div class="stat-card">
-      <span class="stat-label">Cobertura</span>
+  <section class="progress-panel">
 
-      <strong
-        class="stat-value"
-        id="coverageValue">
-        -- %
-      </strong>
+    <div class="stats-header">
 
-      <span
-        class="stat-detail"
-        id="coverageDetail">
-        -- de -- elementos trabajados
-      </span>
+      <div>
+        <span class="panel-kicker">
+          PROGRESO
+        </span>
 
-      <div class="progress-track">
-        <div
-          class="progress-fill"
-          id="coverageBar">
-        </div>
+        <h2 id="statsScopeTitle">
+          Todo el temario
+        </h2>
       </div>
+
+      <button
+        class="refresh-button"
+        onclick="refreshStudyData()">
+        ACTUALIZAR
+      </button>
+
     </div>
 
-    <div class="stat-card">
-      <span class="stat-label">Rendimiento</span>
+    <div class="dashboard-stats">
 
-      <strong
-        class="stat-value"
-        id="performanceValue">
-        -- %
-      </strong>
+      <div class="dashboard-stat">
+        <span>Cobertura</span>
 
-      <span
-        class="stat-detail"
-        id="performanceDetail">
-        Sin respuestas registradas
-      </span>
+        <strong id="coverageValue">
+          -- %
+        </strong>
 
-      <div class="progress-track">
-        <div
-          class="progress-fill"
-          id="performanceBar">
+        <small id="coverageDetail">
+          -- de -- elementos
+        </small>
+
+        <div class="modern-progress">
+          <div id="coverageBar"></div>
         </div>
       </div>
+
+      <div class="dashboard-stat">
+        <span>Rendimiento</span>
+
+        <strong id="performanceValue">
+          -- %
+        </strong>
+
+        <small id="performanceDetail">
+          Sin respuestas
+        </small>
+
+        <div class="modern-progress">
+          <div id="performanceBar"></div>
+        </div>
+      </div>
+
+      <div class="dashboard-stat">
+        <span>Pendientes</span>
+
+        <strong id="pendingValue">
+          --
+        </strong>
+
+        <small>
+          conocimientos sin trabajar
+        </small>
+      </div>
+
+      <div class="dashboard-stat">
+        <span>Respuestas</span>
+
+        <strong id="answerCount">
+          --
+        </strong>
+
+        <small id="answerBreakdown">
+          -- aciertos · -- errores · -- blancos
+        </small>
+      </div>
+
     </div>
 
-  </div>
-  <div class="performance-overview">
-  <div class="section-stats-title">
-    Rendimiento general por temas
-  </div>
+    <div
+      class="topic-stats-container"
+      id="topicStatsGrid">
+    </div>
 
-  <div id="topicPerformanceBars"></div>
-</div>
-<details class="section-details">
-  <summary>
-    VER DESGLOSE COMPLETO DEL TEMA
-  </summary>
+    <details
+      class="topic-detail-panel"
+      id="topicDetailPanel">
 
-  <div
-    class="section-stats"
-    id="sectionStats">
-  </div>
-</details>
-</div>
-  <div class="technical">
-  <p><b>Carga masiva de temario</b></p>
+      <summary>
+        <span id="topicDetailTitle">
+          Desglose del tema
+        </span>
+      </summary>
 
-  <label>
-    Bloque
-    <select id="topicUploadBlock">
-      <option value="legislacion">Legislación</option>
-      <option value="geografia">Geografía</option>
-      <option value="especifico" selected>Específico</option>
-    </select>
-  </label>
+      <div
+        class="section-stats"
+        id="sectionStats">
+      </div>
 
-  <br><br>
+    </details>
 
-  <label>
-    PDFs del bloque
-    <input
-      id="topicUploadFiles"
-      type="file"
-      accept=".pdf,application/pdf"
-      multiple
-    >
-  </label>
+  </section>
 
-  <br><br>
+  <details class="admin-panel">
 
-  <button
-    class="secondary"
-    id="uploadTopics"
-    onclick="uploadTopicBatch()">
-    CARGAR Y ANALIZAR TEMAS
-  </button>
+    <summary>
+      Administración y gestión del temario
+    </summary>
 
-  <p
-    class="muted"
-    id="uploadTopicsStatus"
-    style="margin-top:10px">
-    Selecciona todos los PDF de un mismo bloque.
-  </p>
+    <div class="admin-content">
 
-  <hr>
+      <label>
+        Bloque
+        <select id="topicUploadBlock">
+          <option value="legislacion">
+            Legislación
+          </option>
+          <option value="geografia">
+            Geografía
+          </option>
+          <option value="especifico" selected>
+            Específico
+          </option>
+        </select>
+      </label>
 
-  <button
-    class="secondary"
-    onclick="ingestOfficialExams()">
-    INDEXAR EXÁMENES OFICIALES
-  </button>
-</div>
+      <label>
+        PDFs del bloque
+        <input
+          id="topicUploadFiles"
+          type="file"
+          accept=".pdf,application/pdf"
+          multiple>
+      </label>
 
-  <div class="row">
+      <button
+        class="secondary"
+        id="uploadTopics"
+        onclick="uploadTopicBatch()">
+        CARGAR Y ANALIZAR TEMAS
+      </button>
 
-  <label>
-    Tipo de test
-    <select id="testType">
-      <option value="normal" selected>Normal</option>
-      <option value="failed">Solo preguntas falladas</option>
-    </select>
-  </label>
+      <p
+        class="muted"
+        id="uploadTopicsStatus">
+        Selecciona todos los PDF de un mismo bloque.
+      </p>
 
-  <label>
-    Preguntas
-    <select id="count">
-      <option>5</option>
-      <option selected>10</option>
-      <option>20</option>
-      <option>30</option>
-    </select>
-  </label>
+      <hr>
 
-  <label>
-    Dificultad
-    <select id="difficulty">
-      <option value="media">Media</option>
-      <option value="alta" selected>Alta</option>
-    </select>
-  </label>
+      <button
+        class="secondary"
+        onclick="ingestOfficialExams()">
+        INDEXAR EXÁMENES OFICIALES
+      </button>
 
-  <label>
-    Modo
-    <select id="mode">
-      <option value="mixto">Mixto</option>
-      <option value="literal">Literal</option>
-      <option value="calculos">Cálculos</option>
-    </select>
-  </label>
+    </div>
+
+  </details>
 
 </div>
-
-  <br>
-
-  <button
-    class="primary"
-    id="generate"
-    onclick="generate()">
-    GENERAR TEST
-  </button>
-
-  <p class="muted" style="margin-top:18px">
-    Las preguntas se generan a partir del temario indexado.
-  </p>
-
-</div>
+    
 
 <div id="quiz" class="hidden"></div>
 
