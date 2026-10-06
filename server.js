@@ -10331,16 +10331,34 @@ let finalQuestions = [];
 if(newGenerationCount > 0){
 const officialStyle =
   await getCachedOfficialExamStyleReference();
-  prompt =
-    generationPrompt(
-        newGenerationCount,
-        difficulty,
-        mode
-      ) +
-      coverageTargetsPrompt(
-        generationTargets
-      ) +
-      `
+
+const hasGeographyTargets =
+  generationTargets.some(target=>{
+    const topicNumber =
+      coverageTopicNumber(target.topic_name);
+
+    return (
+      Number.isInteger(topicNumber) &&
+      topicNumber >= 21 &&
+      topicNumber <= 27
+    );
+  });
+
+const geographyStyle =
+  hasGeographyTargets
+    ? await getCachedOfficialGeographyStyleReference()
+    : "";
+
+prompt =
+  generationPrompt(
+      newGenerationCount,
+      difficulty,
+      mode
+    ) +
+    coverageTargetsPrompt(
+      generationTargets
+    ) +
+    `
 
 ===============================================
 REFERENCIA DINÁMICA DE ESTILO — EXÁMENES OFICIALES
@@ -10367,6 +10385,76 @@ Da predominio al estilo 2026, conservando los rasgos útiles del modelo 2024.
 --- REFERENCIA DE ESTILO ---
 
 ${officialStyle}
+
+--- FIN DE REFERENCIA DE ESTILO ---
+` +
+(
+  hasGeographyTargets
+    ? `
+
+==================================================
+ESTILO ESPECÍFICO — GEOGRAFÍA 2024/2026
+==================================================
+
+La siguiente referencia procede exclusivamente del análisis
+de las preguntas de GEOGRAFÍA de los exámenes oficiales
+de Bomberos de Navarra 2024 y 2026.
+
+APLICACIÓN:
+
+- Aplícala EXCLUSIVAMENTE a los objetivos de los temas 21 a 27.
+- Para objetivos de otros bloques, sigue utilizando únicamente
+  las reglas generales de generación y estilo oficial.
+- La referencia de Geografía describe CÓMO pregunta el tribunal.
+- NO es fuente factual.
+- Toda respuesta correcta y todo distractor deben continuar
+  estando respaldados por el temario factual recuperado.
+
+--- REFERENCIA ESPECÍFICA DE GEOGRAFÍA ---
+
+${geographyStyle}
+
+--- FIN DE REFERENCIA ESPECÍFICA DE GEOGRAFÍA ---
+
+==================================================
+BARRERA CARTOGRÁFICA — GEOGRAFÍA
+==================================================
+
+NO generes preguntas cuya respuesta requiera DEDUCIR por conocimiento
+cartográfico externo o por interpretación de un mapa no proporcionado:
+
+- qué accidente geográfico está al norte, sur, este u oeste de otro;
+- posiciones espaciales relativas;
+- proximidades geográficas;
+- recorridos deducidos visualmente;
+- qué elemento se encuentra entre otros;
+- orientación respecto de montes, sierras, ríos, valles,
+  municipios u otros accidentes;
+- cualquier relación espacial que NO esté expresamente respaldada
+  por el temario factual recuperado.
+
+Estas familias pueden existir en los exámenes oficiales,
+pero quedan FUERA de la generación automática de la plataforma.
+
+EXCEPCIÓN IMPORTANTE:
+
+Si el propio temario expresa TEXTUALMENTE una relación de orientación,
+orden, secuencia o recorrido, SÍ puede preguntarse.
+
+Ejemplos de relaciones permitidas cuando estén explícitas en el temario:
+- una lista ordenada de norte a sur;
+- municipios recorridos por una línea;
+- pertenencia de una localidad a un ámbito;
+- relaciones territoriales expresamente escritas.
+
+No confundas una relación textual explícita con una deducción cartográfica.
+
+Para Geografía prioriza las familias reproducibles observadas
+en los exámenes oficiales 2024/2026 siempre que puedan construirse
+íntegramente con los datos del temario.
+`
+    : ""
+);
 
 --- FIN DE REFERENCIA DE ESTILO ---
 `;
