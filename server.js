@@ -7055,14 +7055,8 @@ JOIN topics t
   ON t.id = ci.topic_id
 
 LEFT JOIN coverage_review_state crs
-  
+  ON crs.coverage_item_id = ci.id
 
-WHERE
-  (
-    $2::int[] IS NULL
-    OR ci.topic_id = ANY($2::int[])
-  )
-      ON crs.coverage_item_id = ci.id
 LEFT JOIN LATERAL (
   SELECT
     tsq.is_correct,
@@ -7078,6 +7072,13 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) last_nonblank_answer
   ON TRUE
+
+WHERE
+  (
+    $2::int[] IS NULL
+    OR ci.topic_id = ANY($2::int[])
+  )
+
     ${orderClause}
 
     LIMIT $1
