@@ -6966,8 +6966,27 @@ questionFamily:
 }
 async function getAdaptiveCoverageCandidates(
   limit = 120,
-  allowedTopicIds = null
+  allowedTopicIds = null,
+  selectionStrategy = "adaptive"
 ){
+  const orderClause =
+    selectionStrategy === "simulation"
+      ? `ORDER BY RANDOM()`
+      : `
+        ORDER BY
+          adaptive_priority ASC,
+
+          CASE
+            WHEN crs.next_review_at IS NOT NULL
+            THEN crs.next_review_at
+          END ASC NULLS LAST,
+
+          ci.times_wrong DESC,
+          ci.times_blank DESC,
+          ci.times_asked ASC,
+          ci.last_asked_at ASC NULLS FIRST,
+          ci.id ASC
+      `;
   const result = await db.query(
     `
     SELECT
@@ -7075,19 +7094,7 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) last_nonblank_answer
   ON TRUE
-    ORDER BY
-      adaptive_priority ASC,
-
-      CASE
-        WHEN crs.next_review_at IS NOT NULL
-        THEN crs.next_review_at
-      END ASC NULLS LAST,
-
-      ci.times_wrong DESC,
-      ci.times_blank DESC,
-      ci.times_asked ASC,
-      ci.last_asked_at ASC NULLS FIRST,
-      ci.id ASC
+    ${orderClause}
 
     LIMIT $1
     `,
@@ -7335,7 +7342,8 @@ if(target?.failed_difficulty === "muy alta"){
 async function getCoverageTargetsForGeneration(
   count,
   ai,
-  allowedTopicIds = null
+  allowedTopicIds = null,
+  selectionStrategy = "adaptive"
 ){
   /*
     SELECCIÓN DE OBJETIVOS
@@ -7352,7 +7360,8 @@ async function getCoverageTargetsForGeneration(
 const adaptiveCandidates =
   await getAdaptiveCoverageCandidates(
     Math.max(count * 12,120),
-    allowedTopicIds
+    allowedTopicIds,
+    selectionStrategy
   );
 
 if(adaptiveCandidates.length < count){
@@ -7380,16 +7389,24 @@ para avance de cobertura.
 No fijamos porcentajes rígidos:
 el resto del test continúa gobernado por la prioridad adaptativa.
 */
-let newCandidate =
-  adaptiveCandidates.find(
-    candidate => candidate.worked === false
-  );
+let newCandidate = null;
 
-if(!newCandidate){
+if(selectionStrategy !== "simulation"){
   newCandidate =
-  await getNewCoverageCandidate(
-    allowedTopicIds
-  );
+    adaptiveCandidates.find(
+      candidate => candidate.worked === false
+    );
+
+  if(!newCandidate){
+    newCandidate =
+      await getNewCoverageCandidate(
+        allowedTopicIds
+      );
+  }
+
+  if(newCandidate){
+    selectedAdaptive.push(newCandidate);
+  }
 }
 
 if(newCandidate){
@@ -7565,7 +7582,10 @@ for(let i = 0; i < selected.length; i++){
     FROM coverage_items ci
     JOIN topics t ON t.id = ci.topic_id
     WHERE
-  ci.worked = FALSE
+  (
+    $3::text = 'simulation'
+    OR ci.worked = FALSE
+  )
   AND NOT (ci.id = ANY($1::int[]))
   AND (
     $2::int[] IS NULL
@@ -7581,7 +7601,8 @@ for(let i = 0; i < selected.length; i++){
   occupiedCoverageIds,
   Array.isArray(allowedTopicIds)
     ? allowedTopicIds
-    : null
+    : null,
+  selectionStrategy
 ]
   );
 
@@ -10470,11 +10491,14 @@ const testType=
   req.body.testType==="failed"
     ? "failed"
     : "normal";
-
+const examMode=
+  req.body.examMode==="simulation"
+    ? "simulation"
+    : "training";
 const ai=aiClient();
 const allowedTopicIds =
   await resolveGenerationTopicScope(req.body);
-const targets=
+    const targets=
   testType==="failed"
     ? await getFailedCoverageTargets(
         count,
@@ -10483,7 +10507,10 @@ const targets=
     : await getCoverageTargetsForGeneration(
         count,
         ai,
-        allowedTopicIds
+        allowedTopicIds,
+        examMode==="simulation"
+          ? "simulation"
+          : "adaptive"
       );
     if(targets.length===0){
   throw new Error(
