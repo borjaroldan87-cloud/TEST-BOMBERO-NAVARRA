@@ -332,13 +332,40 @@ async function generate(){
     btn.disabled=true;
     btn.textContent="GENERANDO TEST...";
 
-    const j=await api("/api/generate",{
+    const allScope=
+  $("scopeAll")?.checked === true;
+
+if(
+  !allScope &&
+  selectedBlocks.size===0 &&
+  selectedTopicIds.size===0
+){
+  throw new Error(
+    "Selecciona al menos un bloque o tema."
+  );
+}
+
+currentTestLabel=
+  buildSelectionLabel();
+
+const j=await api("/api/generate",{
   method:"POST",
   body:JSON.stringify({
     count:+$("count").value,
     difficulty:$("difficulty").value,
     mode:$("mode").value,
-    testType:$("testType")?.value || "normal"
+    testType:
+      $("testType")?.value || "normal",
+
+    selectedBlocks:
+      allScope
+        ? []
+        : [...selectedBlocks],
+
+    selectedTopicIds:
+      allScope
+        ? []
+        : [...selectedTopicIds]
   })
 });
 
@@ -612,13 +639,20 @@ function show(){
       </div>
 
       <div class="exam-block-info">
-        <strong>BLOQUE TEMÁTICO 3</strong><br>
-        Conocimientos específicos<br><br>
 
-        <strong>Tema:</strong> Apeo y poda de arbolado<br>
-        <strong>${qs.length} preguntas</strong>
-        (de la 1 a la ${qs.length})
-      </div>
+  <strong>
+    ${escapeHtml(currentTestLabel)}
+  </strong>
+
+  <br><br>
+
+  <strong>
+    ${qs.length} preguntas
+  </strong>
+
+  (de la 1 a la ${qs.length})
+
+</div>
 
       ${qs.map((q,k)=>`
         <div class="exam-question">
@@ -919,385 +953,835 @@ function performanceText(performance){
 </span>
   `;
 }
-async function loadStatistics(){
-  try{
-    const data=await api("/api/statistics");
+let topicCatalog=[];
+let sectionStatistics=[];
+let knowledgeStatistics=[];
 
-    const topics=data.topics || [];
+const selectedBlocks=new Set();
+const selectedTopicIds=new Set();
 
-    const topic=
-      topics.find(
-        item=>item.topic==="Apeo y poda de arbolado"
-      ) || topics[0];
+let statsFocusTopicId=null;
+let currentTestLabel="Todo el temario";
 
-    if(!topic) return;
+const BLOCK_META={
+  legislacion:{
+    label:"Legislación",
+    order:1
+  },
+  geografia:{
+    label:"Geografía",
+    order:2
+  },
+  especifico:{
+    label:"Específico",
+    order:3
+  }
+};
 
-    const coverage=topic.coverage;
-    const performance=topic.performance;
+function escapeHtml(value){
+  return String(value ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
 
-    $("coverageValue").textContent=
-      `${coverage.percentage} %`;
+function topicBlock(topic){
+  if(
+    topic?.block &&
+    BLOCK_META[topic.block]
+  ){
+    return topic.block;
+  }
 
-    $("coverageDetail").textContent=
-      `${coverage.workedItems} de ${coverage.totalItems} elementos trabajados`;
+  const order=
+    Number(topic?.topicOrder);
 
-    $("coverageBar").style.width=
-      `${Math.min(
-        100,
-        Math.max(0,coverage.percentage)
-      )}%`;
+  if(order>=21 && order<=27){
+    return "geografia";
+  }
 
-    if(performance.percentage===null){
+  if(order>=1 && order<=19){
+    return "legislacion";
+  }
 
-      $("performanceValue").textContent="-- %";
+  return "especifico";
+}
 
-      $("performanceValue").style.color="#777";
+function blockLabel(block){
+  return (
+    BLOCK_META[block]?.label ||
+    block ||
+    "Otros"
+  );
+}
 
-      $("performanceDetail").textContent=
-        "Sin respuestas registradas";
+function sortTopics(a,b){
+  const blockA=
+    BLOCK_META[topicBlock(a)]?.order || 99;
 
-      $("performanceBar").style.width="0%";
-      $("performanceBar").style.backgroundColor="#777";
+  const blockB=
+    BLOCK_META[topicBlock(b)]?.order || 99;
 
-    }else{
+  if(blockA!==blockB){
+    return blockA-blockB;
+  }
 
-      const color=
-        performanceColor(performance.percentage);
+  const orderA=
+    Number.isFinite(Number(a.topicOrder))
+      ? Number(a.topicOrder)
+      : 9999;
 
-      $("performanceValue").textContent=
-        `${performance.percentage} %`;
+  const orderB=
+    Number.isFinite(Number(b.topicOrder))
+      ? Number(b.topicOrder)
+      : 9999;
 
-      $("performanceValue").style.color=color;
+  return (
+    orderA-orderB ||
+    String(a.topic)
+      .localeCompare(
+        String(b.topic),
+        "es"
+      )
+  );
+}
 
-      $("performanceDetail").textContent=
-  `${performance.correct} aciertos · ${performance.wrong} errores · ${performance.blank ?? 0} blancos`;
+function allScopeSelected(){
+  return $("scopeAll")?.checked === true;
+}
 
-      $("performanceBar").style.width=
-        `${Math.min(
-          100,
-          Math.max(0,performance.percentage)
-        )}%`;
+function getSelectedTopics(){
+  if(allScopeSelected()){
+    return [...topicCatalog];
+  }
 
-      $("performanceBar").style.backgroundColor=color;
+  return topicCatalog.filter(topic=>
+    selectedBlocks.has(
+      topicBlock(topic)
+    ) ||
+    selectedTopicIds.has(
+      Number(topic.topicId)
+    )
+  );
+}
+
+function setAllScope(checked){
+  if(checked){
+    selectedBlocks.clear();
+    selectedTopicIds.clear();
+  }
+
+  statsFocusTopicId=null;
+
+  renderTopicSelector();
+  renderSelectionStatistics();
+}
+
+function toggleBlock(block,checked){
+  $("scopeAll").checked=false;
+
+  if(checked){
+    selectedBlocks.add(block);
+
+    for(const topic of topicCatalog){
+      if(topicBlock(topic)===block){
+        selectedTopicIds.delete(
+          Number(topic.topicId)
+        );
+      }
     }
+  }else{
+    selectedBlocks.delete(block);
+  }
 
-    const topicBars=$("topicPerformanceBars");
+  statsFocusTopicId=null;
 
-    if(topicBars){
+  renderTopicSelector();
+  renderSelectionStatistics();
+}
 
-      topicBars.innerHTML=
-        topics.map(item=>{
+function toggleTopic(topicId,checked){
+  $("scopeAll").checked=false;
 
-          const p=item.performance;
+  const id=Number(topicId);
 
-          return `
-            <div style="margin:14px 0">
+  const topic=
+    topicCatalog.find(item=>
+      Number(item.topicId)===id
+    );
+
+  if(!topic) return;
+
+  const block=
+    topicBlock(topic);
+
+  if(selectedBlocks.has(block)){
+    selectedBlocks.delete(block);
+  }
+
+  if(checked){
+    selectedTopicIds.add(id);
+  }else{
+    selectedTopicIds.delete(id);
+  }
+
+  statsFocusTopicId=null;
+
+  renderTopicSelector();
+  renderSelectionStatistics();
+}
+
+function buildSelectionLabel(){
+  if(allScopeSelected()){
+    return "Todo el temario";
+  }
+
+  const topics=
+    getSelectedTopics();
+
+  if(
+    selectedBlocks.size===1 &&
+    selectedTopicIds.size===0
+  ){
+    return blockLabel(
+      [...selectedBlocks][0]
+    );
+  }
+
+  if(topics.length===1){
+    return topics[0].topic;
+  }
+
+  if(topics.length>1){
+    return `${topics.length} temas seleccionados`;
+  }
+
+  return "Sin contenido seleccionado";
+}
+
+function renderTopicSelector(){
+  const container=
+    $("topicSelector");
+
+  if(!container) return;
+
+  const groups=[
+    "legislacion",
+    "geografia",
+    "especifico"
+  ];
+
+  container.innerHTML=
+    groups.map(block=>{
+
+      const topics=
+        topicCatalog
+          .filter(topic=>
+            topicBlock(topic)===block
+          )
+          .sort(sortTopics);
+
+      if(!topics.length){
+        return "";
+      }
+
+      const wholeBlock=
+        selectedBlocks.has(block);
+
+      return `
+        <details class="block-card">
+
+          <summary>
+
+            <input
+              type="checkbox"
+              ${wholeBlock ? "checked" : ""}
+              onclick="event.stopPropagation()"
+              onchange="
+                toggleBlock(
+                  '${block}',
+                  this.checked
+                )
+              "
+            >
+
+            <div class="block-summary-text">
+              <strong>
+                ${blockLabel(block)}
+              </strong>
+
+              <small>
+                ${topics.length}
+                tema${topics.length===1 ? "" : "s"}
+              </small>
+            </div>
+
+          </summary>
+
+          <div class="topic-check-list">
+
+            ${topics.map(topic=>{
+
+              const id=
+                Number(topic.topicId);
+
+              const checked=
+                wholeBlock ||
+                selectedTopicIds.has(id);
+
+              return `
+                <label class="topic-check">
+
+                  <input
+                    type="checkbox"
+                    ${checked ? "checked" : ""}
+                    ${wholeBlock ? "disabled" : ""}
+                    onchange="
+                      toggleTopic(
+                        ${id},
+                        this.checked
+                      )
+                    "
+                  >
+
+                  <span>
+                    ${escapeHtml(topic.topic)}
+                  </span>
+
+                </label>
+              `;
+
+            }).join("")}
+
+          </div>
+
+        </details>
+      `;
+
+    }).join("");
+
+  const summary=
+    $("selectionSummary");
+
+  if(summary){
+    const selected=
+      getSelectedTopics();
+
+    summary.textContent=
+      allScopeSelected()
+        ? `Todo el temario · ${topicCatalog.length} temas disponibles`
+        : selected.length
+          ? `${selected.length} tema${selected.length===1 ? "" : "s"} seleccionado${selected.length===1 ? "" : "s"}`
+          : "Selecciona al menos un bloque o tema";
+  }
+}
+
+function aggregateTopics(topics){
+  const aggregate={
+    totalItems:0,
+    workedItems:0,
+    pendingItems:0,
+    correct:0,
+    wrong:0,
+    blank:0,
+    answered:0,
+    coveragePercentage:0,
+    performancePercentage:null
+  };
+
+  for(const topic of topics){
+
+    aggregate.totalItems+=
+      Number(
+        topic.coverage?.totalItems || 0
+      );
+
+    aggregate.workedItems+=
+      Number(
+        topic.coverage?.workedItems || 0
+      );
+
+    aggregate.correct+=
+      Number(
+        topic.performance?.correct || 0
+      );
+
+    aggregate.wrong+=
+      Number(
+        topic.performance?.wrong || 0
+      );
+
+    aggregate.blank+=
+      Number(
+        topic.performance?.blank || 0
+      );
+  }
+
+  aggregate.pendingItems=
+    Math.max(
+      0,
+      aggregate.totalItems-
+      aggregate.workedItems
+    );
+
+  aggregate.answered=
+    aggregate.correct+
+    aggregate.wrong+
+    aggregate.blank;
+
+  aggregate.coveragePercentage=
+    aggregate.totalItems>0
+      ? Number(
+          (
+            aggregate.workedItems /
+            aggregate.totalItems *
+            100
+          ).toFixed(1)
+        )
+      : 0;
+
+  aggregate.performancePercentage=
+    aggregate.answered>0
+      ? Number(
+          (
+            aggregate.correct /
+            aggregate.answered *
+            100
+          ).toFixed(1)
+        )
+      : null;
+
+  return aggregate;
+}
+
+function renderSelectionStatistics(){
+  const topics=
+    getSelectedTopics();
+
+  const title=
+    $("statsScopeTitle");
+
+  if(title){
+    title.textContent=
+      buildSelectionLabel();
+  }
+
+  if(!topics.length){
+    $("coverageValue").textContent="-- %";
+    $("coverageDetail").textContent=
+      "Sin contenido seleccionado";
+    $("performanceValue").textContent="-- %";
+    $("performanceDetail").textContent=
+      "Sin contenido seleccionado";
+    $("pendingValue").textContent="--";
+    $("answerCount").textContent="--";
+    $("answerBreakdown").textContent=
+      "-- aciertos · -- errores · -- blancos";
+    $("coverageBar").style.width="0%";
+    $("performanceBar").style.width="0%";
+    $("topicStatsGrid").innerHTML="";
+    $("sectionStats").innerHTML="";
+    return;
+  }
+
+  const aggregate=
+    aggregateTopics(topics);
+
+  $("coverageValue").textContent=
+    `${aggregate.coveragePercentage} %`;
+
+  $("coverageDetail").textContent=
+    `${aggregate.workedItems} de ${aggregate.totalItems} elementos`;
+
+  $("coverageBar").style.width=
+    `${aggregate.coveragePercentage}%`;
+
+  if(
+    aggregate.performancePercentage===null
+  ){
+    $("performanceValue").textContent=
+      "-- %";
+
+    $("performanceValue").style.color=
+      "#64748b";
+
+    $("performanceDetail").textContent=
+      "Sin respuestas registradas";
+
+    $("performanceBar").style.width=
+      "0%";
+  }else{
+    const color=
+      performanceColor(
+        aggregate.performancePercentage
+      );
+
+    $("performanceValue").textContent=
+      `${aggregate.performancePercentage} %`;
+
+    $("performanceValue").style.color=
+      color;
+
+    $("performanceDetail").textContent=
+      `${aggregate.correct} aciertos · ${aggregate.wrong} errores · ${aggregate.blank} blancos`;
+
+    $("performanceBar").style.width=
+      `${aggregate.performancePercentage}%`;
+
+    $("performanceBar").style.background=
+      color;
+  }
+
+  $("pendingValue").textContent=
+    aggregate.pendingItems;
+
+  $("answerCount").textContent=
+    aggregate.answered;
+
+  $("answerBreakdown").textContent=
+    `${aggregate.correct} aciertos · ${aggregate.wrong} errores · ${aggregate.blank} blancos`;
+
+  renderTopicStatistics(topics);
+
+  if(topics.length===1){
+    openTopicStats(
+      Number(topics[0].topicId),
+      true
+    );
+  }else if(
+    statsFocusTopicId &&
+    !topics.some(topic=>
+      Number(topic.topicId)===
+      Number(statsFocusTopicId)
+    )
+  ){
+    statsFocusTopicId=null;
+    $("sectionStats").innerHTML="";
+  }
+}
+
+function renderTopicStatistics(topics){
+  const container=
+    $("topicStatsGrid");
+
+  if(!container) return;
+
+  const blocks=[
+    "legislacion",
+    "geografia",
+    "especifico"
+  ];
+
+  container.innerHTML=
+    blocks.map(block=>{
+
+      const blockTopics=
+        topics
+          .filter(topic=>
+            topicBlock(topic)===block
+          )
+          .sort(sortTopics);
+
+      if(!blockTopics.length){
+        return "";
+      }
+
+      const aggregate=
+        aggregateTopics(blockTopics);
+
+      return `
+        <details class="stats-block">
+
+          <summary>
+            ${blockLabel(block)}
+            ·
+            ${aggregate.coveragePercentage} % cobertura
+          </summary>
+
+          <div class="topic-card-grid">
+
+            ${blockTopics.map(topic=>{
+
+              const performance=
+                topic.performance?.percentage;
+
+              return `
+                <button
+                  class="topic-stat-card"
+                  onclick="
+                    openTopicStats(
+                      ${Number(topic.topicId)}
+                    )
+                  "
+                >
+
+                  <strong>
+                    ${escapeHtml(topic.topic)}
+                  </strong>
+
+                  <div class="topic-stat-meta">
+                    <span>
+                      Cobertura
+                      ${topic.coverage.percentage} %
+                    </span>
+
+                    <span>
+                      ${
+                        performance===null
+                          ? "Sin respuestas"
+                          : `${performance} %`
+                      }
+                    </span>
+                  </div>
+
+                </button>
+              `;
+
+            }).join("")}
+
+          </div>
+
+        </details>
+      `;
+
+    }).join("");
+}
+
+function openTopicStats(
+  topicId,
+  automatic=false
+){
+  const topic=
+    topicCatalog.find(item=>
+      Number(item.topicId)===
+      Number(topicId)
+    );
+
+  if(!topic) return;
+
+  statsFocusTopicId=
+    Number(topicId);
+
+  $("topicDetailTitle").textContent=
+    `Desglose · ${topic.topic}`;
+
+  renderTopicDetail(
+    Number(topicId)
+  );
+
+  const panel=
+    $("topicDetailPanel");
+
+  if(panel){
+    panel.open=true;
+
+    if(!automatic){
+      panel.scrollIntoView({
+        behavior:"smooth",
+        block:"start"
+      });
+    }
+  }
+}
+
+function renderTopicDetail(topicId){
+  const sections=
+    sectionStatistics.filter(item=>
+      Number(item.topicId)===
+      Number(topicId)
+    );
+
+  const knowledge=
+    knowledgeStatistics.filter(item=>
+      Number(item.topicId)===
+      Number(topicId)
+    );
+
+  const container=
+    $("sectionStats");
+
+  if(!container) return;
+
+  if(!sections.length){
+    container.innerHTML=`
+      <p class="muted">
+        Este tema todavía no tiene desglose disponible.
+      </p>
+    `;
+    return;
+  }
+
+  container.innerHTML=
+    sections.map(section=>{
+
+      const sectionKnowledge=
+        knowledge.filter(item=>
+          (
+            item.section ||
+            "Sin sección"
+          )===section.section
+        );
+
+      const performance=
+        section.performance;
+
+      return `
+        <details
+          style="
+            padding:12px 0;
+            border-bottom:1px solid #e2e8f0;
+          "
+        >
+
+          <summary
+            style="
+              cursor:pointer;
+              font-weight:700;
+            "
+          >
+
+            ${escapeHtml(section.section)}
+
+            ·
+
+            ${
+              performance.percentage===null
+                ? "sin respuestas"
+                : `${performance.percentage} %`
+            }
+
+            <div
+              style="
+                margin-top:5px;
+                color:#64748b;
+                font-size:11px;
+                font-weight:400;
+              "
+            >
+              Cobertura:
+              ${section.coverage.percentage} %
+              ·
+              ${section.coverage.workedItems}/${section.coverage.totalItems}
+              ·
+              ${section.coverage.pendingItems} pendientes
+            </div>
+
+          </summary>
+
+          <div
+            style="
+              padding:
+                8px 4px 0 14px;
+            "
+          >
+
+            ${sectionKnowledge.map(item=>`
 
               <div
                 style="
-                  display:flex;
-                  justify-content:space-between;
-                  gap:12px;
-                  align-items:center;
+                  padding:9px 0;
+                  border-top:1px solid #eef2f7;
                 "
               >
-                <span>
-                  ${item.topic}
-                </span>
 
-                ${
-                  p.percentage===null
-                    ? `
-                      <strong style="color:#777">
-                        --
-                      </strong>
-                    `
-                    : `
-                      <strong
-                        style="color:${performanceColor(
-                          p.percentage
-                        )}"
-                      >
-                        ${p.percentage} %
-                      </strong>
-                    `
-                }
+                <div>
+                  ${escapeHtml(item.concept)}
+                </div>
+
+                <div
+                  style="
+                    margin-top:4px;
+                    font-size:12px;
+                  "
+                >
+                  ${performanceText(
+                    item.performance
+                  )}
+                </div>
+
+                <div
+                  style="
+                    margin-top:4px;
+                    color:#64748b;
+                    font-size:11px;
+                  "
+                >
+                  Etapa SRS:
+                  ${
+                    item.srs?.reviewStage ??
+                    "--"
+                  }
+
+                  ·
+
+                  ${
+                    item.srs?.nextReviewAt
+                      ? `Próximo repaso: ${
+                          new Date(
+                            item.srs.nextReviewAt
+                          ).toLocaleDateString(
+                            "es-ES"
+                          )
+                        }`
+                      : "Sin repaso programado"
+                  }
+                </div>
+
               </div>
 
-              ${performanceBar(p.percentage)}
+            `).join("")}
 
-            </div>
-          `;
-        }).join("");
-    }
+          </div>
 
-  }catch(e){
-    console.error(
-      "ERROR CARGANDO ESTADÍSTICAS:",
-      e
-    );
-  }
+        </details>
+      `;
+
+    }).join("");
 }
 
-function performanceBadge(performance){
-  if(
-    performance?.percentage===null ||
-    performance?.percentage===undefined
-  ){
-    return `
-      <strong style="color:#777">
-        Sin respuestas
-      </strong>
-    `;
-  }
-
-  return `
-    <strong
-      style="
-        color:${performanceColor(performance.percentage)};
-        font-weight:800;
-      "
-    >
-      ${performance.percentage} %
-    </strong>
-    <span>
-      · ${performance.correct} aciertos
-      · ${performance.wrong} errores
-    </span>
-  `;
-}
-
-async function loadSectionStatistics(){
+async function loadStatistics(){
   try{
 
     const [
-      sectionData,
-      knowledgeData
+      statistics,
+      sections,
+      knowledge
     ]=await Promise.all([
+      api("/api/statistics"),
       api("/api/statistics/sections"),
       api("/api/statistics/knowledge")
     ]);
 
-    const topicName=
-      "Apeo y poda de arbolado";
+    topicCatalog=
+      (statistics.topics || [])
+        .sort(sortTopics);
 
-    const sections=
-      (sectionData.sections || [])
-        .filter(
-          item=>item.topic===topicName
-        );
+    sectionStatistics=
+      sections.sections || [];
 
-    const knowledge=
-      (knowledgeData.knowledge || [])
-        .filter(
-          item=>item.topic===topicName
-        );
+    knowledgeStatistics=
+      knowledge.knowledge || [];
 
-    const container=$("sectionStats");
-
-    if(!container) return;
-
-    if(!sections.length){
-      container.innerHTML="";
-      return;
-    }
-
-    container.innerHTML=`
-
-      <div class="section-stats-title">
-        Rendimiento por secciones
-      </div>
-
-      ${sections.map(item=>{
-
-        const coverage=item.coverage;
-        const performance=item.performance;
-
-        const sectionKnowledge=
-          knowledge.filter(
-            k=>
-              (k.section || "Sin sección")===
-              item.section
-          );
-
-        return `
-
-          <details
-            style="
-              padding:12px 0;
-              border-bottom:1px solid #ddd;
-            "
-          >
-
-            <summary
-              style="
-                cursor:pointer;
-              "
-            >
-
-              <div
-                style="
-                  display:flex;
-                  justify-content:space-between;
-                  gap:12px;
-                  margin-bottom:4px;
-                "
-              >
-
-                <strong>
-                  ${item.section}
-                </strong>
-
-                ${
-                  performance.percentage===null
-                    ? `
-                      <strong style="color:#777">
-                        --
-                      </strong>
-                    `
-                    : `
-                      <strong
-                        style="color:${performanceColor(
-                          performance.percentage
-                        )}"
-                      >
-                        ${performance.percentage} %
-                      </strong>
-                    `
-                }
-
-              </div>
-
-              ${performanceBar(
-                performance.percentage
-              )}
-
-              <div
-                style="
-                  margin-top:5px;
-                  font-size:.85em;
-                  color:#666;
-                "
-              >
-                Cobertura:
-                ${coverage.percentage} %
-                ·
-                ${coverage.workedItems}/${coverage.totalItems}
-              </div>
-
-            </summary>
-
-            <div
-              style="
-                margin-top:12px;
-                padding-left:12px;
-              "
-            >
-
-              ${
-                sectionKnowledge.length
-                  ? sectionKnowledge.map(k=>`
-
-                    <div
-                      style="
-                        padding:9px 0;
-                        border-top:1px solid #eee;
-                      "
-                    >
-
-                      <div>
-                        ${k.concept}
-                      </div>
-
-                      <div
-                        style="
-                          margin-top:3px;
-                          font-size:.9em;
-                        "
-                      >
-                        ${performanceText(
-                          k.performance
-                        )}
-                      </div>
-<div
-  style="
-    margin-top:4px;
-    font-size:.8em;
-    color:#777;
-    line-height:1.5;
-  "
->
-  <div>
-    Respuestas:
-    ${k.performance?.answered ?? 0}
-    ·
-    Etapa SRS:
-    ${k.srs?.reviewStage ?? "--"}
-  </div>
-
-  <div>
-    ${
-      k.srs?.nextReviewAt
-        ? `
-          Próximo repaso:
-          ${new Date(
-            k.srs.nextReviewAt
-          ).toLocaleDateString(
-            "es-ES"
-          )}
-        `
-        : "Sin repaso programado"
-    }
-  </div>
-
-  <div>
-    ${
-      k.srs?.lastAskedAt
-        ? `
-          Última aparición:
-          ${new Date(
-            k.srs.lastAskedAt
-          ).toLocaleDateString(
-            "es-ES"
-          )}
-        `
-        : "Nunca preguntado"
-    }
-  </div>
-</div>
-                </div>
-
-                  `).join("")
-
-                  : `
-                    <div
-                      style="
-                        padding:9px 0;
-                        color:#777;
-                      "
-                    >
-                      Sin conocimientos respondidos
-                    </div>
-                  `
-              }
-
-            </div>
-
-          </details>
-        `;
-
-      }).join("")}
-    `;
+    renderTopicSelector();
+    renderSelectionStatistics();
 
   }catch(e){
 
     console.error(
-      "ERROR CARGANDO DESGLOSE COMPLETO:",
+      "ERROR CARGANDO ESTADÍSTICAS:",
       e
     );
 
   }
 }
+
+async function refreshStudyData(){
+  await loadStatistics();
+}
+          
+
 async function ingestOfficialExams(){
   const ok = confirm(
     "Se indexarán los exámenes oficiales 2024 y 2026 en el almacén independiente de estilo. ¿Continuar?"
@@ -1326,4 +1810,4 @@ async function ingestOfficialExams(){
 }
 status();
 loadStatistics();
-loadSectionStatistics();
+
