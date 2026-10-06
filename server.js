@@ -114,9 +114,12 @@ async function initDatabase(){
     )
   `);
 await db.query(`
-    ALTER TABLE topics
-    ADD COLUMN IF NOT EXISTS block TEXT
-  `);
+  UPDATE topics
+  SET block = 'especifico'
+  WHERE
+    (block IS NULL OR TRIM(block) = '')
+    AND LOWER(TRIM(name)) = 'apeo y poda de arbolado'
+`);
 
   await db.query(`
     ALTER TABLE topics
@@ -6743,6 +6746,125 @@ Selecciona la pareja con correspondencia técnica más clara.
     coverageItem,
     graphicAsset
   };
+}
+    function normalizeGenerationBlocks(value){
+  const allowed =
+    new Set([
+      "legislacion",
+      "geografia",
+      "especifico"
+    ]);
+
+  const input =
+    Array.isArray(value)
+      ? value
+      : [];
+
+  return [
+    ...new Set(
+      input
+        .map(item=>
+          String(item || "")
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g,"")
+        )
+        .filter(item=>allowed.has(item))
+    )
+  ];
+}
+
+function normalizeGenerationTopicIds(value){
+  const input =
+    Array.isArray(value)
+      ? value
+      : [];
+
+  return [
+    ...new Set(
+      input
+        .map(Number)
+        .filter(id=>
+          Number.isInteger(id) &&
+          id > 0
+        )
+    )
+  ];
+}
+
+async function resolveGenerationTopicScope(body = {}){
+  const selectedBlocks =
+    normalizeGenerationBlocks(
+      body.selectedBlocks
+    );
+
+  const selectedTopicIds =
+    normalizeGenerationTopicIds(
+      body.selectedTopicIds
+    );
+
+  /*
+  Sin filtros = todo el temario.
+  Mantiene compatibilidad con la interfaz actual
+  mientras terminamos el frontend.
+  */
+  if(
+    !selectedBlocks.length &&
+    !selectedTopicIds.length
+  ){
+    return null;
+  }
+
+  const result =
+    await db.query(
+      `
+      SELECT id
+      FROM topics
+      WHERE
+        (
+          COALESCE(
+            array_length($1::text[],1),
+            0
+          ) > 0
+          AND block = ANY($1::text[])
+        )
+        OR
+        (
+          COALESCE(
+            array_length($2::int[],1),
+            0
+          ) > 0
+          AND id = ANY($2::int[])
+        )
+      ORDER BY
+        CASE block
+          WHEN 'legislacion' THEN 1
+          WHEN 'geografia' THEN 2
+          WHEN 'especifico' THEN 3
+          ELSE 4
+        END,
+        topic_order NULLS LAST,
+        id
+      `,
+      [
+        selectedBlocks,
+        selectedTopicIds
+      ]
+    );
+
+  const allowedTopicIds =
+    result.rows
+      .map(row=>Number(row.id))
+      .filter(Number.isInteger);
+
+  if(!allowedTopicIds.length){
+    throw new Error(
+      "La selección de contenido no contiene ningún tema disponible."
+    );
+  }
+
+  return allowedTopicIds;
 }
 async function getFailedCoverageTargets(count){
   const result = await db.query(
