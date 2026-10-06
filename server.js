@@ -2496,7 +2496,30 @@ Ejemplos de filas que deben EXCLUIRSE:
 No generes ninguna unidad examinable sobre esas filas.
 
 Cualquier otra fila de la tabla debe conservarse.
+CONTROL ESTRUCTURAL OBLIGATORIO:
 
+La tabla completa contiene 702 filas numeradas.
+
+De ellas:
+- 493 filas son "Área industrial" + código y deben EXCLUIRSE;
+- 209 filas son registros válidos y deben CONSERVARSE.
+
+Por tanto, en el conjunto completo del documento deben quedar
+representadas exactamente las 209 filas válidas.
+
+En cada fragmento de PDF que recibas:
+
+- devuelve EXACTAMENTE UNA unidad de cobertura por cada fila válida
+  presente en ese fragmento;
+- NO agrupes varias filas en una sola unidad;
+- NO resumas conjuntos de registros;
+- NO omitas una fila válida aunque su denominación sea poco habitual;
+- NO intentes generar 209 elementos dentro de un único fragmento:
+  devuelve únicamente las filas válidas físicamente presentes
+  en las páginas recibidas.
+
+El campo sourceEvidence de cada unidad debe comenzar SIEMPRE
+con el número de fila original de la tabla.
 Para CADA registro válido conserva exactamente:
 
 - número de fila, cuando aparezca;
@@ -5309,7 +5332,16 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         `COVERAGE: File Search listo para ${topic.name}`
       );
     }
-const {totalPages,chunks}=await splitPdfIntoChunks(pdfPath,5);
+const coverageChunkPages=
+  coverageTopicNumber(topic.name)===22
+    ? 1
+    : 5;
+
+const {totalPages,chunks}=
+  await splitPdfIntoChunks(
+    pdfPath,
+    coverageChunkPages
+  );
 
 console.log(
   `COVERAGE: ${totalPages} páginas divididas en ${chunks.length} bloques`
@@ -5561,6 +5593,53 @@ const parsed={
     if(validItems.length===0){
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
+    if(coverageTopicNumber(topic.name)===22){
+  const normalizeTema22Text=value=>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .trim();
+
+  const excludedAreaItems=
+    validItems.filter(item=>
+      /^\s*\d{1,3}\s+area industrial\b/.test(
+        normalizeTema22Text(
+          item.sourceEvidence
+        )
+      )
+    );
+
+  const validRowNumbers=
+    new Set(
+      validItems
+        .map(item=>{
+          const match=
+            String(item.sourceEvidence || "")
+              .match(/^\s*(\d{1,3})\b/);
+
+          return match
+            ? Number(match[1])
+            : null;
+        })
+        .filter(rowNumber=>
+          Number.isInteger(rowNumber) &&
+          rowNumber>=1 &&
+          rowNumber<=702
+        )
+    );
+
+  if(
+    excludedAreaItems.length>0 ||
+    validRowNumbers.size!==209
+  ){
+    throw new Error(
+      `COVERAGE TEMA 22 incompleta: ` +
+      `${validRowNumbers.size}/209 filas válidas distintas; ` +
+      `${excludedAreaItems.length} áreas industriales incluidas.`
+    );
+  }
+}
     if(coverageTopicNumber(topic.name)===21){
   const structuralKey=value=>
     String(value || "")
