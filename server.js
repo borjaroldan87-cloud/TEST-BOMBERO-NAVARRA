@@ -7055,23 +7055,7 @@ JOIN topics t
   ON t.id = ci.topic_id
 
 LEFT JOIN coverage_review_state crs
-  ON crs.coverage_item_id = ci.id
-
-LEFT JOIN LATERAL (
-  SELECT
-    tsq.is_correct,
-    tsq.answered_at
-  FROM test_session_questions tsq
-  WHERE
-    tsq.coverage_item_id = ci.id
-    AND tsq.answered_at IS NOT NULL
-    AND tsq.is_blank = FALSE
-  ORDER BY
-    tsq.answered_at DESC,
-    tsq.id DESC
-  LIMIT 1
-) last_nonblank_answer
-  ON TRUE
+  
 
 WHERE
   (
@@ -7402,10 +7386,6 @@ if(selectionStrategy !== "simulation"){
       await getNewCoverageCandidate(
         allowedTopicIds
       );
-  }
-
-  if(newCandidate){
-    selectedAdaptive.push(newCandidate);
   }
 }
 
