@@ -5601,18 +5601,26 @@ const parsed={
       .toLowerCase()
       .trim();
 
-  const excludedAreaItems=
-    validItems.filter(item=>
-      /^\s*\d{1,3}\s+area industrial\b/.test(
-        normalizeTema22Text(
-          item.sourceEvidence
-        )
+  const isExcludedIndustrialArea=item=>
+    /^\s*\d{1,3}\s+area industrial\b/.test(
+      normalizeTema22Text(
+        item.sourceEvidence
       )
+    );
+
+  const excludedAreaItems=
+    validItems.filter(
+      isExcludedIndustrialArea
+    );
+
+  const tema22ValidItems=
+    validItems.filter(
+      item=>!isExcludedIndustrialArea(item)
     );
 
   const validRowNumbers=
     new Set(
-      validItems
+      tema22ValidItems
         .map(item=>{
           const match=
             String(item.sourceEvidence || "")
@@ -5630,15 +5638,27 @@ const parsed={
     );
 
   if(
-    excludedAreaItems.length>0 ||
+    tema22ValidItems.length!==209 ||
     validRowNumbers.size!==209
   ){
     throw new Error(
       `COVERAGE TEMA 22 incompleta: ` +
-      `${validRowNumbers.size}/209 filas válidas distintas; ` +
-      `${excludedAreaItems.length} áreas industriales incluidas.`
+      `${tema22ValidItems.length}/209 elementos válidos; ` +
+      `${validRowNumbers.size}/209 filas válidas distintas.`
     );
   }
+
+  validItems.splice(
+    0,
+    validItems.length,
+    ...tema22ValidItems
+  );
+
+  console.log(
+    `COVERAGE TEMA 22: ` +
+    `${validItems.length} filas válidas; ` +
+    `${excludedAreaItems.length} áreas industriales descartadas.`
+  );
 }
     if(coverageTopicNumber(topic.name)===21){
   const structuralKey=value=>
