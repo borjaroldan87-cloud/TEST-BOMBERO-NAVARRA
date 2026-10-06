@@ -5294,6 +5294,165 @@ async function getCachedOfficialExamStyleReference(){
 
   return styleReference;
 }
+async function getOfficialGeographyStyleReference(){
+  if(!EXAM_STYLE_STORE){
+    await loadExamStyleStore();
+  }
+
+  if(!EXAM_STYLE_STORE){
+    throw new Error(
+      "No está disponible el almacén de estilo de los exámenes oficiales."
+    );
+  }
+
+  const ai = aiClient();
+
+  const prompt = `
+Analiza los exámenes oficiales de Bomberos de Navarra 2024 y 2026
+contenidos en este File Search Store.
+
+OBJETIVO EXCLUSIVO:
+Localiza y analiza ÚNICAMENTE las preguntas que correspondan
+inequívocamente al bloque de GEOGRAFÍA.
+
+NO analices como Geografía preguntas de legislación,
+materia técnica de bomberos u otros bloques.
+
+Estos exámenes NO son fuente factual del temario.
+Su única función aquí es revelar CÓMO PREGUNTA EL TRIBUNAL
+LA MATERIA DE GEOGRAFÍA.
+
+Analiza conjuntamente 2024 y 2026,
+dando mayor peso al estilo observado en 2026.
+
+Extrae patrones útiles sobre:
+
+1. Tipos de relaciones geográficas que pregunta el tribunal.
+2. Pertenencia o exclusión de municipios, localidades,
+   infraestructuras, ámbitos o elementos territoriales.
+3. Asociaciones entre dos o más datos.
+4. Forma de preguntar listas y conjuntos.
+5. Forma de preguntar cifras, longitudes, superficies,
+   altitudes, porcentajes u otros datos numéricos.
+6. Relaciones entre municipios, parques, infraestructuras,
+   líneas, recorridos o ámbitos territoriales.
+7. Uso de preguntas CORRECTA, INCORRECTA, NO u otras
+   formulaciones negativas.
+8. Longitud y estructura habitual de enunciados y opciones.
+9. Construcción de distractores geográficos plausibles.
+10. Uso de elementos reales próximos o pertenecientes
+    a categorías similares como distractores.
+11. Nivel de literalidad frente a razonamiento.
+12. Diferencias relevantes entre las preguntas de
+    Geografía de 2024 y 2026.
+13. Rasgos del modelo 2026 que deberían predominar.
+
+CARTOGRAFÍA Y ORIENTACIÓN ESPACIAL:
+
+Identifica también como categoría separada las preguntas
+cuya resolución dependa de observar o interpretar un mapa,
+por ejemplo:
+
+- orientación norte/sur/este/oeste entre accidentes geográficos;
+- posición espacial relativa;
+- qué elemento queda respecto de otro;
+- proximidad o situación deducida visualmente;
+- recorridos o relaciones espaciales que no estén expresados
+  textualmente en una fuente factual.
+
+Describe CÓMO formula el tribunal estas preguntas,
+pero NO deduzcas ni proporciones sus respuestas
+y NO conviertas esas relaciones espaciales en conocimiento factual.
+
+Distingue expresamente estas preguntas cartográficas
+de aquellas relaciones de orden, orientación o recorrido
+que sí estén ESCRITAS literalmente en una fuente textual.
+
+REGLAS ABSOLUTAS:
+
+- NO uses las respuestas oficiales como fuente factual.
+- NO indiques cuál era la opción correcta de una pregunta oficial.
+- NO copies preguntas completas del examen.
+- NO extraigas datos concretos para utilizarlos posteriormente
+  como conocimiento.
+- Describe patrones de evaluación, redacción y distractores.
+- Si una pregunta no puede identificarse inequívocamente
+  como Geografía, no la incluyas en el análisis.
+- La futura fuente factual seguirá siendo exclusivamente
+  el temario cargado en File Search.
+
+Devuelve una guía específica y compacta de ESTILO DE GEOGRAFÍA,
+diferenciando claramente:
+
+A) familias de preguntas reproducibles con seguridad
+   desde el temario textual;
+
+B) preguntas de interpretación cartográfica/orientación
+   que requieren mapa y que NO deben generarse
+   automáticamente sin una fuente cartográfica suficiente.
+`;
+
+  const response = await ai.models.generateContent({
+    model:"gemini-3.5-flash-lite",
+    contents:prompt,
+    config:{
+      tools:[
+        {
+          fileSearch:{
+            fileSearchStoreNames:[EXAM_STYLE_STORE]
+          }
+        }
+      ]
+    }
+  });
+
+  const text = response.text?.trim();
+
+  if(!text){
+    throw new Error(
+      "No se pudo obtener la referencia específica de estilo de Geografía."
+    );
+  }
+
+  return text;
+}
+
+async function getCachedOfficialGeographyStyleReference(){
+  const cached = await db.query(
+    "SELECT value FROM app_state WHERE key=$1 LIMIT 1",
+    ["official_geography_style_reference"]
+  );
+
+  if(cached.rows.length && cached.rows[0].value?.trim()){
+    console.log(
+      "GEOGRAPHY STYLE: referencia recuperada de PostgreSQL"
+    );
+    return cached.rows[0].value;
+  }
+
+  console.log(
+    "GEOGRAPHY STYLE: no existe caché; obteniendo referencia desde File Search"
+  );
+
+  const styleReference =
+    await getOfficialGeographyStyleReference();
+
+  await db.query(`
+    INSERT INTO app_state (key,value)
+    VALUES ($1,$2)
+    ON CONFLICT (key)
+    DO UPDATE SET value=EXCLUDED.value
+  `,[
+    "official_geography_style_reference",
+    styleReference
+  ]);
+
+  console.log(
+    "GEOGRAPHY STYLE: referencia guardada en PostgreSQL"
+  );
+
+  return styleReference;
+}
 async function generateCoverageWithRetry(ai,request){
   const retryDelays=[
     3000,
