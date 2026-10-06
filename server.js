@@ -7240,7 +7240,9 @@ async function getFreshReplacementTargetForTest({
 
   return null;
 }
-async function getNewCoverageCandidate(){
+async function getNewCoverageCandidate(
+  allowedTopicIds = null
+){
   const result = await db.query(`
     SELECT
       ci.id,
@@ -7268,13 +7270,24 @@ async function getNewCoverageCandidate(){
     FROM coverage_items ci
     JOIN topics t
       ON t.id = ci.topic_id
-    WHERE ci.worked = FALSE
+    WHERE
+  ci.worked = FALSE
+  AND (
+    $1::int[] IS NULL
+    OR ci.topic_id = ANY($1::int[])
+  )
     ORDER BY
       ci.times_asked ASC,
       ci.last_asked_at ASC NULLS FIRST,
       ci.id ASC
     LIMIT 1
-  `);
+  `,
+  [
+    Array.isArray(allowedTopicIds)
+      ? allowedTopicIds
+      : null
+  ]
+);
 
   return result.rows[0] || null;
 }
@@ -7373,7 +7386,10 @@ let newCandidate =
   );
 
 if(!newCandidate){
-  newCandidate = await getNewCoverageCandidate();
+  newCandidate =
+  await getNewCoverageCandidate(
+    allowedTopicIds
+  );
 }
 
 if(newCandidate){
@@ -7548,15 +7564,25 @@ for(let i = 0; i < selected.length; i++){
       ci.source_evidence
     FROM coverage_items ci
     JOIN topics t ON t.id = ci.topic_id
-    WHERE ci.worked = FALSE
-      AND NOT (ci.id = ANY($1::int[]))
+    WHERE
+  ci.worked = FALSE
+  AND NOT (ci.id = ANY($1::int[]))
+  AND (
+    $2::int[] IS NULL
+    OR ci.topic_id = ANY($2::int[])
+  )
     ORDER BY
       ci.times_asked ASC,
       ci.last_asked_at ASC NULLS FIRST,
       ci.id ASC
     LIMIT 120
     `,
-    [occupiedCoverageIds]
+    [
+  occupiedCoverageIds,
+  Array.isArray(allowedTopicIds)
+    ? allowedTopicIds
+    : null
+]
   );
 
   /*
@@ -9753,10 +9779,12 @@ app.get("/api/statistics", async(req,res)=>{
   try{
     const result = await db.query(`
       SELECT
-        t.id AS topic_id,
-        t.name AS topic_name,
+  t.id AS topic_id,
+  t.name AS topic_name,
+  t.block AS block,
+  t.topic_order AS topic_order,
 
-        COUNT(ci.id)::int AS total_items,
+  COUNT(ci.id)::int AS total_items,
 
         COUNT(ci.id) FILTER (
           WHERE ci.worked = TRUE
@@ -9773,10 +9801,20 @@ app.get("/api/statistics", async(req,res)=>{
         ON ci.topic_id = t.id
 
       GROUP BY
-        t.id,
-        t.name
+  t.id,
+  t.name,
+  t.block,
+  t.topic_order
 
-      ORDER BY t.id
+ORDER BY
+  CASE t.block
+    WHEN 'legislacion' THEN 1
+    WHEN 'geografia' THEN 2
+    WHEN 'especifico' THEN 3
+    ELSE 4
+  END,
+  t.topic_order NULLS LAST,
+  t.id
     `);
 
     const topics = result.rows.map(row=>{
@@ -9816,7 +9854,11 @@ app.get("/api/statistics", async(req,res)=>{
       return {
         topicId:Number(row.topic_id),
         topic:row.topic_name,
-
+block:row.block || null,
+topicOrder:
+  row.topic_order != null
+    ? Number(row.topic_order)
+    : null,
         coverage:{
           totalItems,
           workedItems,
