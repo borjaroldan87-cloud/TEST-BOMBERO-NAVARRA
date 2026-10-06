@@ -2458,37 +2458,81 @@ examinable del Tema 21, que también debe conservarse.
 
   if(topicNumber===22){
     return `
-REGLAS ESPECÍFICAS DEL TEMA 22 — POLÍGONOS INDUSTRIALES:
+REGLAS ESPECÍFICAS DEL TEMA 22 — ACTIVIDADES INDUSTRIALES:
 
-Solo es materia de estudio la información correspondiente
-a POLÍGONOS INDUSTRIALES.
+Este tema contiene una tabla de emplazamientos y ámbitos industriales.
 
-REGLAS:
+REGLA FUNDAMENTAL:
 
-1. EXCLUYE del inventario cualquier fila identificada como
-   "Área industrial".
+TODO registro de la tabla es materia de estudio,
+independientemente de la denominación concreta que utilice,
+SALVO las filas identificadas expresamente con el término
+"Área industrial" seguido de su numeración o código.
 
-2. No generes unidades examinables sobre las áreas industriales
-   aunque aparezcan en la tabla del documento.
+Por tanto:
 
-3. Conserva cada polígono industrial como registro independiente.
+- NO limites la extracción a registros cuyo nombre contenga
+  "Polígono Industrial";
 
-4. Para cada polígono conserva exactamente las relaciones
-   que aparezcan en su misma fila:
-   - nombre del polígono;
-   - municipio o municipios asociados;
-   - parque de bomberos asociado;
-   - superficie/área, si aparece;
-   - perímetro, si aparece.
+- conserva también cualquier registro denominado, por ejemplo,
+  parque empresarial, zona, sector, ciudad, campus empresarial,
+  área de actividades económicas, polígono, instalación industrial
+  o cualquier otra denominación presente en la tabla;
 
-5. NO mezcles datos de filas consecutivas.
+- la denominación concreta del registro NO determina su exclusión.
 
-6. NO atribuyas a un polígono el municipio, parque, área
-   o perímetro de otra fila.
+ÚNICA EXCLUSIÓN:
 
-7. La relación POLÍGONO -> MUNICIPIO -> PARQUE
-   es especialmente importante y debe quedar representada
-   de forma examinable.
+Excluye exclusivamente las filas cuyo nombre corresponda al patrón:
+
+"Área industrial" + numeración/código
+
+Ejemplos de filas que deben EXCLUIRSE:
+
+"Área industrial 202-1"
+"Área industrial 104-1"
+"Área industrial 902-3"
+
+No generes ninguna unidad examinable sobre esas filas.
+
+Cualquier otra fila de la tabla debe conservarse.
+
+Para CADA registro válido conserva exactamente:
+
+- número de fila, cuando aparezca;
+- denominación completa;
+- municipio o municipios asociados;
+- parque de bomberos asociado;
+- superficie/área;
+- perímetro.
+
+Cada fila válida debe permanecer como una unidad independiente.
+
+La relación:
+
+REGISTRO -> MUNICIPIO -> PARQUE DE BOMBEROS
+
+debe quedar expresamente representada y ser preguntable.
+
+También son preguntables los valores de:
+
+- área/superficie;
+- perímetro;
+- número de fila;
+- denominación exacta.
+
+NO:
+
+- mezcles datos de filas consecutivas;
+- atribuyas a un registro el municipio de otro;
+- atribuyas a un registro el parque de otro;
+- atribuyas a un registro el área o perímetro de otro;
+- excluyas una fila válida por no contener las palabras
+  "Polígono Industrial";
+- incluyas filas "Área industrial" numeradas.
+
+La prioridad es conservar TODAS las filas válidas de la tabla,
+excluyendo únicamente las filas "Área industrial" numeradas.
 `;
   }
 
