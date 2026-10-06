@@ -5593,13 +5593,24 @@ const parsed={
     if(validItems.length===0){
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
-    if(coverageTopicNumber(topic.name)===22){
+    
+if(coverageTopicNumber(topic.name)===22){
   const normalizeTema22Text=value=>
     String(value || "")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g,"")
       .toLowerCase()
       .trim();
+
+  const getTema22RowNumber=item=>{
+    const match=
+      String(item?.sourceEvidence || "")
+        .match(/^\s*(\d{1,3})\b/);
+
+    return match
+      ? Number(match[1])
+      : null;
+  };
 
   const isExcludedIndustrialArea=item=>
     /^\s*\d{1,3}\s+area industrial\b/.test(
@@ -5608,56 +5619,79 @@ const parsed={
       )
     );
 
-  const excludedAreaItems=
-    validItems.filter(
-      isExcludedIndustrialArea
-    );
-
-  const tema22ValidItems=
+  const tema22Candidates=
     validItems.filter(
       item=>!isExcludedIndustrialArea(item)
     );
 
-  const validRowNumbers=
-    new Set(
-      tema22ValidItems
-        .map(item=>{
-          const match=
-            String(item.sourceEvidence || "")
-              .match(/^\s*(\d{1,3})\b/);
+  const rowsByNumber=
+    new Map();
 
-          return match
-            ? Number(match[1])
-            : null;
-        })
-        .filter(rowNumber=>
-          Number.isInteger(rowNumber) &&
-          rowNumber>=1 &&
-          rowNumber<=702
-        )
-    );
+  for(const item of tema22Candidates){
+    const rowNumber=
+      getTema22RowNumber(item);
 
-  if(
-    tema22ValidItems.length!==209 ||
-    validRowNumbers.size!==209
-  ){
+    if(
+      !Number.isInteger(rowNumber) ||
+      rowNumber<1 ||
+      rowNumber>702
+    ){
+      continue;
+    }
+
+    const previous=
+      rowsByNumber.get(rowNumber);
+
+    if(!previous){
+      rowsByNumber.set(
+        rowNumber,
+        item
+      );
+      continue;
+    }
+
+    const currentScore=
+      String(item.concept || "").length +
+      String(item.sourceEvidence || "").length;
+
+    const previousScore=
+      String(previous.concept || "").length +
+      String(previous.sourceEvidence || "").length;
+
+    if(currentScore>previousScore){
+      rowsByNumber.set(
+        rowNumber,
+        item
+      );
+    }
+  }
+
+  if(rowsByNumber.size!==209){
     throw new Error(
       `COVERAGE TEMA 22 incompleta: ` +
-      `${tema22ValidItems.length}/209 elementos válidos; ` +
-      `${validRowNumbers.size}/209 filas válidas distintas.`
+      `${rowsByNumber.size}/209 filas válidas distintas.`
     );
   }
+
+  const tema22FinalItems=
+    [...rowsByNumber.entries()]
+      .sort(
+        (a,b)=>a[0]-b[0]
+      )
+      .map(
+        ([,item])=>item
+      );
 
   validItems.splice(
     0,
     validItems.length,
-    ...tema22ValidItems
+    ...tema22FinalItems
   );
 
   console.log(
     `COVERAGE TEMA 22: ` +
-    `${validItems.length} filas válidas; ` +
-    `${excludedAreaItems.length} áreas industriales descartadas.`
+    `${tema22Candidates.length} elementos válidos detectados -> ` +
+    `${validItems.length} filas únicas conservadas.`
   );
 }
     if(coverageTopicNumber(topic.name)===21){
