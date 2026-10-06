@@ -2634,34 +2634,181 @@ NO mezcles datos de instalaciones distintas.
   }
 
   if(topicNumber===26){
-    return `
+  return `
 REGLAS ESPECÍFICAS DEL TEMA 26 — RED DEL FERROCARRIL:
 
-Este tema contiene tablas complejas y relaciones entre varias columnas.
+Este tema contiene una tabla ferroviaria con celdas combinadas.
+NO debes interpretar cada línea visual como si todas las columnas
+se repitieran expresamente.
 
-Debes conservar cuidadosamente:
-- línea ferroviaria;
+OBJETIVO ESTRUCTURAL:
+
+Debes crear dos grupos de contenido:
+
+==================================================
+A) ESTACIONES Y PUNTOS FERROVIARIOS
+==================================================
+
+La tabla contiene EXACTAMENTE 14 registros de estaciones o puntos
+ferroviarios, correspondientes a los números 1 a 14.
+
+Genera EXACTAMENTE 14 unidades independientes.
+
+Usa section exactamente:
+"Tema 26 - estaciones y puntos ferroviarios"
+
+Usa:
+itemType="relacion"
+evaluationType="identificacion"
+
+Los 14 registros son:
+
+1. ALTSASU-PUEBLO (APD)
+2. ALTSASU
+3. CASTEJON DE EBRO
+4. CORTES DE NAVARRA
+5. ETXARRI-ARANATZ
+6. UHARTE-ARAKIL
+7. FECULAS-NAVARRA
+8. MARCILLA DE NAVARRA
+9. OLITE-ERRIBERRI
+10. PAMPLONA/IRUÑA
+11. RIBAFORADA
+12. TAFALLA
+13. TUDELA DE NAVARRA
+14. VILLAFRANCA DE NAVARRA
+
+Para CADA registro conserva conjuntamente:
+
+- número de registro;
+- nombre exacto;
+- tipo o marcador del punto ferroviario cuando aparezca;
+- línea de FFCC;
 - tramo;
-- longitud, cuando corresponda;
-- municipios o localidades;
-- estaciones o puntos ferroviarios;
-- dirección o ubicación indicada;
-- parque o parques de bomberos asociados.
+- longitud asociada;
+- localidad o municipio cuando pueda identificarse inequívocamente;
+- dirección exacta;
+- parque de bomberos asociado específicamente a la estación.
 
-REGLA FUNDAMENTAL:
-NO interpretes por proximidad visual que dos valores pertenecen
-a la misma fila si la estructura de la tabla no lo confirma.
+IMPORTANTE SOBRE EL TIPO:
 
-Mantén las relaciones de cada registro exactamente como aparecen.
+- conserva literalmente cualquier marcador que aparezca, por ejemplo "(APD)";
+- si el documento no muestra un marcador específico, no inventes
+  "apeadero", "apartadero" u otra categoría;
+- el encabezado general "Estaciones de la red ferroviaria" puede utilizarse
+  para describir los registros sin marcador.
 
-Las relaciones LOCALIDAD/ESTACIÓN -> PARQUE DE BOMBEROS
-son especialmente examinables.
+IMPORTANTE SOBRE MUNICIPIOS:
 
-También son examinables los recorridos y municipios atravesados
-por cada línea cuando el documento los indique.
+NO utilices automáticamente la lista "Municipio(s) por los que pasa"
+del eje ferroviario como si fuese el municipio concreto de la estación.
+
+Esa lista pertenece al EJE/LÍNEA, no necesariamente a la estación.
+
+==================================================
+REGLA CRÍTICA DE CELDAS COMBINADAS
+==================================================
+
+La línea y el tramo de los registros 1 a 14 son:
+
+- Nº 1:
+  Madrid-Irún -> Madrid-Irún
+
+- Nº 2, 3 y 4:
+  Zaragoza-Altsasu/Alsasua -> Castejón-Altsasu/Alsasua
+
+- Nº 5 y 6:
+  Madrid-Irún -> Madrid-Irún
+
+- Nº 7, 8, 9, 10 y 11:
+  Zaragoza-Altsasu/Alsasua -> Castejón-Altsasu/Alsasua
+
+- Nº 12 y 13:
+  Madrid-Irún -> Madrid-Irún
+
+- Nº 14:
+  Zaragoza-Altsasu/Alsasua -> Castejón-Altsasu/Alsasua
+
+RESPETA EXACTAMENTE ESTA CORRESPONDENCIA.
+
+No atribuyas una línea o tramo a una estación por proximidad visual.
+
+==================================================
+B) LÍNEAS Y TRAMOS
+==================================================
+
+Conserva también las relaciones generales del eje ferroviario.
+
+Usa section exactamente:
+"Tema 26 - líneas y tramos"
+
+Usa:
+itemType="relacion"
+evaluationType="identificacion"
+
+Deben quedar representadas estas CINCO relaciones:
+
+1. Madrid-Irún
+   -> Madrid-Irún
+
+2. Zaragoza-Altsasu/Alsasua
+   -> Castejón-Altsasu/Alsasua
+
+3. Castejón-Logroño-Bilbao
+   -> Castejón-Logroño
+
+4. Zaragoza-Altsasu/Alsasua
+   -> Cortes-Castejón
+
+5. Soria-Castejón (Sin servicio)
+   -> Castejón-Valverde (Sin servicio)
+
+Para cada una conserva:
+
+- línea;
+- tramo;
+- municipios por los que pasa;
+- parque o parques de bomberos asociados;
+- condición "Sin servicio" cuando corresponda.
+
+MUY IMPORTANTE:
+
+Los municipios:
+
+Castejón; Corella; Cintruéñigo; Fitero
+
+pertenecen a:
+
+Soria-Castejón (Sin servicio)
+-> Castejón-Valverde (Sin servicio)
+
+NO los atribuyas a Castejón-Logroño.
+
+==================================================
+
+NO mezcles:
+
+- parque asociado al eje ferroviario;
+- parque asociado específicamente a una estación;
+- municipios atravesados por una línea;
+- localidad concreta de una estación.
+
+Son relaciones distintas.
+
+La prioridad de estudio es:
+
+1. estación/punto ferroviario -> parque de bomberos;
+2. tipo o marcador del punto ferroviario;
+3. estación -> línea y tramo;
+4. estación -> localidad/municipio;
+5. estación -> dirección;
+6. estación -> longitud.
+
+La longitud debe conservarse aunque tenga menor prioridad examinable.
+
+No inventes información que no aparezca en la tabla.
 `;
-  }
-
+}
   
   if(topicNumber===27){
     return `
