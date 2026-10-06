@@ -959,7 +959,24 @@ body{
     </div>
 
     <div class="config-grid">
+<label>
+  Experiencia
+  <select
+    id="examMode"
+    onchange="syncExamMode()">
 
+    <option
+      value="training"
+      selected>
+      Entrenamiento
+    </option>
+
+    <option value="simulation">
+      Simulacro
+    </option>
+
+  </select>
+</label>
       <label>
         Tipo de test
         <select id="testType">
