@@ -11157,11 +11157,16 @@ for(let i = 0; i < factualValidation.length; i++){
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
-if(invalidQuestions.length > 0){
+for(
+  let regenerationAttempt = 1;
+  regenerationAttempt <= 3 &&
+  invalidQuestions.length > 0;
+  regenerationAttempt++
+){
   console.log(
     "VALIDACIÓN FINAL:",
     invalidQuestions.length,
-    "preguntas rechazadas. Se realizará una única regeneración."
+    `preguntas rechazadas. Regeneración ${regenerationAttempt}/3.`
   );
 
   const regenerated =
@@ -11294,7 +11299,7 @@ if(invalidQuestions.length > 0){
 
 if(invalidQuestions.length > 0){
   throw new Error(
-    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final tras una única regeneración.`
+    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final tras 3 regeneraciones.`
   );
 }
 
