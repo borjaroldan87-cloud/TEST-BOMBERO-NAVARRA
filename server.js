@@ -9204,9 +9204,6 @@ DIVERSIDAD
 - La dificultad debe proceder del conocimiento territorial,
   NO de enunciados innecesariamente complejos.
 `;
-}
-
-`;
 }    
 function geographyExamQuestionPolicy(target){
   const topicNumber=
