@@ -8150,28 +8150,115 @@ return {
       continue;
     }
 
-    const targetText=
-      " " +
-      normalizeGeo(
-        [
-          target.concept,
-          target.source_evidence
-        ]
-          .filter(Boolean)
-          .join(" ")
-      ) +
-      " ";
+const conceptText=
+  String(target.concept || "")
+    .trim();
 
-    const exact=
-      territorialRows
+let operationalLocationText="";
+
+/*
+Para TEMA 21 el propio concept ya contiene:
+MUNICIPIO -> PARQUE
+o
+CONCEJO -> MUNICIPIO -> PARQUE
+*/
+if(topicNumber===21){
+
+  const conceptParts=
+    conceptText
+      .split("->")
+      .map(part=>part.trim())
+      .filter(Boolean);
+
+  operationalLocationText=
+    String(conceptParts[0] || "")
+      .replace(
+        /^Municipio de\s+/i,
+        ""
+      )
+      .trim();
+
+}else{
+
+  /*
+  Para instalaciones buscamos EXCLUSIVAMENTE
+  la parte que identifica su municipio/localidad.
+
+  Nunca buscamos el parque dentro del texto completo,
+  evitando que "Parque Central de Pamplona/Iruña"
+  provoque una falsa detección de Pamplona.
+  */
+  const locationPatterns=[
+    /\bubicad[oa]s?\s+en\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
+
+    /\bsituad[oa]s?\s+en\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
+
+    /\bemplazad[oa]s?\s+en\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
+
+    /\blocalizad[oa]s?\s+en\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
+
+    /\ben\s+el\s+municipio\s+de\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
+
+    /\bmunicipio(?:s)?\s+asociad[oa]s?\s*[:\-]?\s*(.+?)(?=,\s*(?:parque|asociad|adscrit|correspond)|\.\s*$|$)/i
+  ];
+
+  for(const pattern of locationPatterns){
+
+    const match=
+      conceptText.match(pattern);
+
+    if(match?.[1]){
+      operationalLocationText=
+        String(match[1])
+          .trim();
+
+      break;
+    }
+  }
+}
+
+/*
+Texto NORMALIZADO que contiene solamente
+el lugar operativo detectado.
+*/
+const normalizedOperationalLocation=
+  operationalLocationText
+    ? ` ${normalizeGeo(
+        operationalLocationText
+      )} `
+    : "";
+
+/*
+Relacionamos el lugar exclusivamente con
+las entidades territoriales exactas del T21.
+
+Ejemplos:
+Orkoien -> Cordovilla
+Sesma -> Lodosa
+Milagro -> Peralta/Azkoien
+
+Si aparece un concejo, se recupera su fila:
+CONCEJO -> MUNICIPIO -> PARQUE.
+*/
+const exact=
+  normalizedOperationalLocation
+    ? territorialRows
         .filter(row=>
           row.aliases.some(alias=>
-            targetText.includes(
+            normalizedOperationalLocation.includes(
               ` ${alias} `
             )
           )
         )
+        .filter(
+          (row,index,array)=>
+            array.findIndex(other=>
+              normalizeGeo(other.concept) ===
+              normalizeGeo(row.concept)
+            ) === index
+        )
         .sort((a,b)=>{
+
           const maxA=
             Math.max(
               0,
@@ -8190,7 +8277,8 @@ return {
 
           return maxB-maxA;
         })
-        .slice(0,3);
+        .slice(0,4)
+    : [];
 
     if(!exact.length){
       continue;
@@ -8263,18 +8351,395 @@ return {
           );
         })
         .slice(0,16);
+const cleanTerritorialRow=row=>({
+  id:row.id,
 
-    const cleanTerritorialRow=row=>({
-      id:row.id,
-      concept:row.concept,
-      source_page:row.source_page,
-      manual_page:row.manual_page,
-      source_evidence:
-        row.source_evidence,
-      operationalArea:
-        row.operationalArea
-    });
+  entity:
+    row.rawEntity,
 
+  parentMunicipality:
+    row.parentMunicipality,
+
+  concept:
+    row.concept,
+
+  source_page:
+    row.source_page,
+
+  manual_page:
+    row.manual_page,
+
+  source_evidence:
+    row.source_evidence,
+
+  operationalArea:
+    row.operationalArea
+});
+    target.operationalLocation=
+  operationalLocationText || null;
+    /*
+==================================================
+POOL FACTUAL DE OPCIONES DE GEOGRAFÍA
+==================================================
+
+No genera respuestas.
+Solo entrega al generador candidatos reales y
+territorialmente competitivos procedentes del T21
+y del propio tema.
+
+IMPORTANTE:
+"mismo ámbito operativo" NO significa necesariamente
+municipio geográficamente colindante.
+La vecindad estricta solo podrá afirmarse cuando
+dispongamos de evidencia cartográfica suficiente.
+*/
+
+const municipalitySection=
+  normalizeGeo(
+    "Tema 21 - municipios y ámbitos"
+  );
+
+const subordinateSection=
+  normalizeGeo(
+    "Tema 21 - concejos y localidades"
+  );
+
+const isMunicipalityRow=row=>
+  normalizeGeo(row.section) ===
+  municipalitySection;
+
+const isSubordinateRow=row=>
+  normalizeGeo(row.section) ===
+  subordinateSection;
+
+const uniqueBy=(rows,keyFn)=>{
+  const seen=new Set();
+
+  return rows.filter(row=>{
+    const key=
+      String(keyFn(row) || "")
+        .trim();
+
+    if(!key || seen.has(key)){
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
+const exactOperationalAreas=
+  new Set(
+    exact
+      .map(row=>
+        row.normalizedOperationalArea
+      )
+      .filter(Boolean)
+  );
+
+const targetEntityKey=
+  normalizeGeo(
+    operationalLocationText
+  );
+
+const exactPrimary=
+  exact.find(row=>
+    row.aliases.some(alias=>
+      alias === targetEntityKey
+    )
+  ) ||
+  exact[0] ||
+  null;
+
+const targetParentMunicipality=
+  exactPrimary?.parentMunicipality ||
+  operationalLocationText ||
+  null;
+
+const targetParentMunicipalityKey=
+  normalizeGeo(
+    targetParentMunicipality
+  );
+
+const targetManualPage=
+  Number(
+    exactPrimary?.manual_page
+  );
+
+const pageDistance=row=>{
+  const page=
+    Number(row?.manual_page);
+
+  if(
+    Number.isFinite(targetManualPage) &&
+    Number.isFinite(page)
+  ){
+    return Math.abs(
+      page-targetManualPage
+    );
+  }
+
+  return 999;
+};
+
+/*
+--------------------------------------------------
+A) MUNICIPIOS COMPETITIVOS
+--------------------------------------------------
+
+Primero:
+- mismo parque/sede operativa;
+- misma página o páginas próximas del Anexo I;
+- nunca repetir el propio municipio.
+*/
+
+const municipalityCandidates=
+  uniqueBy(
+    territorialRows
+      .filter(row=>
+        isMunicipalityRow(row) &&
+        exactOperationalAreas.has(
+          row.normalizedOperationalArea
+        ) &&
+        !row.aliases.some(alias=>
+          alias === targetEntityKey
+        )
+      )
+      .sort((a,b)=>
+        pageDistance(a)-
+        pageDistance(b) ||
+        Number(a.id)-Number(b.id)
+      ),
+    row=>
+      normalizeGeo(row.rawEntity)
+  )
+  .slice(0,16)
+  .map(row=>({
+    entity:
+      row.rawEntity,
+
+    operationalArea:
+      row.operationalArea,
+
+    concept:
+      row.concept,
+
+    source_page:
+      row.source_page,
+
+    manual_page:
+      row.manual_page
+  }));
+
+/*
+--------------------------------------------------
+B) CONCEJOS DEL MISMO MUNICIPIO
+--------------------------------------------------
+
+Sirve especialmente para preguntas:
+
+"¿Qué concejo NO pertenece al municipio X?"
+
+Los concejos correctos deben salir de aquí.
+*/
+
+const sameMunicipalitySubordinates=
+  uniqueBy(
+    territorialRows
+      .filter(row=>
+        isSubordinateRow(row) &&
+        normalizeGeo(
+          row.parentMunicipality
+        ) ===
+        targetParentMunicipalityKey &&
+        !row.aliases.some(alias=>
+          alias === targetEntityKey
+        )
+      )
+      .sort((a,b)=>
+        Number(a.id)-Number(b.id)
+      ),
+    row=>
+      normalizeGeo(row.rawEntity)
+  )
+  .slice(0,16)
+  .map(row=>({
+    entity:
+      row.rawEntity,
+
+    parentMunicipality:
+      row.parentMunicipality,
+
+    operationalArea:
+      row.operationalArea,
+
+    concept:
+      row.concept,
+
+    source_page:
+      row.source_page,
+
+    manual_page:
+      row.manual_page
+  }));
+
+/*
+--------------------------------------------------
+C) CONCEJOS COMPETITIVOS DE OTROS MUNICIPIOS
+--------------------------------------------------
+
+Prioridad:
+- mismo parque/sede;
+- municipio padre diferente;
+- posición próxima dentro del Anexo I.
+
+Son candidatos para el único distractor falso
+de una pregunta de pertenencia de concejos.
+*/
+
+const nearbySubordinates=
+  uniqueBy(
+    territorialRows
+      .filter(row=>
+        isSubordinateRow(row) &&
+        exactOperationalAreas.has(
+          row.normalizedOperationalArea
+        ) &&
+        normalizeGeo(
+          row.parentMunicipality
+        ) !==
+        targetParentMunicipalityKey
+      )
+      .sort((a,b)=>
+        pageDistance(a)-
+        pageDistance(b) ||
+        Number(a.id)-Number(b.id)
+      ),
+    row=>
+      normalizeGeo(row.rawEntity)
+  )
+  .slice(0,16)
+  .map(row=>({
+    entity:
+      row.rawEntity,
+
+    parentMunicipality:
+      row.parentMunicipality,
+
+    operationalArea:
+      row.operationalArea,
+
+    concept:
+      row.concept,
+
+    source_page:
+      row.source_page,
+
+    manual_page:
+      row.manual_page
+  }));
+
+/*
+--------------------------------------------------
+D) PARQUES/SEDES ALTERNATIVOS
+--------------------------------------------------
+
+El correcto sale de exactOperationalAreas.
+
+Los alternativos se ordenan por proximidad de aparición
+en el Anexo I, pero NO se afirma por ello que sean
+geográficamente colindantes.
+*/
+
+const alternativeOperationalAreas=
+  uniqueBy(
+    territorialRows
+      .filter(row=>
+        row.normalizedOperationalArea &&
+        !exactOperationalAreas.has(
+          row.normalizedOperationalArea
+        )
+      )
+      .sort((a,b)=>
+        pageDistance(a)-
+        pageDistance(b) ||
+        Number(a.id)-Number(b.id)
+      ),
+    row=>
+      row.normalizedOperationalArea
+  )
+  .slice(0,8)
+  .map(row=>({
+    operationalArea:
+      row.operationalArea,
+
+    exampleEntity:
+      row.rawEntity,
+
+    source_page:
+      row.source_page,
+
+    manual_page:
+      row.manual_page
+  }));
+
+/*
+--------------------------------------------------
+E) REGISTROS REALES DEL MISMO TEMA
+--------------------------------------------------
+
+Para preguntas inversas:
+municipio -> polígono
+municipio -> solar
+municipio -> eólico
+etc.
+
+No entregamos datos inventados:
+son coverage_items reales del mismo tema.
+*/
+
+const sameTopicRecords=
+  result.rows
+    .slice(0,16)
+    .map(row=>({
+      id:
+        row.id,
+
+      concept:
+        row.concept,
+
+      source_page:
+        row.source_page,
+
+      manual_page:
+        row.manual_page
+    }));
+
+target.optionPools={
+  correctLocation:
+    operationalLocationText || null,
+
+  correctOperationalAreas:
+    exact.map(row=>
+      row.operationalArea
+    ),
+
+  municipalitiesSameOperationalArea:
+    municipalityCandidates,
+
+  subordinatesSameMunicipality:
+    sameMunicipalitySubordinates,
+
+  subordinatesOtherMunicipalitiesSameOperationalArea:
+    nearbySubordinates,
+
+  alternativeOperationalAreas:
+    alternativeOperationalAreas,
+
+  sameTopicRecords:
+    sameTopicRecords
+};
     target.territorialContext={
       exact:
         exact.map(
@@ -8921,6 +9386,261 @@ No deduzcas orientación ni recorrido a partir de conocimiento cartográfico ext
 
   return "";
 }
+function geographyOptionPoolsPrompt(item){
+
+  const topicNumber=
+    coverageTopicNumber(
+      item?.topic_name
+    );
+
+  if(
+    !Number.isInteger(topicNumber) ||
+    topicNumber < 21 ||
+    topicNumber > 25
+  ){
+    return "";
+  }
+
+  const pools=
+    item?.optionPools || {};
+
+  const municipalities=
+    Array.isArray(
+      pools.municipalitiesSameOperationalArea
+    )
+      ? pools.municipalitiesSameOperationalArea
+      : [];
+
+  const sameMunicipalitySubordinates=
+    Array.isArray(
+      pools.subordinatesSameMunicipality
+    )
+      ? pools.subordinatesSameMunicipality
+      : [];
+
+  const nearbySubordinates=
+    Array.isArray(
+      pools.subordinatesOtherMunicipalitiesSameOperationalArea
+    )
+      ? pools.subordinatesOtherMunicipalitiesSameOperationalArea
+      : [];
+
+  const alternativeOperationalAreas=
+    Array.isArray(
+      pools.alternativeOperationalAreas
+    )
+      ? pools.alternativeOperationalAreas
+      : [];
+
+  const sameTopicRecords=
+    Array.isArray(
+      pools.sameTopicRecords
+    )
+      ? pools.sameTopicRecords
+      : [];
+
+  const correctOperationalAreas=
+    Array.isArray(
+      pools.correctOperationalAreas
+    )
+      ? pools.correctOperationalAreas
+      : [];
+
+  return `
+==================================================
+POOL FACTUAL OBLIGATORIO PARA LAS OPCIONES
+==================================================
+
+LUGAR/MUNICIPIO CORRECTO DEL OBJETIVO:
+${pools.correctLocation || "No determinado"}
+
+SEDE/PARQUE OPERATIVO CORRECTO SEGÚN TEMA 21:
+${
+  correctOperationalAreas.length
+    ? correctOperationalAreas.join(" | ")
+    : "No determinado"
+}
+
+MUNICIPIOS COMPETITIVOS DEL MISMO ÁMBITO OPERATIVO:
+${
+  municipalities.length
+    ? municipalities
+        .map(
+          (row,index)=>
+            `${index+1}. ${row.entity}`
+        )
+        .join("\n")
+    : "No disponibles"
+}
+
+CONCEJOS/LOCALIDADES DEL MISMO MUNICIPIO:
+${
+  sameMunicipalitySubordinates.length
+    ? sameMunicipalitySubordinates
+        .map(
+          (row,index)=>
+            `${index+1}. ${row.entity}`
+        )
+        .join("\n")
+    : "No disponibles"
+}
+
+CONCEJOS/LOCALIDADES DE OTROS MUNICIPIOS DEL MISMO ÁMBITO:
+${
+  nearbySubordinates.length
+    ? nearbySubordinates
+        .map(
+          (row,index)=>
+            `${index+1}. ${row.entity} -> ${row.parentMunicipality}`
+        )
+        .join("\n")
+    : "No disponibles"
+}
+
+OTRAS SEDES/PARQUES DISPONIBLES:
+${
+  alternativeOperationalAreas.length
+    ? alternativeOperationalAreas
+        .map(
+          (row,index)=>
+            `${index+1}. ${row.operationalArea}`
+        )
+        .join("\n")
+    : "No disponibles"
+}
+
+OTROS REGISTROS REALES DEL MISMO TEMA:
+${
+  sameTopicRecords.length
+    ? sameTopicRecords
+        .map(
+          (row,index)=>
+            `${index+1}. ${row.concept}`
+        )
+        .join("\n")
+    : "No disponibles"
+}
+
+==================================================
+REGLAS OBLIGATORIAS DE CONSTRUCCIÓN
+==================================================
+
+1. SI LA PREGUNTA PIDE UN MUNICIPIO:
+
+- La respuesta correcta debe ser:
+  ${pools.correctLocation || "el municipio factual del objetivo"}.
+
+- Si existen al menos TRES municipios en
+  MUNICIPIOS COMPETITIVOS DEL MISMO ÁMBITO OPERATIVO,
+  los TRES distractores DEBEN salir de esa lista.
+
+- Está PROHIBIDO sustituirlos por municipios arbitrarios
+  de otras zonas de Navarra.
+
+- Las cuatro opciones deben ser únicamente nombres
+  de municipios/localidades.
+
+- No añadas el parque, comarca ni ninguna pista
+  territorial dentro de las opciones.
+
+2. SI LA PREGUNTA PIDE EL PARQUE/SEDE QUE ACTÚA PRIMERO:
+
+- Usa como correcta la sede operativa concreta obtenida del Tema 21.
+
+- Si el Tema 21 distingue dos sedes físicas,
+  usa la sede concreta y NO la denominación
+  administrativa agrupada.
+
+- Está expresamente prohibido responder:
+  "Lodosa-Peralta/Azkoien"
+  cuando pueda determinarse Lodosa o Peralta/Azkoien.
+
+- Lo mismo se aplica a cualquier otro parque
+  con sedes operativas diferenciadas.
+
+- Las cuatro opciones serán exclusivamente
+  nombres de parques/sedes.
+
+- No incluyas municipio + parque en la misma opción.
+
+3. SI LA PREGUNTA ES:
+
+"¿QUÉ CONCEJO NO PERTENECE AL MUNICIPIO X?"
+
+y existen datos suficientes:
+
+- TRES opciones deben salir literalmente de
+  CONCEJOS/LOCALIDADES DEL MISMO MUNICIPIO.
+
+- UNA opción debe salir de
+  CONCEJOS/LOCALIDADES DE OTROS MUNICIPIOS
+  DEL MISMO ÁMBITO.
+
+- La opción falsa debe ser real.
+  No inventes ningún concejo.
+
+- NO utilices como opción falsa una localidad
+  evidentemente ajena si existe una alternativa
+  territorialmente más competitiva.
+
+4. SI LA PREGUNTA PIDE IDENTIFICAR UNA INSTALACIÓN:
+
+- Usa instalaciones reales procedentes de
+  OTROS REGISTROS REALES DEL MISMO TEMA.
+
+- Todas las opciones deben ser del mismo tipo:
+  cuatro polígonos,
+  cuatro parques solares,
+  cuatro parques eólicos
+  o cuatro helipuertos/helisuperficies.
+
+5. PRINCIPIO DE DIFICULTAD:
+
+Una opción NO es válida como distractor simplemente
+porque sea falsa.
+
+Debe ser suficientemente plausible como para que
+un opositor necesite conocer el temario para descartarla.
+
+Si un distractor puede eliminarse únicamente porque
+pertenece claramente a otra zona territorial,
+RECHÁZALO y usa otro del pool.
+
+6. PRINCIPIO DE CAMBIO MÍNIMO:
+
+En preguntas territoriales simples cambia UNA sola variable:
+
+- instalación correcta + municipio incorrecto plausible;
+- instalación correcta + parque incorrecto plausible;
+- municipio correcto + instalación incorrecta plausible;
+- municipio correcto + concejo incorrecto plausible.
+
+No conviertas simultáneamente municipio, parque e instalación
+en datos falsos salvo que el arquetipo oficial exija
+expresamente una pregunta combinada.
+
+7. PROHIBIDO DAR PISTAS:
+
+Si preguntas por municipio,
+NO menciones en el enunciado el parque correspondiente.
+
+Si preguntas por parque,
+NO menciones el municipio si el nombre de la instalación
+es suficiente para formular la pregunta.
+
+Si preguntas por un concejo,
+NO incluyas datos que revelen su municipio padre.
+
+8. PRIORIDAD:
+
+Cuando este POOL FACTUAL disponga de suficientes alternativas,
+SUS DATOS TIENEN PRIORIDAD sobre cualquier distractor
+que el modelo pudiera inventar por iniciativa propia.
+
+No uses conocimiento externo para mejorar,
+completar o sustituir estos pools.
+`;
+}
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -9021,6 +9741,7 @@ REGLAS TERRITORIALES OBLIGATORIAS:
 ` : ""}
 ${geographyExamQuestionPolicy(item)}
 ${geographyOfficialArchetypePrompt(item,index)}
+${geographyOptionPoolsPrompt(item)}
 ${Array.isArray(item.distractorContext) && item.distractorContext.length ? `
 - BANCO FACTUAL CERCANO PARA CONSTRUIR DISTRACTORES:
 ${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${contextItem.concept} | Evidencia: ${contextItem.source_evidence}`).join("\n")}
@@ -10557,6 +11278,390 @@ function geographyOperationalParkIssue(target,question){
     return (
       "GEOGRAFÍA OPERATIVA: la respuesta correcta no coincide " +
       "con la sede/parque operativo exacto determinado por el Tema 21."
+    );
+  }
+
+  return null;
+}
+function geographyOptionPoolIssue(target,question){
+
+  const topicNumber=
+    coverageTopicNumber(
+      target?.topic_name
+    );
+
+  if(
+    !Number.isInteger(topicNumber) ||
+    topicNumber < 21 ||
+    topicNumber > 25
+  ){
+    return null;
+  }
+
+  const pools=
+    target?.optionPools;
+
+  if(!pools){
+    return null;
+  }
+
+  const options=
+    Array.isArray(question?.options)
+      ? question.options
+      : [];
+
+  if(options.length !== 4){
+    return null;
+  }
+
+  const correctIndex=
+    Number(question?.correctIndex);
+
+  if(
+    !Number.isInteger(correctIndex) ||
+    correctIndex < 0 ||
+    correctIndex > 3
+  ){
+    return null;
+  }
+
+  const normalize=value=>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g," ")
+      .trim()
+      .replace(/\s+/g," ");
+
+  const normalizeEntity=value=>
+    normalize(value)
+      .replace(
+        /^(?:municipio|concejo|localidad)\s+de\s+/,
+        ""
+      )
+      .replace(
+        /^(?:parque\s+de\s+bomberos|parque|sede)\s+de\s+/,
+        ""
+      )
+      .trim();
+
+  const matchesEntity=(value,entity)=>{
+    const option=
+      normalizeEntity(value);
+
+    const candidate=
+      normalizeEntity(entity);
+
+    return (
+      option &&
+      candidate &&
+      option === candidate
+    );
+  };
+
+  const matchesAny=(value,entities)=>
+    entities.some(entity=>
+      matchesEntity(
+        value,
+        entity
+      )
+    );
+
+  const stem=
+    normalize(question?.stem);
+
+  const complexQuestion=
+    /\b(?:incorrecta|incorrecto|combinacion|afirmaciones|relaciones|correspondencia)\b/
+      .test(stem);
+
+  const asksMunicipality=
+    !complexQuestion &&
+    (
+      /\ben que municipio\b/.test(stem) ||
+      /\ba que municipio\b/.test(stem) ||
+      /\bque municipio\b/.test(stem) ||
+      /\bcual es el municipio\b/.test(stem)
+    );
+
+  const asksOperationalPark=
+    !complexQuestion &&
+    (
+      /\bque parque(?: de bomberos)?\b/.test(stem) ||
+      /\bcual es el parque(?: de bomberos)?\b/.test(stem) ||
+      /\bque sede\b/.test(stem) ||
+      /\bcual es la sede\b/.test(stem)
+    );
+
+  const asksConcejoExclusion=
+    /\bconcejos?\b/.test(stem) &&
+    (
+      /\bno pertenece\b/.test(stem) ||
+      /\bno pertenecen\b/.test(stem) ||
+      /\bno forma parte\b/.test(stem)
+    );
+
+  /*
+  ================================================
+  1. PREGUNTA SIMPLE DE MUNICIPIO
+  ================================================
+  */
+
+  if(asksMunicipality){
+
+    const correctLocation=
+      pools.correctLocation;
+
+    if(!correctLocation){
+      return null;
+    }
+
+    const correctOption=
+      options[correctIndex];
+
+    if(
+      !matchesEntity(
+        correctOption,
+        correctLocation
+      )
+    ){
+      return (
+        "GEOGRAFÍA — MUNICIPIO: la opción marcada como correcta " +
+        "no coincide con el municipio/localidad factual del objetivo."
+      );
+    }
+
+    const candidates=
+      Array.isArray(
+        pools.municipalitiesSameOperationalArea
+      )
+        ? pools.municipalitiesSameOperationalArea
+            .map(row=>row?.entity)
+            .filter(Boolean)
+        : [];
+
+    /*
+    Solo hacemos obligatorio el pool cuando
+    realmente tenemos tres distractores disponibles.
+    */
+    if(candidates.length >= 3){
+
+      for(let i=0;i<options.length;i++){
+
+        if(i===correctIndex){
+          continue;
+        }
+
+        if(
+          !matchesAny(
+            options[i],
+            candidates
+          )
+        ){
+          return (
+            "GEOGRAFÍA — DISTRACTOR TERRITORIAL: una pregunta " +
+            "de municipio contiene un distractor que no procede " +
+            "del pool competitivo del mismo ámbito operativo."
+          );
+        }
+      }
+    }
+  }
+
+  /*
+  ================================================
+  2. PREGUNTA SIMPLE DE PARQUE/SEDE
+  ================================================
+  */
+
+  if(asksOperationalPark){
+
+    const correctAreas=
+      Array.isArray(
+        pools.correctOperationalAreas
+      )
+        ? [
+            ...new Set(
+              pools.correctOperationalAreas
+                .filter(Boolean)
+            )
+          ]
+        : [];
+
+    /*
+    Solo imponemos una respuesta exacta cuando
+    el objetivo conduce inequívocamente a UNA sede.
+    */
+    if(correctAreas.length === 1){
+
+      const correctOption=
+        options[correctIndex];
+
+      if(
+        !matchesEntity(
+          correctOption,
+          correctAreas[0]
+        )
+      ){
+        return (
+          "GEOGRAFÍA — PARQUE OPERATIVO: la opción correcta " +
+          "no coincide con la sede/parque exacto determinado " +
+          "por el Tema 21."
+        );
+      }
+
+      const alternatives=
+        Array.isArray(
+          pools.alternativeOperationalAreas
+        )
+          ? pools.alternativeOperationalAreas
+              .map(
+                row=>row?.operationalArea
+              )
+              .filter(Boolean)
+          : [];
+
+      if(alternatives.length >= 3){
+
+        for(let i=0;i<options.length;i++){
+
+          if(i===correctIndex){
+            continue;
+          }
+
+          if(
+            !matchesAny(
+              options[i],
+              alternatives
+            )
+          ){
+            return (
+              "GEOGRAFÍA — DISTRACTOR DE PARQUE: una alternativa " +
+              "no procede del pool factual de sedes/parques disponibles."
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /*
+  ================================================
+  3. CONCEJO QUE NO PERTENECE AL MUNICIPIO
+  ================================================
+
+  Estructura obligatoria cuando existen datos:
+  3 concejos verdaderos del municipio
+  +
+  1 concejo real de otro municipio del mismo ámbito.
+
+  La opción de otro municipio debe ser correctIndex
+  porque la pregunta solicita el que NO pertenece.
+  */
+
+  if(asksConcejoExclusion){
+
+    const sameMunicipality=
+      Array.isArray(
+        pools.subordinatesSameMunicipality
+      )
+        ? pools.subordinatesSameMunicipality
+            .map(row=>row?.entity)
+            .filter(Boolean)
+        : [];
+
+    const otherMunicipalities=
+      Array.isArray(
+        pools.subordinatesOtherMunicipalitiesSameOperationalArea
+      )
+        ? pools.subordinatesOtherMunicipalitiesSameOperationalArea
+            .map(row=>row?.entity)
+            .filter(Boolean)
+        : [];
+
+    if(
+      sameMunicipality.length >= 3 &&
+      otherMunicipalities.length >= 1
+    ){
+
+      let sameCount=0;
+      let otherCount=0;
+
+      for(let i=0;i<options.length;i++){
+
+        const inSame=
+          matchesAny(
+            options[i],
+            sameMunicipality
+          );
+
+        const inOther=
+          matchesAny(
+            options[i],
+            otherMunicipalities
+          );
+
+        if(inSame){
+          sameCount++;
+        }
+
+        if(inOther){
+          otherCount++;
+        }
+
+        if(
+          i===correctIndex &&
+          !inOther
+        ){
+          return (
+            "GEOGRAFÍA — CONCEJOS: en una pregunta de NO pertenencia, " +
+            "la opción marcada como correcta debe ser un concejo real " +
+            "de otro municipio territorialmente plausible."
+          );
+        }
+
+        if(
+          i!==correctIndex &&
+          !inSame
+        ){
+          return (
+            "GEOGRAFÍA — CONCEJOS: las tres opciones que sí pertenecen " +
+            "deben ser concejos reales del municipio preguntado."
+          );
+        }
+      }
+
+      if(
+        sameCount !== 3 ||
+        otherCount !== 1
+      ){
+        return (
+          "GEOGRAFÍA — CONCEJOS: la pregunta no respeta la estructura " +
+          "3 concejos reales del municipio + 1 concejo real de otro municipio."
+        );
+      }
+    }
+  }
+
+  /*
+  ================================================
+  4. OPCIONES DUPLICADAS
+  ================================================
+  */
+
+  const normalizedOptions=
+    options.map(
+      normalizeEntity
+    );
+
+  if(
+    new Set(
+      normalizedOptions
+    ).size !== 4
+  ){
+    return (
+      "GEOGRAFÍA — OPCIONES: existen alternativas duplicadas " +
+      "o equivalentes dentro de la misma pregunta."
     );
   }
 
