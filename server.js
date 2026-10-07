@@ -13316,6 +13316,33 @@ for(
         geographyRelevanceIssue
       ];
     }
+    const geographyOperationalIssue =
+  geographyOperationalParkIssue(
+    targetForValidation,
+    regenerated.questions[i]
+  );
+
+if(geographyOperationalIssue){
+  validationResult.valid = false;
+  validationResult.issues = [
+    ...(validationResult.issues || []),
+    geographyOperationalIssue
+  ];
+}
+
+const geographyOptionIssue =
+  geographyOptionPoolIssue(
+    targetForValidation,
+    regenerated.questions[i]
+  );
+
+if(geographyOptionIssue){
+  validationResult.valid = false;
+  validationResult.issues = [
+    ...(validationResult.issues || []),
+    geographyOptionIssue
+  ];
+}
     if(
       targetForValidation?.failed_difficulty === "muy alta" &&
       regenerated.questions[i]?.difficulty !== "muy alta"
