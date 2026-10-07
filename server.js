@@ -2114,6 +2114,196 @@ ${JSON.stringify(questions)}
   };
 }
 
+
+const legislationAnkiValidationRunner = {
+  running:false,
+  startedAt:null,
+  finishedAt:null,
+  processed:0,
+  validated:0,
+  rejected:0,
+  batches:0,
+  lastTopicOrder:null,
+  lastError:null
+};
+
+async function runLegislationAnkiValidationQueue({
+  batchSize=20,
+  delayMs=750
+}={}){
+  if(legislationAnkiValidationRunner.running){
+    return;
+  }
+
+  legislationAnkiValidationRunner.running=true;
+  legislationAnkiValidationRunner.startedAt=
+    new Date().toISOString();
+  legislationAnkiValidationRunner.finishedAt=null;
+  legislationAnkiValidationRunner.processed=0;
+  legislationAnkiValidationRunner.validated=0;
+  legislationAnkiValidationRunner.rejected=0;
+  legislationAnkiValidationRunner.batches=0;
+  legislationAnkiValidationRunner.lastTopicOrder=null;
+  legislationAnkiValidationRunner.lastError=null;
+
+  try{
+    while(true){
+      const status=
+        await getLegislationAnkiValidationStatus();
+
+      const pending=
+        Number(status?.pending || 0);
+
+      if(pending <= 0){
+        break;
+      }
+
+      const batch=
+        await validateLegislationAnkiBatch({
+          topicOrder:null,
+          limit:batchSize
+        });
+
+      if(!batch?.processed){
+        break;
+      }
+
+      legislationAnkiValidationRunner.processed +=
+        Number(batch.processed || 0);
+
+      legislationAnkiValidationRunner.validated +=
+        Number(batch.validated || 0);
+
+      legislationAnkiValidationRunner.rejected +=
+        Number(batch.rejected || 0);
+
+      legislationAnkiValidationRunner.batches += 1;
+
+      legislationAnkiValidationRunner.lastTopicOrder=
+        batch.topicOrder ?? null;
+
+      console.log(
+        "[anki-legislation-runner]",
+        JSON.stringify({
+          batch:
+            legislationAnkiValidationRunner.batches,
+          topicOrder:
+            batch.topicOrder,
+          processed:
+            batch.processed,
+          validated:
+            batch.validated,
+          rejected:
+            batch.rejected,
+          remaining:
+            Number(batch?.status?.pending || 0)
+        })
+      );
+
+      if(delayMs > 0){
+        await sleep(delayMs);
+      }
+    }
+
+  }catch(error){
+    legislationAnkiValidationRunner.lastError=
+      error?.message || String(error);
+
+    console.error(
+      "ANKI VALIDATION RUNNER ERROR:",
+      error
+    );
+
+  }finally{
+    legislationAnkiValidationRunner.running=false;
+    legislationAnkiValidationRunner.finishedAt=
+      new Date().toISOString();
+
+    console.log(
+      "[anki-legislation-runner] finalizado",
+      JSON.stringify(
+        legislationAnkiValidationRunner
+      )
+    );
+  }
+}
+
+app.get(
+  "/api/legislation-anki/validation-runner-status",
+  async(req,res)=>{
+    try{
+      res.json({
+        ok:true,
+        runner:{
+          ...legislationAnkiValidationRunner
+        },
+        status:
+          await getLegislationAnkiValidationStatus()
+      });
+
+    }catch(error){
+      res.status(500).json({
+        ok:false,
+        error:error?.message || String(error)
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/legislation-anki/validation-run",
+  async(req,res)=>{
+    try{
+      const batchSize=
+        Math.min(
+          Math.max(
+            Number(req.query?.batchSize) || 20,
+            1
+          ),
+          20
+        );
+
+      if(!legislationAnkiValidationRunner.running){
+        setImmediate(()=>{
+          runLegislationAnkiValidationQueue({
+            batchSize,
+            delayMs:750
+          }).catch(error=>{
+            console.error(
+              "ANKI VALIDATION RUNNER UNHANDLED:",
+              error
+            );
+          });
+        });
+      }
+
+      res.json({
+        ok:true,
+        started:
+          !legislationAnkiValidationRunner.running,
+        message:
+          "Validación automática iniciada o ya en ejecución.",
+        runner:{
+          ...legislationAnkiValidationRunner
+        },
+        status:
+          await getLegislationAnkiValidationStatus()
+      });
+
+    }catch(error){
+      console.error(
+        "ANKI VALIDATION RUN START ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        ok:false,
+        error:error?.message || String(error)
+      });
+    }
+  }
+);
+
 app.get(
   "/api/legislation-anki/validation-status",
   async(req,res)=>{
