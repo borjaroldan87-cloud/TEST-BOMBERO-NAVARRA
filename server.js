@@ -13235,6 +13235,22 @@ if(geographyOperationalIssue){
     ]
   };
 }
+const geographyOptionIssue =
+  geographyOptionPoolIssue(
+    target,
+    question
+  );
+
+if(geographyOptionIssue){
+  factualValidation[i] = {
+    ...factualValidation[i],
+    valid:false,
+    issues:[
+      ...(factualValidation[i].issues || []),
+      geographyOptionIssue
+    ]
+  };
+}
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
@@ -13343,6 +13359,7 @@ if(geographyOptionIssue){
     geographyOptionIssue
   ];
 }
+    
     if(
       targetForValidation?.failed_difficulty === "muy alta" &&
       regenerated.questions[i]?.difficulty !== "muy alta"
