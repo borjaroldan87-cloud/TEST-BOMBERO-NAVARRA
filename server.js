@@ -8027,7 +8027,6 @@ return {
   operationalArea,
   normalizedOperationalArea:
     normalizeGeo(operationalArea)
-};
       };
     });
 
