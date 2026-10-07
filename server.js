@@ -7403,7 +7403,45 @@ if(selectionStrategy !== "simulation"){
 if(newCandidate){
   selectedAdaptive.push(newCandidate);
 }
+const deferredGeographyCandidates = [];
+const usedGeographyMunicipalities = new Set();
 
+const geographyMunicipalityKey = candidate => {
+  const topicNumber =
+    coverageTopicNumber(candidate?.topic_name);
+
+  if(![22,23,24,25].includes(topicNumber)){
+    return null;
+  }
+
+  const concept =
+    String(candidate?.concept || "");
+
+  const match =
+    concept.match(
+      /\bubicad[oa]\s+en\s+(.+?)(?=,\s*(?:asociad[oa]|adscrit[oa]|con\b)|$)/i
+    );
+
+  if(!match?.[1]){
+    return null;
+  }
+
+  return match[1]
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g," ");
+};
+
+for(const selected of selectedAdaptive){
+  const key =
+    geographyMunicipalityKey(selected);
+
+  if(key){
+    usedGeographyMunicipalities.add(key);
+  }
+}
 for(const candidate of adaptiveCandidates){
 
   if(
@@ -7446,14 +7484,78 @@ for(const candidate of adaptiveCandidates){
   if(overlaps){
     continue;
   }
+const geographyMunicipality =
+  geographyMunicipalityKey(candidate);
 
+if(
+  geographyMunicipality &&
+  usedGeographyMunicipalities.has(
+    geographyMunicipality
+  )
+){
+  deferredGeographyCandidates.push(candidate);
+  continue;
+}
   selectedAdaptive.push(candidate);
-
+if(geographyMunicipality){
+  usedGeographyMunicipalities.add(
+    geographyMunicipality
+  );
+}
   if(selectedAdaptive.length === count){
     break;
   }
 }
+if(selectedAdaptive.length < count){
 
+  for(
+    const candidate
+    of deferredGeographyCandidates
+  ){
+
+    if(
+      selectedAdaptive.some(
+        selected =>
+          Number(selected.id) ===
+          Number(candidate.id)
+      )
+    ){
+      continue;
+    }
+
+    const candidateConcept =
+      String(candidate.concept || "")
+        .trim()
+        .toLowerCase();
+
+    const candidateSection =
+      String(candidate.section || "")
+        .trim()
+        .toLowerCase();
+
+    const overlaps =
+      selectedAdaptive.some(selected =>
+        String(selected.concept || "")
+          .trim()
+          .toLowerCase() ===
+            candidateConcept &&
+        String(selected.section || "")
+          .trim()
+          .toLowerCase() ===
+            candidateSection
+      );
+
+    if(overlaps){
+      continue;
+    }
+
+    selectedAdaptive.push(candidate);
+
+    if(selectedAdaptive.length === count){
+      break;
+    }
+  }
+}
 if(selectedAdaptive.length < count){
   throw new Error(
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
@@ -7853,8 +7955,10 @@ for(let index = 0; index < selected.length; index++){
         ON t.id = ci.topic_id
       WHERE
         t.topic_order = 21
-        AND LOWER(BTRIM(COALESCE(ci.section,''))) =
-            LOWER('Tema 21 - municipios y ámbitos')
+        AND LOWER(BTRIM(COALESCE(ci.section,''))) IN (
+  LOWER('Tema 21 - municipios y ámbitos'),
+  LOWER('Tema 21 - concejos y localidades')
+)
         AND ci.concept LIKE '%->%'
       ORDER BY ci.id ASC
     `);
@@ -7871,33 +7975,58 @@ for(let index = 0; index < selected.length; index++){
   const territorialRows=
     territorialResult.rows.map(row=>{
 
-      const parts=
-        String(row.concept || "")
-          .split("->");
+const parts=
+  String(row.concept || "")
+    .split("->")
+    .map(part=>part.trim())
+    .filter(Boolean);
 
-      const rawEntity=
-        String(parts.shift() || "")
-          .trim()
-          .replace(
-            /^Municipio de\s+/i,
-            ""
-          );
+const rawEntity=
+  String(parts[0] || "")
+    .trim()
+    .replace(
+      /^Municipio de\s+/i,
+      ""
+    );
 
-      const operationalArea=
-        parts.join("->").trim();
+const parentMunicipality=
+  parts.length >= 3
+    ? String(parts[1] || "").trim()
+    : rawEntity;
 
-      const aliases=
-        rawEntity
-          .split("/")
-          .map(normalizeGeo)
-          .filter(alias=>alias.length >= 4);
+const operationalArea=
+  parts.length >= 3
+    ? String(
+        parts[parts.length - 1] || ""
+      ).trim()
+    : String(parts[1] || "").trim();
 
-      return {
-        ...row,
-        aliases,
-        operationalArea,
-        normalizedOperationalArea:
-          normalizeGeo(operationalArea)
+const aliases=
+  rawEntity
+    .split("/")
+    .map(normalizeGeo)
+    .filter(alias=>alias.length >= 3);
+
+const municipalityAliases=
+  parentMunicipality
+    .replace(
+      /^Municipio de\s+/i,
+      ""
+    )
+    .split("/")
+    .map(normalizeGeo)
+    .filter(alias=>alias.length >= 3);
+
+return {
+  ...row,
+  rawEntity,
+  parentMunicipality,
+  aliases,
+  municipalityAliases,
+  operationalArea,
+  normalizedOperationalArea:
+    normalizeGeo(operationalArea)
+};
       };
     });
 
@@ -8428,16 +8557,190 @@ for(let index = 0; index < selected.length; index++){
 
 - ESTRUCTURA A IMITAR:
   ${selected.pattern}
-
 REGLAS DEL ARQUETIPO:
+
 - Imita la ESTRUCTURA de las preguntas oficiales, nunca su contenido factual.
 - No copies literalmente ninguna pregunta oficial.
-- Sustituye todos los nombres y hechos por datos del objetivo y del temario.
+- Sustituye nombres y hechos por datos del objetivo y del temario.
 - Mantén el objetivo curricular seleccionado.
-- Si questionFamily es 2026_INCORRECTA, adapta el arquetipo a tres relaciones verdaderas y una falsa.
-- Si questionFamily es 2026_CORRECTA, debe existir una sola relación íntegramente correcta.
-- Los distractores deben ser territorialmente próximos y competitivos.
-- Evita repetir el mismo arquetipo cuando haya otros compatibles disponibles.
+
+==================================================
+REGLA DE ENUNCIADO
+==================================================
+
+- PRIORIDAD ABSOLUTA: enunciados breves, naturales y directos.
+- Formula UNA incógnita principal por pregunta.
+- NO añadas información que permita deducir la respuesta sin conocer el dato.
+- NO expliques en el enunciado la relación territorial que precisamente se pregunta.
+- NO utilices frases artificiales como:
+  "analizando la distribución industrial y territorial...",
+  "conforme a los registros técnicos...",
+  "según la catalogación...",
+  "en relación con su adscripción operativa..."
+  salvo que sean realmente necesarias.
+
+EJEMPLOS DE ESTRUCTURA ADECUADA:
+
+- "¿En qué municipio se encuentra el Polígono Industrial X?"
+- "Se produce un incendio en el Polígono Industrial X.
+   ¿Qué parque de bomberos se movilizará en primer lugar?"
+- "¿En qué municipio se encuentra el Parque Solar X?"
+- "Se produce un incendio en el Parque Eólico X.
+   ¿Qué parque de bomberos se movilizará en primer lugar?"
+- "Se produce un accidente en el concejo X.
+   ¿Qué parque de bomberos se movilizará en primer lugar?"
+
+==================================================
+NO REGALAR LA RESPUESTA
+==================================================
+
+- Si preguntas MUNICIPIO:
+  el enunciado NO debe indicar el parque ni otra relación
+  territorial que permita deducir fácilmente el municipio.
+
+- Si preguntas PARQUE:
+  si el incidente ocurre en una instalación concreta,
+  da el nombre de la instalación pero NO añadas además
+  su municipio salvo que sea imprescindible para el arquetipo.
+
+- Si preguntas INSTALACIÓN:
+  no añadas otra característica que identifique
+  inequívocamente la respuesta.
+
+==================================================
+HOMOGENEIDAD DE LAS CUATRO OPCIONES
+==================================================
+
+- Las cuatro opciones deben pertenecer a la MISMA categoría.
+
+- Pregunta por municipio:
+  CUATRO municipios.
+
+- Pregunta por concejo:
+  CUATRO concejos.
+
+- Pregunta por parque:
+  CUATRO parques/sedes operativas.
+
+- Pregunta por polígono:
+  CUATRO polígonos industriales.
+
+- Pregunta por parque solar:
+  CUATRO instalaciones solares.
+
+- Pregunta por parque eólico:
+  CUATRO parques eólicos.
+
+- Pregunta por helipuerto/helisuperficie:
+  CUATRO instalaciones de esa categoría.
+
+- NO mezcles municipio + parque dentro de una misma opción
+  en una pregunta simple.
+
+==================================================
+DIFICULTAD DE LOS DISTRACTORES
+==================================================
+
+- Está PROHIBIDO construir distractores fácilmente descartables
+  por pertenecer a zonas evidentemente incompatibles cuando
+  existan alternativas territoriales más plausibles.
+
+- Utiliza prioritariamente:
+  1. CONTEXTO TERRITORIAL DEL TEMA 21;
+  2. RELACIONES TERRITORIALES PRÓXIMAS;
+  3. BANCO FACTUAL CERCANO del propio tema.
+
+- Para preguntas de MUNICIPIO:
+  los tres distractores deben ser municipios territorialmente
+  plausibles respecto a la respuesta correcta.
+
+- Prioriza municipios pertenecientes al mismo parque operativo
+  o a ámbitos inmediatamente relacionados presentes en el
+  contexto factual suministrado.
+
+- NO inventes que dos municipios son colindantes.
+  Solo utiliza vecindad geográfica cuando la fuente lo respalde.
+
+- Para preguntas de PARQUE:
+  utiliza sedes/parques que constituyan alternativas operativas
+  plausibles para esa zona.
+  Evita opciones absurdamente alejadas si existen alternativas mejores.
+
+- Cuando el Tema 21 permita determinar una sede concreta,
+  utiliza SIEMPRE esa sede concreta.
+
+- NO uses como respuesta operativa agrupaciones administrativas
+  como "Lodosa-Peralta/Azkoien" cuando pueda determinarse
+  Lodosa o Peralta/Azkoien de forma individual.
+
+==================================================
+MUNICIPIOS Y CONCEJOS — TEMA 21
+==================================================
+
+- En preguntas del tipo:
+  "¿Qué concejo NO pertenece al municipio X?"
+
+  construye preferentemente:
+  - TRES concejos reales pertenecientes al municipio preguntado;
+  - UN concejo real perteneciente a otro municipio próximo o
+    territorialmente plausible.
+
+- El distractor incorrecto debe ser verosímil:
+  nunca elijas deliberadamente un concejo de una zona
+  evidentemente remota si dispones de uno más competitivo.
+
+- También son prioritarias:
+  municipio/concejo -> parque operativo;
+  concejo -> municipio;
+  municipio -> sede;
+  pertenencia y exclusión territorial.
+
+==================================================
+POLÍGONOS, SOLARES, EÓLICOS Y HELIPUERTOS
+==================================================
+
+- Para T22, T23, T24 y T25 prioriza preguntas simples:
+  instalación -> municipio
+  e
+  instalación/lugar -> parque operativo.
+
+- Las preguntas combinadas
+  instalación -> municipio -> parque
+  pueden aparecer, pero NO deben dominar el test.
+
+- No repitas innecesariamente un municipio o una instalación
+  cuando existan otros objetivos disponibles.
+
+==================================================
+POLARIDAD
+==================================================
+
+- Si questionFamily es 2026_INCORRECTA:
+  deben existir exactamente TRES opciones verdaderas
+  y UNA falsa.
+
+- Si questionFamily es 2026_CORRECTA:
+  debe existir exactamente UNA opción válida.
+
+- No fabriques la opción falsa mediante una asociación
+  territorial grotesca; debe ser una confusión plausible.
+
+==================================================
+DIVERSIDAD
+==================================================
+
+- Evita reutilizar en varias preguntas consecutivas:
+  el mismo municipio,
+  el mismo concejo,
+  la misma instalación,
+  el mismo parque
+  o los mismos distractores.
+
+- La dificultad debe proceder del conocimiento territorial,
+  NO de enunciados innecesariamente complejos.
+`;
+}
+
 `;
 }    
 function geographyExamQuestionPolicy(target){
@@ -8664,7 +8967,9 @@ OBJETIVO ${index+1}
 - Tipo de evaluación solicitado: ${item.evaluation_type}
 - Dificultad adaptativa requerida: ${item.adaptiveDifficulty || "alta"}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
-- Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
+${item.manual_page
+  ? `- Página impresa del manual (uso interno): ${item.manual_page}`
+  : ""}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
 ${item.territorialContext?.exact?.length ? `
 
