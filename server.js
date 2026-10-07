@@ -404,7 +404,13 @@ await db.query(`
 await db.query(`
   CREATE INDEX IF NOT EXISTS idx_legislation_anki_fingerprint
   ON legislation_anki_questions(fingerprint)
-`);}
+`);
+
+await db.query(`
+  ALTER TABLE legislation_anki_questions
+  ADD COLUMN IF NOT EXISTS validation_evidence TEXT
+`);
+}
 async function syncGraphicAssets(){
   const graphicsRoot = path.join(process.cwd(), "public", "graphics");
 
@@ -1730,6 +1736,449 @@ async function syncLegislationAnkiQuestions(){
     JSON.stringify(status.rows[0])
   );
 }
+
+async function getLegislationAnkiValidationStatus(){
+  const totals=await db.query(`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'pending'
+      )::int AS pending,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'validated'
+      )::int AS validated,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'rejected'
+      )::int AS rejected,
+      COUNT(*) FILTER (
+        WHERE option_count = 3
+      )::int AS three_options,
+      COUNT(*) FILTER (
+        WHERE option_count = 4
+      )::int AS four_options
+    FROM legislation_anki_questions
+  `);
+
+  const byTopic=await db.query(`
+    SELECT
+      topic_order,
+      MIN(topic) AS topic,
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'pending'
+      )::int AS pending,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'validated'
+      )::int AS validated,
+      COUNT(*) FILTER (
+        WHERE validation_status = 'rejected'
+      )::int AS rejected
+    FROM legislation_anki_questions
+    GROUP BY topic_order
+    ORDER BY topic_order ASC
+  `);
+
+  return {
+    ...totals.rows[0],
+    byTopic:byTopic.rows
+  };
+}
+
+async function getLegislationTopicNamesForAnkiOrder(topicOrder){
+  const result=await db.query(`
+    SELECT
+      name,
+      topic_order
+    FROM topics
+    WHERE block = 'legislacion'
+    ORDER BY topic_order ASC NULLS LAST, id ASC
+  `);
+
+  return result.rows
+    .filter(row=>
+      ankiLegislationSourceOrderForTopicName(
+        row.name
+      ) === Number(topicOrder)
+    )
+    .map(row=>row.name);
+}
+
+const legislationAnkiValidationSchema={
+  type:"object",
+  properties:{
+    results:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          ankiNoteId:{type:"integer"},
+          valid:{type:"boolean"},
+          reason:{type:"string"},
+          evidence:{type:"string"}
+        },
+        required:[
+          "ankiNoteId",
+          "valid",
+          "reason",
+          "evidence"
+        ]
+      }
+    }
+  },
+  required:["results"]
+};
+
+async function validateLegislationAnkiBatch({
+  topicOrder=null,
+  limit=10
+}={}){
+  if(!STORE){
+    throw new Error(
+      "ANKI LEGISLACIÓN: el File Search factual todavía no está cargado."
+    );
+  }
+
+  const safeLimit=
+    Math.min(
+      Math.max(
+        Number(limit) || 10,
+        1
+      ),
+      20
+    );
+
+  let effectiveTopicOrder=
+    Number.isInteger(Number(topicOrder))
+      ? Number(topicOrder)
+      : null;
+
+  if(effectiveTopicOrder == null){
+    const nextTopic=await db.query(`
+      SELECT topic_order
+      FROM legislation_anki_questions
+      WHERE validation_status = 'pending'
+      ORDER BY topic_order ASC, id ASC
+      LIMIT 1
+    `);
+
+    if(!nextTopic.rows.length){
+      return {
+        processed:0,
+        topicOrder:null,
+        complete:true,
+        status:
+          await getLegislationAnkiValidationStatus()
+      };
+    }
+
+    effectiveTopicOrder=
+      Number(nextTopic.rows[0].topic_order);
+  }
+
+  if(
+    !Number.isInteger(effectiveTopicOrder) ||
+    effectiveTopicOrder < 1 ||
+    effectiveTopicOrder > 11
+  ){
+    throw new Error(
+      "ANKI LEGISLACIÓN: topicOrder debe estar entre 1 y 11."
+    );
+  }
+
+  const pending=await db.query(
+    `
+    SELECT
+      id,
+      anki_note_id,
+      topic_order,
+      topic,
+      stem,
+      options,
+      correct_index,
+      correct_answer,
+      option_count
+    FROM legislation_anki_questions
+    WHERE
+      validation_status = 'pending'
+      AND topic_order = $1
+    ORDER BY id ASC
+    LIMIT $2
+    `,
+    [
+      effectiveTopicOrder,
+      safeLimit
+    ]
+  );
+
+  if(!pending.rows.length){
+    return {
+      processed:0,
+      topicOrder:effectiveTopicOrder,
+      complete:true,
+      status:
+        await getLegislationAnkiValidationStatus()
+    };
+  }
+
+  const relatedTopicNames=
+    await getLegislationTopicNamesForAnkiOrder(
+      effectiveTopicOrder
+    );
+
+  const questions=
+    pending.rows.map(row=>({
+      ankiNoteId:
+        Number(row.anki_note_id),
+
+      topic:
+        row.topic,
+
+      stem:
+        row.stem,
+
+      options:
+        row.options,
+
+      correctIndex:
+        Number(row.correct_index),
+
+      markedCorrectAnswer:
+        row.correct_answer,
+
+      optionCount:
+        Number(row.option_count)
+    }));
+
+  const runtimeSchema=
+    structuredClone(
+      legislationAnkiValidationSchema
+    );
+
+  runtimeSchema.properties.results.minItems=
+    questions.length;
+
+  runtimeSchema.properties.results.maxItems=
+    questions.length;
+
+  const prompt=`
+Eres un auditor factual estricto de preguntas de LEGISLACIÓN
+para una oposición de Bomberos de Navarra.
+
+FUENTE DE VERDAD:
+- Utiliza EXCLUSIVAMENTE File Search sobre los PDF del temario factual.
+- NO uses conocimiento general, memoria propia, el banco Anki ni los exámenes
+  oficiales como fuente factual.
+- El banco Anki que recibes es únicamente el OBJETO que debes comprobar.
+- Si el temario recuperado no permite demostrar con seguridad la respuesta,
+  marca valid=false.
+
+BLOQUE ANKI:
+${effectiveTopicOrder}
+
+DENOMINACIÓN ANKI:
+${pending.rows[0]?.topic || "No especificada"}
+
+TEMAS/DOCUMENTOS FACTUALES RELACIONADOS EN LA APLICACIÓN:
+${relatedTopicNames.length
+  ? relatedTopicNames.map(name=>`- ${name}`).join("\n")
+  : "- No se ha podido identificar por nombre. Busca en los PDF factuales únicamente por el contenido normativo de la pregunta."}
+
+TAREA PARA CADA PREGUNTA:
+1. Comprueba el enunciado contra el temario factual.
+2. Comprueba que la opción indicada por correctIndex sea correcta.
+3. Comprueba que ninguna otra opción sea también correcta según la polaridad
+   exacta del enunciado.
+4. Respeta preguntas originales de 3 o de 4 opciones: ambas son válidas.
+5. NO rechaces una pregunta por estilo, longitud o redacción si es
+   factualmente correcta y unívoca.
+6. Si existe contradicción con el temario o falta soporte suficiente para
+   demostrar la respuesta, valid=false.
+7. evidence debe resumir de forma breve el contenido factual recuperado que
+   permite comprobar la respuesta. No inventes artículos, cifras ni normas.
+8. reason debe explicar brevemente por qué se valida o se rechaza.
+
+Devuelve EXACTAMENTE un resultado por pregunta, en el mismo orden y con
+el mismo ankiNoteId.
+
+PREGUNTAS:
+${JSON.stringify(questions)}
+`;
+
+  const ai=aiClient();
+
+  const response=
+    await ai.models.generateContent({
+      model:"gemini-3.5-flash-lite",
+      contents:prompt,
+      config:{
+        tools:[{
+          fileSearch:{
+            fileSearchStoreNames:[STORE]
+          }
+        }],
+        responseMimeType:"application/json",
+        responseJsonSchema:runtimeSchema
+      }
+    });
+
+  const parsed=
+    JSON.parse(response.text);
+
+  if(
+    !Array.isArray(parsed?.results) ||
+    parsed.results.length !== questions.length
+  ){
+    throw new Error(
+      "ANKI LEGISLACIÓN: el validador no devolvió un resultado por pregunta."
+    );
+  }
+
+  const expectedIds=
+    questions.map(
+      question=>Number(question.ankiNoteId)
+    );
+
+  for(let i=0;i<parsed.results.length;i++){
+    const result=parsed.results[i];
+
+    if(
+      Number(result.ankiNoteId) !==
+      expectedIds[i]
+    ){
+      throw new Error(
+        "ANKI LEGISLACIÓN: el validador devolvió IDs u orden inconsistentes."
+      );
+    }
+  }
+
+  const client=
+    await db.connect();
+
+  try{
+    await client.query("BEGIN");
+
+    for(const result of parsed.results){
+      await client.query(
+        `
+        UPDATE legislation_anki_questions
+        SET
+          validation_status = $2,
+          validation_reason = $3,
+          validation_evidence = $4,
+          validated_at = NOW(),
+          updated_at = NOW()
+        WHERE anki_note_id = $1
+        `,
+        [
+          Number(result.ankiNoteId),
+          result.valid === true
+            ? "validated"
+            : "rejected",
+          String(result.reason || "").trim() || null,
+          String(result.evidence || "").trim() || null
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+
+  }catch(error){
+    await client.query("ROLLBACK");
+    throw error;
+
+  }finally{
+    client.release();
+  }
+
+  const validated=
+    parsed.results.filter(
+      result=>result.valid === true
+    ).length;
+
+  const rejected=
+    parsed.results.length - validated;
+
+  return {
+    processed:parsed.results.length,
+    topicOrder:effectiveTopicOrder,
+    topic:
+      pending.rows[0]?.topic || null,
+    factualTopics:
+      relatedTopicNames,
+    validated,
+    rejected,
+    complete:false,
+    results:parsed.results,
+    status:
+      await getLegislationAnkiValidationStatus()
+  };
+}
+
+app.get(
+  "/api/legislation-anki/validation-status",
+  async(req,res)=>{
+    try{
+      res.json({
+        ok:true,
+        status:
+          await getLegislationAnkiValidationStatus()
+      });
+
+    }catch(error){
+      console.error(
+        "ANKI VALIDATION STATUS ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        ok:false,
+        error:error?.message || String(error)
+      });
+    }
+  }
+);
+
+app.get(
+  "/api/legislation-anki/validate-next",
+  async(req,res)=>{
+    try{
+      const rawTopicOrder=
+        req.query?.topicOrder;
+
+      const topicOrder=
+        rawTopicOrder == null ||
+        rawTopicOrder === ""
+          ? null
+          : Number(rawTopicOrder);
+
+      const limit=
+        Number(req.query?.limit || 10);
+
+      const result=
+        await validateLegislationAnkiBatch({
+          topicOrder,
+          limit
+        });
+
+      res.json({
+        ok:true,
+        ...result
+      });
+
+    }catch(error){
+      console.error(
+        "ANKI VALIDATION ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        ok:false,
+        error:error?.message || String(error)
+      });
+    }
+  }
+);
+
 async function getOrCreateTopic(name, sourceFile=null){
   const existing = await db.query(
     "SELECT * FROM topics WHERE name = $1 LIMIT 1",
