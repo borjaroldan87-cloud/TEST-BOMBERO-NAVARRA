@@ -7835,20 +7835,16 @@ for(let index = 0; index < selected.length; index++){
     return;
   }
 
-  for(const target of targets){
-    if(!target?.topic_name || !target?.id){
-      target.distractorContext = [];
-      continue;
-    }
-
-    const result = await db.query(
-      `
+  /*
+  Contexto territorial maestro del Tema 21.
+  Se carga una sola vez por generación.
+  */
+  const territorialResult =
+    await db.query(`
       SELECT
         ci.id,
         ci.section,
         ci.concept,
-        ci.item_type,
-        ci.evaluation_type,
         ci.source_page,
         ci.manual_page,
         ci.source_evidence
@@ -7856,55 +7852,594 @@ for(let index = 0; index < selected.length; index++){
       JOIN topics t
         ON t.id = ci.topic_id
       WHERE
-        t.name = $1
-        AND ci.id <> $2
-        AND ci.source_evidence IS NOT NULL
-        AND BTRIM(ci.source_evidence) <> ''
-        AND (
-          (
-            $3::text IS NOT NULL
-            AND BTRIM($3::text) <> ''
-            AND LOWER(BTRIM(COALESCE(ci.section,''))) =
-                LOWER(BTRIM($3::text))
+        t.topic_order = 21
+        AND LOWER(BTRIM(COALESCE(ci.section,''))) =
+            LOWER('Tema 21 - municipios y ámbitos')
+        AND ci.concept LIKE '%->%'
+      ORDER BY ci.id ASC
+    `);
+
+  const normalizeGeo=value=>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g," ")
+      .trim()
+      .replace(/\s+/g," ");
+
+  const territorialRows=
+    territorialResult.rows.map(row=>{
+
+      const parts=
+        String(row.concept || "")
+          .split("->");
+
+      const rawEntity=
+        String(parts.shift() || "")
+          .trim()
+          .replace(
+            /^Municipio de\s+/i,
+            ""
+          );
+
+      const operationalArea=
+        parts.join("->").trim();
+
+      const aliases=
+        rawEntity
+          .split("/")
+          .map(normalizeGeo)
+          .filter(alias=>alias.length >= 4);
+
+      return {
+        ...row,
+        aliases,
+        operationalArea,
+        normalizedOperationalArea:
+          normalizeGeo(operationalArea)
+      };
+    });
+
+  for(const target of targets){
+
+    if(!target?.topic_name || !target?.id){
+      target.distractorContext=[];
+      target.territorialContext={
+        exact:[],
+        nearby:[]
+      };
+      continue;
+    }
+
+    /*
+    Banco factual del propio tema.
+    Ampliamos de 6 a 12 para disponer de
+    más alternativas reales.
+    */
+    const result=
+      await db.query(
+        `
+        SELECT
+          ci.id,
+          ci.section,
+          ci.concept,
+          ci.item_type,
+          ci.evaluation_type,
+          ci.source_page,
+          ci.manual_page,
+          ci.source_evidence
+        FROM coverage_items ci
+        JOIN topics t
+          ON t.id = ci.topic_id
+        WHERE
+          t.name = $1
+          AND ci.id <> $2
+          AND ci.source_evidence IS NOT NULL
+          AND BTRIM(ci.source_evidence) <> ''
+          AND (
+            (
+              $3::text IS NOT NULL
+              AND BTRIM($3::text) <> ''
+              AND LOWER(
+                BTRIM(
+                  COALESCE(ci.section,'')
+                )
+              ) =
+              LOWER(BTRIM($3::text))
+            )
+            OR
+            (
+              $4::int IS NOT NULL
+              AND ci.source_page IS NOT NULL
+              AND ci.source_page BETWEEN
+                ($4::int - 2)
+                AND
+                ($4::int + 2)
+            )
           )
-          OR
-          (
-            $4::int IS NOT NULL
-            AND ci.source_page IS NOT NULL
-            AND ci.source_page BETWEEN ($4::int - 2) AND ($4::int + 2)
+        ORDER BY
+          CASE
+            WHEN
+              $3::text IS NOT NULL
+              AND BTRIM($3::text) <> ''
+              AND LOWER(
+                BTRIM(
+                  COALESCE(ci.section,'')
+                )
+              ) =
+              LOWER(BTRIM($3::text))
+            THEN 0
+            ELSE 1
+          END,
+          CASE
+            WHEN ci.item_type = $5
+            THEN 0
+            ELSE 1
+          END,
+          CASE
+            WHEN
+              $4::int IS NOT NULL
+              AND ci.source_page IS NOT NULL
+            THEN
+              ABS(
+                ci.source_page -
+                $4::int
+              )
+            ELSE 999
+          END,
+          ci.id ASC
+        LIMIT 12
+        `,
+        [
+          target.topic_name,
+          Number(target.id),
+          target.section || null,
+          target.source_page ?? null,
+          target.item_type || null
+        ]
+      );
+
+    target.distractorContext=
+      result.rows;
+
+    target.territorialContext={
+      exact:[],
+      nearby:[]
+    };
+
+    const topicNumber=
+      coverageTopicNumber(
+        target.topic_name
+      );
+
+    if(
+      !Number.isInteger(topicNumber) ||
+      topicNumber < 21 ||
+      topicNumber > 26
+    ){
+      continue;
+    }
+
+    const targetText=
+      " " +
+      normalizeGeo(
+        [
+          target.concept,
+          target.source_evidence
+        ]
+          .filter(Boolean)
+          .join(" ")
+      ) +
+      " ";
+
+    const exact=
+      territorialRows
+        .filter(row=>
+          row.aliases.some(alias=>
+            targetText.includes(
+              ` ${alias} `
+            )
           )
         )
-      ORDER BY
-        CASE
-          WHEN
-            $3::text IS NOT NULL
-            AND BTRIM($3::text) <> ''
-            AND LOWER(BTRIM(COALESCE(ci.section,''))) =
-                LOWER(BTRIM($3::text))
-          THEN 0
-          ELSE 1
-        END,
-        CASE WHEN ci.item_type = $5 THEN 0 ELSE 1 END,
-        CASE
-          WHEN $4::int IS NOT NULL AND ci.source_page IS NOT NULL
-          THEN ABS(ci.source_page - $4::int)
-          ELSE 999
-        END,
-        ci.id ASC
-      LIMIT 6
-      `,
-      [
-        target.topic_name,
-        Number(target.id),
-        target.section || null,
-        target.source_page ?? null,
-        target.item_type || null
-      ]
-    );
+        .sort((a,b)=>{
+          const maxA=
+            Math.max(
+              0,
+              ...a.aliases.map(
+                alias=>alias.length
+              )
+            );
 
-    target.distractorContext = result.rows;
+          const maxB=
+            Math.max(
+              0,
+              ...b.aliases.map(
+                alias=>alias.length
+              )
+            );
+
+          return maxB-maxA;
+        })
+        .slice(0,3);
+
+    if(!exact.length){
+      continue;
+    }
+
+    const exactIds=
+      new Set(
+        exact.map(row=>
+          Number(row.id)
+        )
+      );
+
+    const exactAreas=
+      new Set(
+        exact
+          .map(row=>
+            row.normalizedOperationalArea
+          )
+          .filter(Boolean)
+      );
+
+    const exactPages=
+      new Set(
+        exact
+          .map(row=>
+            String(
+              row.manual_page || ""
+            )
+          )
+          .filter(Boolean)
+      );
+
+    const nearby=
+      territorialRows
+        .filter(row=>
+          !exactIds.has(
+            Number(row.id)
+          ) &&
+          (
+            exactAreas.has(
+              row.normalizedOperationalArea
+            ) ||
+            exactPages.has(
+              String(
+                row.manual_page || ""
+              )
+            )
+          )
+        )
+        .sort((a,b)=>{
+          const sameAreaA=
+            exactAreas.has(
+              a.normalizedOperationalArea
+            )
+              ? 0
+              : 1;
+
+          const sameAreaB=
+            exactAreas.has(
+              b.normalizedOperationalArea
+            )
+              ? 0
+              : 1;
+
+          return (
+            sameAreaA-
+            sameAreaB ||
+            Number(a.id)-
+            Number(b.id)
+          );
+        })
+        .slice(0,16);
+
+    const cleanTerritorialRow=row=>({
+      id:row.id,
+      concept:row.concept,
+      source_page:row.source_page,
+      manual_page:row.manual_page,
+      source_evidence:
+        row.source_evidence,
+      operationalArea:
+        row.operationalArea
+    });
+
+    target.territorialContext={
+      exact:
+        exact.map(
+          cleanTerritorialRow
+        ),
+
+      nearby:
+        nearby.map(
+          cleanTerritorialRow
+        )
+    };
   }
-}  
+}
+  function geographyOfficialArchetypePrompt(target,index=0){
+  const topicNumber=
+    coverageTopicNumber(target?.topic_name);
+
+  if(
+    !Number.isInteger(topicNumber) ||
+    topicNumber < 21 ||
+    topicNumber > 27
+  ){
+    return "";
+  }
+
+  const base={
+    21:[
+      {
+        id:"INCIDENTE_LOCALIDAD_SEDE",
+        pattern:
+          "Plantea un aviso o incidente en una localidad, municipio o concejo y pregunta qué sede/parque operativo se movilizaría primero."
+      },
+      {
+        id:"PERTENENCIA_SEDE",
+        pattern:
+          "Pregunta qué municipio, localidad o concejo pertenece a una sede concreta."
+      },
+      {
+        id:"NO_PERTENECE_AMBITO",
+        pattern:
+          "Presenta cuatro localidades plausibles y pregunta cuál NO pertenece al ámbito territorial indicado."
+      },
+      {
+        id:"RELACION_CRUZADA",
+        pattern:
+          "Presenta cuatro parejas municipio/concejo -> sede y exige identificar la pareja correcta o incorrecta."
+      },
+      {
+        id:"MISMA_ZONA_SEDES_DISTINTAS",
+        pattern:
+          "Construye las alternativas usando municipios de sedes próximas o administrativamente agrupadas para obligar a distinguir la sede operativa exacta."
+      }
+    ],
+
+    22:[
+      {
+        id:"POLIGONO_LOCALIDAD",
+        pattern:
+          "Da el nombre de un polígono o emplazamiento industrial y pregunta en qué municipio/localidad se encuentra."
+      },
+      {
+        id:"POLIGONO_SEDE",
+        pattern:
+          "Plantea un incidente industrial en un polígono concreto y pregunta qué sede/parque operativo acudiría en primer lugar."
+      },
+      {
+        id:"POLIGONO_MUNICIPIO_SEDE",
+        pattern:
+          "Presenta cuatro combinaciones polígono -> municipio -> sede y exige seleccionar la única combinación íntegramente correcta."
+      },
+      {
+        id:"POLIGONO_INCORRECTA",
+        pattern:
+          "Presenta cuatro relaciones reales o casi reales entre polígonos, municipios y sedes y pregunta cuál es INCORRECTA."
+      },
+      {
+        id:"MUNICIPIO_POLIGONO",
+        pattern:
+          "Da un municipio y obliga a identificar cuál de varios polígonos pertenece realmente a él."
+      }
+    ],
+
+    23:[
+      {
+        id:"SOLAR_SEDE",
+        pattern:
+          "Plantea un incidente en una planta o parque solar concreto y pregunta qué sede/parque operativo corresponde."
+      },
+      {
+        id:"SOLAR_MUNICIPIO",
+        pattern:
+          "Da el nombre de una instalación solar y pregunta en qué municipio se encuentra."
+      },
+      {
+        id:"SOLAR_MUNICIPIO_SEDE",
+        pattern:
+          "Presenta combinaciones instalación solar -> municipio -> sede y exige discriminar la combinación correcta."
+      },
+      {
+        id:"SOLAR_INCORRECTA",
+        pattern:
+          "Presenta cuatro asociaciones de plantas solares con municipios o sedes y pregunta cuál es INCORRECTA."
+      }
+    ],
+
+    24:[
+      {
+        id:"EOLICO_SEDE",
+        pattern:
+          "Plantea un incendio o incidencia en un parque eólico concreto y pregunta qué sede/parque operativo corresponde."
+      },
+      {
+        id:"EOLICO_MUNICIPIO",
+        pattern:
+          "Da el nombre de un parque eólico y pregunta en qué municipio o municipios se localiza."
+      },
+      {
+        id:"EOLICO_MUNICIPIO_SEDE",
+        pattern:
+          "Presenta cuatro combinaciones parque eólico -> municipio -> sede y exige seleccionar la única correcta."
+      },
+      {
+        id:"EOLICO_INCORRECTA",
+        pattern:
+          "Presenta cuatro asociaciones parque eólico/municipio/sede y pregunta cuál es INCORRECTA."
+      }
+    ],
+
+    25:[
+      {
+        id:"HELIPUERTO_MUNICIPIO",
+        pattern:
+          "Da una instalación de helipuerto o helisuperficie y pregunta en qué municipio se encuentra."
+      },
+      {
+        id:"MUNICIPIO_HELIPUERTO",
+        pattern:
+          "Da un municipio y pregunta cuál de varias instalaciones corresponde a él."
+      },
+      {
+        id:"HELIPUERTO_TIPO_USO",
+        pattern:
+          "Pregunta por el tipo, uso operativo o estado de una instalación concreta cuando el temario lo indique expresamente."
+      },
+      {
+        id:"HELIPUERTO_RELACION_INCORRECTA",
+        pattern:
+          "Presenta cuatro asociaciones instalación -> municipio/tipo y pregunta cuál es INCORRECTA."
+      }
+    ],
+
+    26:[
+      {
+        id:"ESTACION_EXISTENCIA",
+        pattern:
+          "Presenta varias localidades y pregunta en cuál existe o NO existe estación o punto ferroviario."
+      },
+      {
+        id:"ESTACION_SEDE",
+        pattern:
+          "Plantea una incidencia en una estación o punto ferroviario y pregunta qué sede/parque operativo corresponde."
+      },
+      {
+        id:"ESTACION_LINEA_TRAMO",
+        pattern:
+          "Da una estación o punto y pregunta a qué línea o tramo pertenece."
+      },
+      {
+        id:"LINEA_MUNICIPIO",
+        pattern:
+          "Da una línea o tramo y exige reconocer qué municipio o estación pertenece a él."
+      },
+      {
+        id:"FERROCARRIL_INCORRECTA",
+        pattern:
+          "Presenta cuatro asociaciones estación/municipio/línea y pregunta cuál es INCORRECTA."
+      }
+    ],
+
+    27:[
+      {
+        id:"CAMINO_PERTENENCIA",
+        pattern:
+          "Pregunta qué municipio pertenece o NO pertenece a un recorrido concreto del Camino."
+      },
+      {
+        id:"CAMINO_ORDEN",
+        pattern:
+          "Presenta varios municipios o puntos del recorrido y pregunta el orden correcto en el sentido indicado por la fuente."
+      },
+      {
+        id:"CAMINO_ENTRADA_SALIDA",
+        pattern:
+          "Pregunta por el municipio o punto de entrada, salida, paso o unión de un recorrido cuando figure expresamente en el temario."
+      },
+      {
+        id:"CAMINO_SECUENCIA_INCORRECTA",
+        pattern:
+          "Presenta cuatro secuencias o relaciones de paso y pregunta cuál es INCORRECTA."
+      }
+    ]
+  };
+
+  const available=
+    Array.isArray(base[topicNumber])
+      ? [...base[topicNumber]]
+      : [];
+
+  /*
+  Arquetipos especiales observados en examen oficial.
+  Solo se habilitan cuando el propio objetivo aporta
+  evidencia factual suficiente.
+  */
+  const evidence=
+    [
+      target?.concept,
+      target?.source_evidence,
+      ...(Array.isArray(target?.distractorContext)
+        ? target.distractorContext.map(
+            item=>item?.source_evidence
+          )
+        : [])
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+  const normalizedEvidence=
+    evidence
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase();
+
+  const hasRoadEvidence=
+    /\b(?:na|n|a|ap)-?\d{1,4}\b/
+      .test(normalizedEvidence);
+
+  if(
+    (topicNumber===22 || topicNumber===24) &&
+    hasRoadEvidence
+  ){
+    available.push({
+      id:"ACCESO_OPERATIVO",
+      pattern:
+        "Plantea una incidencia en la instalación y pregunta por la carretera o acceso operativo correcto, usando exclusivamente carreteras expresamente respaldadas por la fuente."
+    });
+  }
+
+  if(
+    topicNumber===26 &&
+    /\btunel|tuneles\b/.test(normalizedEvidence)
+  ){
+    available.push({
+      id:"TUNEL_RELACION",
+      pattern:
+        "Plantea una incidencia o identificación en un túnel y exige relacionarlo con estación, línea, municipio o sede cuando esa relación figure en la fuente."
+    });
+  }
+
+  if(!available.length){
+    return "";
+  }
+
+  const numericId=
+    Number(target?.id);
+
+  const selector=
+    Number.isInteger(numericId)
+      ? numericId + Number(index || 0)
+      : Number(index || 0);
+
+  const selected=
+    available[
+      Math.abs(selector) %
+      available.length
+    ];
+
+  return `
+- ARQUETIPO OFICIAL DE GEOGRAFÍA ASIGNADO:
+  ${selected.id}
+
+- ESTRUCTURA A IMITAR:
+  ${selected.pattern}
+
+REGLAS DEL ARQUETIPO:
+- Imita la ESTRUCTURA de las preguntas oficiales, nunca su contenido factual.
+- No copies literalmente ninguna pregunta oficial.
+- Sustituye todos los nombres y hechos por datos del objetivo y del temario.
+- Mantén el objetivo curricular seleccionado.
+- Si questionFamily es 2026_INCORRECTA, adapta el arquetipo a tres relaciones verdaderas y una falsa.
+- Si questionFamily es 2026_CORRECTA, debe existir una sola relación íntegramente correcta.
+- Los distractores deben ser territorialmente próximos y competitivos.
+- Evita repetir el mismo arquetipo cuando haya otros compatibles disponibles.
+`;
+}    
 function geographyExamQuestionPolicy(target){
   const topicNumber=
     coverageTopicNumber(target?.topic_name);
@@ -8114,7 +8649,13 @@ OBJETIVOS:
 ${targets.map((item,index)=>`
 OBJETIVO ${index+1}
 - Tema/documento obligatorio: ${item.topic_name || "No especificado"}
-- Todo sourceEvidence de esta pregunta debe proceder de ese tema/documento. No mezcles hechos de otros temas aunque sean parecidos.
+- Usa este tema/documento como fuente factual principal.
+- EXCEPCIÓN GEOGRÁFICA CONTROLADA:
+  si este objetivo incluye CONTEXTO TERRITORIAL DEL TEMA 21,
+  puedes y debes utilizar ese contexto exclusivamente para determinar
+  municipio/concejo -> sede/parque operativo exacto y para construir
+  distractores territoriales plausibles.
+- No utilices el Tema 21 para completar ningún otro dato del objetivo.
 - Familia de pregunta asignada: ${item.questionFamily || "GENERAL"}
 - Esta familia es OBLIGATORIA salvo imposibilidad factual demostrable.
 - Apartado: ${item.section || "No especificado"}
@@ -8125,9 +8666,56 @@ OBJETIVO ${index+1}
 - Página física PDF (uso interno): ${item.source_page ?? "No determinada"}
 - Página impresa del manual (para mostrar al opositor): ${item.manual_page ?? "No determinada"}
 - Evidencia catalogada: ${item.source_evidence || "No disponible"}
+${item.territorialContext?.exact?.length ? `
 
+- CONTEXTO TERRITORIAL DEL TEMA 21 — RELACIÓN OPERATIVA EXACTA:
+${item.territorialContext.exact.map((contextItem,index)=>`
+  ${index+1}. ${contextItem.concept}
+`).join("")}
+
+${item.territorialContext.nearby?.length ? `
+- RELACIONES TERRITORIALES PRÓXIMAS PARA DISTRACTORES:
+${item.territorialContext.nearby.map((contextItem,index)=>`
+  ${index+1}. ${contextItem.concept}
+`).join("")}
+` : ""}
+
+REGLAS TERRITORIALES OBLIGATORIAS:
+
+- Si el tema objetivo muestra una denominación administrativa agrupada
+  y el Tema 21 permite identificar la sede concreta, PREVALECE la
+  asignación operativa concreta del Tema 21.
+
+- Lodosa y Peralta/Azkoien son sedes operativas distintas.
+- Altsasu/Alsasua y Auritz/Burguete son sedes operativas distintas.
+- Navascués/Nabaskoze y Sangüesa/Zangoza son sedes operativas distintas.
+
+- NO utilices la denominación administrativa agrupada como respuesta
+  cuando pueda determinarse la sede concreta.
+
+- Los distractores deben construirse preferentemente con municipios,
+  sedes y parques de estas relaciones territoriales próximas.
+
+- Para preguntas instalación -> municipio/parque:
+  al menos DOS distractores deben diferir de la correcta únicamente
+  en una relación territorial plausible.
+
+- Es válido y recomendable usar municipios de la misma sede o de
+  sedes territorialmente próximas para que el opositor tenga que
+  conocer realmente la asignación.
+
+- Evita como distractores parques evidentemente alejados o
+  territorialmente absurdos cuando existan alternativas próximas.
+
+- No inventes proximidades geográficas.
+  Usa exclusivamente las relaciones suministradas aquí y las
+  recuperadas del temario.
+
+- Si utilizas información del Tema 21 para fijar la sede operativa,
+  inclúyela también en sourceEvidence.
+` : ""}
 ${geographyExamQuestionPolicy(item)}
-
+${geographyOfficialArchetypePrompt(item,index)}
 ${Array.isArray(item.distractorContext) && item.distractorContext.length ? `
 - BANCO FACTUAL CERCANO PARA CONSTRUIR DISTRACTORES:
 ${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${contextItem.concept} | Evidencia: ${contextItem.source_evidence}`).join("\n")}
@@ -9568,6 +10156,102 @@ function geographyForbiddenQuestionIssue(target,question){
     return (
       `RELEVANCIA GEOGRÁFICA: la pregunta del Tema ${topicNumber} ` +
       `contiene datos expresamente prohibidos para esta oposición.`
+    );
+  }
+
+  return null;
+}
+function geographyOperationalParkIssue(target,question){
+  const exact =
+    Array.isArray(
+      target?.territorialContext?.exact
+    )
+      ? target.territorialContext.exact
+      : [];
+
+  if(!exact.length){
+    return null;
+  }
+
+  const normalize=value=>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g," ")
+      .trim()
+      .replace(/\s+/g," ");
+
+  const stem=
+    normalize(question?.stem);
+
+  const asksOperationalPark=
+    /\b(parque|bomberos|moviliz|competente|referencia|cobertura|atendid|adscripcion|servicio)\b/
+      .test(stem);
+
+  if(!asksOperationalPark){
+    return null;
+  }
+
+  const correctOption=
+    question?.options?.[
+      Number(question.correctIndex)
+    ] || "";
+
+  const normalizedCorrect=
+    normalize(correctOption);
+
+  const exactAreas=[
+    ...new Set(
+      exact
+        .map(item=>
+          normalize(
+            item.operationalArea ||
+            String(item.concept || "")
+              .split("->")
+              .slice(1)
+              .join("->")
+          )
+        )
+        .filter(Boolean)
+    )
+  ];
+
+  if(exactAreas.length !== 1){
+    return null;
+  }
+
+  const exactArea=
+    exactAreas[0]
+      .replace(/^sede de /,"")
+      .replace(/^parque de /,"")
+      .trim();
+
+  const groupedAdministrativeLabels=[
+    /lodosa peralta azkoien/,
+    /altsasu alsasua auritz burguete/,
+    /navascues nabaskoze sanguesa zangoza/
+  ];
+
+  if(
+    groupedAdministrativeLabels.some(
+      pattern=>pattern.test(normalizedCorrect)
+    )
+  ){
+    return (
+      "GEOGRAFÍA OPERATIVA: se ha utilizado como respuesta " +
+      "un parque agrupado administrativamente cuando el Tema 21 " +
+      "permite determinar la sede operativa concreta."
+    );
+  }
+
+  if(
+    exactArea &&
+    !normalizedCorrect.includes(exactArea)
+  ){
+    return (
+      "GEOGRAFÍA OPERATIVA: la respuesta correcta no coincide " +
+      "con la sede/parque operativo exacto determinado por el Tema 21."
     );
   }
 
@@ -11125,6 +11809,22 @@ for(let i = 0; i < factualValidation.length; i++){
       ]
     };
   }
+  const geographyOperationalIssue =
+  geographyOperationalParkIssue(
+    target,
+    question
+  );
+
+if(geographyOperationalIssue){
+  factualValidation[i] = {
+    ...factualValidation[i],
+    valid:false,
+    issues:[
+      ...(factualValidation[i].issues || []),
+      geographyOperationalIssue
+    ]
+  };
+}
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
