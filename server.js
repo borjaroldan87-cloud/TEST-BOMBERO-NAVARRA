@@ -4151,22 +4151,13 @@ evaluado, NO al formato del enunciado.
 
 FORMATO DEL ENUNCIADO:
 
-Cuando el coverage item utilizado tenga manualPage disponible, utiliza la
-estructura:
-
-"Conforme al manual elaborado por el CEIS Guadalajara, [título o materia
-identificable del manual], página X, ..."
-
-X debe proceder EXCLUSIVAMENTE de manualPage.
-
-NUNCA utilices sourcePage como número visible en el enunciado.
-NUNCA calcules manualPage mediante offsets.
-NUNCA inventes una página.
-NUNCA inventes el título o materia del manual.
-
-Si manualPage es null o no existe una referencia segura para construir esa
-cita, formula una pregunta literal/precisa sin inventar la referencia de
-página.
+- NO cites por defecto CEIS Guadalajara, manuales ni páginas.
+- La forma visible del enunciado depende del BLOQUE del objetivo.
+- Solo una política específica del bloque puede autorizar una referencia
+  a manual o página.
+- NUNCA utilices sourcePage como número visible en el enunciado.
+- NUNCA calcules manualPage mediante offsets.
+- NUNCA inventes una página, norma, artículo, título o referencia.
 
 A1. 2024_NUMERICA
 
@@ -6595,38 +6586,64 @@ app.get("/api/coverage-audit", async(req,res)=>{
     });
   }
 });
-function buildQuestionFamilyPlan(count){
-  const allowedCounts =
-    new Set([5,10,20,30,40,45,60,75]);
-
-  if(!allowedCounts.has(Number(count))){
-    throw new Error(
-      `Número de preguntas no soportado: ${count}`
-    );
+function buildQuestionFamilyPlan(targets){
+  if(!Array.isArray(targets) || !targets.length){
+    return [];
   }
 
-  const basePlan = [
-    "2026_CORRECTA",
-    "2026_CORRECTA",
-    "2026_INCORRECTA",
-    "2026_INCORRECTA",
-    "2026_RAZONAMIENTO",
-    "2024_NUMERICA",
-    "2024_NUMERICA",
-    "2024_TEXTO",
-    "CALCULO_FORMULACION",
-    "GRAFICA"
-  ];
+  const plans={
+    legislacion:[
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2024_TEXTO",
+      "2026_CORRECTA",
+      "2026_INCORRECTA"
+    ],
 
-  const plan=[];
+    geografia:[
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2024_TEXTO"
+    ],
 
-  while(plan.length < count){
-    plan.push(...basePlan);
-  }
+    especifico:[
+      "2026_CORRECTA",
+      "2026_CORRECTA",
+      "2026_INCORRECTA",
+      "2026_INCORRECTA",
+      "2026_RAZONAMIENTO",
+      "2024_NUMERICA",
+      "2024_NUMERICA",
+      "2024_TEXTO",
+      "CALCULO_FORMULACION",
+      "GRAFICA"
+    ]
+  };
 
-  return plan
-    .slice(0,count)
-    .sort(()=>Math.random()-0.5);
+  const counters={
+    legislacion:0,
+    geografia:0,
+    especifico:0
+  };
+
+  return targets.map(item=>{
+    const block=
+      String(item?.topic_block || "especifico")
+        .trim()
+        .toLowerCase();
+
+    const plan=
+      plans[block] || plans.especifico;
+
+    const current=
+      counters[block] ?? 0;
+
+    counters[block]=current + 1;
+
+    return plan[current % plan.length];
+  });
 }
 async function selectSemanticGraphicPair(
   ai,
@@ -6904,6 +6921,7 @@ async function getFailedCoverageTargets(
     SELECT
       ci.id,
       t.name AS topic_name,
+      t.block AS topic_block,
       ci.section,
       ci.concept,
       ci.item_type,
@@ -7003,6 +7021,7 @@ async function getAdaptiveCoverageCandidates(
     SELECT
       ci.id,
       t.name AS topic_name,
+      t.block AS topic_block,
       ci.section,
       ci.concept,
       ci.item_type,
@@ -7250,6 +7269,7 @@ async function getNewCoverageCandidate(
     SELECT
       ci.id,
       t.name AS topic_name,
+      t.block AS topic_block,
       ci.section,
       ci.concept,
       ci.item_type,
@@ -7568,7 +7588,7 @@ const result = {
 
     
 
-  const families = buildQuestionFamilyPlan(count);
+  const families = buildQuestionFamilyPlan(result.rows);
 
   const selected = result.rows.map((item,index)=>({
     ...item,
@@ -7666,6 +7686,7 @@ for(let i = 0; i < selected.length; i++){
     SELECT
       ci.id,
       t.name AS topic_name,
+      t.block AS topic_block,
       ci.section,
       ci.concept,
       ci.item_type,
@@ -9638,6 +9659,80 @@ No uses conocimiento externo para mejorar,
 completar o sustituir estos pools.
 `;
 }
+function blockQuestionPolicy(item){
+  const block=
+    String(item?.topic_block || "")
+      .trim()
+      .toLowerCase();
+
+  if(block === "legislacion"){
+    return `
+
+==================================================
+POLÍTICA ESPECÍFICA — LEGISLACIÓN
+==================================================
+
+- Redacta como una pregunta normativa de oposición.
+- Está PROHIBIDO citar CEIS Guadalajara, manuales, páginas físicas o páginas impresas.
+- Está PROHIBIDO preguntar por índices, posición de epígrafes, orden de apartados,
+  estructura editorial del documento o numeración dentro del índice.
+- Pregunta por el contenido jurídico examinable: literalidad normativa, competencias,
+  derechos, obligaciones, órganos, composición, plazos, mayorías, procedimientos,
+  requisitos, excepciones, efectos y relaciones entre preceptos.
+- Si la evidencia permite identificar con seguridad una norma o artículo, utiliza
+  formulaciones del tipo "De acuerdo con...", "Según el artículo..." o equivalentes.
+- Si la norma o artículo NO están respaldados por la evidencia recuperada, no los inventes.
+- Los distractores deben ser jurídicamente plausibles y cercanos al contenido preguntado.
+`;
+  }
+
+  if(block === "geografia"){
+    return `
+
+==================================================
+POLÍTICA ESPECÍFICA — GEOGRAFÍA
+==================================================
+
+- Formula preguntas territoriales directas, breves y operativas.
+- Está PROHIBIDO citar CEIS Guadalajara, manuales o páginas.
+- Está PROHIBIDO preguntar por índices, epígrafes o estructura editorial del documento.
+`;
+  }
+
+  if(block === "especifico"){
+    const literalFamily=
+      item?.questionFamily === "2024_NUMERICA" ||
+      item?.questionFamily === "2024_TEXTO";
+
+    if(literalFamily && item?.manual_page){
+      return `
+
+==================================================
+POLÍTICA ESPECÍFICA — BLOQUE ESPECÍFICO
+==================================================
+
+- En esta familia literal 2024, y SOLO porque existe manualPage fiable,
+  puedes utilizar cuando encaje con el estilo oficial:
+  "Conforme al manual elaborado por el CEIS Guadalajara, [materia], página ${item.manual_page}, ..."
+- La referencia es opcional: no fuerces la fórmula cuando perjudique la naturalidad.
+- Nunca uses sourcePage como página visible.
+`;
+    }
+
+    return `
+
+==================================================
+POLÍTICA ESPECÍFICA — BLOQUE ESPECÍFICO
+==================================================
+
+- Redacta conforme al estilo técnico de los exámenes oficiales.
+- No fuerces referencias a CEIS o páginas fuera de las familias literales 2024
+  con manualPage fiable.
+`;
+  }
+
+  return "";
+}
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -9736,6 +9831,7 @@ REGLAS TERRITORIALES OBLIGATORIAS:
 - Si utilizas información del Tema 21 para fijar la sede operativa,
   inclúyela también en sourceEvidence.
 ` : ""}
+${blockQuestionPolicy(item)}
 ${geographyExamQuestionPolicy(item)}
 ${geographyOfficialArchetypePrompt(item,index)}
 ${geographyOptionPoolsPrompt(item)}
