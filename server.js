@@ -2008,23 +2008,68 @@ ${JSON.stringify(questions)}
 
   const ai=aiClient();
 
-  const response=
-    await ai.models.generateContent({
-      model:"gemini-3.5-flash-lite",
-      contents:prompt,
-      config:{
-        tools:[{
-          fileSearch:{
-            fileSearchStoreNames:[STORE]
-          }
-        }],
-        responseMimeType:"application/json",
-        responseJsonSchema:runtimeSchema
-      }
-    });
+  let parsed=null;
+  let lastValidationError=null;
 
-  const parsed=
-    JSON.parse(response.text);
+  for(let attempt=1; attempt<=6; attempt++){
+    try{
+      const response=
+        await ai.models.generateContent({
+          model:"gemini-3.5-flash-lite",
+          contents:prompt,
+          config:{
+            tools:[{
+              fileSearch:{
+                fileSearchStoreNames:[STORE]
+              }
+            }],
+            responseMimeType:"application/json",
+            responseJsonSchema:runtimeSchema
+          }
+        });
+
+      const rawText=
+        typeof response?.text === "string"
+          ? response.text.trim()
+          : "";
+
+      if(!rawText){
+        throw new Error(
+          "ANKI LEGISLACIÓN: Gemini devolvió una respuesta vacía."
+        );
+      }
+
+      parsed=JSON.parse(rawText);
+      lastValidationError=null;
+      break;
+
+    }catch(error){
+      lastValidationError=error;
+
+      console.warn(
+        "ANKI VALIDATION BATCH RETRY",
+        JSON.stringify({
+          topicOrder:effectiveTopicOrder,
+          attempt,
+          maxAttempts:6,
+          error:error?.message || String(error)
+        })
+      );
+
+      if(attempt < 6){
+        const delays=[2000,4000,8000,15000,30000];
+        await sleep(delays[attempt-1] || 30000);
+      }
+    }
+  }
+
+  if(!parsed){
+    throw new Error(
+      `ANKI LEGISLACIÓN: no se pudo validar el lote tras 6 intentos. ${
+        lastValidationError?.message || "Respuesta inválida de Gemini."
+      }`
+    );
+  }
 
   if(
     !Array.isArray(parsed?.results) ||
