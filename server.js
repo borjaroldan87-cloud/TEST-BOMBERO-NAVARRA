@@ -366,7 +366,45 @@ await db.query(`
   ALTER TABLE coverage_review_state
   ADD COLUMN IF NOT EXISTS total_blank INTEGER NOT NULL DEFAULT 0
 `);
-}
+await db.query(`
+  CREATE TABLE IF NOT EXISTS legislation_anki_questions (
+    id BIGSERIAL PRIMARY KEY,
+    anki_note_id BIGINT NOT NULL UNIQUE,
+    topic_order INTEGER NOT NULL,
+    deck_path TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    stem TEXT NOT NULL,
+    options JSONB NOT NULL,
+    correct_index INTEGER NOT NULL
+      CHECK (correct_index BETWEEN 0 AND 3),
+    correct_answer TEXT,
+    option_count INTEGER NOT NULL
+      CHECK (option_count IN (3,4)),
+    direct_use_eligible BOOLEAN NOT NULL DEFAULT FALSE,
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    fingerprint TEXT NOT NULL,
+    validation_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (validation_status IN ('pending','validated','rejected')),
+    validation_reason TEXT,
+    validated_coverage_item_id INTEGER
+      REFERENCES coverage_items(id) ON DELETE SET NULL,
+    validated_at TIMESTAMPTZ,
+    times_used INTEGER NOT NULL DEFAULT 0,
+    last_used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`);
+
+await db.query(`
+  CREATE INDEX IF NOT EXISTS idx_legislation_anki_topic_status
+  ON legislation_anki_questions(topic_order, validation_status)
+`);
+
+await db.query(`
+  CREATE INDEX IF NOT EXISTS idx_legislation_anki_fingerprint
+  ON legislation_anki_questions(fingerprint)
+`);}
 async function syncGraphicAssets(){
   const graphicsRoot = path.join(process.cwd(), "public", "graphics");
 
@@ -1489,6 +1527,207 @@ async function saveExamStyleStore(storeName){
      ON CONFLICT (key)
      DO UPDATE SET value = EXCLUDED.value`,
     ["exam_style_store", storeName]
+  );
+}
+async function syncLegislationAnkiQuestions(){
+  const indexPath=
+    path.join(
+      process.cwd(),
+      "legislation_anki_index.json"
+    );
+
+  if(!fs.existsSync(indexPath)){
+    console.log(
+      "[anki-legislation] legislation_anki_index.json no encontrado."
+    );
+    return;
+  }
+
+  const parsed=
+    JSON.parse(
+      fs.readFileSync(indexPath,"utf8")
+    );
+
+  const source=
+    Array.isArray(parsed?.questions)
+      ? parsed.questions
+      : [];
+
+  if(!source.length){
+    throw new Error(
+      "ANKI LEGISLACIÓN: el índice no contiene preguntas."
+    );
+  }
+
+  const rows=
+    source.map(question=>{
+      const topic=
+        String(question?.topic || "").trim();
+
+      const topicMatch=
+        topic.match(/^\s*(\d{1,2})\./);
+
+      const options=
+        Array.isArray(question?.options)
+          ? question.options.map(
+              option=>String(option || "").trim()
+            )
+          : [];
+
+      const correctIndex=
+        Number(question?.correctIndex);
+
+      return {
+        anki_note_id:
+          Number(question?.ankiNoteId),
+
+        topic_order:
+          topicMatch
+            ? Number(topicMatch[1])
+            : null,
+
+        deck_path:
+          String(question?.deckPath || "").trim(),
+
+        topic,
+
+        stem:
+          String(question?.stem || "").trim(),
+
+        options,
+
+        correct_index:
+          correctIndex,
+
+        correct_answer:
+          String(
+            question?.correctAnswer ||
+            options[correctIndex] ||
+            ""
+          ).trim(),
+
+        option_count:
+          options.length,
+
+        direct_use_eligible:
+          options.length === 4,
+
+        tags:
+          Array.isArray(question?.tags)
+            ? question.tags
+            : [],
+
+        fingerprint:
+          String(
+            question?.fingerprint || ""
+          ).trim()
+      };
+    });
+
+  const invalid=
+    rows.find(row=>
+      !Number.isInteger(row.anki_note_id) ||
+      !Number.isInteger(row.topic_order) ||
+      row.topic_order < 1 ||
+      row.topic_order > 11 ||
+      !row.stem ||
+      ![3,4].includes(row.option_count) ||
+      !Number.isInteger(row.correct_index) ||
+      row.correct_index < 0 ||
+      row.correct_index >= row.option_count ||
+      !row.fingerprint
+    );
+
+  if(invalid){
+    throw new Error(
+      `ANKI LEGISLACIÓN: registro inválido ${invalid.anki_note_id || "sin ID"}.`
+    );
+  }
+
+  await db.query(
+    `
+    INSERT INTO legislation_anki_questions (
+      anki_note_id,
+      topic_order,
+      deck_path,
+      topic,
+      stem,
+      options,
+      correct_index,
+      correct_answer,
+      option_count,
+      direct_use_eligible,
+      tags,
+      fingerprint
+    )
+
+    SELECT
+      x.anki_note_id,
+      x.topic_order,
+      x.deck_path,
+      x.topic,
+      x.stem,
+      x.options,
+      x.correct_index,
+      x.correct_answer,
+      x.option_count,
+      x.direct_use_eligible,
+      x.tags,
+      x.fingerprint
+
+    FROM jsonb_to_recordset(
+      $1::jsonb
+    ) AS x(
+      anki_note_id BIGINT,
+      topic_order INTEGER,
+      deck_path TEXT,
+      topic TEXT,
+      stem TEXT,
+      options JSONB,
+      correct_index INTEGER,
+      correct_answer TEXT,
+      option_count INTEGER,
+      direct_use_eligible BOOLEAN,
+      tags JSONB,
+      fingerprint TEXT
+    )
+
+    ON CONFLICT (anki_note_id)
+    DO UPDATE SET
+      topic_order = EXCLUDED.topic_order,
+      deck_path = EXCLUDED.deck_path,
+      topic = EXCLUDED.topic,
+      stem = EXCLUDED.stem,
+      options = EXCLUDED.options,
+      correct_index = EXCLUDED.correct_index,
+      correct_answer = EXCLUDED.correct_answer,
+      option_count = EXCLUDED.option_count,
+      direct_use_eligible = EXCLUDED.direct_use_eligible,
+      tags = EXCLUDED.tags,
+      fingerprint = EXCLUDED.fingerprint,
+      updated_at = NOW()
+    `,
+    [
+      JSON.stringify(rows)
+    ]
+  );
+
+  const status=
+    await db.query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (
+          WHERE option_count = 4
+        )::int AS four_options,
+        COUNT(*) FILTER (
+          WHERE option_count = 3
+        )::int AS three_options
+      FROM legislation_anki_questions
+    `);
+
+  console.log(
+    "[anki-legislation]",
+    JSON.stringify(status.rows[0])
   );
 }
 async function getOrCreateTopic(name, sourceFile=null){
@@ -13890,7 +14129,9 @@ async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
   console.log("STARTUP 1/4 OK");
-
+console.log("STARTUP ANKI: syncLegislationAnkiQuestions");
+await syncLegislationAnkiQuestions();
+console.log("STARTUP ANKI OK");
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
