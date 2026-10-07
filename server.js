@@ -1610,7 +1610,7 @@ async function syncLegislationAnkiQuestions(){
           options.length,
 
         direct_use_eligible:
-          options.length === 4,
+          [3,4].includes(options.length),
 
         tags:
           Array.isArray(question?.tags)
@@ -9972,6 +9972,214 @@ POLÍTICA ESPECÍFICA — BLOQUE ESPECÍFICO
 
   return "";
 }
+function ankiLegislationSourceOrderForTopicName(topicName){
+  const text=
+    String(topicName || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g," ")
+      .trim()
+      .replace(/\s+/g," ");
+
+  if(!text){
+    return null;
+  }
+
+  if(text.includes("constitucion")) return 2;
+  if(text.includes("union europea")) return 3;
+  if(text.includes("lorafna")) return 6;
+
+  if(
+    text.includes("parlamento") ||
+    text.includes("comptos") ||
+    text.includes("defensor del pueblo")
+  ){
+    return 7;
+  }
+
+  if(
+    text.includes("gobierno de navarra") ||
+    text.includes("gobierno navarra")
+  ){
+    return 8;
+  }
+
+  if(
+    text.includes("fuentes del derecho") ||
+    (text.includes("fuentes") && text.includes("derecho"))
+  ){
+    return 1;
+  }
+
+  if(
+    text.includes("11 2019") ||
+    text.includes("administracion de la comunidad foral")
+  ){
+    return 9;
+  }
+
+  if(
+    text.includes("actos administrativos") ||
+    text.includes("acto administrativo")
+  ){
+    return 4;
+  }
+
+  if(
+    text.includes("39 2015") ||
+    text.includes("procedimiento administrativo comun") ||
+    text.includes("disposiciones generales")
+  ){
+    return 5;
+  }
+
+  if(text.includes("13 2007")) return 10;
+
+  if(
+    text.includes("igualdad") ||
+    text.includes("17 2019")
+  ){
+    return 11;
+  }
+
+  return null;
+}
+
+async function getLegislationAnkiStyleReference(targets){
+  if(!Array.isArray(targets) || !targets.length){
+    return "";
+  }
+
+  const sourceOrders=[
+    ...new Set(
+      targets
+        .filter(target=>
+          String(target?.topic_block || "")
+            .trim()
+            .toLowerCase() === "legislacion"
+        )
+        .map(target=>
+          ankiLegislationSourceOrderForTopicName(
+            target?.topic_name
+          )
+        )
+        .filter(Number.isInteger)
+    )
+  ];
+
+  if(!sourceOrders.length){
+    return "";
+  }
+
+  const result=await db.query(
+    `
+    SELECT
+      topic_order,
+      topic,
+      stem,
+      options,
+      correct_index
+    FROM (
+      SELECT
+        topic_order,
+        topic,
+        stem,
+        options,
+        correct_index,
+        ROW_NUMBER() OVER (
+          PARTITION BY topic_order
+          ORDER BY times_used ASC, id ASC
+        ) AS rn
+      FROM legislation_anki_questions
+      WHERE topic_order = ANY($1::int[])
+    ) ranked
+    WHERE rn <= 6
+    ORDER BY topic_order ASC, rn ASC
+    `,
+    [sourceOrders]
+  );
+
+  if(!result.rows.length){
+    return "";
+  }
+
+  return `
+
+==================================================
+CORPUS ANKI — MODELO DE REDACCIÓN DE LEGISLACIÓN
+==================================================
+
+Las preguntas siguientes proceden del banco Anki del opositor.
+Úsalas EXCLUSIVAMENTE como modelo de:
+- longitud y naturalidad del enunciado;
+- forma de preguntar legislación;
+- construcción de distractores;
+- nivel de precisión y literalidad.
+
+NO son fuente factual para la pregunta nueva.
+NO copies automáticamente sus respuestas.
+NO sustituyen al temario.
+La única fuente factual continúa siendo File Search sobre los PDF del temario.
+
+EJEMPLOS:
+${result.rows.map((row,index)=>`
+EJEMPLO ${index+1}
+Tema Anki: ${row.topic}
+Enunciado: ${row.stem}
+Opciones: ${JSON.stringify(row.options)}
+`).join("\n")}
+--- FIN DEL CORPUS ANKI ---
+`;
+}
+
+function legislationQuestionIssue(target,question){
+  if(
+    String(target?.topic_block || "")
+      .trim()
+      .toLowerCase() !== "legislacion"
+  ){
+    return null;
+  }
+
+  if(
+    ["GRAFICA","CALCULO_FORMULACION"]
+      .includes(question?.questionFamily)
+  ){
+    return (
+      "LEGISLACIÓN: familia de pregunta incompatible con el bloque."
+    );
+  }
+
+  const stem=
+    String(question?.stem || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toLowerCase()
+      .replace(/\s+/g," ")
+      .trim();
+
+  const forbidden=[
+    /\bceis\s+guadalajara\b/,
+    /\bmanual\s+elaborado\b/,
+    /\bpagina\s+\d+\b/,
+    /\bindice\b/,
+    /\bestructura\s+(?:general|tematica|del\s+documento)\b/,
+    /\bnumero\s+de\s+orden\b/,
+    /\bocupa\s+(?:el\s+)?(?:primer|segundo|tercer|cuarto|quinto|sexto|septimo|octavo|noveno|decimo|\d+)\s+lugar\b/,
+    /\borden\s+de\s+(?:los\s+)?apartados\b/
+  ];
+
+  if(forbidden.some(pattern=>pattern.test(stem))){
+    return (
+      "LEGISLACIÓN: el enunciado contiene una referencia editorial " +
+      "o de manual prohibida para este bloque."
+    );
+  }
+
+  return null;
+}
+
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -12375,9 +12583,15 @@ distractorIssues: result.distractorIssues || [],
 graphicIssues: result.graphicIssues || []
   }));
 
+  const legislationAnkiStyle =
+    await getLegislationAnkiStyleReference(
+      replacementTargets
+    );
+
   const replacementPrompt =
     generationPrompt(replacementTargets.length, difficulty, mode) +
     coverageTargetsPrompt(replacementTargets) +
+    legislationAnkiStyle +
     `
 ========================================
 REGENERACIÓN DE PREGUNTAS RECHAZADAS
@@ -13317,6 +13531,11 @@ const geographyStyle =
     ? await getCachedOfficialGeographyStyleReference()
     : "";
 
+const legislationAnkiStyle =
+  await getLegislationAnkiStyleReference(
+    generationTargets
+  );
+
 prompt =
   generationPrompt(
       newGenerationCount,
@@ -13326,6 +13545,7 @@ prompt =
     coverageTargetsPrompt(
       generationTargets
     ) +
+    legislationAnkiStyle +
     `
 
 ===============================================
@@ -13535,6 +13755,24 @@ let factualValidation =
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
+
+  const legislationIssue =
+    legislationQuestionIssue(
+      target,
+      question
+    );
+
+  if(legislationIssue){
+    factualValidation[i] = {
+      ...factualValidation[i],
+      valid:false,
+      issues:[
+        ...(factualValidation[i].issues || []),
+        legislationIssue
+      ]
+    };
+  }
+
   const geographyRelevanceIssue =
     geographyForbiddenQuestionIssue(
       target,
@@ -13651,6 +13889,21 @@ for(
     const validationResult = replacementValidation[i];
     const targetForValidation =
       generationTargets[originalIndex];
+
+    const legislationIssue =
+      legislationQuestionIssue(
+        targetForValidation,
+        regenerated.questions[i]
+      );
+
+    if(legislationIssue){
+      validationResult.valid = false;
+      validationResult.issues = [
+        ...(validationResult.issues || []),
+        legislationIssue
+      ];
+    }
+
     const geographyRelevanceIssue =
       geographyForbiddenQuestionIssue(
         targetForValidation,
