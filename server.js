@@ -170,6 +170,52 @@ await db.query(`
   ADD COLUMN IF NOT EXISTS manual_page TEXT
 `);
 
+await db.query(`
+  ALTER TABLE coverage_items
+  ADD COLUMN IF NOT EXISTS exam_relevant BOOLEAN NOT NULL DEFAULT TRUE
+`);
+
+await db.query(`
+  UPDATE coverage_items ci
+  SET exam_relevant = FALSE
+  FROM topics t
+  WHERE
+    ci.topic_id = t.id
+    AND t.block = 'legislacion'
+    AND ci.exam_relevant = TRUE
+    AND (
+      LOWER(BTRIM(COALESCE(ci.section,''))) IN (
+        'índice',
+        'indice',
+        'índice general',
+        'indice general',
+        'sumario',
+        'tabla de contenidos'
+      )
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%estructura general%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%estructura temática%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%estructura tematica%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%número de orden%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%numero de orden%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%orden de los apartados%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%orden de apartados%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%posición en el índice%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%posicion en el indice%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%posición dentro del índice%'
+      OR LOWER(COALESCE(ci.concept,'')) LIKE '%posicion dentro del indice%'
+      OR (
+        LOWER(COALESCE(ci.concept,'')) LIKE '%ocupa%'
+        AND LOWER(COALESCE(ci.concept,'')) LIKE '%lugar%'
+        AND LOWER(COALESCE(ci.concept,'')) LIKE '%índice%'
+      )
+      OR (
+        LOWER(COALESCE(ci.concept,'')) LIKE '%ocupa%'
+        AND LOWER(COALESCE(ci.concept,'')) LIKE '%lugar%'
+        AND LOWER(COALESCE(ci.concept,'')) LIKE '%indice%'
+      )
+    )
+`);
+
    await db.query(`
     CREATE TABLE IF NOT EXISTS graphic_assets (
       id SERIAL PRIMARY KEY,
@@ -409,6 +455,18 @@ await db.query(`
 await db.query(`
   ALTER TABLE legislation_anki_questions
   ADD COLUMN IF NOT EXISTS validation_evidence TEXT
+`);
+
+await db.query(`
+  ALTER TABLE question_bank
+  ADD COLUMN IF NOT EXISTS source_anki_question_id BIGINT
+    REFERENCES legislation_anki_questions(id) ON DELETE SET NULL
+`);
+
+await db.query(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_question_bank_anki_coverage
+  ON question_bank(source_anki_question_id, coverage_item_id)
+  WHERE source_anki_question_id IS NOT NULL
 `);
 }
 async function syncGraphicAssets(){
@@ -7880,6 +7938,7 @@ JOIN question_bank qb
 
 WHERE
   la.is_correct = FALSE
+  AND ci.exam_relevant = TRUE
   AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
@@ -8029,7 +8088,8 @@ LEFT JOIN LATERAL (
   ON TRUE
 
 WHERE
-  (
+  ci.exam_relevant = TRUE
+  AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
   )
@@ -8219,7 +8279,8 @@ async function getNewCoverageCandidate(
     JOIN topics t
       ON t.id = ci.topic_id
     WHERE
-  ci.worked = FALSE
+  ci.exam_relevant = TRUE
+  AND ci.worked = FALSE
   AND (
     $1::int[] IS NULL
     OR ci.topic_id = ANY($1::int[])
@@ -8622,7 +8683,8 @@ for(let i = 0; i < selected.length; i++){
     FROM coverage_items ci
     JOIN topics t ON t.id = ci.topic_id
     WHERE
-  (
+  ci.exam_relevant = TRUE
+  AND (
     $3::text = 'simulation'
     OR ci.worked = FALSE
   )
@@ -10219,6 +10281,9 @@ PROHIBIDO COMO OBJETO DE PREGUNTA:
 Esos campos pueden conservarse en sourceEvidence para identificar
 correctamente el registro, pero NO deben aparecer como dato solicitado
 ni como eje de los distractores.
+- La explicación final debe justificar SOLO la relación territorial preguntada.
+  No reproduzcas superficie, área, perímetro ni número de fila aunque aparezcan
+  dentro de sourceEvidence.
 `;
   }
 
@@ -10778,7 +10843,10 @@ async function getLegislationAnkiStyleReference(targets){
           ORDER BY times_used ASC, id ASC
         ) AS rn
       FROM legislation_anki_questions
-      WHERE topic_order = ANY($1::int[])
+      WHERE
+        topic_order = ANY($1::int[])
+        AND validation_status = 'validated'
+        AND direct_use_eligible = TRUE
     ) ranked
     WHERE rn <= 6
     ORDER BY topic_order ASC, rn ASC
@@ -10817,6 +10885,530 @@ Opciones: ${JSON.stringify(row.options)}
 `).join("\n")}
 --- FIN DEL CORPUS ANKI ---
 `;
+}
+
+function normalizeLegislationMatchText(value){
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim()
+    .replace(/\s+/g," ");
+}
+
+const LEGISLATION_MATCH_STOPWORDS = new Set([
+  "segun","conforme","acuerdo","articulo","articulos","ley","foral",
+  "real","decreto","organica","constitucion","espanola","navarra",
+  "sera","seran","puede","pueden","debe","deben","cual","cuales",
+  "siguiente","siguientes","respuesta","respuestas","correcta","incorrecta",
+  "verdadera","falsa","entre","sobre","para","como","cuando","donde",
+  "desde","hasta","este","esta","estos","estas","aquel","aquella",
+  "del","las","los","una","uno","unos","unas","que","por","con",
+  "sin","sus","son","sea","sean","tiene","tienen","corresponde"
+]);
+
+function legislationMatchTokens(value){
+  return new Set(
+    normalizeLegislationMatchText(value)
+      .split(" ")
+      .filter(token=>
+        token &&
+        (token.length >= 4 || /^\d+$/.test(token)) &&
+        !LEGISLATION_MATCH_STOPWORDS.has(token)
+      )
+  );
+}
+
+function legislationLexicalScore(targetText,candidateText){
+  const targetTokens=legislationMatchTokens(targetText);
+  const candidateTokens=legislationMatchTokens(candidateText);
+
+  if(!targetTokens.size || !candidateTokens.size){
+    return 0;
+  }
+
+  let intersection=0;
+  for(const token of targetTokens){
+    if(candidateTokens.has(token)){
+      intersection++;
+    }
+  }
+
+  const targetCoverage=
+    intersection / targetTokens.size;
+  const candidateCoverage=
+    intersection / candidateTokens.size;
+
+  const targetNumbers=
+    normalizeLegislationMatchText(targetText)
+      .match(/\b\d+\b/g) || [];
+  const candidateNumbers=new Set(
+    normalizeLegislationMatchText(candidateText)
+      .match(/\b\d+\b/g) || []
+  );
+
+  const sharedNumbers=
+    targetNumbers.filter(number=>
+      candidateNumbers.has(number)
+    ).length;
+
+  return (
+    targetCoverage * 0.70 +
+    candidateCoverage * 0.25 +
+    Math.min(sharedNumbers,3) * 0.05
+  );
+}
+
+function inferLegislationAnkiFamily(stem){
+  const text=normalizeLegislationMatchText(stem);
+
+  if(
+    /\bincorrect[ao]s?\b/.test(text) ||
+    /\bfals[ao]s?\b/.test(text) ||
+    /\bno\s+(?:corresponde|pertenece|puede|podra|debe|sera|es|son|tiene|tienen)\b/.test(text)
+  ){
+    return "2026_INCORRECTA";
+  }
+
+  return "2026_CORRECTA";
+}
+
+function legislationAnkiFamilyCompatible(targetFamily,stem){
+  const inferred=inferLegislationAnkiFamily(stem);
+
+  if(targetFamily === "2026_INCORRECTA"){
+    return inferred === "2026_INCORRECTA";
+  }
+
+  if(targetFamily === "2026_CORRECTA"){
+    return inferred === "2026_CORRECTA";
+  }
+
+  return true;
+}
+
+const legislationAnkiMatchSchema={
+  type:"object",
+  properties:{
+    matches:{
+      type:"array",
+      items:{
+        type:"object",
+        properties:{
+          targetIndex:{type:"integer",minimum:0},
+          ankiQuestionId:{type:["integer","null"]},
+          reason:{type:"string"}
+        },
+        required:["targetIndex","ankiQuestionId","reason"]
+      }
+    }
+  },
+  required:["matches"]
+};
+
+function buildDirectAnkiQuestion(row,target){
+  return {
+    stem:row.stem,
+    options:Array.isArray(row.options)
+      ? row.options
+      : [],
+    correctIndex:Number(row.correct_index),
+    explanation:
+      row.validation_evidence ||
+      target.source_evidence ||
+      "",
+    sourceEvidence:
+      target.source_evidence ||
+      row.validation_evidence ||
+      "",
+    sourcePage:
+      target.source_page ?? null,
+    manualPage:
+      target.manual_page ?? null,
+    difficulty:
+      target.adaptiveDifficulty || "alta",
+    questionFamily:
+      target.questionFamily === "2024_TEXTO"
+        ? "2024_TEXTO"
+        : inferLegislationAnkiFamily(row.stem),
+    graphic:null,
+    reused:false,
+    ankiDirect:true,
+    ankiQuestionId:Number(row.id),
+    ankiNoteId:Number(row.anki_note_id)
+  };
+}
+
+async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
+  const direct=new Map();
+
+  if(!Array.isArray(targets) || !targets.length){
+    return direct;
+  }
+
+  const legislationTargets=[];
+
+  for(let index=0; index<targets.length; index++){
+    const target=targets[index];
+
+    if(
+      String(target?.topic_block || "")
+        .trim()
+        .toLowerCase() !== "legislacion"
+    ){
+      continue;
+    }
+
+    const sourceOrder=
+      ankiLegislationSourceOrderForTopicName(
+        target?.topic_name
+      );
+
+    if(!Number.isInteger(sourceOrder)){
+      continue;
+    }
+
+    legislationTargets.push({
+      index,
+      target,
+      sourceOrder
+    });
+  }
+
+  if(!legislationTargets.length){
+    return direct;
+  }
+
+  const coverageIds=
+    legislationTargets.map(item=>
+      Number(item.target.id)
+    );
+
+  const linked=await db.query(
+    `
+    SELECT DISTINCT ON (validated_coverage_item_id)
+      id,
+      anki_note_id,
+      topic_order,
+      stem,
+      options,
+      correct_index,
+      validation_evidence,
+      validated_coverage_item_id
+    FROM legislation_anki_questions
+    WHERE
+      validation_status = 'validated'
+      AND direct_use_eligible = TRUE
+      AND validated_coverage_item_id = ANY($1::int[])
+    ORDER BY
+      validated_coverage_item_id,
+      times_used ASC,
+      last_used_at ASC NULLS FIRST,
+      id ASC
+    `,
+    [coverageIds]
+  );
+
+  const linkedByCoverage=new Map(
+    linked.rows.map(row=>[
+      Number(row.validated_coverage_item_id),
+      row
+    ])
+  );
+
+  const unresolved=[];
+
+  for(const item of legislationTargets){
+    const linkedRow=
+      linkedByCoverage.get(
+        Number(item.target.id)
+      );
+
+    if(
+      linkedRow &&
+      legislationAnkiFamilyCompatible(
+        item.target.questionFamily,
+        linkedRow.stem
+      )
+    ){
+      direct.set(
+        item.index,
+        buildDirectAnkiQuestion(
+          linkedRow,
+          item.target
+        )
+      );
+      continue;
+    }
+
+    unresolved.push(item);
+  }
+
+  if(!unresolved.length){
+    return direct;
+  }
+
+  const sourceOrders=[
+    ...new Set(
+      unresolved.map(item=>item.sourceOrder)
+    )
+  ];
+
+  const poolResult=await db.query(
+    `
+    SELECT
+      id,
+      anki_note_id,
+      topic_order,
+      stem,
+      options,
+      correct_index,
+      correct_answer,
+      validation_evidence,
+      validated_coverage_item_id,
+      times_used
+    FROM legislation_anki_questions
+    WHERE
+      topic_order = ANY($1::int[])
+      AND validation_status = 'validated'
+      AND direct_use_eligible = TRUE
+    ORDER BY
+      topic_order ASC,
+      times_used ASC,
+      id ASC
+    `,
+    [sourceOrders]
+  );
+
+  const byOrder=new Map();
+  for(const row of poolResult.rows){
+    const order=Number(row.topic_order);
+    if(!byOrder.has(order)){
+      byOrder.set(order,[]);
+    }
+    byOrder.get(order).push(row);
+  }
+
+  const payload=[];
+
+  for(const item of unresolved){
+    const targetText=[
+      item.target.section,
+      item.target.concept,
+      item.target.source_evidence
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const candidates=(byOrder.get(item.sourceOrder) || [])
+      .filter(row=>
+        (
+          row.validated_coverage_item_id == null ||
+          Number(row.validated_coverage_item_id) ===
+            Number(item.target.id)
+        ) &&
+        legislationAnkiFamilyCompatible(
+          item.target.questionFamily,
+          row.stem
+        )
+      )
+      .map(row=>{
+        const candidateText=[
+          row.stem,
+          row.correct_answer,
+          row.validation_evidence
+        ]
+          .filter(Boolean)
+          .join(" ");
+
+        return {
+          row,
+          score:legislationLexicalScore(
+            targetText,
+            candidateText
+          )
+        };
+      })
+      .sort((a,b)=>
+        b.score-a.score ||
+        Number(a.row.times_used)-Number(b.row.times_used) ||
+        Number(a.row.id)-Number(b.row.id)
+      )
+      .slice(0,10);
+
+    if(!candidates.length){
+      continue;
+    }
+
+    payload.push({
+      targetIndex:item.index,
+      coverageItemId:Number(item.target.id),
+      topic:item.target.topic_name,
+      assignedFamily:item.target.questionFamily,
+      section:item.target.section || "",
+      concept:item.target.concept || "",
+      sourceEvidence:item.target.source_evidence || "",
+      candidates:candidates.map(entry=>({
+        ankiQuestionId:Number(entry.row.id),
+        ankiNoteId:Number(entry.row.anki_note_id),
+        stem:entry.row.stem,
+        options:entry.row.options,
+        correctIndex:Number(entry.row.correct_index),
+        validationEvidence:
+          entry.row.validation_evidence || ""
+      }))
+    });
+  }
+
+  if(!payload.length){
+    return direct;
+  }
+
+  const runtimeSchema=
+    structuredClone(
+      legislationAnkiMatchSchema
+    );
+
+  runtimeSchema.properties.matches.minItems=
+    payload.length;
+  runtimeSchema.properties.matches.maxItems=
+    payload.length;
+
+  const prompt=`
+Eres un enlazador ESTRICTO entre objetivos de cobertura de LEGISLACIÓN
+ya extraídos del temario y preguntas Anki YA VALIDADAS contra esos mismos PDF.
+
+OBJETIVO:
+Para cada targetIndex decide si UNA de sus preguntas candidatas evalúa
+EXACTAMENTE el mismo conocimiento factual que sourceEvidence/concept.
+
+REGLAS:
+1. No basta con pertenecer a la misma ley, artículo, órgano o tema.
+2. La pregunta Anki debe poder responderse completamente con el conocimiento
+   representado por el coverage item.
+3. No enlaces conocimientos vecinos, complementarios, más amplios o más estrechos.
+4. Respeta la polaridad y la familia asignada.
+5. Si ninguna candidata coincide de manera exacta, devuelve ankiQuestionId=null.
+6. No uses conocimiento externo. Compara exclusivamente el target y los datos
+   de las candidatas proporcionadas.
+7. Cada ankiQuestionId solo puede utilizarse UNA vez en este lote.
+8. Ante cualquier duda, devuelve null.
+
+TARGETS Y CANDIDATAS:
+${JSON.stringify(payload)}
+`;
+
+  const response=
+    await ai.models.generateContent({
+      model:"gemini-3.5-flash-lite",
+      contents:prompt,
+      config:{
+        responseMimeType:"application/json",
+        responseJsonSchema:runtimeSchema
+      }
+    });
+
+  const rawText=
+    typeof response?.text === "string"
+      ? response.text.trim()
+      : "";
+
+  if(!rawText){
+    console.warn(
+      "ANKI DIRECT MATCH: respuesta vacía; se continúa con generación normal."
+    );
+    return direct;
+  }
+
+  let parsed;
+  try{
+    parsed=JSON.parse(rawText);
+  }catch(error){
+    console.warn(
+      "ANKI DIRECT MATCH: JSON inválido; se continúa con generación normal.",
+      error?.message || String(error)
+    );
+    return direct;
+  }
+
+  if(
+    !Array.isArray(parsed?.matches) ||
+    parsed.matches.length !== payload.length
+  ){
+    console.warn(
+      "ANKI DIRECT MATCH: número de resultados inconsistente."
+    );
+    return direct;
+  }
+
+  const payloadByIndex=new Map(
+    payload.map(item=>[
+      Number(item.targetIndex),
+      item
+    ])
+  );
+
+  const usedAnkiIds=new Set();
+
+  for(const match of parsed.matches){
+    const targetIndex=Number(match.targetIndex);
+    const targetPayload=
+      payloadByIndex.get(targetIndex);
+
+    if(!targetPayload){
+      continue;
+    }
+
+    if(match.ankiQuestionId == null){
+      continue;
+    }
+
+    const ankiQuestionId=
+      Number(match.ankiQuestionId);
+
+    if(
+      !Number.isInteger(ankiQuestionId) ||
+      usedAnkiIds.has(ankiQuestionId)
+    ){
+      continue;
+    }
+
+    const candidate=
+      targetPayload.candidates.find(item=>
+        Number(item.ankiQuestionId) ===
+        ankiQuestionId
+      );
+
+    if(!candidate){
+      continue;
+    }
+
+    const fullRow=
+      (byOrder.get(
+        ankiLegislationSourceOrderForTopicName(
+          targets[targetIndex]?.topic_name
+        )
+      ) || []).find(row=>
+        Number(row.id) === ankiQuestionId
+      );
+
+    if(!fullRow){
+      continue;
+    }
+
+    usedAnkiIds.add(ankiQuestionId);
+
+    direct.set(
+      targetIndex,
+      buildDirectAnkiQuestion(
+        fullRow,
+        targets[targetIndex]
+      )
+    );
+  }
+
+  return direct;
 }
 
 function legislationQuestionIssue(target,question){
@@ -11367,6 +11959,138 @@ async function persistGeneratedTest({
       let questionId;
 
 if(
+  question.ankiDirect === true &&
+  Number.isInteger(Number(question.ankiQuestionId))
+){
+  const ankiQuestionId=
+    Number(question.ankiQuestionId);
+
+  const ankiCheck=await client.query(
+    `SELECT
+       id,
+       validation_status,
+       direct_use_eligible,
+       validated_coverage_item_id
+     FROM legislation_anki_questions
+     WHERE id = $1
+     FOR UPDATE`,
+    [ankiQuestionId]
+  );
+
+  if(!ankiCheck.rows.length){
+    throw new Error(
+      `PERSISTENCIA: pregunta Anki ${ankiQuestionId} inexistente.`
+    );
+  }
+
+  const ankiRow=ankiCheck.rows[0];
+
+  if(
+    ankiRow.validation_status !== "validated" ||
+    ankiRow.direct_use_eligible !== true
+  ){
+    throw new Error(
+      `PERSISTENCIA: pregunta Anki ${ankiQuestionId} no está validada para uso directo.`
+    );
+  }
+
+  if(
+    ankiRow.validated_coverage_item_id != null &&
+    Number(ankiRow.validated_coverage_item_id) !==
+      Number(target.id)
+  ){
+    throw new Error(
+      `PERSISTENCIA: pregunta Anki ${ankiQuestionId} ya está enlazada a otro coverage_item.`
+    );
+  }
+
+  const existingAnkiBank=await client.query(
+    `SELECT id
+     FROM question_bank
+     WHERE
+       source_anki_question_id = $1
+       AND coverage_item_id = $2
+       AND active = TRUE
+     LIMIT 1`,
+    [
+      ankiQuestionId,
+      Number(target.id)
+    ]
+  );
+
+  if(existingAnkiBank.rows.length){
+    questionId=
+      Number(existingAnkiBank.rows[0].id);
+
+    await client.query(
+      `UPDATE question_bank
+       SET
+         last_shown_at = NOW(),
+         updated_at = NOW()
+       WHERE id = $1`,
+      [questionId]
+    );
+  }else{
+    const questionResult=await client.query(
+      `INSERT INTO question_bank (
+        coverage_item_id,
+        stem,
+        options,
+        correct_index,
+        explanation,
+        source_evidence,
+        source_page,
+        manual_page,
+        question_family,
+        difficulty,
+        graphic,
+        validation_version,
+        last_shown_at,
+        source_anki_question_id
+      )
+      VALUES (
+        $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,NULL,6,NOW(),$11
+      )
+      RETURNING id`,
+      [
+        Number(target.id),
+        question.stem,
+        JSON.stringify(question.options),
+        Number(question.correctIndex),
+        question.explanation || null,
+        question.sourceEvidence || null,
+        question.sourcePage ?? null,
+        question.manualPage != null
+          ? String(question.manualPage)
+          : null,
+        question.questionFamily,
+        question.difficulty || difficulty,
+        ankiQuestionId
+      ]
+    );
+
+    questionId=
+      Number(questionResult.rows[0].id);
+  }
+
+  await client.query(
+    `UPDATE legislation_anki_questions
+     SET
+       validated_coverage_item_id = COALESCE(
+         validated_coverage_item_id,
+         $2
+       ),
+       times_used = times_used + 1,
+       last_used_at = NOW(),
+       updated_at = NOW()
+     WHERE id = $1`,
+    [
+      ankiQuestionId,
+      Number(target.id)
+    ]
+  );
+
+}else if(
   question.reused === true &&
   Number.isInteger(Number(question.questionId))
 ){
@@ -12394,8 +13118,7 @@ function geographyForbiddenQuestionIssue(target,question){
     question?.stem,
     ...(Array.isArray(question?.options)
       ? question.options
-      : []),
-    question?.explanation
+      : [])
   ]
     .filter(Boolean)
     .join(" ")
@@ -13419,6 +14142,7 @@ app.get("/api/statistics", async(req,res)=>{
 
       LEFT JOIN coverage_items ci
         ON ci.topic_id = t.id
+       AND ci.exam_relevant = TRUE
 
       GROUP BY
   t.id,
@@ -13627,6 +14351,7 @@ COALESCE(SUM(ci.times_blank),0)::int
 
       JOIN coverage_items ci
         ON ci.topic_id = t.id
+       AND ci.exam_relevant = TRUE
 
       GROUP BY
         t.id,
@@ -13750,6 +14475,8 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
 
       LEFT JOIN coverage_review_state crs
         ON crs.coverage_item_id = ci.id
+
+      WHERE ci.exam_relevant = TRUE
 
       ORDER BY
         t.id,
@@ -14158,6 +14885,48 @@ console.log(
   "reutilizables de",
   targets.length
 );
+
+const directAnkiQuestions=new Map();
+
+if(testType === "normal"){
+  const unresolvedIndexes=[];
+  const unresolvedTargets=[];
+
+  for(let i=0; i<targets.length; i++){
+    if(reusableQuestions.has(i)){
+      continue;
+    }
+
+    unresolvedIndexes.push(i);
+    unresolvedTargets.push(targets[i]);
+  }
+
+  const directLocal=
+    await getDirectLegislationAnkiQuestionsForTargets(
+      ai,
+      unresolvedTargets
+    );
+
+  for(const [localIndex,question] of directLocal){
+    const originalIndex=
+      unresolvedIndexes[localIndex];
+
+    if(Number.isInteger(originalIndex)){
+      directAnkiQuestions.set(
+        originalIndex,
+        question
+      );
+    }
+  }
+}
+
+console.log(
+  "ANKI DIRECTO:",
+  directAnkiQuestions.size,
+  "preguntas exactas de",
+  targets.length
+);
+
     console.log(
       "GENERATECONTENT: iniciando con",
       targets.length,
@@ -14168,7 +14937,10 @@ const generationIndexes = [];
 
 for(let i = 0; i < targets.length; i++){
 
-  if(reusableQuestions.has(i)){
+  if(
+    reusableQuestions.has(i) ||
+    directAnkiQuestions.has(i)
+  ){
     continue;
   }
 
@@ -14466,6 +15238,17 @@ for(let i = 0; i < factualValidation.length; i++){
     );
 
   if(geographyRelevanceIssue){
+    console.log(
+      "GEOGRAPHY DETERMINISTIC REJECTION:",
+      JSON.stringify({
+        phase:"initial",
+        targetId:target?.id ?? null,
+        topic:target?.topic_name || null,
+        issue:geographyRelevanceIssue,
+        stem:question?.stem || null
+      })
+    );
+
     factualValidation[i] = {
       ...factualValidation[i],
       valid:false,
@@ -14597,6 +15380,18 @@ for(
       );
 
     if(geographyRelevanceIssue){
+      console.log(
+        "GEOGRAPHY DETERMINISTIC REJECTION:",
+        JSON.stringify({
+          phase:"regeneration",
+          attempt:regenerationAttempt,
+          targetId:targetForValidation?.id ?? null,
+          topic:targetForValidation?.topic_name || null,
+          issue:geographyRelevanceIssue,
+          stem:regenerated.questions[i]?.stem || null
+        })
+      );
+
       validationResult.valid = false;
       validationResult.issues = [
         ...(validationResult.issues || []),
@@ -14741,6 +15536,10 @@ const completeQuestions =
 
 for(const [index, reusable] of reusableQuestions){
   completeQuestions[index] = reusable;
+}
+
+for(const [index, directAnki] of directAnkiQuestions){
+  completeQuestions[index] = directAnki;
 }
 
 for(let i = 0; i < finalQuestions.length; i++){
