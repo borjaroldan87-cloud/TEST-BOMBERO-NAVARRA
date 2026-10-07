@@ -1848,9 +1848,11 @@ async function validateLegislationAnkiBatch({
     );
 
   let effectiveTopicOrder=
-    Number.isInteger(Number(topicOrder))
-      ? Number(topicOrder)
-      : null;
+    topicOrder === null ||
+    topicOrder === undefined ||
+    String(topicOrder).trim() === ""
+      ? null
+      : Number(topicOrder);
 
   if(effectiveTopicOrder == null){
     const nextTopic=await db.query(`
