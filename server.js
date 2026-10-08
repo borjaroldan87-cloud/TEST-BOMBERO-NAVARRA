@@ -11840,6 +11840,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
     const options=linkedByCoverage.get(Number(item.target.id)) || [];
     const compatible=options.filter(row=>
       !usedAnkiIds.has(Number(row.id)) &&
+      !legislationKnownAmbiguityIssue(row) &&
       legislationAnkiFamilyCompatible(item.target.questionFamily,row.stem)
     );
     const linkedRow=compatible.find(row=>!isRecent(row)) || compatible[0];
@@ -11919,6 +11920,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
     const candidates=(byOrder.get(item.sourceOrder) || [])
       .filter(row=>
         !usedAnkiIds.has(Number(row.id)) &&
+        !legislationKnownAmbiguityIssue(row) &&
         (
           row.validated_coverage_item_id == null ||
           Number(row.validated_coverage_item_id) ===
@@ -12112,7 +12114,7 @@ ${JSON.stringify(payload)}
         Number(row.id) === ankiQuestionId
       );
 
-    if(!fullRow){
+    if(!fullRow || legislationKnownAmbiguityIssue(fullRow)){
       continue;
     }
 
@@ -12128,6 +12130,32 @@ ${JSON.stringify(payload)}
   }
 
   return direct;
+}
+
+
+// SERVER_77B: control puntual del doble acierto del preambulo.
+// Los enunciados breves como 'Segun la Constitucion Espanola:' son validos:
+// el examen puede evaluar literalidad sin pedir CORRECTA/INCORRECTA.
+// No modifica el texto FDF ni contenido curricular.
+function legislationKnownAmbiguityIssue(question){
+  const norm = value => String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  const stem = norm(question?.stem);
+  const options = Array.isArray(question?.options)
+    ? question.options.map(norm)
+    : [];
+  if(
+    /preambulo/.test(stem) &&
+    options.some(o => o.includes("garantizar la convivencia democratica")) &&
+    options.some(o => o.includes("establecer una sociedad democratica avanzada"))
+  ){
+    return "LEGISLACIÓN: se presentan simultáneamente dos propósitos verdaderos del preámbulo como alternativas.";
+  }
+  return null;
 }
 
 function legislationQuestionIssue(target,question){
@@ -12174,6 +12202,8 @@ function legislationQuestionIssue(target,question){
     );
   }
 
+  const knownAmbiguity=legislationKnownAmbiguityIssue(question);
+  if(knownAmbiguity){return knownAmbiguity;}
   return null;
 }
 
