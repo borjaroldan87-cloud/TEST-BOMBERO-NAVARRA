@@ -8413,6 +8413,41 @@ if(newCandidate){
 const deferredGeographyCandidates = [];
 const usedGeographyMunicipalities = new Set();
 
+/*
+DIVERSIDAD INTERNA — LEGISLACIÓN
+
+En tests de un mismo tema legal evitamos concentrar varias preguntas
+seguidas en la misma página/fragmento del temario mientras existan
+objetivos equivalentes de otras páginas.
+
+No elimina coverage_items ni altera prioridades SRS: únicamente difiere
+los candidatos de una página ya representada hasta completar primero
+una muestra más amplia del tema.
+*/
+const deferredLegislationPageCandidates = [];
+const usedLegislationPages = new Set();
+
+const legislationPageKey = candidate => {
+  if(
+    String(candidate?.topic_block || "")
+      .trim()
+      .toLowerCase() !== "legislacion"
+  ){
+    return null;
+  }
+
+  const page =
+    candidate?.manual_page ??
+    candidate?.source_page ??
+    null;
+
+  if(page == null || String(page).trim() === ""){
+    return null;
+  }
+
+  return `${Number(candidate?.topic_id || 0)}:${String(page).trim()}`;
+};
+
 const geographyMunicipalityKey = candidate => {
   const topicNumber =
     coverageTopicNumber(candidate?.topic_name);
@@ -8447,6 +8482,15 @@ for(const selected of selectedAdaptive){
 
   if(key){
     usedGeographyMunicipalities.add(key);
+  }
+
+  const legislationPage =
+    legislationPageKey(selected);
+
+  if(legislationPage){
+    usedLegislationPages.add(
+      legislationPage
+    );
   }
 }
 for(const candidate of adaptiveCandidates){
@@ -8503,10 +8547,29 @@ if(
   deferredGeographyCandidates.push(candidate);
   continue;
 }
+
+const legislationPage =
+  legislationPageKey(candidate);
+
+if(
+  legislationPage &&
+  usedLegislationPages.has(
+    legislationPage
+  )
+){
+  deferredLegislationPageCandidates.push(candidate);
+  continue;
+}
+
   selectedAdaptive.push(candidate);
 if(geographyMunicipality){
   usedGeographyMunicipalities.add(
     geographyMunicipality
+  );
+}
+if(legislationPage){
+  usedLegislationPages.add(
+    legislationPage
   );
 }
   if(selectedAdaptive.length === count){
@@ -8563,6 +8626,55 @@ if(selectedAdaptive.length < count){
     }
   }
 }
+if(selectedAdaptive.length < count){
+  for(
+    const candidate
+    of deferredLegislationPageCandidates
+  ){
+    if(
+      selectedAdaptive.some(
+        selected =>
+          Number(selected.id) ===
+          Number(candidate.id)
+      )
+    ){
+      continue;
+    }
+
+    const candidateConcept =
+      String(candidate.concept || "")
+        .trim()
+        .toLowerCase();
+
+    const candidateSection =
+      String(candidate.section || "")
+        .trim()
+        .toLowerCase();
+
+    const overlaps =
+      selectedAdaptive.some(selected =>
+        String(selected.concept || "")
+          .trim()
+          .toLowerCase() ===
+            candidateConcept &&
+        String(selected.section || "")
+          .trim()
+          .toLowerCase() ===
+            candidateSection
+      );
+
+    if(overlaps){
+      continue;
+    }
+
+    selectedAdaptive.push(candidate);
+
+    if(selectedAdaptive.length === count){
+      break;
+    }
+  }
+}
+
 if(selectedAdaptive.length < count){
   throw new Error(
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
@@ -10177,6 +10289,14 @@ POLÍGONOS, SOLARES, EÓLICOS Y HELIPUERTOS
   e
   instalación/lugar -> parque operativo.
 
+- REGLA ADICIONAL T22:
+  Si el tema es T22, el enunciado y las opciones deben contener únicamente
+  nombres de polígonos/emplazamientos, municipios/localidades y/o parques/sedes
+  necesarios para resolver la relación territorial.
+  No introduzcas superficie, área, perímetro, número de fila ni expresiones
+  genéricas como "características técnicas", "datos técnicos" o
+  "características del polígono".
+
 - Las preguntas combinadas
   instalación -> municipio -> parque
   pueden aparecer, pero NO deben dominar el test.
@@ -10213,6 +10333,49 @@ DIVERSIDAD
   NO de enunciados innecesariamente complejos.
 `;
 }    
+function geographyPromptSafeText(target,value){
+  const topicNumber=
+    coverageTopicNumber(target?.topic_name);
+
+  let text=
+    String(value || "").trim();
+
+  if(topicNumber === 22){
+    /*
+    El coverage de T22 conserva superficie/perímetro para fidelidad documental,
+    pero esos campos NO son materia examinable. No los exponemos al generador,
+    porque contaminaban especialmente las preguntas INCORRECTA.
+    */
+    text = text
+      .replace(/\s*,?\s*superficie\b.*$/i,"")
+      .replace(/\s*,?\s*per[ií]metro\b.*$/i,"")
+      .replace(/^\s*\d+\s+(?=(?:pol[ií]gono|[aá]rea|zona|parque|sector|ciudad)\b)/i,"")
+      .replace(/\s+\d+(?:[.,]\d+)?\s+\d+(?:[.,]\d+)?\s*$/i,"")
+      .trim();
+  }
+
+  return text;
+}
+
+function geographyPromptSafeEvidence(target){
+  const topicNumber=
+    coverageTopicNumber(target?.topic_name);
+
+  if(topicNumber === 22){
+    /*
+    Para T22 el concepto ya contiene la relación útil
+    instalación -> municipio -> parque. Evitamos pasar al prompt
+    las columnas numéricas crudas de la tabla.
+    */
+    return geographyPromptSafeText(
+      target,
+      target?.concept || target?.source_evidence || ""
+    );
+  }
+
+  return String(target?.source_evidence || "").trim();
+}
+
 function geographyExamQuestionPolicy(target){
   const topicNumber=
     coverageTopicNumber(target?.topic_name);
@@ -10278,12 +10441,23 @@ PROHIBIDO COMO OBJETO DE PREGUNTA:
 - perímetro;
 - número de fila de la tabla.
 
-Esos campos pueden conservarse en sourceEvidence para identificar
-correctamente el registro, pero NO deben aparecer como dato solicitado
-ni como eje de los distractores.
+Esos campos pueden conservarse internamente para identificar
+correctamente el registro, pero NO deben aparecer en el enunciado,
+las opciones ni como eje de los distractores.
+
+REGLA ESPECÍFICA PARA 2026_INCORRECTA:
+- La opción INCORRECTA debe construirse EXCLUSIVAMENTE alterando una relación
+  polígono/emplazamiento -> municipio y/o parque.
+- Está PROHIBIDO formular preguntas genéricas sobre "características técnicas",
+  "datos técnicos", "características del polígono" o "adscripción técnica".
+- Usa formatos como:
+  "¿Cuál de las siguientes relaciones polígono-municipio es INCORRECTA?"
+  "¿Cuál de las siguientes asociaciones polígono-parque es INCORRECTA?"
+  "Señale la combinación polígono-municipio-parque INCORRECTA:"
+
 - La explicación final debe justificar SOLO la relación territorial preguntada.
   No reproduzcas superficie, área, perímetro ni número de fila aunque aparezcan
-  dentro de sourceEvidence.
+  en la fuente original.
 `;
   }
 
@@ -10523,7 +10697,7 @@ ${
     ? sameTopicRecords
         .map(
           (row,index)=>
-            `${index+1}. ${row.concept}`
+            `${index+1}. ${geographyPromptSafeText(item,row.concept)}`
         )
         .join("\n")
     : "No disponibles"
@@ -11499,7 +11673,7 @@ OBJETIVO ${index+1}
 - Familia de pregunta asignada: ${item.questionFamily || "GENERAL"}
 - Esta familia es OBLIGATORIA salvo imposibilidad factual demostrable.
 - Apartado: ${item.section || "No especificado"}
-- Concepto: ${item.concept}
+- Concepto: ${geographyPromptSafeText(item,item.concept)}
 - Tipo de contenido: ${item.item_type}
 - Tipo de evaluación solicitado: ${item.evaluation_type}
 - Dificultad adaptativa requerida: ${item.adaptiveDifficulty || "alta"}
@@ -11507,7 +11681,7 @@ OBJETIVO ${index+1}
 ${item.manual_page
   ? `- Página impresa del manual (uso interno): ${item.manual_page}`
   : ""}
-- Evidencia catalogada: ${item.source_evidence || "No disponible"}
+- Evidencia catalogada: ${geographyPromptSafeEvidence(item) || "No disponible"}
 ${item.territorialContext?.exact?.length ? `
 
 - CONTEXTO TERRITORIAL DEL TEMA 21 — RELACIÓN OPERATIVA EXACTA:
@@ -11562,7 +11736,7 @@ ${geographyOfficialArchetypePrompt(item,index)}
 ${geographyOptionPoolsPrompt(item)}
 ${Array.isArray(item.distractorContext) && item.distractorContext.length ? `
 - BANCO FACTUAL CERCANO PARA CONSTRUIR DISTRACTORES:
-${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${contextItem.concept} | Evidencia: ${contextItem.source_evidence}`).join("\n")}
+${item.distractorContext.map((contextItem,contextIndex)=>`  ${contextIndex+1}. Apartado: ${contextItem.section || "No especificado"} | Concepto: ${geographyPromptSafeText(item,contextItem.concept)} | Evidencia: ${coverageTopicNumber(item?.topic_name)===22 ? geographyPromptSafeText(item,contextItem.concept) : (contextItem.source_evidence || "")}`).join("\n")}
 
 REGLAS DE USO DEL BANCO FACTUAL:
 - Este banco NO cambia el objetivo de la pregunta.
@@ -14867,6 +15041,22 @@ if(testType === "normal"){
     ){
       continue;
     }
+
+    /*
+    LEGISLACIÓN:
+    no reutilizar el banco histórico generado antes de la integración Anki.
+    Esas preguntas pueden pertenecer a versiones antiguas de prompts y
+    distractores. Primero se intenta Anki validado y, si no existe coincidencia
+    exacta, se genera una pregunta nueva con las reglas actuales.
+    */
+    if(
+      String(targets[i]?.topic_block || "")
+        .trim()
+        .toLowerCase() === "legislacion"
+    ){
+      continue;
+    }
+
     const reusable =
       await getReusableQuestionForTarget(
         targets[i],
@@ -15245,7 +15435,10 @@ for(let i = 0; i < factualValidation.length; i++){
         targetId:target?.id ?? null,
         topic:target?.topic_name || null,
         issue:geographyRelevanceIssue,
-        stem:question?.stem || null
+        stem:question?.stem || null,
+        options:Array.isArray(question?.options)
+          ? question.options
+          : []
       })
     );
 
@@ -15388,7 +15581,10 @@ for(
           targetId:targetForValidation?.id ?? null,
           topic:targetForValidation?.topic_name || null,
           issue:geographyRelevanceIssue,
-          stem:regenerated.questions[i]?.stem || null
+          stem:regenerated.questions[i]?.stem || null,
+          options:Array.isArray(regenerated.questions[i]?.options)
+            ? regenerated.questions[i].options
+            : []
         })
       );
 
@@ -15554,6 +15750,26 @@ if(completeQuestions.some(question => !question)){
 }
 
 finalQuestions = completeQuestions;
+
+console.log(
+  "TEST SOURCES:",
+  finalQuestions.map((question,index)=>({
+    position:index + 1,
+    coverageId:Number(targets[index]?.id || 0),
+    topic:targets[index]?.topic_name || null,
+    source:
+      question?.ankiDirect === true
+        ? "ANKI_VALIDADO"
+        : question?.reused === true
+          ? "BANCO_REUTILIZADO"
+          : "GENERADA_NUEVA",
+    options:Array.isArray(question?.options)
+      ? question.options.length
+      : 0,
+    correctIndex:Number(question?.correctIndex)
+  }))
+);
+
     /*
       Las preguntas mantienen el mismo orden que los objetivos:
       pregunta 1 -> objetivo 1
