@@ -8765,9 +8765,23 @@ const constitutionLegislativeProcessKey = candidate => {
     candidate?.section,
     candidate?.concept
   ].filter(Boolean).join(" "));
-  return /(?:proyectos? de ley|proposiciones? de ley|iniciativa legislativa|iniciativa popular|decretos? leyes|decreto ley|procedimiento legislativo|funcion legislativa|promulgacion de las leyes|sancion de las leyes|entrada en vigor de las leyes|vacatio legis|elaboracion de las leyes|leyes organicas)/.test(text)
+  return /(?:proyectos? de ley|proposiciones? de ley|iniciativa legislativa|iniciativa popular|decretos? leyes|decreto ley|procedimiento legislativo|funcion legislativa|promulgacion de las leyes|sancion de las leyes|entrada en vigor de las leyes|vacatio legis|elaboracion de las leyes|leyes organicas|delegacion legislativa|legislacion delegada|decretos? legislativos?|ley(?:es)? de bases|textos? refundidos?)/.test(text)
     ? "actividad_legislativa"
     : null;
+};
+// SERVER_75: evitamos específicamente duplicar la legislación delegada
+// (aunque los coverage_items tengan secciones o núcleos distintos).
+// Solo se aplica en la primera pasada y no impide el fallback si faltan candidatos.
+const constitutionLegislativeSubtopicKey = candidate => {
+  if(!constitutionOnlySelection){ return null; }
+  const text = legislationDiversityNormalize([
+    candidate?.section,
+    candidate?.concept
+  ].filter(Boolean).join(" "));
+  if(/(?:delegacion legislativa|legislacion delegada|decretos? legislativos?|ley(?:es)? de bases|textos? refundidos?|refundir textos|refundicion)/.test(text)){
+    return "legislacion_delegada";
+  }
+  return null;
 };
 
 let legislationCandidates = adaptiveCandidates;
@@ -8775,23 +8789,36 @@ let ankiLinkedCandidateIds = new Set();
 if(legislationOnlySelection){
   const candidateIds = adaptiveCandidates.map(item=>Number(item.id));
   const linkedRows = await db.query(`
-    SELECT DISTINCT validated_coverage_item_id AS id
+    SELECT validated_coverage_item_id AS id,
+      BOOL_OR(last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '12 hours') AS has_fresh
     FROM legislation_anki_questions
     WHERE validation_status = 'validated'
       AND direct_use_eligible = TRUE
       AND validated_coverage_item_id = ANY($1::int[])
+    GROUP BY validated_coverage_item_id
   `,[candidateIds]);
   ankiLinkedCandidateIds = new Set(linkedRows.rows.map(row=>Number(row.id)));
-  // Orden estable: priorizar SRS primero; dentro de cada nivel, Anki vinculado.
+  const ankiFreshCandidateIds = new Set(
+    linkedRows.rows.filter(row=>row.has_fresh === true).map(row=>Number(row.id))
+  );
+  // SERVER_76: misma prioridad SRS; preferir FDF no reciente, luego FDF reciente,
+  // y solo después conocimientos sin FDF asociado. Sin bloquear contenido curricular.
+  const ankiRank = candidate =>
+    ankiFreshCandidateIds.has(Number(candidate.id)) ? 2 :
+    ankiLinkedCandidateIds.has(Number(candidate.id)) ? 1 : 0;
   legislationCandidates = adaptiveCandidates
     .map((candidate,index)=>({candidate,index}))
     .sort((a,b)=>
       Number(a.candidate.adaptive_priority)-Number(b.candidate.adaptive_priority) ||
-      Number(ankiLinkedCandidateIds.has(Number(b.candidate.id)))-
-        Number(ankiLinkedCandidateIds.has(Number(a.candidate.id))) ||
+      ankiRank(b.candidate)-ankiRank(a.candidate) ||
       a.index-b.index
     )
     .map(item=>item.candidate);
+  console.log('LEGISLATION ANKI CANDIDATES:', JSON.stringify({
+    examined:candidateIds.length,
+    withLinkedAnki:ankiLinkedCandidateIds.size,
+    withFreshLinkedAnki:ankiFreshCandidateIds.size
+  }));
 }
 
 if(legislationOnlySelection && selectedAdaptive.length < count){
@@ -8799,6 +8826,9 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
   let legislativeProcessCount = selectedAdaptive.filter(candidate =>
     constitutionLegislativeProcessKey(candidate) === "actividad_legislativa"
   ).length;
+  const usedLegislativeSubtopics = new Set(
+    selectedAdaptive.map(constitutionLegislativeSubtopicKey).filter(Boolean)
+  );
 
   for(const candidate of legislationCandidates){
     if(selectedAdaptive.length >= count){
@@ -8822,6 +8852,10 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
     if(macroKey === "actividad_legislativa" && legislativeProcessCount >= 2){
       continue;
     }
+    const subtopicKey = constitutionLegislativeSubtopicKey(candidate);
+    if(subtopicKey && usedLegislativeSubtopics.has(subtopicKey)){
+      continue;
+    }
 
     const candidateTokens = legislationDiversityTokens(candidate);
     const semanticRepeated = usedLegislationSemanticTexts.some(tokens =>
@@ -8837,6 +8871,9 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
     usedLegislationSections.add(nucleusKey);
     if(macroKey === "actividad_legislativa"){
       legislativeProcessCount++;
+    }
+    if(subtopicKey){
+      usedLegislativeSubtopics.add(subtopicKey);
     }
 
     const pageKey = legislationPageKey(candidate);
@@ -8854,6 +8891,7 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
       selected:selectedAdaptive.length,
       nuclei:[...usedLegislationSections],
       constitutionLegislativeProcessCount:legislativeProcessCount,
+      legislativeSubtopics:[...usedLegislativeSubtopics],
       candidatesWithAnki:ankiLinkedCandidateIds.size
     })
   );
@@ -11756,7 +11794,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
 
   const linked=await db.query(
     `
-    SELECT DISTINCT ON (validated_coverage_item_id)
+    SELECT
       id,
       anki_note_id,
       topic_order,
@@ -11764,7 +11802,9 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
       options,
       correct_index,
       validation_evidence,
-      validated_coverage_item_id
+      validated_coverage_item_id,
+      last_used_at,
+      times_used
     FROM legislation_anki_questions
     WHERE
       validation_status = 'validated'
@@ -11772,6 +11812,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
       AND validated_coverage_item_id = ANY($1::int[])
     ORDER BY
       validated_coverage_item_id,
+      CASE WHEN last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '12 hours' THEN 0 ELSE 1 END,
       times_used ASC,
       last_used_at ASC NULLS FIRST,
       id ASC
@@ -11779,40 +11820,44 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
     [coverageIds]
   );
 
-  const linkedByCoverage=new Map(
-    linked.rows.map(row=>[
-      Number(row.validated_coverage_item_id),
-      row
-    ])
-  );
+  // SERVER_76: no escoger una única fila por cobertura ANTES de verificar
+  // la compatibilidad CORRECTA/INCORRECTA. Varias FDF pueden cubrir el mismo item.
+  const linkedByCoverage=new Map();
+  for(const row of linked.rows){
+    const key=Number(row.validated_coverage_item_id);
+    if(!linkedByCoverage.has(key)){ linkedByCoverage.set(key,[]); }
+    linkedByCoverage.get(key).push(row);
+  }
 
   const unresolved=[];
+  const usedAnkiIds=new Set();
+  let directRecentFallbacks=0;
+  const recentCutoff=Date.now()-12*60*60*1000;
+  const isRecent=row=>row.last_used_at != null &&
+    new Date(row.last_used_at).getTime()>=recentCutoff;
 
   for(const item of legislationTargets){
-    const linkedRow=
-      linkedByCoverage.get(
-        Number(item.target.id)
-      );
+    const options=linkedByCoverage.get(Number(item.target.id)) || [];
+    const compatible=options.filter(row=>
+      !usedAnkiIds.has(Number(row.id)) &&
+      legislationAnkiFamilyCompatible(item.target.questionFamily,row.stem)
+    );
+    const linkedRow=compatible.find(row=>!isRecent(row)) || compatible[0];
 
-    if(
-      linkedRow &&
-      legislationAnkiFamilyCompatible(
-        item.target.questionFamily,
-        linkedRow.stem
-      )
-    ){
-      direct.set(
-        item.index,
-        buildDirectAnkiQuestion(
-          linkedRow,
-          item.target
-        )
-      );
-      continue;
+    if(linkedRow){
+      if(isRecent(linkedRow)){directRecentFallbacks++;}
+      usedAnkiIds.add(Number(linkedRow.id));
+      direct.set(item.index,buildDirectAnkiQuestion(linkedRow,item.target));
+    }else{
+      unresolved.push(item);
     }
-
-    unresolved.push(item);
   }
+
+  console.log('ANKI LINKED MATCH:',JSON.stringify({
+    selected:direct.size,
+    recentFallbacks:directRecentFallbacks,
+    unmatched:unresolved.length
+  }));
 
   if(!unresolved.length){
     return direct;
@@ -11836,7 +11881,8 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
       correct_answer,
       validation_evidence,
       validated_coverage_item_id,
-      times_used
+      times_used,
+      last_used_at
     FROM legislation_anki_questions
     WHERE
       topic_order = ANY($1::int[])
@@ -11872,6 +11918,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
 
     const candidates=(byOrder.get(item.sourceOrder) || [])
       .filter(row=>
+        !usedAnkiIds.has(Number(row.id)) &&
         (
           row.validated_coverage_item_id == null ||
           Number(row.validated_coverage_item_id) ===
@@ -11901,6 +11948,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
       })
       .sort((a,b)=>
         b.score-a.score ||
+        Number(isRecent(a.row))-Number(isRecent(b.row)) ||
         Number(a.row.times_used)-Number(b.row.times_used) ||
         Number(a.row.id)-Number(b.row.id)
       )
@@ -11921,6 +11969,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
       candidates:candidates.map(entry=>({
         ankiQuestionId:Number(entry.row.id),
         ankiNoteId:Number(entry.row.anki_note_id),
+        recentlyUsed:isRecent(entry.row),
         stem:entry.row.stem,
         options:entry.row.options,
         correctIndex:Number(entry.row.correct_index),
@@ -11963,6 +12012,8 @@ REGLAS:
    de las candidatas proporcionadas.
 7. Cada ankiQuestionId solo puede utilizarse UNA vez en este lote.
 8. Ante cualquier duda, devuelve null.
+9. Si varias candidatas coinciden exactamente, prefiere una no usada recientemente.
+   Una candidata reciente solo se descarta si existe otra coincidencia igual de válida.
 
 TARGETS Y CANDIDATAS:
 ${JSON.stringify(payload)}
@@ -12018,8 +12069,7 @@ ${JSON.stringify(payload)}
     ])
   );
 
-  const usedAnkiIds=new Set();
-
+  // Incluye las preguntas vinculadas elegidas arriba: sin duplicados por sesión.
   for(const match of parsed.matches){
     const targetIndex=Number(match.targetIndex);
     const targetPayload=
