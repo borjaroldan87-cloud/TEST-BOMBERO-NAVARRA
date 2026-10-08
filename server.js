@@ -8678,7 +8678,82 @@ for(const selected of selectedAdaptive){
     );
   }
 }
+/*
+LEGISLACIÓN — SELECCIÓN POR NÚCLEO PRIMERO
+
+Cuando el test seleccionado pertenece exclusivamente al bloque de Legislación,
+la primera pasada no elige coverage_items uno tras otro. Primero ocupa, en el
+orden adaptativo original, una plaza por núcleo jurídico distinto. Solo después,
+si todavía faltan preguntas, actúan las pasadas normales de respaldo.
+
+La clave de núcleo incluye topic_id, por lo que también funciona al seleccionar
+varios temas de Legislación sin mezclar sus núcleos entre sí.
+*/
+const legislationOnlySelection =
+  adaptiveCandidates.length > 0 &&
+  adaptiveCandidates.every(candidate =>
+    String(candidate?.topic_block || "")
+      .trim()
+      .toLowerCase() === "legislacion"
+  );
+
+if(legislationOnlySelection && selectedAdaptive.length < count){
+  const nucleusFirstUsed = new Set(usedLegislationSections);
+
+  for(const candidate of adaptiveCandidates){
+    if(selectedAdaptive.length >= count){
+      break;
+    }
+
+    if(
+      selectedAdaptive.some(
+        selected => Number(selected.id) === Number(candidate.id)
+      )
+    ){
+      continue;
+    }
+
+    const nucleusKey = legislationSectionKey(candidate);
+    if(!nucleusKey || nucleusFirstUsed.has(nucleusKey)){
+      continue;
+    }
+
+    const candidateTokens = legislationDiversityTokens(candidate);
+    const semanticRepeated = usedLegislationSemanticTexts.some(tokens =>
+      legislationSemanticOverlap(candidateTokens,tokens) >= 0.42
+    );
+
+    if(semanticRepeated){
+      continue;
+    }
+
+    selectedAdaptive.push(candidate);
+    nucleusFirstUsed.add(nucleusKey);
+    usedLegislationSections.add(nucleusKey);
+
+    const pageKey = legislationPageKey(candidate);
+    if(pageKey){
+      usedLegislationPages.add(pageKey);
+    }
+
+    usedLegislationSemanticTexts.push(candidateTokens);
+  }
+
+  console.log(
+    "LEGISLATION NUCLEUS-FIRST:",
+    JSON.stringify({
+      requested:count,
+      selected:selectedAdaptive.length,
+      nuclei:[...usedLegislationSections]
+    })
+  );
+}
+
 for(const candidate of adaptiveCandidates){
+
+  if(selectedAdaptive.length >= count){
+    break;
+  }
 
   if(
     selectedAdaptive.some(
