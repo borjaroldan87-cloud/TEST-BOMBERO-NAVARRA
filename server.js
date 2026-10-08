@@ -8425,7 +8425,78 @@ los candidatos de una página ya representada hasta completar primero
 una muestra más amplia del tema.
 */
 const deferredLegislationPageCandidates = [];
+const deferredLegislationSemanticCandidates = [];
 const usedLegislationPages = new Set();
+const usedLegislationSections = new Set();
+const usedLegislationSemanticTexts = [];
+
+const legislationDiversityNormalize = value =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g," ")
+    .trim()
+    .replace(/\s+/g," ");
+
+const LEGISLATION_DIVERSITY_STOPWORDS = new Set([
+  "segun","conforme","acuerdo","articulo","articulos","ley","foral",
+  "real","decreto","organica","constitucion","espanola","navarra",
+  "sera","seran","puede","pueden","debe","deben","cual","cuales",
+  "siguiente","siguientes","respuesta","respuestas","correcta","incorrecta",
+  "verdadera","falsa","entre","sobre","para","como","cuando","donde",
+  "desde","hasta","este","esta","estos","estas","aquel","aquella",
+  "del","las","los","una","uno","unos","unas","que","por","con",
+  "sin","sus","son","sea","sean","tiene","tienen","corresponde"
+]);
+
+const legislationDiversityTokens = candidate => {
+  const text = legislationDiversityNormalize([
+    candidate?.section,
+    candidate?.concept,
+    candidate?.source_evidence
+  ].filter(Boolean).join(" "));
+
+  return new Set(
+    text.split(" ").filter(token =>
+      token &&
+      (token.length >= 4 || /^\d+$/.test(token)) &&
+      !LEGISLATION_DIVERSITY_STOPWORDS.has(token)
+    )
+  );
+};
+
+const legislationSectionKey = candidate => {
+  if(
+    String(candidate?.topic_block || "")
+      .trim()
+      .toLowerCase() !== "legislacion"
+  ){
+    return null;
+  }
+
+  const section = legislationDiversityNormalize(candidate?.section);
+  if(!section){
+    return null;
+  }
+
+  return `${Number(candidate?.topic_id || 0)}:${section}`;
+};
+
+const legislationSemanticOverlap = (a,b) => {
+  if(!a?.size || !b?.size){
+    return 0;
+  }
+
+  let intersection = 0;
+  for(const token of a){
+    if(b.has(token)){
+      intersection++;
+    }
+  }
+
+  return intersection / Math.min(a.size,b.size);
+};
 
 const legislationPageKey = candidate => {
   if(
@@ -8492,6 +8563,25 @@ for(const selected of selectedAdaptive){
       legislationPage
     );
   }
+
+  const legislationSection =
+    legislationSectionKey(selected);
+
+  if(legislationSection){
+    usedLegislationSections.add(
+      legislationSection
+    );
+  }
+
+  if(
+    String(selected?.topic_block || "")
+      .trim()
+      .toLowerCase() === "legislacion"
+  ){
+    usedLegislationSemanticTexts.push(
+      legislationDiversityTokens(selected)
+    );
+  }
 }
 for(const candidate of adaptiveCandidates){
 
@@ -8548,6 +8638,34 @@ if(
   continue;
 }
 
+const legislationSection =
+  legislationSectionKey(candidate);
+
+const legislationTokens =
+  legislationDiversityTokens(candidate);
+
+const legislationSemanticRepeated =
+  String(candidate?.topic_block || "")
+    .trim()
+    .toLowerCase() === "legislacion" &&
+  (
+    (
+      legislationSection &&
+      usedLegislationSections.has(legislationSection)
+    ) ||
+    usedLegislationSemanticTexts.some(tokens =>
+      legislationSemanticOverlap(
+        legislationTokens,
+        tokens
+      ) >= 0.42
+    )
+  );
+
+if(legislationSemanticRepeated){
+  deferredLegislationSemanticCandidates.push(candidate);
+  continue;
+}
+
 const legislationPage =
   legislationPageKey(candidate);
 
@@ -8570,6 +8688,20 @@ if(geographyMunicipality){
 if(legislationPage){
   usedLegislationPages.add(
     legislationPage
+  );
+}
+if(legislationSection){
+  usedLegislationSections.add(
+    legislationSection
+  );
+}
+if(
+  String(candidate?.topic_block || "")
+    .trim()
+    .toLowerCase() === "legislacion"
+){
+  usedLegislationSemanticTexts.push(
+    legislationTokens
   );
 }
   if(selectedAdaptive.length === count){
@@ -8629,6 +8761,55 @@ if(selectedAdaptive.length < count){
 if(selectedAdaptive.length < count){
   for(
     const candidate
+    of deferredLegislationSemanticCandidates
+  ){
+    if(
+      selectedAdaptive.some(
+        selected =>
+          Number(selected.id) ===
+          Number(candidate.id)
+      )
+    ){
+      continue;
+    }
+
+    const candidateConcept =
+      String(candidate.concept || "")
+        .trim()
+        .toLowerCase();
+
+    const candidateSection =
+      String(candidate.section || "")
+        .trim()
+        .toLowerCase();
+
+    const overlaps =
+      selectedAdaptive.some(selected =>
+        String(selected.concept || "")
+          .trim()
+          .toLowerCase() ===
+            candidateConcept &&
+        String(selected.section || "")
+          .trim()
+          .toLowerCase() ===
+            candidateSection
+      );
+
+    if(overlaps){
+      continue;
+    }
+
+    selectedAdaptive.push(candidate);
+
+    if(selectedAdaptive.length === count){
+      break;
+    }
+  }
+}
+
+if(selectedAdaptive.length < count){
+  for(
+    const candidate
     of deferredLegislationPageCandidates
   ){
     if(
@@ -8684,7 +8865,21 @@ const result = {
   rows: selectedAdaptive
 };
 
-    
+console.log(
+  "LEGISLATION DIVERSITY:",
+  selectedAdaptive
+    .filter(item =>
+      String(item?.topic_block || "")
+        .trim()
+        .toLowerCase() === "legislacion"
+    )
+    .map(item => ({
+      coverageId:Number(item.id),
+      page:item.manual_page ?? item.source_page ?? null,
+      section:item.section || "",
+      concept:String(item.concept || "").slice(0,120)
+    }))
+);
 
   const families = buildQuestionFamilyPlan(result.rows);
 
