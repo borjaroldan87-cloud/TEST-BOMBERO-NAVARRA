@@ -8475,12 +8475,107 @@ const legislationSectionKey = candidate => {
     return null;
   }
 
-  const section = legislationDiversityNormalize(candidate?.section);
-  if(!section){
+  const text = legislationDiversityNormalize([
+    candidate?.section,
+    candidate?.concept,
+    candidate?.source_evidence
+  ].filter(Boolean).join(" "));
+
+  if(!text){
     return null;
   }
 
-  return `${Number(candidate?.topic_id || 0)}:${section}`;
+  const topicId = Number(candidate?.topic_id || 0);
+
+  /*
+  NÚCLEO CONCEPTUAL — LEGISLACIÓN
+
+  Para Constitución no basta con separar por página o por el texto exacto
+  de section: distintos coverage_items pueden preguntar varias veces el mismo
+  bloque jurídico (Corona, suspensión de derechos, etc.). Esta clasificación
+  crea un nivel superior de diversidad.
+
+  En otros temas legales, si no se reconoce un núcleo específico, se conserva
+  la sección normalizada como clave estable.
+  */
+  const articleNumbers = [
+    ...text.matchAll(/(?:articulo|art|arts)\s*(\d{1,3})/g)
+  ].map(match => Number(match[1]));
+
+  const hasArticleInRange = (min,max) =>
+    articleNumbers.some(number => number >= min && number <= max);
+
+  let nucleus = null;
+
+  if(topicId && (
+    /\bpreambulo\b/.test(text)
+  )){
+    nucleus = "preambulo";
+  }else if(
+    /\bcorona\b|\brey\b|\bsucesion\b|\bregencia\b|\brefrendo\b/.test(text) ||
+    hasArticleInRange(56,65)
+  ){
+    nucleus = "corona";
+  }else if(
+    /suspension.*derech|derech.*suspension|estado.*alarma|estado.*excepcion|estado.*sitio|estados.*excepcional/.test(text) ||
+    articleNumbers.includes(55)
+  ){
+    nucleus = "suspension_estados_excepcionales";
+  }else if(
+    /tribunal constitucional/.test(text) ||
+    hasArticleInRange(159,165)
+  ){
+    nucleus = "tribunal_constitucional";
+  }else if(
+    /reforma constitucional|reforma.*constitucion/.test(text) ||
+    hasArticleInRange(166,169)
+  ){
+    nucleus = "reforma_constitucional";
+  }else if(
+    /cortes generales|congreso|senado|diputad|senador/.test(text) ||
+    hasArticleInRange(66,96)
+  ){
+    nucleus = "cortes_generales";
+  }else if(
+    /gobierno|administracion|presidente del gobierno|consejo de ministros/.test(text) ||
+    hasArticleInRange(97,107)
+  ){
+    nucleus = "gobierno_administracion";
+  }else if(
+    /poder judicial|jueces|magistrados|tribunales|consejo general del poder judicial|ministerio fiscal/.test(text) ||
+    hasArticleInRange(117,127)
+  ){
+    nucleus = "poder_judicial";
+  }else if(
+    /organizacion territorial|comunidades autonomas|municipios|provincias|autonomia/.test(text) ||
+    hasArticleInRange(137,158)
+  ){
+    nucleus = "organizacion_territorial";
+  }else if(
+    /economia|hacienda|presupuestos|tribut|sector publico/.test(text) ||
+    hasArticleInRange(128,136)
+  ){
+    nucleus = "economia_hacienda";
+  }else if(
+    /derechos fundamentales|derechos y deberes|libertad|igualdad|tutela|recurso de amparo|defensor del pueblo/.test(text) ||
+    hasArticleInRange(10,54)
+  ){
+    nucleus = "derechos_deberes";
+  }else if(
+    /titulo preliminar|estado social|soberania|monarquia parlamentaria|pluralismo politico|lengua oficial|bandera|capital del estado|partidos politicos|sindicatos/.test(text) ||
+    hasArticleInRange(1,9)
+  ){
+    nucleus = "titulo_preliminar";
+  }
+
+  if(nucleus){
+    return `${topicId}:nucleus:${nucleus}`;
+  }
+
+  const section = legislationDiversityNormalize(candidate?.section);
+  return section
+    ? `${topicId}:section:${section}`
+    : null;
 };
 
 const legislationSemanticOverlap = (a,b) => {
@@ -8799,7 +8894,26 @@ if(selectedAdaptive.length < count){
       continue;
     }
 
+    const nucleusKey = legislationSectionKey(candidate);
+    if(
+      nucleusKey &&
+      usedLegislationSections.has(nucleusKey)
+    ){
+      continue;
+    }
+
     selectedAdaptive.push(candidate);
+
+    const pageKey = legislationPageKey(candidate);
+    if(pageKey){
+      usedLegislationPages.add(pageKey);
+    }
+    if(nucleusKey){
+      usedLegislationSections.add(nucleusKey);
+    }
+    usedLegislationSemanticTexts.push(
+      legislationDiversityTokens(candidate)
+    );
 
     if(selectedAdaptive.length === count){
       break;
@@ -8876,6 +8990,7 @@ console.log(
     .map(item => ({
       coverageId:Number(item.id),
       page:item.manual_page ?? item.source_page ?? null,
+      nucleus:legislationSectionKey(item),
       section:item.section || "",
       concept:String(item.concept || "").slice(0,120)
     }))
