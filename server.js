@@ -8004,6 +8004,7 @@ async function getAdaptiveCoverageCandidates(
     `
     SELECT
       ci.id,
+      ci.topic_id,
       t.name AS topic_name,
       t.block AS topic_block,
       ci.section,
@@ -8253,6 +8254,7 @@ async function getNewCoverageCandidate(
   const result = await db.query(`
     SELECT
       ci.id,
+      ci.topic_id,
       t.name AS topic_name,
       t.block AS topic_block,
       ci.section,
@@ -8359,9 +8361,16 @@ async function getCoverageTargetsForGeneration(
         CALCULO_FORMULACION -> 2024_NUMERICA -> 2024_TEXTO.
   */
 
+// LEGISLACIÓN (un único tema): ver suficientes páginas y núcleos.
+// El orden de prioridad adaptativa se conserva; la consulta sigue siendo
+// PostgreSQL local, sin llamadas adicionales a Gemini.
+const nucleusCandidateLimit =
+  Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
+    ? Math.max(count * 80, 800)
+    : Math.max(count * 12, 120);
 const adaptiveCandidates =
   await getAdaptiveCoverageCandidates(
-    Math.max(count * 12,120),
+    nucleusCandidateLimit,
     allowedTopicIds,
     selectionStrategy
   );
@@ -8475,107 +8484,143 @@ const legislationSectionKey = candidate => {
     return null;
   }
 
-  const text = legislationDiversityNormalize([
-    candidate?.section,
-    candidate?.concept,
-    candidate?.source_evidence
-  ].filter(Boolean).join(" "));
-
-  if(!text){
-    return null;
-  }
+  const section = legislationDiversityNormalize(candidate?.section);
+  const concept = legislationDiversityNormalize(candidate?.concept);
+  const evidence = legislationDiversityNormalize(candidate?.source_evidence);
+  const text = [section,concept,evidence].filter(Boolean).join(" ");
+  if(!text){ return null; }
 
   const topicId = Number(candidate?.topic_id || 0);
+  const topicName = legislationDiversityNormalize(candidate?.topic_name);
+  const isConstitution =
+    coverageTopicNumber(candidate?.topic_name) === 1 &&
+    /constitucion/.test(topicName);
 
   /*
-  NÚCLEO CONCEPTUAL — LEGISLACIÓN
+   * SERVER_73 — CONSTITUCIÓN: núcleo jurídico real, no epígrafe editorial.
+   * Clasificar ANTES de escoger coverage_items. Una sub-sección de Cortes
+   * no puede constituir un núcleo nuevo, ni «suspensión individual» debe
+   * aparecer como otro núcleo distinto de la suspensión general.
+   * Priorizar la sección, después el concepto y por último la evidencia:
+   * una mención incidental a Gobierno o Cortes en la evidencia no desplaza
+   * el título constitucional que estamos evaluando.
+   */
+  if(isConstitution){
+    const keyForArticle = value => {
+      const articles = [...String(value||"").matchAll(
+        /\b(?:articulo|articulos|art|arts)\s*(\d{1,3})(?!\d)/g
+      )].map(match=>Number(match[1]));
+      if(articles.includes(55)){ return "suspension_estados_excepcionales"; }
+      const range = (min,max)=>articles.some(n=>n>=min && n<=max);
+      if(range(166,169)){ return "reforma_constitucional"; }
+      if(range(159,165)){ return "tribunal_constitucional"; }
+      if(range(137,158)){ return "organizacion_territorial"; }
+      if(range(128,136)){ return "economia_hacienda"; }
+      if(range(117,127)){ return "poder_judicial"; }
+      if(range(97,107)){ return "gobierno_administracion"; }
+      if(range(66,96)){ return "cortes_generales"; }
+      if(range(56,65)){ return "corona"; }
+      if(range(10,54)){ return "derechos_deberes"; }
+      if(range(1,9)){ return "titulo_preliminar"; }
+      return null;
+    };
 
-  Para Constitución no basta con separar por página o por el texto exacto
-  de section: distintos coverage_items pueden preguntar varias veces el mismo
-  bloque jurídico (Corona, suspensión de derechos, etc.). Esta clasificación
-  crea un nivel superior de diversidad.
+    const keyForText = (value, isSection=false) => {
+      if(!value){ return null; }
+      // La prioridad evita colisiones semánticas (Cortes controlan Gobierno).
+      if(/\bpreambulo\b/.test(value)){ return "preambulo"; }
+      if(/suspension|suspend|estado de sitio|estado de excepcion|estado de alarma|estados excepcionales/.test(value)){
+        return "suspension_estados_excepcionales";
+      }
+      if(/tribunal constitucional|\btitulo ix\b/.test(value)){
+        return "tribunal_constitucional";
+      }
+      if(/reforma constitucional|reforma de la constitucion|\btitulo x\b/.test(value)){
+        return "reforma_constitucional";
+      }
+      if(/\bcorona\b|\brey\b|\bmonarca\b|refrendo|regencia|sucesion a la corona|\btitulo ii\b/.test(value)){
+        return "corona";
+      }
+      if(/cortes generales|\bcongreso\b|\bsenado\b|\bcamaras?\b|\bdiputad|\bsenador|\bparlamentari|mandato imperativo|\btitulo iii\b/.test(value)){
+        return "cortes_generales";
+      }
+      if(/poder judicial|jueces|magistrados|consejo general del poder judicial|ministerio fiscal|\btitulo vi\b/.test(value)){
+        return "poder_judicial";
+      }
+      if(/organizacion territorial|comunidades autonomas|municipios|provincias|\btitulo viii\b/.test(value)){
+        return "organizacion_territorial";
+      }
+      if(/economia y hacienda|haciendas locales|tribut|\btitulo vii\b/.test(value)){
+        return "economia_hacienda";
+      }
+      if(/gobierno y administracion|presidente del gobierno|consejo de ministros|\btitulo iv\b|\btitulo v\b/.test(value)){
+        return "gobierno_administracion";
+      }
+      if(/derechos y deberes|derechos fundamentales|tutela judicial|recurso de amparo|\btitulo i\b/.test(value)){
+        return "derechos_deberes";
+      }
+      if(/titulo preliminar|estado social|soberania nacional|monarquia parlamentaria|pluralismo politico/.test(value)){
+        return "titulo_preliminar";
+      }
+      // Concepto/evidencia, NO sección: evita que el mero uso de Gobierno
+      // en un comentario sobre las Cortes distorsione el núcleo.
+      if(!isSection){
+        if(/\bgobierno\b|\badministracion\b/.test(value)){
+          return "gobierno_administracion";
+        }
+        if(/\blibertad\b|\bigualdad\b|\bderechos\b/.test(value)){
+          return "derechos_deberes";
+        }
+      }
+      return null;
+    };
 
-  En otros temas legales, si no se reconoce un núcleo específico, se conserva
-  la sección normalizada como clave estable.
-  */
-  const articleNumbers = [
-    ...text.matchAll(/(?:articulo|art|arts)\s*(\d{1,3})/g)
-  ].map(match => Number(match[1]));
+    const nucleus =
+      keyForText(section,true) ||
+      keyForArticle(section) ||
+      keyForText(concept) ||
+      keyForArticle(concept) ||
+      keyForArticle(evidence) ||
+      keyForText(evidence) ||
+      "otros_constitucion";
 
-  const hasArticleInRange = (min,max) =>
-    articleNumbers.some(number => number >= min && number <= max);
-
-  let nucleus = null;
-
-  if(topicId && (
-    /\bpreambulo\b/.test(text)
-  )){
-    nucleus = "preambulo";
-  }else if(
-    /\bcorona\b|\brey\b|\bsucesion\b|\bregencia\b|\brefrendo\b/.test(text) ||
-    hasArticleInRange(56,65)
-  ){
-    nucleus = "corona";
-  }else if(
-    /suspension.*derech|derech.*suspension|estado.*alarma|estado.*excepcion|estado.*sitio|estados.*excepcional/.test(text) ||
-    articleNumbers.includes(55)
-  ){
-    nucleus = "suspension_estados_excepcionales";
-  }else if(
-    /tribunal constitucional/.test(text) ||
-    hasArticleInRange(159,165)
-  ){
-    nucleus = "tribunal_constitucional";
-  }else if(
-    /reforma constitucional|reforma.*constitucion/.test(text) ||
-    hasArticleInRange(166,169)
-  ){
-    nucleus = "reforma_constitucional";
-  }else if(
-    /cortes generales|congreso|senado|diputad|senador/.test(text) ||
-    hasArticleInRange(66,96)
-  ){
-    nucleus = "cortes_generales";
-  }else if(
-    /gobierno|administracion|presidente del gobierno|consejo de ministros/.test(text) ||
-    hasArticleInRange(97,107)
-  ){
-    nucleus = "gobierno_administracion";
-  }else if(
-    /poder judicial|jueces|magistrados|tribunales|consejo general del poder judicial|ministerio fiscal/.test(text) ||
-    hasArticleInRange(117,127)
-  ){
-    nucleus = "poder_judicial";
-  }else if(
-    /organizacion territorial|comunidades autonomas|municipios|provincias|autonomia/.test(text) ||
-    hasArticleInRange(137,158)
-  ){
-    nucleus = "organizacion_territorial";
-  }else if(
-    /economia|hacienda|presupuestos|tribut|sector publico/.test(text) ||
-    hasArticleInRange(128,136)
-  ){
-    nucleus = "economia_hacienda";
-  }else if(
-    /derechos fundamentales|derechos y deberes|libertad|igualdad|tutela|recurso de amparo|defensor del pueblo/.test(text) ||
-    hasArticleInRange(10,54)
-  ){
-    nucleus = "derechos_deberes";
-  }else if(
-    /titulo preliminar|estado social|soberania|monarquia parlamentaria|pluralismo politico|lengua oficial|bandera|capital del estado|partidos politicos|sindicatos/.test(text) ||
-    hasArticleInRange(1,9)
-  ){
-    nucleus = "titulo_preliminar";
-  }
-
-  if(nucleus){
+    // Los epígrafes desconocidos NO se hacen pasar por núcleos independientes.
     return `${topicId}:nucleus:${nucleus}`;
   }
 
-  const section = legislationDiversityNormalize(candidate?.section);
-  return section
-    ? `${topicId}:section:${section}`
-    : null;
+  /* Otros temas de Legislación: preservar las reglas previas (server_72). */
+  const articleNumbers = [...text.matchAll(
+    /(?:articulo|articulos|art|arts)\s*(\d{1,3})/g
+  )].map(match=>Number(match[1]));
+  const hasArticleInRange = (min,max) =>
+    articleNumbers.some(number=>number>=min && number<=max);
+  let nucleus = null;
+  if(/\bpreambulo\b/.test(text)){ nucleus="preambulo"; }
+  else if(/\bcorona\b|\brey\b|\bsucesion\b|\bregencia\b|\brefrendo\b/.test(text) || hasArticleInRange(56,65)){
+    nucleus="corona";
+  }else if(/suspension.*derech|derech.*suspension|estado.*alarma|estado.*excepcion|estado.*sitio|estados.*excepcional/.test(text) || articleNumbers.includes(55)){
+    nucleus="suspension_estados_excepcionales";
+  }else if(/tribunal constitucional/.test(text) || hasArticleInRange(159,165)){
+    nucleus="tribunal_constitucional";
+  }else if(/reforma constitucional|reforma.*constitucion/.test(text) || hasArticleInRange(166,169)){
+    nucleus="reforma_constitucional";
+  }else if(/cortes generales|congreso|senado|diputad|senador/.test(text) || hasArticleInRange(66,96)){
+    nucleus="cortes_generales";
+  }else if(/gobierno|administracion|presidente del gobierno|consejo de ministros/.test(text) || hasArticleInRange(97,107)){
+    nucleus="gobierno_administracion";
+  }else if(/poder judicial|jueces|magistrados|tribunales|consejo general del poder judicial|ministerio fiscal/.test(text) || hasArticleInRange(117,127)){
+    nucleus="poder_judicial";
+  }else if(/organizacion territorial|comunidades autonomas|municipios|provincias|autonomia/.test(text) || hasArticleInRange(137,158)){
+    nucleus="organizacion_territorial";
+  }else if(/economia|hacienda|presupuestos|tribut|sector publico/.test(text) || hasArticleInRange(128,136)){
+    nucleus="economia_hacienda";
+  }else if(/derechos fundamentales|derechos y deberes|libertad|igualdad|tutela|recurso de amparo|defensor del pueblo/.test(text) || hasArticleInRange(10,54)){
+    nucleus="derechos_deberes";
+  }else if(/titulo preliminar|estado social|soberania|monarquia parlamentaria|pluralismo politico|lengua oficial|bandera|capital del estado|partidos politicos|sindicatos/.test(text) || hasArticleInRange(1,9)){
+    nucleus="titulo_preliminar";
+  }
+  if(nucleus){ return `${topicId}:nucleus:${nucleus}`; }
+  return section ? `${topicId}:section:${section}` : null;
 };
 
 const legislationSemanticOverlap = (a,b) => {
