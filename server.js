@@ -12632,6 +12632,8 @@ async function registerQuestionAnswer({
       `SELECT
          tsq.id AS session_question_id,
          tsq.coverage_item_id,
+         tsq.selected_index,
+         tsq.is_correct,
          tsq.answered_at,
          qb.correct_index
        FROM test_session_questions tsq
@@ -12655,8 +12657,25 @@ async function registerQuestionAnswer({
     const row = result.rows[0];
 
     if(row.answered_at){
+      /*
+        GUARDADO IDEMPOTENTE:
+        si el navegador repite exactamente la misma respuesta porque una
+        respuesta HTTP se perdió o Render devolvió una página intermedia,
+        no contamos de nuevo estadísticas ni SRS. Simplemente confirmamos
+        que esa respuesta ya estaba persistida.
+      */
+      if(Number(row.selected_index) === Number(selectedIndex)){
+        await client.query("COMMIT");
+
+        return {
+          isCorrect:Boolean(row.is_correct),
+          correctIndex:Number(row.correct_index),
+          alreadySaved:true
+        };
+      }
+
       throw new Error(
-        "RESPUESTA: esta pregunta ya había sido contestada."
+        "RESPUESTA: esta pregunta ya había sido contestada con otra opción."
       );
     }
 
