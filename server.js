@@ -8742,10 +8742,65 @@ const legislationOnlySelection =
       .toLowerCase() === "legislacion"
   );
 
+/*
+SERVER_74 — diversificación y prioridad Anki SIN cambiar la prioridad SRS.
+- Los candidatos mantienen el orden por adaptive_priority (vencidos,
+  debilidades, nuevo y mantenimiento).
+- En el MISMO nivel de prioridad se prefieren los conocimientos que tienen
+  una pregunta Anki/FDF validada y vinculada, para reducir generación Gemini.
+- En Constitución no se admiten más de dos objetivos del mismo conjunto
+  de actividad legislativa en la primera pasada si quedan otras opciones.
+- No se toca ningún coverage_item, ni las preguntas originales FDF.
+*/
+const constitutionOnlySelection =
+  legislationOnlySelection &&
+  adaptiveCandidates.every(candidate =>
+    coverageTopicNumber(candidate?.topic_name) === 1 &&
+    /constitucion/.test(legislationDiversityNormalize(candidate?.topic_name))
+  );
+
+const constitutionLegislativeProcessKey = candidate => {
+  if(!constitutionOnlySelection){ return null; }
+  const text = legislationDiversityNormalize([
+    candidate?.section,
+    candidate?.concept
+  ].filter(Boolean).join(" "));
+  return /(?:proyectos? de ley|proposiciones? de ley|iniciativa legislativa|iniciativa popular|decretos? leyes|decreto ley|procedimiento legislativo|funcion legislativa|promulgacion de las leyes|sancion de las leyes|entrada en vigor de las leyes|vacatio legis|elaboracion de las leyes|leyes organicas)/.test(text)
+    ? "actividad_legislativa"
+    : null;
+};
+
+let legislationCandidates = adaptiveCandidates;
+let ankiLinkedCandidateIds = new Set();
+if(legislationOnlySelection){
+  const candidateIds = adaptiveCandidates.map(item=>Number(item.id));
+  const linkedRows = await db.query(`
+    SELECT DISTINCT validated_coverage_item_id AS id
+    FROM legislation_anki_questions
+    WHERE validation_status = 'validated'
+      AND direct_use_eligible = TRUE
+      AND validated_coverage_item_id = ANY($1::int[])
+  `,[candidateIds]);
+  ankiLinkedCandidateIds = new Set(linkedRows.rows.map(row=>Number(row.id)));
+  // Orden estable: priorizar SRS primero; dentro de cada nivel, Anki vinculado.
+  legislationCandidates = adaptiveCandidates
+    .map((candidate,index)=>({candidate,index}))
+    .sort((a,b)=>
+      Number(a.candidate.adaptive_priority)-Number(b.candidate.adaptive_priority) ||
+      Number(ankiLinkedCandidateIds.has(Number(b.candidate.id)))-
+        Number(ankiLinkedCandidateIds.has(Number(a.candidate.id))) ||
+      a.index-b.index
+    )
+    .map(item=>item.candidate);
+}
+
 if(legislationOnlySelection && selectedAdaptive.length < count){
   const nucleusFirstUsed = new Set(usedLegislationSections);
+  let legislativeProcessCount = selectedAdaptive.filter(candidate =>
+    constitutionLegislativeProcessKey(candidate) === "actividad_legislativa"
+  ).length;
 
-  for(const candidate of adaptiveCandidates){
+  for(const candidate of legislationCandidates){
     if(selectedAdaptive.length >= count){
       break;
     }
@@ -8763,6 +8818,11 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
       continue;
     }
 
+    const macroKey = constitutionLegislativeProcessKey(candidate);
+    if(macroKey === "actividad_legislativa" && legislativeProcessCount >= 2){
+      continue;
+    }
+
     const candidateTokens = legislationDiversityTokens(candidate);
     const semanticRepeated = usedLegislationSemanticTexts.some(tokens =>
       legislationSemanticOverlap(candidateTokens,tokens) >= 0.42
@@ -8775,6 +8835,9 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
     selectedAdaptive.push(candidate);
     nucleusFirstUsed.add(nucleusKey);
     usedLegislationSections.add(nucleusKey);
+    if(macroKey === "actividad_legislativa"){
+      legislativeProcessCount++;
+    }
 
     const pageKey = legislationPageKey(candidate);
     if(pageKey){
@@ -8789,7 +8852,9 @@ if(legislationOnlySelection && selectedAdaptive.length < count){
     JSON.stringify({
       requested:count,
       selected:selectedAdaptive.length,
-      nuclei:[...usedLegislationSections]
+      nuclei:[...usedLegislationSections],
+      constitutionLegislativeProcessCount:legislativeProcessCount,
+      candidatesWithAnki:ankiLinkedCandidateIds.size
     })
   );
 }
