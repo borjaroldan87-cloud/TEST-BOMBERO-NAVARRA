@@ -8034,18 +8034,18 @@ async function getAdaptiveCoverageCandidates(
       ) AS latest_nonblank_failed,
       CASE
         WHEN
-          ci.worked = TRUE
+          ci.times_asked > 0
           AND crs.next_review_at IS NOT NULL
           AND crs.next_review_at <= NOW()
         THEN 1
 
         WHEN
-  ci.worked = TRUE
+  ci.times_asked > 0
   AND last_nonblank_answer.is_correct = FALSE
 THEN 2
 
         WHEN
-          ci.worked = TRUE
+          ci.times_asked > 0
           AND (ci.times_wrong + ci.times_blank) > 0
           AND (
             ci.times_correct::numeric /
@@ -8058,7 +8058,7 @@ THEN 2
           ) < 0.70
         THEN 3
 
-        WHEN ci.worked = FALSE
+        WHEN COALESCE(ci.times_asked,0) = 0
         THEN 4
 
         ELSE 5
@@ -8282,7 +8282,7 @@ async function getNewCoverageCandidate(
       ON t.id = ci.topic_id
     WHERE
   ci.exam_relevant = TRUE
-  AND ci.worked = FALSE
+  AND ci.times_asked = 0
   AND (
     $1::int[] IS NULL
     OR ci.topic_id = ANY($1::int[])
@@ -8343,6 +8343,145 @@ if(target?.failed_difficulty === "muy alta"){
 
   return "alta";
 }
+/* SERVER 83: selector puro, testeable y sin llamadas de red.
+ * Una cobertura equivale a un hecho examinable; Anki solo se favorece
+ * cuando existe un enlace REAL contrastado con ese mismo hecho.
+ */
+function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAnkiIds,freshAnkiIds,count,strategy,sectionKey,tokensFor,overlap,seed}){
+  const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  const subkey=item=>`${Number(item.topic_id)}:${norm(item.section||'sin epigrafe')}`;
+  const conceptKey=item=>`${Number(item.topic_id)}:${norm(item.concept)}`;
+  const nucleus=item=>sectionKey(item)||subkey(item);
+  const stats=new Map((statsRows||[]).map(row=>[subkey(row),{
+    total:Number(row.total)||1, asked:Number(row.asked_count)||0
+  }]));
+  // Comparar el dato central, nunca texto editorial/páginas que comparten plantilla.
+  const conceptStop=new Set('articulo articulos sobre segun conforme acuerdo constitucion espanola organica funcion funciones regulacion regimen juridico contenido establecer establece indica cuales respuesta preguntas ejercicio deber deberes derecho derechos facultad facultades corresponde determinadas determinacion estas estos aquellos toda todos normativa prevision previsiones definicion definiciones entre cual para como hasta donde quienes siguiente siguientes'.split(' '));
+  const tokenCache=new WeakMap();
+  const contentTokens=item=>{
+    if(tokenCache.has(item))return tokenCache.get(item);
+    const set=new Set(norm(item.concept).split(' ').filter(t=>t && (t.length>=4 || /^\d+$/.test(t)) && !conceptStop.has(t)));
+    tokenCache.set(item,set);return set;
+  };
+  const recentIds=new Set(), recentConcepts=new Set(), recentByNucleus=new Map();
+  const recentBySub=new Map(), pastConcepts=[];
+  const recentSessionIds=[...new Set((recentRows||[]).map(row=>Number(row.session_id)))].sort((a,b)=>b-a);
+  const sessionRanks=new Map(recentSessionIds.map((id,index)=>[id,index]));
+  for(const row of recentRows||[]){
+    recentIds.add(Number(row.id));
+    recentConcepts.add(conceptKey(row));
+    const nk=nucleus(row),sk=subkey(row),rank=sessionRanks.get(Number(row.session_id))??99;
+    const hit=recentByNucleus.get(nk)||{hits:0,latest:99};
+    hit.hits++;hit.latest=Math.min(hit.latest,rank);recentByNucleus.set(nk,hit);
+    const sub=recentBySub.get(sk)||{hits:0,latest:99};
+    sub.hits++;sub.latest=Math.min(sub.latest,rank);recentBySub.set(sk,sub);
+    pastConcepts.push({nucleus:nk,tokens:contentTokens(row),item:row});
+  }
+  const historicByNucleus=new Map();
+  const seenSub=new Set();
+  for(const candidate of candidates){
+    const sk=subkey(candidate);
+    if(seenSub.has(sk))continue;
+    seenSub.add(sk);
+    const nk=nucleus(candidate),s=stats.get(sk)||{total:1,asked:0};
+    const old=historicByNucleus.get(nk)||{total:0,asked:0};
+    old.total+=s.total;old.asked+=s.asked;
+    historicByNucleus.set(nk,old);
+  }
+  const seenIds=new Set();const seenConcepts=new Set();const seenNuclei=new Map();
+  const selected=[];let selectedAnki=0,selectedNew=0;
+  const isNew=item=>Number(item.times_asked||0)===0;
+  const hasAnki=item=>verifiedAnkiIds.has(Number(item.id));
+  const freshAnki=item=>freshAnkiIds.has(Number(item.id));
+  const recentCache=new WeakMap();
+  const recent=item=>{
+    if(recentCache.has(item))return recentCache.get(item);
+    const tokens=contentTokens(item);
+    const value=recentIds.has(Number(item.id))||recentConcepts.has(conceptKey(item))||
+      (tokens.size>=4 && pastConcepts.some(prev=>prev.nucleus===nucleus(item) &&
+        prev.tokens.size>=4 && overlap(tokens,prev.tokens)>=0.90));
+    recentCache.set(item,value);return value;
+  };
+  const distinctWithinTest=item=>!seenConcepts.has(conceptKey(item)) && !selected.some(other=>
+    nucleus(other)===nucleus(item) && contentTokens(item).size>=4 &&
+    contentTokens(other).size>=4 && overlap(contentTokens(item),contentTokens(other))>=0.85);
+  // Se ordenan las secciones y núcleos por su exposición histórica, no por ID.
+  function score(item){
+    const nk=nucleus(item),sk=subkey(item);
+    const nh=recentByNucleus.get(nk)||{hits:0,latest:99};
+    const sh=recentBySub.get(sk)||{hits:0,latest:99};
+    const st=stats.get(sk)||{total:1,asked:0};
+    const nt=historicByNucleus.get(nk)||{total:1,asked:0};
+    const priority=Number(item.adaptive_priority)||5;
+    const seen=seenNuclei.get(nk)||0;
+    const recentNucPenalty=nh.latest===0?105:nh.latest===1?50:nh.latest===2?23:0;
+    const recentSubPenalty=sh.latest===0?60:sh.latest===1?25:0;
+    const topicSame=selected.filter(s=>Number(s.topic_id)===Number(item.topic_id)).length;
+    return -seen*220-recentNucPenalty-recentSubPenalty
+      -nh.hits*2.5-sh.hits*2.8
+      -36*nt.asked/Math.max(1,nt.total)
+      -54*st.asked/Math.max(1,st.total)
+      -Math.min(12,Number(item.times_asked||0))*5
+      -topicSame*16
+      +(isNew(item)?25:0)
+      +(priority===1?22:priority===2?16:priority===3?10:0)
+      +((priority===1 && item.next_review_at)?Math.min(10,Math.max(0,(Date.now()-new Date(item.next_review_at))/86400000)):0);
+  }
+  const idOrder=item=>((Math.imul(Number(item.id)||0,1103515245)^Math.imul(seed||0,12345))>>>0);
+  function take(filter,{permitSameNucleus=false,permitRecent=false}={}){
+    const pool=candidates.filter(item=>
+      !seenIds.has(Number(item.id)) && filter(item) && distinctWithinTest(item) &&
+      (permitSameNucleus||!seenNuclei.has(nucleus(item))) &&
+      (permitRecent||!recent(item)));
+    if(!pool.length)return false;
+    pool.sort((a,b)=>score(b)-score(a)||idOrder(a)-idOrder(b)||Number(a.id)-Number(b.id));
+    const picked=pool[0];
+    selected.push(picked);seenIds.add(Number(picked.id));seenConcepts.add(conceptKey(picked));
+    const nk=nucleus(picked);seenNuclei.set(nk,(seenNuclei.get(nk)||0)+1);
+    if(hasAnki(picked))selectedAnki++;
+    if(isNew(picked))selectedNew++;
+    return true;
+  }
+  // Nunca sacrificar variedad por Anki: la cuota se persigue con enlaces nuevos.
+  const requestedAnki=Math.round(count*0.60);
+  const requestedNew=(strategy==='simulation')?0:Math.ceil(count*0.50);
+  const actualFreshAnki=candidates.filter(c=>freshAnki(c)&&!recent(c)).length;
+  const ankiGoal=Math.min(requestedAnki,actualFreshAnki);
+  // En ausencia de intersección nueva/Anki, 60 % Anki y 50 % nuevo
+  // son incompatibles; se da prioridad al 60 % Anki sin fingir ambos.
+  const overlapCount=candidates.filter(c=>freshAnki(c)&&isNew(c)&&!recent(c)).length;
+  const newGoal=Math.min(requestedNew,count-ankiGoal+overlapCount);
+  function exhaust(predicate,goalFn){
+    for(let pass=0;pass<2&&selected.length<count&&goalFn();pass++){
+      while(selected.length<count&&goalFn() && take(predicate,{permitSameNucleus:pass===1})){}
+    }
+  }
+  // 1. Anki NUEVAS para cumplir ambas metas y reducir repetición de conocimientos.
+  exhaust(c=>freshAnki(c)&&isNew(c),()=>selectedAnki<ankiGoal&&selectedNew<newGoal);
+  // 2. Anki vinculadas contrastadas NO recientes.
+  exhaust(c=>freshAnki(c),()=>selectedAnki<ankiGoal);
+  // 3. Extensión de cobertura REAL (no presentaciones sin responder).
+  exhaust(c=>isNew(c),()=>selectedNew<newGoal);
+  // 4. Resto: SRS y debilidades con rotación por sección y núcleo.
+  exhaust(()=>true,()=>selected.length<count);
+  // 5. Único respaldo: la ventana reciente se relaja si no alcanza el material.
+  // No relajar coincidencias dentro del MISMO test ni falsear la fuente Anki.
+  if(selected.length<count){
+    for(const permitSameNucleus of [false,true]){
+      while(selected.length<count&&take(()=>true,{permitSameNucleus,permitRecent:true})){}
+    }
+  }
+  const metrics={requested:count,selected:selected.length,
+    uniqueNuclei:seenNuclei.size,uniqueSubindexes:new Set(selected.map(subkey)).size,
+    historicallyRecentReused:selected.filter(recent).length,
+    ankiVerified:selectedAnki,ankiGoalRequested:requestedAnki,ankiPoolFresh:actualFreshAnki,
+    newActual:selectedNew,newGoalRequested:requestedNew,
+    selectedCoverageIds:selected.map(x=>Number(x.id)),
+    selectedNuclei:selected.map(nucleus)};
+  return {selected,metrics};
+}
+
 async function getCoverageTargetsForGeneration(
   count,
   ai,
@@ -8366,8 +8505,8 @@ async function getCoverageTargetsForGeneration(
 // PostgreSQL local, sin llamadas adicionales a Gemini.
 const nucleusCandidateLimit =
   Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
-    ? Math.max(count * 80, 800)
-    : Math.max(count * 12, 120);
+    ? Math.max(count * 100, 1400)
+    : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
 const adaptiveCandidates =
   await getAdaptiveCoverageCandidates(
     nucleusCandidateLimit,
@@ -8405,7 +8544,7 @@ let newCandidate = null;
 if(selectionStrategy !== "simulation"){
   newCandidate =
     adaptiveCandidates.find(
-      candidate => candidate.worked === false
+      candidate => Number(candidate.times_asked || 0) === 0
     );
 
   if(!newCandidate){
@@ -8788,18 +8927,14 @@ const constitutionLegislativeSubtopicKey = candidate => {
   return null;
 };
 
-// SERVER_82 — ROTACIÓN ENTRE TESTS POR SUBÍNDICE + RESERVA ANKI.
-// Sin alterar tablas, respuestas ni estados SRS. El progreso se lee de
-// coverage_items, y la repetición reciente de las últimas sesiones.
-let legislationCandidates = adaptiveCandidates;
-let ankiLinkedCandidateIds = new Set();
+// SERVER_83 — sustituimos el selector completo (no un nuevo parche de ranking).
+// La selección se apoya en sesiones anteriores, objetivos realmente contestados,
+// rotación entre núcleos/subíndices y enlaces Anki validados contra el mismo PDF.
 if(legislationOnlySelection){
   const topicIds=[...new Set(adaptiveCandidates.map(x=>Number(x.topic_id)).filter(Number.isInteger))];
   const statsResult=await db.query(`
     SELECT topic_id, section, COUNT(*)::int AS total,
-           COUNT(*) FILTER (WHERE worked=TRUE)::int AS worked_count,
-           COALESCE(SUM(times_asked),0)::int AS asked_count,
-           MAX(last_asked_at) AS latest_asked
+           COALESCE(SUM(times_asked),0)::int AS asked_count
     FROM coverage_items
     WHERE exam_relevant=TRUE AND topic_id=ANY($1::int[])
     GROUP BY topic_id,section
@@ -8811,216 +8946,59 @@ if(legislationOnlySelection){
       JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
       WHERE ci.topic_id=ANY($1::int[])
       ORDER BY tsq.session_id DESC
-      LIMIT 6
+      LIMIT 18
     )
-    SELECT DISTINCT ci.id,ci.topic_id,ci.section,ci.concept
+    SELECT ci.id,ci.topic_id,ci.section,ci.concept,ci.source_evidence,
+           tsq.session_id
     FROM test_session_questions tsq
     JOIN recent_sessions rs ON rs.session_id=tsq.session_id
     JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
     WHERE ci.topic_id=ANY($1::int[])
   `,[topicIds]);
-  const subkey=c=>`${Number(c.topic_id)}:${legislationDiversityNormalize(c.section||'sin_epigrafe')}`;
-  const signature=c=>`${subkey(c)}:${legislationDiversityNormalize(c.concept)}`;
-  const bySubindex=new Map(statsResult.rows.map(row=>[
-    subkey(row),{
-      total:Number(row.total)||1,
-      worked:Number(row.worked_count)||0,
-      asked:Number(row.asked_count)||0
-    }
-  ]));
-  const recentIds=new Set(recentResult.rows.map(row=>Number(row.id)));
-  const recentSignatures=new Set(recentResult.rows.map(signature));
-  const nucleusTotals=new Map();
-  const seenSubindexes=new Set();
-  for(const item of adaptiveCandidates){
-    const sectionKey=subkey(item);
-    if(seenSubindexes.has(sectionKey)){continue;}
-    seenSubindexes.add(sectionKey);
-    const nucleus=legislationSectionKey(item);
-    const section=bySubindex.get(sectionKey)||{total:1,worked:0,asked:0};
-    if(!nucleus){continue;}
-    const existing=nucleusTotals.get(nucleus)||{total:0,worked:0,asked:0};
-    existing.total+=section.total;
-    existing.worked+=section.worked;
-    existing.asked+=section.asked;
-    nucleusTotals.set(nucleus,existing);
-  }
-  const nucleusDensity=item=>{
-    const stat=nucleusTotals.get(legislationSectionKey(item));
-    return stat ? stat.asked/Math.max(1,stat.total) : 0;
-  };
-  const subDensity=item=>{
-    const stat=bySubindex.get(subkey(item));
-    return stat ? stat.asked/Math.max(1,stat.total) : 0;
-  };
-  const subWorkedRatio=item=>{
-    const stat=bySubindex.get(subkey(item));
-    return stat ? stat.worked/Math.max(1,stat.total) : 0;
-  };
-  const recent=item=>recentIds.has(Number(item.id)) || recentSignatures.has(signature(item));
-  const itemPriority=item=>Number(item.adaptive_priority)||5;
-  const candidateIds=adaptiveCandidates.map(item=>Number(item.id));
-  const linkedRows=await db.query(`
+  const linked=await db.query(`
     SELECT id,anki_note_id,topic_order,stem,options,correct_index,
-           correct_answer,validation_evidence,validated_coverage_item_id,
-           last_used_at,times_used
+      correct_answer,validation_evidence,validated_coverage_item_id,
+      last_used_at,times_used
     FROM legislation_anki_questions
     WHERE validation_status='validated' AND direct_use_eligible=TRUE
       AND validated_coverage_item_id=ANY($1::int[])
     ORDER BY times_used ASC,id ASC
-  `,[candidateIds]);
-  const byId=new Map(adaptiveCandidates.map(item=>[Number(item.id),item]));
-  const freshLinks=new Set();
+  `,[adaptiveCandidates.map(item=>Number(item.id))]);
+  const candidateById=new Map(adaptiveCandidates.map(item=>[Number(item.id),item]));
+  const verifiedAnkiIds=new Set(),freshAnkiIds=new Set();
+  let rejectedAnki=0;
   const freshnessCutoff=Date.now()-12*60*60*1000;
-  let rejectedLinks=0;
-  for(const row of linkedRows.rows){
-    const item=byId.get(Number(row.validated_coverage_item_id));
-    if(!item || Number(row.topic_order)!==ankiLegislationSourceOrderForTopicName(item.topic_name) ||
-      legislationKnownAmbiguityIssue(row) || legislationConflictingArticles(item,row) ||
-      !legislationExactCoverageLink(item,row)){
-      rejectedLinks++; continue;
+  for(const row of linked.rows){
+    const target=candidateById.get(Number(row.validated_coverage_item_id));
+    if(!target || Number(row.topic_order)!==ankiLegislationSourceOrderForTopicName(target.topic_name) ||
+      legislationKnownAmbiguityIssue(row) || legislationConflictingArticles(target,row) ||
+      !legislationExactCoverageLink(target,row)){
+      rejectedAnki++;continue;
     }
-    const id=Number(item.id);
-    ankiLinkedCandidateIds.add(id);
-    const isFresh=!row.last_used_at || new Date(row.last_used_at).getTime()<freshnessCutoff;
-    if(isFresh){freshLinks.add(id);}
-    if(!item.ankiPreferredFamily || isFresh){
-      item.ankiPreferredFamily=inferLegislationAnkiFamily(row.stem);
-    }
-  }
-  const historicOrder=new Map(adaptiveCandidates.map((item,index)=>[Number(item.id),index]));
-  const rankCandidates=(a,b)=>
-    itemPriority(a)-itemPriority(b) ||
-    // SRS vencido primero; nunca retrasarlo por rotación de epígrafes.
-    (itemPriority(a)===1 && itemPriority(b)===1 && a.next_review_at && b.next_review_at ?
-      new Date(a.next_review_at)-new Date(b.next_review_at) : 0) ||
-    ((itemPriority(a)>=4 && recent(a)?1:0)-(itemPriority(b)>=4 && recent(b)?1:0)) ||
-    nucleusDensity(a)-nucleusDensity(b) ||
-    subWorkedRatio(a)-subWorkedRatio(b) ||
-    subDensity(a)-subDensity(b) ||
-    (Number(a.times_asked)||0)-(Number(b.times_asked)||0) ||
-    (historicOrder.get(Number(a.id))||0)-(historicOrder.get(Number(b.id))||0);
-  legislationCandidates=[...adaptiveCandidates].sort(rankCandidates);
-
-  const targetAnki=Math.round(count*0.60);
-  const usedNuclei=new Set();
-  const usedSubindexes=new Set();
-  const usedConcepts=new Set();
-  let legislativeProcessCount=0;
-  const usedLegislativeSubtopics=new Set();
-  let ankiReserved=0;
-  const recordPick=(candidate)=>{
-    selectedAdaptive.push(candidate);
-    usedNuclei.add(legislationSectionKey(candidate));
-    usedSubindexes.add(subkey(candidate));
-    usedConcepts.add(signature(candidate));
-    const page=legislationPageKey(candidate);
-    if(page){usedLegislationPages.add(page);}
-    const nucleus=legislationSectionKey(candidate);
-    if(nucleus){usedLegislationSections.add(nucleus);}
-    usedLegislationSemanticTexts.push(legislationDiversityTokens(candidate));
-    if(constitutionLegislativeProcessKey(candidate)==='actividad_legislativa'){
-      legislativeProcessCount++;
-    }
-    const subtopic=constitutionLegislativeSubtopicKey(candidate);
-    if(subtopic){usedLegislativeSubtopics.add(subtopic);}
-    if(ankiLinkedCandidateIds.has(Number(candidate.id))){ankiReserved++;}
-  };
-  const tryPick=(candidate,{newNucleus=false,newSubindex=false,avoidRecent=true}={})=>{
-    if(selectedAdaptive.length>=count ||
-      selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)) ||
-      usedConcepts.has(signature(candidate))){return false;}
-    const nucleus=legislationSectionKey(candidate);
-    if(newNucleus && (!nucleus || usedNuclei.has(nucleus))){return false;}
-    if(newSubindex && usedSubindexes.has(subkey(candidate))){return false;}
-    if(avoidRecent && itemPriority(candidate)>=4 && recent(candidate)){return false;}
-    const family=constitutionLegislativeProcessKey(candidate);
-    if(family==='actividad_legislativa' && legislativeProcessCount>=2){return false;}
-    const subtopic=constitutionLegislativeSubtopicKey(candidate);
-    if(subtopic && usedLegislativeSubtopics.has(subtopic)){return false;}
-    // SERVER_82: comparar semánticamente dentro del MISMO núcleo.
-    // Comparar con todos los núcleos penalizaba frases jurídicas comunes
-    // ("regulación", "competencia", etc.) y provocaba rellenos repetidos.
-    const tokens=legislationDiversityTokens(candidate);
-    if(selectedAdaptive.some(other =>
-      legislationSectionKey(other)===nucleus &&
-      legislationSemanticOverlap(tokens,legislationDiversityTokens(other))>=0.83)){
-      return false;
-    }
-    recordPick(candidate);
-    return true;
-  };
-  // Una pregunta nueva por test para avanzar, siempre que no sea simulacro.
-  if(selectionStrategy!=='simulation'){
-    const newChoices=legislationCandidates.filter(c=>c.worked===false)
-      .sort((a,b)=>nucleusDensity(a)-nucleusDensity(b) ||
-        subWorkedRatio(a)-subWorkedRatio(b) || subDensity(a)-subDensity(b) ||
-        Number(recent(a))-Number(recent(b)) || rankCandidates(a,b));
-    const firstNew=newChoices.find(c=>!recent(c))||newChoices[0];
-    if(firstNew){recordPick(firstNew);}
-  }
-  // Cumplir la cuota preferentemente en la misma prioridad adaptativa.
-  // Solo un enlace verificado puede ocupar una plaza Anki: nunca inventarlo.
-  const levels=[...new Set(legislationCandidates.map(itemPriority))].sort((a,b)=>a-b);
-  for(const level of levels){
-    if(selectedAdaptive.length>=count){break;}
-    const levelCandidates=legislationCandidates.filter(c=>itemPriority(c)===level);
-    for(const opts of [
-      {newNucleus:true,newSubindex:true,avoidRecent:true},
-      {newNucleus:false,newSubindex:true,avoidRecent:true},
-      {newNucleus:false,newSubindex:true,avoidRecent:false}
-    ]){
-      // Primera pasada: Anki contrastado del mismo nivel adaptativo.
-      for(const candidate of levelCandidates){
-        if(selectedAdaptive.length>=count || ankiReserved>=targetAnki){break;}
-        if(ankiLinkedCandidateIds.has(Number(candidate.id))){tryPick(candidate,opts);}
-      }
-      // Después, objetivos nuevos. Entre ellos se prefieren los subíndices
-      // con menor historial, sin forzar Anki ajeno al coverage_item.
-      for(const candidate of levelCandidates){
-        if(selectedAdaptive.length>=count){break;}
-        if(ankiLinkedCandidateIds.has(Number(candidate.id)) && ankiReserved>=targetAnki){continue;}
-        tryPick(candidate,opts);
-      }
-      if(selectedAdaptive.length>=count){break;}
+    const id=Number(target.id);
+    verifiedAnkiIds.add(id);
+    const fresh=!row.last_used_at||new Date(row.last_used_at).getTime()<freshnessCutoff;
+    if(fresh)freshAnkiIds.add(id);
+    if(!target.ankiPreferredFamily||fresh){
+      target.ankiPreferredFamily=inferLegislationAnkiFamily(row.stem);
     }
   }
-  // Respaldo progresivo: nunca saltar directamente a candidatos antiguos
-  // por el orden de id. Relajar primero núcleo, luego semejanza, y solo al
-  // final la antigüedad si ya no hay suficientes objetivos distintos.
-  let fallbackPicks=0;
-  if(selectedAdaptive.length<count){
-    for(const phase of [
-      {avoidRecent:true,newSubindex:true},
-      {avoidRecent:true,newSubindex:false},
-      {avoidRecent:false,newSubindex:true},
-      {avoidRecent:false,newSubindex:false}
-    ]){
-      for(const candidate of legislationCandidates){
-        if(selectedAdaptive.length>=count){break;}
-        if(selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)) ||
-          usedConcepts.has(signature(candidate)) ||
-          (phase.newSubindex && usedSubindexes.has(subkey(candidate))) ||
-          (phase.avoidRecent && itemPriority(candidate)>=4 && recent(candidate))){
-          continue;
-        }
-        recordPick(candidate);
-        fallbackPicks++;
-      }
-      if(selectedAdaptive.length>=count){break;}
-    }
+  const lastSession=recentResult.rows.reduce((n,r)=>Math.max(n,Number(r.session_id)||0),0);
+  const decision=chooseLegislationCoverage83({
+    candidates:adaptiveCandidates,
+    statsRows:statsResult.rows,
+    recentRows:recentResult.rows,
+    verifiedAnkiIds,freshAnkiIds,count,strategy:selectionStrategy,
+    sectionKey:legislationSectionKey,tokensFor:legislationDiversityTokens,
+    overlap:legislationSemanticOverlap,seed:lastSession+1
+  });
+  if(decision.selected.length<count){
+    throw new Error(`Rotación 83: solo ${decision.selected.length} conocimientos distintos para ${count} plazas. No rellenamos con repeticiones.`);
   }
-  console.log('LEGISLATION ROTATION 82:',JSON.stringify({
-    requested:count,selected:selectedAdaptive.length,
-    selectedSubindexes:[...usedSubindexes],
-    distinctNuclei:usedNuclei.size,
-    recentTargetsAvoided:legislationCandidates.filter(c=>itemPriority(c)>=4 && recent(c)).length,
-    ankiGoal:targetAnki,ankiVerifiedReserved:ankiReserved,
-    ankiPoolVerified:ankiLinkedCandidateIds.size,ankiFreshLinks:freshLinks.size,
-    rejectedLinks,recentSessions:6,fallbackPicks,
-    sourcesByPriority:selectedAdaptive.reduce((acc,item)=>{
-      const k=String(itemPriority(item));acc[k]=(acc[k]||0)+1;return acc;
-    },{})
+  selectedAdaptive.push(...decision.selected);
+  console.log('LEGISLATION ROTATION 83:',JSON.stringify({
+    ...decision.metrics,ankiLinkedVerified:verifiedAnkiIds.size,
+    ankiLinkRejected:rejectedAnki,selectionStrategy
   }));
 }
 
@@ -11997,7 +11975,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets,maxDirectA
 
   for(const item of supported){
     const rows=(linkedByCoverage.get(Number(item.target.id))||[]).filter(row=>
-      !used.has(Number(row.id)) && Number(row.topic_order)===item.sourceOrder &&
+      !used.has(Number(row.id)) && !isRecent(row) && Number(row.topic_order)===item.sourceOrder &&
       !legislationKnownAmbiguityIssue(row) &&
       legislationAnkiFamilyCompatible(item.target.questionFamily,row.stem)
     );
@@ -12006,7 +11984,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets,maxDirectA
       legislationExactCoverageLink(item.target,row)
     );
     linkedRejected+=rows.length-exact.length;
-    const chosen=exact.find(row=>!isRecent(row)) || exact[0];
+    const chosen=exact.find(row=>!isRecent(row));
     if(chosen && direct.size<maxDirectAllowed){
       used.add(Number(chosen.id));
       direct.set(item.index,buildDirectAnkiQuestion(chosen,item.target));
@@ -12015,7 +11993,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets,maxDirectA
   console.log('ANKI LINKED MATCH:',JSON.stringify({
     selected:direct.size,unmatched:unresolved.length,linkedRejected
   }));
-  if(!unresolved.length || !ai?.models?.generateContent){return direct;}
+  if(!unresolved.length || direct.size>=maxDirectAllowed || !ai?.models?.generateContent){return direct;}
 
   const orders=[...new Set(unresolved.map(item=>item.sourceOrder))];
   const pool=await db.query(`
@@ -12040,7 +12018,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets,maxDirectA
       .filter(Boolean).join(" ");
     if(targetText.trim().length<20){continue;}
     const candidates=(byOrder.get(item.sourceOrder)||[]).filter(row=>
-      !used.has(Number(row.id)) &&
+      !used.has(Number(row.id)) && !isRecent(row) &&
       (row.validated_coverage_item_id==null ||
         Number(row.validated_coverage_item_id)===Number(item.target.id)) &&
       !legislationKnownAmbiguityIssue(row) &&
@@ -12704,33 +12682,29 @@ if(target.questionFamily === "GRAFICA"){
   };
 }
 async function isExactBankDuplicate(target, question){
-  if(
-    !target?.id ||
-    !question?.stem ||
-    !Array.isArray(question?.options)
-  ){
+  if(!target?.id || !question?.stem || !Array.isArray(question?.options)){
     return false;
   }
-
-  const result = await db.query(
-    `
-    SELECT id
-    FROM question_bank
-    WHERE
-      coverage_item_id = $1
-      AND active = TRUE
-      AND LOWER(TRIM(stem)) = LOWER(TRIM($2))
-      AND options = $3::jsonb
-    LIMIT 1
-    `,
-    [
-      Number(target.id),
-      String(question.stem),
-      JSON.stringify(question.options)
-    ]
-  );
-
-  return result.rows.length > 0;
+  // En Legislación también se comparan preguntas de otros coverage_items
+  // pertenecientes al mismo tema. Evita regenerar idénticos enunciados
+  // al avanzar de un epígrafe a otro sin alterar el banco persistente.
+  const isLegal=String(target.topic_block||'').trim().toLowerCase()==='legislacion';
+  const result=await db.query(`
+    SELECT qb.id
+    FROM question_bank qb
+    WHERE qb.active=TRUE AND (
+      (qb.coverage_item_id=$1
+       AND LOWER(TRIM(qb.stem))=LOWER(TRIM($2))
+       AND qb.options=$3::jsonb)
+      OR ($4::int IS NOT NULL
+        AND EXISTS (SELECT 1 FROM coverage_items ci
+                    WHERE ci.id=qb.coverage_item_id AND ci.topic_id=$4)
+        AND LOWER(REGEXP_REPLACE(TRIM(qb.stem),'[[:space:]]+',' ','g')) =
+            LOWER(REGEXP_REPLACE(TRIM($2),'[[:space:]]+',' ','g')))
+    ) LIMIT 1
+  `,[Number(target.id),String(question.stem),JSON.stringify(question.options),
+     isLegal ? Number(target.topic_id) : null]);
+  return result.rows.length>0;
 }
 async function persistGeneratedTest({
   questions,
@@ -13276,6 +13250,7 @@ async function registerQuestionAnswer({
     await client.query(
       `UPDATE coverage_items
        SET
+         worked = TRUE,
          times_asked = times_asked + 1,
          times_correct =
            times_correct + $1,
@@ -15521,6 +15496,7 @@ app.post("/api/finish-test", async(req,res)=>{
       await client.query(
         `UPDATE coverage_items
          SET
+           worked = TRUE,
            times_asked = times_asked + 1,
            times_blank = times_blank + 1,
            last_asked_at = NOW()
@@ -16482,19 +16458,7 @@ console.log(
 
     finalQuestions = persistedTest.questions;
 
-if(testType==="normal"){
-  await markCoverageTargetsWorked(targets);
-
-  console.log(
-    "COBERTURA: marcados como trabajados",
-    targets.map(t=>t.id)
-  );
-}else{
-  console.log(
-    "REPASO DE FALLOS: cobertura no modificada",
-    targets.map(t=>t.id)
-  );
-}
+console.log("COBERTURA 83: pendientes de respuesta, no trabajados al crear la sesión",targets.map(t=>t.id));
 
     res.json({
   ok:true,
@@ -16502,7 +16466,7 @@ if(testType==="normal"){
   questions:finalQuestions,
   coverage:{
     targeted:targets.length,
-    markedWorked:testType === "normal" ? targets.length : 0
+    markedWorked:0
   }
 });
 
@@ -16767,6 +16731,11 @@ async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
   console.log("STARTUP 1/4 OK");
+  const cleanup83=await db.query(`
+    UPDATE coverage_items SET worked=FALSE
+    WHERE worked=TRUE AND COALESCE(times_asked,0)=0
+  `);
+  console.log("COBERTURA 83: elementos mostrados pero no respondidos reparados:",cleanup83.rowCount);
 console.log("STARTUP ANKI: syncLegislationAnkiQuestions");
 await syncLegislationAnkiQuestions();
 console.log("STARTUP ANKI OK");
