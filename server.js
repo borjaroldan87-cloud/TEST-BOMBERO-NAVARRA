@@ -14402,6 +14402,106 @@ function geographyOptionPoolIssue(target,question){
 
   return null;
 }
+// SEGUNDO CONTRASTE ESPECIALIZADO: en preguntas de tipo INCORRECTA/FALSA,
+// las cuatro opciones son afirmaciones independientes. El validador general
+// podía aprobar dos falsedades con correctIndex apuntando solo a una.
+// Este contraste NO recibe correctIndex, explicación ni sourceEvidence del
+// generador: evita que la segunda revisión copie su respuesta esperada.
+function isLegislationFalseStatementQuestion(question){
+  const normalized=String(question?.stem||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /\b(?:incorrecta|incorrecto|falsa|falso)\b/.test(normalized) &&
+    Array.isArray(question?.options) && question.options.length===4;
+}
+
+async function auditLegislationFalseStatements(ai,questions){
+  // Grupos de dos para buscar las reglas de cada pregunta en el PDF sin
+  // sobrecargar una consulta con decenas de artículos y apartados distintos.
+  // Máximo dos consultas simultáneas para limitar presión sobre File Search.
+  const batches=[];
+  for(let i=0;i<questions.length;i+=2){batches.push(questions.slice(i,i+2));}
+  const answer=new Map();
+  const schema={
+    type:'object',properties:{results:{
+      type:'array',minItems:1,maxItems:2,
+      items:{type:'object',properties:{
+        index:{type:'integer',minimum:0},
+        A:{type:'string',enum:['TRUE','FALSE','UNKNOWN']},
+        B:{type:'string',enum:['TRUE','FALSE','UNKNOWN']},
+        C:{type:'string',enum:['TRUE','FALSE','UNKNOWN']},
+        D:{type:'string',enum:['TRUE','FALSE','UNKNOWN']},
+        evidenceA:{type:'string'},evidenceB:{type:'string'},
+        evidenceC:{type:'string'},evidenceD:{type:'string'}
+      },required:['index','A','B','C','D',
+        'evidenceA','evidenceB','evidenceC','evidenceD']}
+    }},required:['results']
+  };
+  let cursor=0;
+  const worker=async()=>{
+    while(cursor<batches.length){
+      const current=cursor++;
+      const batch=batches[current];
+      const payload=batch.map(entry=>({
+        index:entry.index,stem:entry.question.stem,
+        options:entry.question.options,
+        topic:entry.target?.topic_name||null,
+        section:entry.target?.section||null
+      }));
+      const response=await ai.models.generateContent({
+        model:'gemini-3.5-flash-lite',
+        contents:`SEGUNDA AUDITORÍA JURÍDICA INDEPENDIENTE — OPCIONES FALSAS.
+Usa SOLO el TEMARIO ORIGINAL mediante File Search. Ignora memorias, conocimiento
+externo y otras preguntas. No recibes cuál es la respuesta marcada por el
+primer modelo; evalúa cada afirmación SIN saber cuál se pretendía señalar.
+
+Para CADA alternativa A, B, C, D devuelve:
+TRUE si la afirmación textual es jurídicamente verdadera, aunque no enumere
+todos los supuestos o excepciones de la normativa.
+FALSE si contradice un requisito, ámbito, valor, uso, apartado o excepción
+normativa del PDF. Los términos 'únicamente', 'siempre', 'en todos', 'solo',
+'sin excepción' son parte REAL de lo afirmado: comprueba literalmente si
+el PDF permite ese alcance absoluto. Por ejemplo, 'SI 4 regula ÚNICAMENTE
+la dotación' sería falso si SI 4 regula también señalización.
+UNKNOWN si el PDF recuperado no contiene datos suficientes para decidir.
+
+Para cada letra, aporta en evidenceA/B/C/D el apartado y texto concreto del
+PDF que justifica la calificación (si es FALSE, la regla que contradice).
+NO inventes artículos o citas. No conviertas una afirmación parcialmente
+verdadera en falsa solo por no ser exhaustiva. Una definición sintética o
+condición verdadera sigue siendo TRUE aunque existan más condiciones.
+No confundas uso Residencial Público con uso Residencial Vivienda.
+No utilices la respuesta buscada por el enunciado para ajustar las etiquetas.
+Si un enunciado pregunta por la INCORRECTA, debe haber TRES TRUE y UNA FALSE;
+pero NO fuerces esa distribución: devuelve la realidad del PDF, aunque haya
+DOS FALSE. No reescribas preguntas.
+
+PREGUNTAS A AUDITAR:
+${JSON.stringify(payload)}`,
+        config:{
+          tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+          responseMimeType:'application/json',
+          responseJsonSchema:schema
+        }
+      });
+      const data=JSON.parse(response.text||'{}');
+      if(!Array.isArray(data.results)||data.results.length!==batch.length){
+        throw new Error('Auditoría de afirmaciones falsas: número de resultados inválido.');
+      }
+      for(const result of data.results){
+        if(!batch.some(entry=>entry.index===result.index) || answer.has(result.index)){
+          throw new Error('Auditoría de afirmaciones falsas: índices incorrectos.');
+        }
+        answer.set(result.index,result);
+      }
+    }
+  };
+  await Promise.all(Array.from({length:Math.min(2,batches.length)},()=>worker()));
+  if(answer.size!==questions.length){
+    throw new Error('Auditoría de afirmaciones falsas: resultados incompletos.');
+  }
+  return answer;
+}
+
 async function validateGeneratedQuestions(ai,questions,{independentPdfCheck=false,targets=[]}={}){
   const independentInstructions=independentPdfCheck ? `
 ============================================
@@ -14858,6 +14958,50 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
   }
 }
 
+  // La misma segunda auditoría actúa tanto en generación inicial como en
+  // regeneraciones, únicamente para legislación sin Anki. Las demás rutas
+  // conservan idéntico flujo, coste y esquema de validación del SERVER 90.
+  if(independentPdfCheck){
+    const toAudit=questions.map((question,index)=>({
+      index,question,target:targets[index]
+    })).filter(entry=>
+      validation.results[entry.index]?.valid===true &&
+      isLegislationFalseStatementQuestion(entry.question)
+    );
+    if(toAudit.length){
+      const results=await auditLegislationFalseStatements(ai,toAudit);
+      for(const {index,question} of toAudit){
+        const audit=results.get(index);
+        const status=['A','B','C','D'].map(letter=>audit?.[letter]);
+        const citations=['evidenceA','evidenceB','evidenceC','evidenceD']
+          .map(key=>String(audit?.[key]||'').trim());
+        const falseIndexes=status.map((value,i)=>value==='FALSE'?i:-1)
+          .filter(i=>i>=0);
+        // Una pregunta INCORRECTA exige exactamente tres enunciados verdaderos
+        // y uno falso, marcado por correctIndex. Si no puede contrastarse
+        // cualquiera de los cuatro, no se aprueba por omisión.
+        const validStatuses=status.every(v=>v==='TRUE'||v==='FALSE');
+        const backed=citations.every(v=>v.length>=12);
+        const valid=validStatuses&&backed&&falseIndexes.length===1&&
+          falseIndexes[0]===Number(question.correctIndex);
+        console.log('LEGISLACION AUDITORIA FALSA:',JSON.stringify({
+          index,status,aprobada:valid
+        }));
+        if(!valid){
+          const entry=validation.results[index];
+          entry.valid=false;
+          entry.issues=[...(entry.issues||[]),
+            'SEGUNDA VERIFICACIÓN NORMATIVA (INCORRECTA): '+
+            'A-D='+JSON.stringify(status)+
+            '; falsedades detectadas='+falseIndexes.length+
+            '; es necesaria EXACTAMENTE una falsedad y tres verdades; '+
+            'evidencia insuficiente='+String(!backed)+
+            '; detalles PDF='+JSON.stringify(citations)
+          ];
+        }
+      }
+    }
+  }
   return validation.results;
 }
 async function regenerateInvalidQuestions(
