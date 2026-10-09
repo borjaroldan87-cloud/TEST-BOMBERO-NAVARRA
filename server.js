@@ -8416,7 +8416,11 @@ if(selectionStrategy !== "simulation"){
   }
 }
 
-if(newCandidate){
+// SERVER_82: la primera plaza nueva de Legislación se elige DESPUÉS
+// de ordenar subíndices según el historial; no por el menor id de BD.
+const legislationScope82 = adaptiveCandidates.length > 0 &&
+  adaptiveCandidates.every(item => String(item?.topic_block || '').trim().toLowerCase() === 'legislacion');
+if(newCandidate && !legislationScope82){
   selectedAdaptive.push(newCandidate);
 }
 const deferredGeographyCandidates = [];
@@ -8784,191 +8788,240 @@ const constitutionLegislativeSubtopicKey = candidate => {
   return null;
 };
 
+// SERVER_82 — ROTACIÓN ENTRE TESTS POR SUBÍNDICE + RESERVA ANKI.
+// Sin alterar tablas, respuestas ni estados SRS. El progreso se lee de
+// coverage_items, y la repetición reciente de las últimas sesiones.
 let legislationCandidates = adaptiveCandidates;
 let ankiLinkedCandidateIds = new Set();
 if(legislationOnlySelection){
-  const candidateIds = adaptiveCandidates.map(item=>Number(item.id));
-  // SERVER_81: nunca confundir «tiene enlace en BD» con «enlace
-  // curricular verificable». Esta prueba local anticipada es la misma
-  // que utiliza la persistencia; no genera coste ni modifica FDF.
-  const linkedRows = await db.query(`
-    SELECT id, anki_note_id, topic_order, stem, options, correct_index,
-           correct_answer, validation_evidence, validated_coverage_item_id,
-           last_used_at, times_used
+  const topicIds=[...new Set(adaptiveCandidates.map(x=>Number(x.topic_id)).filter(Number.isInteger))];
+  const statsResult=await db.query(`
+    SELECT topic_id, section, COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE worked=TRUE)::int AS worked_count,
+           COALESCE(SUM(times_asked),0)::int AS asked_count,
+           MAX(last_asked_at) AS latest_asked
+    FROM coverage_items
+    WHERE exam_relevant=TRUE AND topic_id=ANY($1::int[])
+    GROUP BY topic_id,section
+  `,[topicIds]);
+  const recentResult=await db.query(`
+    WITH recent_sessions AS (
+      SELECT DISTINCT tsq.session_id
+      FROM test_session_questions tsq
+      JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
+      WHERE ci.topic_id=ANY($1::int[])
+      ORDER BY tsq.session_id DESC
+      LIMIT 6
+    )
+    SELECT DISTINCT ci.id,ci.topic_id,ci.section,ci.concept
+    FROM test_session_questions tsq
+    JOIN recent_sessions rs ON rs.session_id=tsq.session_id
+    JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
+    WHERE ci.topic_id=ANY($1::int[])
+  `,[topicIds]);
+  const subkey=c=>`${Number(c.topic_id)}:${legislationDiversityNormalize(c.section||'sin_epigrafe')}`;
+  const signature=c=>`${subkey(c)}:${legislationDiversityNormalize(c.concept)}`;
+  const bySubindex=new Map(statsResult.rows.map(row=>[
+    subkey(row),{
+      total:Number(row.total)||1,
+      worked:Number(row.worked_count)||0,
+      asked:Number(row.asked_count)||0
+    }
+  ]));
+  const recentIds=new Set(recentResult.rows.map(row=>Number(row.id)));
+  const recentSignatures=new Set(recentResult.rows.map(signature));
+  const nucleusTotals=new Map();
+  const seenSubindexes=new Set();
+  for(const item of adaptiveCandidates){
+    const sectionKey=subkey(item);
+    if(seenSubindexes.has(sectionKey)){continue;}
+    seenSubindexes.add(sectionKey);
+    const nucleus=legislationSectionKey(item);
+    const section=bySubindex.get(sectionKey)||{total:1,worked:0,asked:0};
+    if(!nucleus){continue;}
+    const existing=nucleusTotals.get(nucleus)||{total:0,worked:0,asked:0};
+    existing.total+=section.total;
+    existing.worked+=section.worked;
+    existing.asked+=section.asked;
+    nucleusTotals.set(nucleus,existing);
+  }
+  const nucleusDensity=item=>{
+    const stat=nucleusTotals.get(legislationSectionKey(item));
+    return stat ? stat.asked/Math.max(1,stat.total) : 0;
+  };
+  const subDensity=item=>{
+    const stat=bySubindex.get(subkey(item));
+    return stat ? stat.asked/Math.max(1,stat.total) : 0;
+  };
+  const subWorkedRatio=item=>{
+    const stat=bySubindex.get(subkey(item));
+    return stat ? stat.worked/Math.max(1,stat.total) : 0;
+  };
+  const recent=item=>recentIds.has(Number(item.id)) || recentSignatures.has(signature(item));
+  const itemPriority=item=>Number(item.adaptive_priority)||5;
+  const candidateIds=adaptiveCandidates.map(item=>Number(item.id));
+  const linkedRows=await db.query(`
+    SELECT id,anki_note_id,topic_order,stem,options,correct_index,
+           correct_answer,validation_evidence,validated_coverage_item_id,
+           last_used_at,times_used
     FROM legislation_anki_questions
     WHERE validation_status='validated' AND direct_use_eligible=TRUE
       AND validated_coverage_item_id=ANY($1::int[])
-    ORDER BY times_used ASC, id ASC
+    ORDER BY times_used ASC,id ASC
   `,[candidateIds]);
-  const candidateById=new Map(adaptiveCandidates.map(item=>[Number(item.id),item]));
-  const ankiFreshCandidateIds=new Set();
-  const freshCutoff=Date.now()-12*60*60*1000;
+  const byId=new Map(adaptiveCandidates.map(item=>[Number(item.id),item]));
+  const freshLinks=new Set();
+  const freshnessCutoff=Date.now()-12*60*60*1000;
   let rejectedLinks=0;
   for(const row of linkedRows.rows){
-    const candidate=candidateById.get(Number(row.validated_coverage_item_id));
-    if(!candidate || Number(row.topic_order)!==ankiLegislationSourceOrderForTopicName(candidate.topic_name)
-      || legislationKnownAmbiguityIssue(row)
-      || legislationConflictingArticles(candidate,row)
-      || !legislationExactCoverageLink(candidate,row)){
+    const item=byId.get(Number(row.validated_coverage_item_id));
+    if(!item || Number(row.topic_order)!==ankiLegislationSourceOrderForTopicName(item.topic_name) ||
+      legislationKnownAmbiguityIssue(row) || legislationConflictingArticles(item,row) ||
+      !legislationExactCoverageLink(item,row)){
       rejectedLinks++; continue;
     }
-    const key=Number(candidate.id);
-    ankiLinkedCandidateIds.add(key);
-    const fresh=!row.last_used_at || new Date(row.last_used_at).getTime()<freshCutoff;
-    if(fresh){ankiFreshCandidateIds.add(key);}
-    if(!candidate.ankiPreferredFamily || fresh){
-      candidate.ankiPreferredFamily=inferLegislationAnkiFamily(row.stem);
+    const id=Number(item.id);
+    ankiLinkedCandidateIds.add(id);
+    const isFresh=!row.last_used_at || new Date(row.last_used_at).getTime()<freshnessCutoff;
+    if(isFresh){freshLinks.add(id);}
+    if(!item.ankiPreferredFamily || isFresh){
+      item.ankiPreferredFamily=inferLegislationAnkiFamily(row.stem);
     }
   }
-  const ankiRank = candidate =>
-    ankiFreshCandidateIds.has(Number(candidate.id)) ? 2 :
-    ankiLinkedCandidateIds.has(Number(candidate.id)) ? 1 : 0;
-  legislationCandidates = adaptiveCandidates
-    .map((candidate,index)=>({candidate,index}))
-    .sort((a,b)=>
-      (Number(a.candidate.adaptive_priority)||0)-(Number(b.candidate.adaptive_priority)||0) ||
-      ankiRank(b.candidate)-ankiRank(a.candidate) || a.index-b.index
-    ).map(item=>item.candidate);
-  console.log('LEGISLATION ANKI PREFLIGHT:',JSON.stringify({
-    examined:candidateIds.length,storedLinks:linkedRows.rows.length,
-    withVerifiedLink:ankiLinkedCandidateIds.size,
-    withFreshVerifiedLink:ankiFreshCandidateIds.size,
-    rejectedLinks,requestedAnki:Math.round(count*.60)
-  }));
-}
+  const historicOrder=new Map(adaptiveCandidates.map((item,index)=>[Number(item.id),index]));
+  const rankCandidates=(a,b)=>
+    itemPriority(a)-itemPriority(b) ||
+    // SRS vencido primero; nunca retrasarlo por rotación de epígrafes.
+    (itemPriority(a)===1 && itemPriority(b)===1 && a.next_review_at && b.next_review_at ?
+      new Date(a.next_review_at)-new Date(b.next_review_at) : 0) ||
+    ((itemPriority(a)>=4 && recent(a)?1:0)-(itemPriority(b)>=4 && recent(b)?1:0)) ||
+    nucleusDensity(a)-nucleusDensity(b) ||
+    subWorkedRatio(a)-subWorkedRatio(b) ||
+    subDensity(a)-subDensity(b) ||
+    (Number(a.times_asked)||0)-(Number(b.times_asked)||0) ||
+    (historicOrder.get(Number(a.id))||0)-(historicOrder.get(Number(b.id))||0);
+  legislationCandidates=[...adaptiveCandidates].sort(rankCandidates);
 
-// SERVER_81: reservar hasta un 60 % de plazas para FDF con vínculo
-// verificado, antes de ocuparlas con preguntas nuevas. No forzar nunca
-// un vínculo inexistente. Conservar núcleos, prevención de repeticiones,
-// nueva cobertura y el orden adaptativo dentro de cada grupo.
-if(legislationOnlySelection && selectedAdaptive.length<count){
-  const targetAnki=Math.round(count*.60);
-  const nucleusCounts=new Map();
-  const macroCounts=new Map();
-  for(const item of selectedAdaptive){
-    const key=legislationSectionKey(item);
-    if(key){nucleusCounts.set(key,(nucleusCounts.get(key)||0)+1);}
-    const macro=constitutionLegislativeProcessKey(item);
-    if(macro){macroCounts.set(macro,(macroCounts.get(macro)||0)+1);}
-  }
-  const tryReserve=(candidate,requireNewNucleus)=>{
-    if(selectedAdaptive.length>=count ||
-       selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)))return false;
-    const key=legislationSectionKey(candidate);
-    if(requireNewNucleus && (!key || nucleusCounts.has(key)))return false;
-    if(constitutionLegislativeProcessKey(candidate)==='actividad_legislativa' &&
-      (macroCounts.get('actividad_legislativa')||0)>=2)return false;
-    const tokens=legislationDiversityTokens(candidate);
-    if(usedLegislationSemanticTexts.some(previous=>
-      legislationSemanticOverlap(tokens,previous)>=0.42))return false;
-    const keySub=constitutionLegislativeSubtopicKey(candidate);
-    if(keySub && selectedAdaptive.some(item=>
-      constitutionLegislativeSubtopicKey(item)===keySub))return false;
+  const targetAnki=Math.round(count*0.60);
+  const usedNuclei=new Set();
+  const usedSubindexes=new Set();
+  const usedConcepts=new Set();
+  let legislativeProcessCount=0;
+  const usedLegislativeSubtopics=new Set();
+  let ankiReserved=0;
+  const recordPick=(candidate)=>{
     selectedAdaptive.push(candidate);
-    if(key){nucleusCounts.set(key,(nucleusCounts.get(key)||0)+1);usedLegislationSections.add(key);}
-    const macro=constitutionLegislativeProcessKey(candidate);
-    if(macro){macroCounts.set(macro,(macroCounts.get(macro)||0)+1);}
+    usedNuclei.add(legislationSectionKey(candidate));
+    usedSubindexes.add(subkey(candidate));
+    usedConcepts.add(signature(candidate));
     const page=legislationPageKey(candidate);
     if(page){usedLegislationPages.add(page);}
-    usedLegislationSemanticTexts.push(tokens);
-    return true;
-  };
-  let verifiedReserved=selectedAdaptive.filter(item=>
-    ankiLinkedCandidateIds.has(Number(item.id))).length;
-  for(const candidate of legislationCandidates){
-    if(verifiedReserved>=targetAnki)break;
-    if(!ankiLinkedCandidateIds.has(Number(candidate.id)))continue;
-    if(tryReserve(candidate,true))verifiedReserved++;
-  }
-  // El resto debe introducir contenido nuevo (no FDF confirmado).
-  // Si no alcanza el 60%, la selección general completa el test.
-  for(const candidate of legislationCandidates){
-    if(selectedAdaptive.length>=count)break;
-    if(ankiLinkedCandidateIds.has(Number(candidate.id)))continue;
-    tryReserve(candidate,true);
-  }
-  console.log('LEGISLATION 60_40 RESERVATION:',JSON.stringify({
-    requested:count,ankiGoal:targetAnki,verifiedReserved,
-    reservedTotal:selectedAdaptive.length,
-    remainingForGeneralSelection:count-selectedAdaptive.length,
-    distinctNuclei:nucleusCounts.size
-  }));
-}
-
-if(legislationOnlySelection && selectedAdaptive.length < count){
-  const nucleusFirstUsed = new Set(usedLegislationSections);
-  let legislativeProcessCount = selectedAdaptive.filter(candidate =>
-    constitutionLegislativeProcessKey(candidate) === "actividad_legislativa"
-  ).length;
-  const usedLegislativeSubtopics = new Set(
-    selectedAdaptive.map(constitutionLegislativeSubtopicKey).filter(Boolean)
-  );
-
-  for(const candidate of legislationCandidates){
-    if(selectedAdaptive.length >= count){
-      break;
-    }
-
-    if(
-      selectedAdaptive.some(
-        selected => Number(selected.id) === Number(candidate.id)
-      )
-    ){
-      continue;
-    }
-
-    const nucleusKey = legislationSectionKey(candidate);
-    if(!nucleusKey || nucleusFirstUsed.has(nucleusKey)){
-      continue;
-    }
-
-    const macroKey = constitutionLegislativeProcessKey(candidate);
-    if(macroKey === "actividad_legislativa" && legislativeProcessCount >= 2){
-      continue;
-    }
-    const subtopicKey = constitutionLegislativeSubtopicKey(candidate);
-    if(subtopicKey && usedLegislativeSubtopics.has(subtopicKey)){
-      continue;
-    }
-
-    const candidateTokens = legislationDiversityTokens(candidate);
-    const semanticRepeated = usedLegislationSemanticTexts.some(tokens =>
-      legislationSemanticOverlap(candidateTokens,tokens) >= 0.42
-    );
-
-    if(semanticRepeated){
-      continue;
-    }
-
-    selectedAdaptive.push(candidate);
-    nucleusFirstUsed.add(nucleusKey);
-    usedLegislationSections.add(nucleusKey);
-    if(macroKey === "actividad_legislativa"){
+    const nucleus=legislationSectionKey(candidate);
+    if(nucleus){usedLegislationSections.add(nucleus);}
+    usedLegislationSemanticTexts.push(legislationDiversityTokens(candidate));
+    if(constitutionLegislativeProcessKey(candidate)==='actividad_legislativa'){
       legislativeProcessCount++;
     }
-    if(subtopicKey){
-      usedLegislativeSubtopics.add(subtopicKey);
+    const subtopic=constitutionLegislativeSubtopicKey(candidate);
+    if(subtopic){usedLegislativeSubtopics.add(subtopic);}
+    if(ankiLinkedCandidateIds.has(Number(candidate.id))){ankiReserved++;}
+  };
+  const tryPick=(candidate,{newNucleus=false,newSubindex=false,avoidRecent=true}={})=>{
+    if(selectedAdaptive.length>=count ||
+      selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)) ||
+      usedConcepts.has(signature(candidate))){return false;}
+    const nucleus=legislationSectionKey(candidate);
+    if(newNucleus && (!nucleus || usedNuclei.has(nucleus))){return false;}
+    if(newSubindex && usedSubindexes.has(subkey(candidate))){return false;}
+    if(avoidRecent && itemPriority(candidate)>=4 && recent(candidate)){return false;}
+    const family=constitutionLegislativeProcessKey(candidate);
+    if(family==='actividad_legislativa' && legislativeProcessCount>=2){return false;}
+    const subtopic=constitutionLegislativeSubtopicKey(candidate);
+    if(subtopic && usedLegislativeSubtopics.has(subtopic)){return false;}
+    // SERVER_82: comparar semánticamente dentro del MISMO núcleo.
+    // Comparar con todos los núcleos penalizaba frases jurídicas comunes
+    // ("regulación", "competencia", etc.) y provocaba rellenos repetidos.
+    const tokens=legislationDiversityTokens(candidate);
+    if(selectedAdaptive.some(other =>
+      legislationSectionKey(other)===nucleus &&
+      legislationSemanticOverlap(tokens,legislationDiversityTokens(other))>=0.83)){
+      return false;
     }
-
-    const pageKey = legislationPageKey(candidate);
-    if(pageKey){
-      usedLegislationPages.add(pageKey);
-    }
-
-    usedLegislationSemanticTexts.push(candidateTokens);
+    recordPick(candidate);
+    return true;
+  };
+  // Una pregunta nueva por test para avanzar, siempre que no sea simulacro.
+  if(selectionStrategy!=='simulation'){
+    const newChoices=legislationCandidates.filter(c=>c.worked===false)
+      .sort((a,b)=>nucleusDensity(a)-nucleusDensity(b) ||
+        subWorkedRatio(a)-subWorkedRatio(b) || subDensity(a)-subDensity(b) ||
+        Number(recent(a))-Number(recent(b)) || rankCandidates(a,b));
+    const firstNew=newChoices.find(c=>!recent(c))||newChoices[0];
+    if(firstNew){recordPick(firstNew);}
   }
-
-  console.log(
-    "LEGISLATION NUCLEUS-FIRST:",
-    JSON.stringify({
-      requested:count,
-      selected:selectedAdaptive.length,
-      nuclei:[...usedLegislationSections],
-      constitutionLegislativeProcessCount:legislativeProcessCount,
-      legislativeSubtopics:[...usedLegislativeSubtopics],
-      candidatesWithAnki:ankiLinkedCandidateIds.size
-    })
-  );
+  // Cumplir la cuota preferentemente en la misma prioridad adaptativa.
+  // Solo un enlace verificado puede ocupar una plaza Anki: nunca inventarlo.
+  const levels=[...new Set(legislationCandidates.map(itemPriority))].sort((a,b)=>a-b);
+  for(const level of levels){
+    if(selectedAdaptive.length>=count){break;}
+    const levelCandidates=legislationCandidates.filter(c=>itemPriority(c)===level);
+    for(const opts of [
+      {newNucleus:true,newSubindex:true,avoidRecent:true},
+      {newNucleus:false,newSubindex:true,avoidRecent:true},
+      {newNucleus:false,newSubindex:true,avoidRecent:false}
+    ]){
+      // Primera pasada: Anki contrastado del mismo nivel adaptativo.
+      for(const candidate of levelCandidates){
+        if(selectedAdaptive.length>=count || ankiReserved>=targetAnki){break;}
+        if(ankiLinkedCandidateIds.has(Number(candidate.id))){tryPick(candidate,opts);}
+      }
+      // Después, objetivos nuevos. Entre ellos se prefieren los subíndices
+      // con menor historial, sin forzar Anki ajeno al coverage_item.
+      for(const candidate of levelCandidates){
+        if(selectedAdaptive.length>=count){break;}
+        if(ankiLinkedCandidateIds.has(Number(candidate.id)) && ankiReserved>=targetAnki){continue;}
+        tryPick(candidate,opts);
+      }
+      if(selectedAdaptive.length>=count){break;}
+    }
+  }
+  // Respaldo progresivo: nunca saltar directamente a candidatos antiguos
+  // por el orden de id. Relajar primero núcleo, luego semejanza, y solo al
+  // final la antigüedad si ya no hay suficientes objetivos distintos.
+  let fallbackPicks=0;
+  if(selectedAdaptive.length<count){
+    for(const phase of [
+      {avoidRecent:true,newSubindex:true},
+      {avoidRecent:true,newSubindex:false},
+      {avoidRecent:false,newSubindex:true},
+      {avoidRecent:false,newSubindex:false}
+    ]){
+      for(const candidate of legislationCandidates){
+        if(selectedAdaptive.length>=count){break;}
+        if(selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)) ||
+          usedConcepts.has(signature(candidate)) ||
+          (phase.newSubindex && usedSubindexes.has(subkey(candidate))) ||
+          (phase.avoidRecent && itemPriority(candidate)>=4 && recent(candidate))){
+          continue;
+        }
+        recordPick(candidate);
+        fallbackPicks++;
+      }
+      if(selectedAdaptive.length>=count){break;}
+    }
+  }
+  console.log('LEGISLATION ROTATION 82:',JSON.stringify({
+    requested:count,selected:selectedAdaptive.length,
+    selectedSubindexes:[...usedSubindexes],
+    distinctNuclei:usedNuclei.size,
+    recentTargetsAvoided:legislationCandidates.filter(c=>itemPriority(c)>=4 && recent(c)).length,
+    ankiGoal:targetAnki,ankiVerifiedReserved:ankiReserved,
+    ankiPoolVerified:ankiLinkedCandidateIds.size,ankiFreshLinks:freshLinks.size,
+    rejectedLinks,recentSessions:6,fallbackPicks,
+    sourcesByPriority:selectedAdaptive.reduce((acc,item)=>{
+      const k=String(itemPriority(item));acc[k]=(acc[k]||0)+1;return acc;
+    },{})
+  }));
 }
 
 for(const candidate of adaptiveCandidates){
