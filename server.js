@@ -11795,80 +11795,222 @@ function legislationExactCoverageLink(target,ankiRow){
   return true;
 }
 
-async function getDirectLegislationAnkiQuestionsForTargets(_ai,targets){
+// SERVER_79: Anki validado por el PDF y vínculo con coverage_item son dos garantías distintas.
+// 1. Emparejar automáticamente solo vínculos existentes y lexicalmente inequívocos.
+// 2. Para los demás, una única comprobación semántica por test (candidatos restringidos,
+//    mismo tema + familia + evidencia PDF). Ante duda se genera pregunta nueva.
+// Nunca modificar el enunciado, número de opciones o solución original de FDF.
+function legislationConflictingArticles(target,row){
+  const articles=value=>{
+    const normalized=normalizeLegislationMatchText(value);
+    const found=new Set(
+      [...normalized.matchAll(/\b(?:articulo|articulos|art|arts)\s+(\d{1,4})\b/g)]
+        .map(match=>Number(match[1]))
+    );
+    for(const match of normalized.matchAll(
+      /\b(?:articulo|articulos|art|arts)\s+(\d{1,4})\s+(?:a|al|hasta)\s+(\d{1,4})\b/g
+    )){
+      const from=Number(match[1]),to=Number(match[2]);
+      if(to>=from && to-from<=100){
+        for(let n=from;n<=to;n++){found.add(n);}
+      }
+    }
+    return found;
+  };
+  const targetArticles=articles([target?.concept,target?.source_evidence].filter(Boolean).join(" "));
+  const questionArticles=articles(row?.stem);
+  return targetArticles.size>0 && questionArticles.size>0 &&
+    ![...targetArticles].some(value=>questionArticles.has(value));
+}
+
+async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
   const direct=new Map();
   if(!Array.isArray(targets) || !targets.length){return direct;}
-
-  const supported=targets.map((target,index)=>({target,index}))
-    .filter(({target})=>
-      String(target?.topic_block || "").trim().toLowerCase()==="legislacion" &&
-      Number.isInteger(ankiLegislationSourceOrderForTopicName(target?.topic_name))
-    );
+  const supported=targets.map((target,index)=>({
+    target,index,sourceOrder:ankiLegislationSourceOrderForTopicName(target?.topic_name)
+  })).filter(item=>
+    String(item.target?.topic_block||"").trim().toLowerCase()==="legislacion" &&
+    Number.isInteger(item.sourceOrder)
+  );
   if(!supported.length){return direct;}
 
-  const rows=await db.query(`
+  const coverageIds=supported.map(item=>Number(item.target.id));
+  const linked=await db.query(`
     SELECT id, anki_note_id, topic_order, stem, options, correct_index,
            correct_answer, validation_evidence, validated_coverage_item_id,
            last_used_at, times_used
-      FROM legislation_anki_questions
-     WHERE validation_status='validated'
-       AND direct_use_eligible=TRUE
-       AND validated_coverage_item_id=ANY($1::int[])
-     ORDER BY validated_coverage_item_id,
-       CASE WHEN last_used_at IS NULL OR last_used_at < NOW()-INTERVAL '12 hours'
-         THEN 0 ELSE 1 END,
-       times_used ASC, id ASC
-  `,[supported.map(({target})=>Number(target.id))]);
-
-  const byCoverage=new Map();
-  for(const row of rows.rows){
-    const id=Number(row.validated_coverage_item_id);
-    if(!byCoverage.has(id)){byCoverage.set(id,[]);}
-    byCoverage.get(id).push(row);
+    FROM legislation_anki_questions
+    WHERE validation_status='validated' AND direct_use_eligible=TRUE
+      AND validated_coverage_item_id=ANY($1::int[])
+    ORDER BY validated_coverage_item_id, times_used ASC, id ASC
+  `,[coverageIds]);
+  const linkedByCoverage=new Map();
+  for(const row of linked.rows){
+    const key=Number(row.validated_coverage_item_id);
+    if(!linkedByCoverage.has(key)){linkedByCoverage.set(key,[]);}
+    linkedByCoverage.get(key).push(row);
   }
   const used=new Set();
-  let rejectedLinks=0;
-  let recentFallbacks=0;
-  for(const {target,index} of supported){
-    const correctTopicOrder=ankiLegislationSourceOrderForTopicName(target.topic_name);
-    const matches=[];
-    for(const row of byCoverage.get(Number(target.id)) || []){
-      if(used.has(Number(row.id)) || Number(row.topic_order)!==correctTopicOrder ||
-         legislationKnownAmbiguityIssue(row) ||
-         !legislationAnkiFamilyCompatible(target.questionFamily,row.stem)){
-        continue;
-      }
-      if(!legislationExactCoverageLink(target,row)){
-        rejectedLinks++;
-        console.warn('ANKI COVERAGE LINK REJECTED:',JSON.stringify({
-          ankiQuestionId:Number(row.id),coverageId:Number(target.id),
-          concept:String(target.concept||"").slice(0,125)
-        }));
-        continue;
-      }
-      matches.push(row);
-    }
-    const cutoff=Date.now()-12*60*60*1000;
-    const recent=row=>row.last_used_at!=null && new Date(row.last_used_at).getTime()>=cutoff;
-    const chosen=matches.find(row=>!recent(row)) || matches[0];
+  const unresolved=[];
+  let linkedRejected=0;
+  const cutoff=Date.now()-12*60*60*1000;
+  const isRecent=row=>row.last_used_at!=null &&
+    new Date(row.last_used_at).getTime()>=cutoff;
+
+  for(const item of supported){
+    const rows=(linkedByCoverage.get(Number(item.target.id))||[]).filter(row=>
+      !used.has(Number(row.id)) && Number(row.topic_order)===item.sourceOrder &&
+      !legislationKnownAmbiguityIssue(row) &&
+      legislationAnkiFamilyCompatible(item.target.questionFamily,row.stem)
+    );
+    const exact=rows.filter(row=>
+      !legislationConflictingArticles(item.target,row) &&
+      legislationExactCoverageLink(item.target,row)
+    );
+    linkedRejected+=rows.length-exact.length;
+    const chosen=exact.find(row=>!isRecent(row)) || exact[0];
     if(chosen){
       used.add(Number(chosen.id));
-      if(recent(chosen)){recentFallbacks++;}
-      direct.set(index,buildDirectAnkiQuestion(chosen,target));
-    }
+      direct.set(item.index,buildDirectAnkiQuestion(chosen,item.target));
+    }else{unresolved.push(item);}
   }
-
-  // SIN búsqueda libre por tema, SIN selección de enlaces por IA y SIN
-  // grabar validated_coverage_item_id para preguntas sin vínculo comprobado.
-  // Los objetivos restantes los resolverá el generador habitual desde el PDF.
   console.log('ANKI LINKED MATCH:',JSON.stringify({
-    selected:direct.size,recentFallbacks,
-    unmatched:supported.length-direct.size,rejectedLinks,
-    semanticMatchingDisabled:true
+    selected:direct.size,unmatched:unresolved.length,linkedRejected
+  }));
+  if(!unresolved.length || !ai?.models?.generateContent){return direct;}
+
+  const orders=[...new Set(unresolved.map(item=>item.sourceOrder))];
+  const pool=await db.query(`
+    SELECT id, anki_note_id, topic_order, stem, options, correct_index,
+           correct_answer, validation_evidence, validated_coverage_item_id,
+           last_used_at, times_used
+    FROM legislation_anki_questions
+    WHERE validation_status='validated' AND direct_use_eligible=TRUE
+      AND topic_order=ANY($1::int[])
+    ORDER BY topic_order ASC, times_used ASC, id ASC
+  `,[orders]);
+  const byOrder=new Map();
+  for(const row of pool.rows){
+    const order=Number(row.topic_order);
+    if(!byOrder.has(order)){byOrder.set(order,[]);}
+    byOrder.get(order).push(row);
+  }
+  const payload=[];
+  const candidateRows=new Map();
+  for(const item of unresolved){
+    const targetText=[item.target.concept,item.target.source_evidence]
+      .filter(Boolean).join(" ");
+    if(targetText.trim().length<20){continue;}
+    const candidates=(byOrder.get(item.sourceOrder)||[]).filter(row=>
+      !used.has(Number(row.id)) &&
+      (row.validated_coverage_item_id==null ||
+        Number(row.validated_coverage_item_id)===Number(item.target.id)) &&
+      !legislationKnownAmbiguityIssue(row) &&
+      legislationAnkiFamilyCompatible(item.target.questionFamily,row.stem) &&
+      !legislationConflictingArticles(item.target,row)
+    ).map(row=>({
+      row,
+      score:legislationLexicalScore(targetText,
+        [row.stem,row.correct_answer].filter(Boolean).join(" "))
+    })).filter(entry=>entry.score>=0.10)
+      .sort((a,b)=>b.score-a.score ||
+        Number(isRecent(a.row))-Number(isRecent(b.row)) ||
+        Number(a.row.times_used)-Number(b.row.times_used) ||
+        Number(a.row.id)-Number(b.row.id))
+      .slice(0,6);
+    if(!candidates.length){continue;}
+    candidateRows.set(item.index,new Map(candidates.map(c=>[Number(c.row.id),c])));
+    payload.push({
+      targetIndex:item.index,
+      targetConcept:String(item.target.concept||"").slice(0,300),
+      pdfEvidence:String(item.target.source_evidence||"").slice(0,650),
+      choices:candidates.map(c=>({
+        ankiQuestionId:Number(c.row.id),
+        stem:String(c.row.stem||"").slice(0,500),
+        options:c.row.options,
+        correctIndex:Number(c.row.correct_index),
+        pdfValidationEvidence:String(c.row.validation_evidence||"").slice(0,350)
+      }))
+    });
+  }
+  if(!payload.length){
+    console.log('ANKI SEMANTIC MATCH:',JSON.stringify({checked:0,selected:0}));
+    return direct;
+  }
+  const schema=structuredClone(legislationAnkiMatchSchema);
+  schema.properties.matches.minItems=payload.length;
+  schema.properties.matches.maxItems=payload.length;
+  schema.properties.matches.items.properties.evidenceQuote={type:"string"};
+  schema.properties.matches.items.required.push("evidenceQuote");
+  const prompt=`Eres un comprobador MUY ESTRICTO de equivalencia curricular.
+Las preguntas FDF ya fueron validadas FACTUALMENTE con el PDF del alumno.
+Ahora debes comprobar EXCLUSIVAMENTE si la pregunta evalúa EL MISMO dato que
+el objetivo individual de coverage_item y su pdfEvidence, no un concepto vecino.
+
+REGLAS:
+- No confundas igualdad temática, sección, órgano o artículo con igualdad de dato.
+- Una pregunta debe poder contestarse COMPLETAMENTE con la evidencia del objetivo.
+- Si la evidencia es insuficiente, el objetivo es genérico, o hay duda: null.
+- No completes lagunas con conocimiento externo ni infieras datos ausentes.
+- Devuelve un registro por targetIndex, con ankiQuestionId elegido o null.
+- Cada pregunta solo se puede asignar una vez; prioriza el encaje exacto.
+- 'reason' debe mencionar el dato concreto compartido, o por qué rechazas.
+- Para una coincidencia válida, evidenceQuote debe copiar literalmente un fragmento
+  de AL MENOS DOS palabras relevantes del targetConcept o pdfEvidence que DEMUESTRE
+  el dato preguntado. No puede ser solo el nombre de la ley o del órgano.
+- Si eliges null, evidenceQuote debe ser una cadena vacía.
+
+OBJETIVOS PDF Y PREGUNTAS FDF:\n${JSON.stringify(payload)}`;
+  let parsed;
+  try{
+    const response=await ai.models.generateContent({
+      model:'gemini-3.5-flash-lite',contents:prompt,
+      config:{responseMimeType:'application/json',responseJsonSchema:schema}
+    });
+    parsed=JSON.parse(String(response?.text||""));
+  }catch(error){
+    console.warn('ANKI SEMANTIC MATCH: sin respuesta fiable; generación PDF.',
+      error?.message||String(error));
+    return direct;
+  }
+  if(!Array.isArray(parsed?.matches)||parsed.matches.length!==payload.length){
+    console.warn('ANKI SEMANTIC MATCH: longitud inválida; generación PDF.');
+    return direct;
+  }
+  let approved=0;
+  const unresolvedByIndex=new Map(unresolved.map(item=>[item.index,item]));
+  for(const match of parsed.matches){
+    const index=Number(match.targetIndex);
+    const item=unresolvedByIndex.get(index);
+    if(!item || direct.has(index)||match.ankiQuestionId==null){continue;}
+    const questionId=Number(match.ankiQuestionId);
+    const entry=candidateRows.get(index)?.get(questionId);
+    if(!entry || used.has(questionId) || !String(match.reason||'').trim()){continue;}
+    // Exigir prueba textual localizada en el coverage_item, nunca una
+    // mera afirmación semántica del modelo que no podamos contrastar.
+    const quoted=normalizeLegislationMatchText(match.evidenceQuote||"");
+    const support=normalizeLegislationMatchText([
+      item.target.concept,item.target.source_evidence
+    ].filter(Boolean).join(" "));
+    if(quoted.length<12 || legislationMatchTokens(quoted).size<2 ||
+       !support.includes(quoted)){continue;}
+    // Segunda barrera local antes de confiar en la aprobación de la IA.
+    if(entry.score<0.10 || legislationConflictingArticles(item.target,entry.row)){
+      continue;
+    }
+    const question=buildDirectAnkiQuestion(entry.row,item.target);
+    question.ankiSemanticLinkApproved=true;
+    used.add(questionId);
+    direct.set(index,question);
+    approved++;
+  }
+  console.log('ANKI SEMANTIC MATCH:',JSON.stringify({
+    poolValidated:pool.rows.length,checked:payload.length,approved,
+    noCandidates:unresolved.length-payload.length,selectedTotal:direct.size,
+    unmatched:supported.length-direct.size
   }));
   return direct;
 }
-
 
 // SERVER_77B: control puntual del doble acierto del preambulo.
 // Los enunciados breves como 'Segun la Constitucion Espanola:' son validos:
@@ -12496,8 +12638,10 @@ if(
   // SERVER_78: barrera transaccional. Nunca persistir ni sumar SRS/cobertura
   // bajo un objetivo que no tenga relación curricular contrastada.
   if(
-    Number(ankiRow.validated_coverage_item_id) !== Number(target.id) ||
-    !legislationExactCoverageLink(target,ankiRow)
+    (Number(ankiRow.validated_coverage_item_id) !== Number(target.id) &&
+      ankiRow.validated_coverage_item_id != null) ||
+    (!legislationExactCoverageLink(target,ankiRow) &&
+      question.ankiSemanticLinkApproved !== true)
   ){
     throw new Error(
       `PERSISTENCIA: relación Anki ${ankiQuestionId} -> cobertura ${target.id} no acreditada.`
@@ -12576,11 +12720,13 @@ if(
   await client.query(
     `UPDATE legislation_anki_questions
      SET
+       validated_coverage_item_id = COALESCE(validated_coverage_item_id, $2),
        times_used = times_used + 1,
        last_used_at = NOW(),
        updated_at = NOW()
-     WHERE id = $1`,
-    [ankiQuestionId]
+     WHERE id = $1
+       AND (validated_coverage_item_id IS NULL OR validated_coverage_item_id = $2)`,
+    [ankiQuestionId, Number(target.id)]
   );
 
 }else if(
