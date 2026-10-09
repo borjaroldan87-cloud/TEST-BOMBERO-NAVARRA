@@ -8788,36 +8788,110 @@ let legislationCandidates = adaptiveCandidates;
 let ankiLinkedCandidateIds = new Set();
 if(legislationOnlySelection){
   const candidateIds = adaptiveCandidates.map(item=>Number(item.id));
+  // SERVER_81: nunca confundir «tiene enlace en BD» con «enlace
+  // curricular verificable». Esta prueba local anticipada es la misma
+  // que utiliza la persistencia; no genera coste ni modifica FDF.
   const linkedRows = await db.query(`
-    SELECT validated_coverage_item_id AS id,
-      BOOL_OR(last_used_at IS NULL OR last_used_at < NOW() - INTERVAL '12 hours') AS has_fresh
+    SELECT id, anki_note_id, topic_order, stem, options, correct_index,
+           correct_answer, validation_evidence, validated_coverage_item_id,
+           last_used_at, times_used
     FROM legislation_anki_questions
-    WHERE validation_status = 'validated'
-      AND direct_use_eligible = TRUE
-      AND validated_coverage_item_id = ANY($1::int[])
-    GROUP BY validated_coverage_item_id
+    WHERE validation_status='validated' AND direct_use_eligible=TRUE
+      AND validated_coverage_item_id=ANY($1::int[])
+    ORDER BY times_used ASC, id ASC
   `,[candidateIds]);
-  ankiLinkedCandidateIds = new Set(linkedRows.rows.map(row=>Number(row.id)));
-  const ankiFreshCandidateIds = new Set(
-    linkedRows.rows.filter(row=>row.has_fresh === true).map(row=>Number(row.id))
-  );
-  // SERVER_76: misma prioridad SRS; preferir FDF no reciente, luego FDF reciente,
-  // y solo después conocimientos sin FDF asociado. Sin bloquear contenido curricular.
+  const candidateById=new Map(adaptiveCandidates.map(item=>[Number(item.id),item]));
+  const ankiFreshCandidateIds=new Set();
+  const freshCutoff=Date.now()-12*60*60*1000;
+  let rejectedLinks=0;
+  for(const row of linkedRows.rows){
+    const candidate=candidateById.get(Number(row.validated_coverage_item_id));
+    if(!candidate || Number(row.topic_order)!==ankiLegislationSourceOrderForTopicName(candidate.topic_name)
+      || legislationKnownAmbiguityIssue(row)
+      || legislationConflictingArticles(candidate,row)
+      || !legislationExactCoverageLink(candidate,row)){
+      rejectedLinks++; continue;
+    }
+    const key=Number(candidate.id);
+    ankiLinkedCandidateIds.add(key);
+    const fresh=!row.last_used_at || new Date(row.last_used_at).getTime()<freshCutoff;
+    if(fresh){ankiFreshCandidateIds.add(key);}
+    if(!candidate.ankiPreferredFamily || fresh){
+      candidate.ankiPreferredFamily=inferLegislationAnkiFamily(row.stem);
+    }
+  }
   const ankiRank = candidate =>
     ankiFreshCandidateIds.has(Number(candidate.id)) ? 2 :
     ankiLinkedCandidateIds.has(Number(candidate.id)) ? 1 : 0;
   legislationCandidates = adaptiveCandidates
     .map((candidate,index)=>({candidate,index}))
     .sort((a,b)=>
-      Number(a.candidate.adaptive_priority)-Number(b.candidate.adaptive_priority) ||
-      ankiRank(b.candidate)-ankiRank(a.candidate) ||
-      a.index-b.index
-    )
-    .map(item=>item.candidate);
-  console.log('LEGISLATION ANKI CANDIDATES:', JSON.stringify({
-    examined:candidateIds.length,
-    withLinkedAnki:ankiLinkedCandidateIds.size,
-    withFreshLinkedAnki:ankiFreshCandidateIds.size
+      (Number(a.candidate.adaptive_priority)||0)-(Number(b.candidate.adaptive_priority)||0) ||
+      ankiRank(b.candidate)-ankiRank(a.candidate) || a.index-b.index
+    ).map(item=>item.candidate);
+  console.log('LEGISLATION ANKI PREFLIGHT:',JSON.stringify({
+    examined:candidateIds.length,storedLinks:linkedRows.rows.length,
+    withVerifiedLink:ankiLinkedCandidateIds.size,
+    withFreshVerifiedLink:ankiFreshCandidateIds.size,
+    rejectedLinks,requestedAnki:Math.round(count*.60)
+  }));
+}
+
+// SERVER_81: reservar hasta un 60 % de plazas para FDF con vínculo
+// verificado, antes de ocuparlas con preguntas nuevas. No forzar nunca
+// un vínculo inexistente. Conservar núcleos, prevención de repeticiones,
+// nueva cobertura y el orden adaptativo dentro de cada grupo.
+if(legislationOnlySelection && selectedAdaptive.length<count){
+  const targetAnki=Math.round(count*.60);
+  const nucleusCounts=new Map();
+  const macroCounts=new Map();
+  for(const item of selectedAdaptive){
+    const key=legislationSectionKey(item);
+    if(key){nucleusCounts.set(key,(nucleusCounts.get(key)||0)+1);}
+    const macro=constitutionLegislativeProcessKey(item);
+    if(macro){macroCounts.set(macro,(macroCounts.get(macro)||0)+1);}
+  }
+  const tryReserve=(candidate,requireNewNucleus)=>{
+    if(selectedAdaptive.length>=count ||
+       selectedAdaptive.some(item=>Number(item.id)===Number(candidate.id)))return false;
+    const key=legislationSectionKey(candidate);
+    if(requireNewNucleus && (!key || nucleusCounts.has(key)))return false;
+    if(constitutionLegislativeProcessKey(candidate)==='actividad_legislativa' &&
+      (macroCounts.get('actividad_legislativa')||0)>=2)return false;
+    const tokens=legislationDiversityTokens(candidate);
+    if(usedLegislationSemanticTexts.some(previous=>
+      legislationSemanticOverlap(tokens,previous)>=0.42))return false;
+    const keySub=constitutionLegislativeSubtopicKey(candidate);
+    if(keySub && selectedAdaptive.some(item=>
+      constitutionLegislativeSubtopicKey(item)===keySub))return false;
+    selectedAdaptive.push(candidate);
+    if(key){nucleusCounts.set(key,(nucleusCounts.get(key)||0)+1);usedLegislationSections.add(key);}
+    const macro=constitutionLegislativeProcessKey(candidate);
+    if(macro){macroCounts.set(macro,(macroCounts.get(macro)||0)+1);}
+    const page=legislationPageKey(candidate);
+    if(page){usedLegislationPages.add(page);}
+    usedLegislationSemanticTexts.push(tokens);
+    return true;
+  };
+  let verifiedReserved=selectedAdaptive.filter(item=>
+    ankiLinkedCandidateIds.has(Number(item.id))).length;
+  for(const candidate of legislationCandidates){
+    if(verifiedReserved>=targetAnki)break;
+    if(!ankiLinkedCandidateIds.has(Number(candidate.id)))continue;
+    if(tryReserve(candidate,true))verifiedReserved++;
+  }
+  // El resto debe introducir contenido nuevo (no FDF confirmado).
+  // Si no alcanza el 60%, la selección general completa el test.
+  for(const candidate of legislationCandidates){
+    if(selectedAdaptive.length>=count)break;
+    if(ankiLinkedCandidateIds.has(Number(candidate.id)))continue;
+    tryReserve(candidate,true);
+  }
+  console.log('LEGISLATION 60_40 RESERVATION:',JSON.stringify({
+    requested:count,ankiGoal:targetAnki,verifiedReserved,
+    reservedTotal:selectedAdaptive.length,
+    remainingForGeneralSelection:count-selectedAdaptive.length,
+    distinctNuclei:nucleusCounts.size
   }));
 }
 
@@ -9223,7 +9297,7 @@ console.log(
 
   const selected = result.rows.map((item,index)=>({
     ...item,
-    questionFamily: families[index] || "GENERAL"
+    questionFamily: item.ankiPreferredFamily || families[index] || "GENERAL"
   }));
 /*
 VALIDACIÓN PREVIA DE COMPATIBILIDAD DE FAMILIAS
@@ -11834,7 +11908,7 @@ function legislationConflictingArticles(target,row){
     ![...targetArticles].some(value=>questionArticles.has(value));
 }
 
-async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
+async function getDirectLegislationAnkiQuestionsForTargets(ai,targets,maxDirectAllowed=Infinity){
   const direct=new Map();
   if(!Array.isArray(targets) || !targets.length){return direct;}
   const supported=targets.map((target,index)=>({
@@ -11880,7 +11954,7 @@ async function getDirectLegislationAnkiQuestionsForTargets(ai,targets){
     );
     linkedRejected+=rows.length-exact.length;
     const chosen=exact.find(row=>!isRecent(row)) || exact[0];
-    if(chosen){
+    if(chosen && direct.size<maxDirectAllowed){
       used.add(Number(chosen.id));
       direct.set(item.index,buildDirectAnkiQuestion(chosen,item.target));
     }else{unresolved.push(item);}
@@ -11993,6 +12067,7 @@ OBJETIVOS PDF Y PREGUNTAS FDF:\n${JSON.stringify(payload)}`;
   for(const match of parsed.matches){
     const index=Number(match.targetIndex);
     const item=unresolvedByIndex.get(index);
+    if(direct.size>=maxDirectAllowed)break;
     if(!item || direct.has(index)||match.ankiQuestionId==null){continue;}
     const questionId=Number(match.ankiQuestionId);
     const entry=candidateRows.get(index)?.get(questionId);
@@ -12073,6 +12148,27 @@ function legislationKnownAmbiguityIssue(question){
   // en una pregunta afirmativa, aunque figure en el PDF fuente.
   // Sí puede emplearse COMO DISTRACTOR en una pregunta correcta, o como la
   // opción falsa elegida en una pregunta de tipo INCORRECTA.
+  // Error real observado en T1: «De las Cámaras» comprende arts. 66-80.
+  // La afirmación 67-80 no puede tomarse como enumeración completa.
+  // Se descarta el ítem entero para evitar dobles respuestas incorrectas.
+  if(/\bcamaras?\b|\bcortes\b/.test(stem) &&
+    options.some(option=>/(?:articulos?|arts?)\s+(?:dedicados?|regulan?|comprenden?|extienden?|abarcan?|desde|del)?[\s\w]*?\b67\s+(?:al|a|hasta)\s+(?:el\s+)?80\b/.test(option) &&
+      /\bcamaras?\b|\bconstitucion\b/.test(option))){
+    return 'LEGISLACIÓN (Cortes): sección De las Cámaras de la CE comprende arts. 66-80, no solo 67-80.';
+  }
+  // Error real observado: una CA no adquiere potestad para celebrar tratados
+  // por poder solicitar o impulsar acuerdos ante el Estado.
+  if(/tratados? internacionales?/.test(stem) &&
+      /competencia|celebracion|celebrar/.test(stem) &&
+      !asksIncorrect){
+    const index=Number(question?.correctIndex ?? question?.correct_index);
+    const chosen=options[index]||'';
+    if(/comunidades? autonomas?/.test(chosen) &&
+       /(?:pueden?|podran?|facultad|no carece|capacidad|competencia compartida|cogestionad)/.test(chosen) &&
+       !/(?:no\s+(?:pueden?|podran?|tienen?\s+competencia)|carecen?\s+de\s+competencia)/.test(chosen)){
+      return 'LEGISLACIÓN (Tratados): posible atribución de celebración de tratados a comunidades autónomas.';
+    }
+  }
   const selectedIndex=Number(question?.correctIndex ?? question?.correct_index);
   if(!asksIncorrect && Number.isInteger(selectedIndex) &&
      selectedIndex>=0 && selectedIndex<options.length){
@@ -15622,10 +15718,14 @@ if(testType === "normal"){
     unresolvedTargets.push(targets[i]);
   }
 
+  const legislationSlots=unresolvedTargets.filter(target=>
+    String(target?.topic_block||'').trim().toLowerCase()==='legislacion'
+  ).length;
   const directLocal=
     await getDirectLegislationAnkiQuestionsForTargets(
       ai,
-      unresolvedTargets
+      unresolvedTargets,
+      Math.round(legislationSlots*0.60)
     );
 
   for(const [localIndex,question] of directLocal){
