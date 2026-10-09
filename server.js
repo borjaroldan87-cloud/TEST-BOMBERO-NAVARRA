@@ -16027,6 +16027,103 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds){
   return {targets,direct,required};
 }
 
+/* SERVER 92 — Rotación semántica para tests de legislación SIN baraja.
+ * Trabaja únicamente sobre objetivos ANTES de generar preguntas.
+ * No transforma cobertura, no altera SRS, ni toca las cuotas Anki.
+ * Solo reemplaza redundancias evitables por objetivos del MISMO tema y
+ * MISMA prioridad adaptativa / situación nuevo-vs-repaso.
+ */
+function legislationFocusTokens92(item){
+  const stop=new Set([
+    'segun','conforme','debe','deben','cuando','sobre','para','como','entre',
+    'cuales','cual','donde','cuyo','cuyos','establece','establecen',
+    'regulacion','regulador','reglamento','normativa','aplicable','aplicables',
+    'requisito','requisitos','condicion','condiciones','exigencia','exigencias',
+    'caracteristica','caracteristicas','definicion','criterio','criterios',
+    'clasificacion','determinacion','consideracion','relacion','respecto',
+    'elemento','elementos','edificio','edificios','establecimiento',
+    'establecimientos','industrial','industriales','seguridad','incendio',
+    'incendios','proteccion','servicio','servicios','apartado','articulo',
+    'articulos','tabla','valores','valor','parametro','parametros',
+    'tipo','tipos','forma','general','especifico','especifica','minimo',
+    'minima','maximo','maxima','medida','medidas','para','ante','este',
+    'estas','estos','aquel','aquellos','de','del','los','las','una','uno',
+    'que','con','por','sin','mas','menos','al','el','y','en','se','su','o'
+  ]);
+  return new Set(legislationDiversityNormalize(item?.concept||'')
+    .split(' ').filter(x=>x && (x.length>=4 || /^\d+$/.test(x)) && !stop.has(x)));
+}
+function legislationFocusSimilarity92(a,b){
+  if(Number(a?.topic_id)!==Number(b?.topic_id))return 0;
+  const ta=legislationFocusTokens92(a),tb=legislationFocusTokens92(b);
+  if(ta.size<2 || tb.size<2)return 0;
+  let hits=0;for(const x of ta)if(tb.has(x))hits++;
+  return hits/Math.min(ta.size,tb.size);
+}
+function legislationTopicSection92(item){
+  return `${Number(item?.topic_id)}:`+
+    legislationDiversityNormalize(item?.section||'').replace(/^\d+(?: \d+)* /,'');
+}
+function legislationRedundancy92(item,chosen){
+  let score=0;
+  const section=legislationTopicSection92(item);
+  let nSameSection=0;
+  for(const other of chosen){
+    if(Number(item.topic_id)!==Number(other.topic_id))continue;
+    const similarity=legislationFocusSimilarity92(item,other);
+    if(similarity>=0.78)score+=5;
+    else if(similarity>=0.55)score+=2.5;
+    if(section===legislationTopicSection92(other))nSameSection++;
+  }
+  // Dos objetivos de la misma sección pueden interrogar hechos diferentes.
+  // Penalizar únicamente la tercera plaza sobre un mismo epígrafe.
+  if(nSameSection>=2)score+=(nSameSection-1)*1.5;
+  return score;
+}
+function diversifyLegislationTargets92(targets,candidates){
+  const chosen=[];const reserved=new Set(targets.map(x=>Number(x.id)));
+  const changes=[];
+  for(let i=0;i<targets.length;i++){
+    const original=targets[i];
+    const priority=Number(original.adaptive_priority)||5;
+    const redundancy=legislationRedundancy92(original,chosen);
+    // Nunca sustituir repaso SRS vencido, fallos, debilidades ni objetivos
+    // de calculo/grafica/razonamiento cuyo tipo requiere evidencia especial.
+    if(priority<=3 || redundancy<2.5 ||
+       ['CALCULO_FORMULACION','GRAFICA','2026_RAZONAMIENTO'].includes(original.questionFamily)){
+      chosen.push(original);continue;
+    }
+    const originalNew=Number(original.times_asked||0)===0;
+    let best=null,bestScore=redundancy;
+    // El orden ya viene de prioridad adaptativa (SQL); favorece los primeros.
+    for(let rank=0;rank<candidates.length;rank++){
+      const candidate=candidates[rank];
+      if(Number(candidate.id)===Number(original.id) ||
+        Number(candidate.topic_id)!==Number(original.topic_id) ||
+        Number(candidate.adaptive_priority)!==priority ||
+        (Number(candidate.times_asked||0)===0)!==originalNew ||
+        (original.questionFamily==='2024_NUMERICA' &&
+          !/\d/.test(`${candidate.concept||''} ${candidate.source_evidence||''}`)) ||
+        reserved.has(Number(candidate.id)) ||
+        candidate.item_type==='anki_independent')continue;
+      const score=legislationRedundancy92(candidate,chosen);
+      if(score<bestScore-0.05){best={candidate,rank};bestScore=score;}
+      if(score===0)break;
+    }
+    // Exigir mejora material, no desplazar objetivos por diversidad cosmética.
+    if(best && bestScore+1.5<=redundancy){
+      reserved.delete(Number(original.id));reserved.add(Number(best.candidate.id));
+      const replacement={...best.candidate,
+        questionFamily:original.questionFamily};
+      chosen.push(replacement);
+      changes.push({slot:i+1,from:Number(original.id),to:Number(replacement.id),
+        fromConcept:original.concept,toConcept:replacement.concept,
+        priority,previousScore:redundancy,newScore:bestScore});
+    }else chosen.push(original);
+  }
+  return {targets:chosen,changes};
+}
+
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -16214,6 +16311,27 @@ console.log(
   "preguntas exactas de",
   targets.length
 );
+
+// SERVER 92: SOLO tests normales íntegramente nuevos de Legislación.
+// Se ejecuta después de resolver la cuota y las tarjetas directas: no cambia
+// una sola plaza Anki, pregunta fallada o unidad de otro bloque.
+if(testType==='normal' && !quota84 && directAnkiQuestions.size===0 &&
+   reusableQuestions.size===0 && targets.length>1 &&
+   targets.every(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion') &&
+   targets.some((t,i)=>Number(t.adaptive_priority)>3 &&
+     legislationRedundancy92(t,targets.slice(0,i))>=2.5)){
+  const candidatePool92=await getAdaptiveCoverageCandidates(
+    Math.max(400,targets.length*55),allowedTopicIds,
+    examMode==='simulation'?'simulation':'adaptive'
+  );
+  const diversity92=diversifyLegislationTargets92(targets,candidatePool92);
+  targets=diversity92.targets;
+  console.log('LEGISLACION DIVERSIDAD 92:',JSON.stringify({
+    replacements:diversity92.changes,
+    uniqueCoverageIds:new Set(targets.map(t=>Number(t.id))).size,
+    total:targets.length
+  }));
+}
 
     console.log(
       "GENERATECONTENT: iniciando con",
@@ -16433,6 +16551,25 @@ dificil. Aplica estas reglas ANTES de devolver el test:
 
 La calidad buscada es SUPERIOR a un test de memorizacion superficial,
 pero siempre con exactamente UNA respuesta correcta y fundamento literal.
+
+COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
+- Antes de entregar la lista entera, contrasta entre sí las preguntas
+  generadas: una cifra reglamentaria, excepción o requisito sustancial
+  NO debe ser el núcleo de dos preguntas diferentes del mismo test,
+  aunque cambien los enunciados o se pregunte una vez CORRECTA y otra
+  INCORRECTA. Dos conocimientos conexos pero distintos SÍ son válidos.
+- Si dos objetivos estuvieran relacionados, pregunta facetas específicas
+  diferentes y respaldadas: p. ej. una condición de aplicación frente
+  a una excepción independiente. No fabrique excepciones inexistentes.
+- Distribuye entre secciones del PDF; no agrupes por comodidad todas las
+  preguntas de definiciones cuando hay objetivos de cifras, procedimientos,
+  excepciones, tablas o aplicación. Respeta SIEMPRE el objetivo asignado.
+- Las alternativas de una pregunta deben compartir el MISMO eje técnico;
+  construir la falsedad por omitir una excepción no es aceptable si lo
+  afirmado sigue siendo verdadero. En INCORRECTA son 3 VERDADES y 1 FALSEDAD.
+- No introduzcas preguntas sobre la bibliografía o normativa citada como
+  referencia editorial, salvo que el objetivo de cobertura sea precisamente
+  la norma aplicable y figure expresamente en el temario.
 `;
     }
 
