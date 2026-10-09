@@ -659,7 +659,7 @@ function show(){
         <div class="exam-question">
 
           <div class="question-stem">
-            ${k+1}. ${q.stem}
+            ${k+1}. ${formatExamContent(q.stem)}
           </div>
 ${renderGraphic(q)}
           <div>
@@ -667,7 +667,7 @@ ${renderGraphic(q)}
               <button
                 class="opt ${ans[k]===j?"sel":""}"
                 onclick="pick(${k},${j})">
-                <b>${"ABCD"[j]})</b> ${option}
+                <b>${"ABCD"[j]})</b> ${formatExamContent(option)}
               </button>
             `).join("")}
           </div>
@@ -831,7 +831,7 @@ function review(){
         userAnswer=`
           <p class="${isCorrect?"ok":"bad"}">
             <b>Tu respuesta:</b>
-            ${"ABCD"[answer]}) ${q.options[answer]}
+            ${"ABCD"[answer]}) ${formatExamContent(q.options[answer])}
           </p>
         `;
       }
@@ -841,7 +841,7 @@ function review(){
         ?`
           <p class="ok">
             <b>Respuesta correcta:</b>
-            ${"ABCD"[q.correctIndex]}) ${q.options[q.correctIndex]}
+            ${"ABCD"[q.correctIndex]}) ${formatExamContent(q.options[q.correctIndex])}
           </p>
         `
         :"";
@@ -850,7 +850,7 @@ function review(){
         <div class="c">
 
           <p>
-            <b>${k+1}. ${q.stem}</b>
+            <b>${k+1}. ${formatExamContent(q.stem)}</b>
           </p>
 
           ${userAnswer}
@@ -858,13 +858,13 @@ function review(){
           ${correctAnswer}
 
           <p>
-            ${q.explanation}
+            ${formatExamContent(q.explanation)}
           </p>
 
           <p class="muted">
             <b>Fuente:</b>
-            ${q.sourceEvidence}
-            ${q.manualPage!=null?` · pág. ${q.manualPage}`:""}
+            ${formatExamContent(q.sourceEvidence)}
+            ${q.manualPage!=null?` · pág. ${escapeHtml(q.manualPage)}`:""}
           </p>
 
         </div>
@@ -1026,6 +1026,120 @@ const BLOCK_META={
     order:3
   }
 };
+
+/*
+ * MATH-86: formato universal de notación KaTeX para toda la aplicación.
+ * No se realizan sustituciones algebraicas: el servidor determina la fórmula,
+ * el cliente se limita a representarla. Ante error, muestra el texto original.
+ */
+/*
+ * Conserva las fórmulas antiguas como hechos algebraicos intactos: cuando
+ * el texto usa Sumatorio(...) y operaciones aritméticas convencionales,
+ * genera tipografía matemática sin cambiar el orden de las operaciones.
+ * Si la expresión no pertenece a esa gramática, NO se transforma.
+ */
+function legacyExamFormulaToLatex(value){
+  const raw=String(value||'').trim();
+  const match=raw.match(/^([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+)$/);
+  if(!match || !/\bSumatorio\s*\(/i.test(match[2]))return null;
+  const expression=match[2].replace(/\s+/g,'');
+  const tokens=expression.match(/Sumatorio|[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?|[()+*\/^\-]/gi);
+  if(!tokens || tokens.join('')!==expression)return null;
+  let i=0;
+  const peek=()=>tokens[i];
+  const take=t=>peek()===t?(i++,true):false;
+  const symbol=name=>{
+    if(name==='Qs')return 'Q_s';
+    if(/^[qGC]i$/.test(name))return `${name[0]}_i`;
+    return name.replaceAll('_','\\_');
+  };
+  function primary(){
+    if(take('(')){
+      const p=expr();if(!take(')'))throw Error('unclosed group');
+      return {kind:'group',part:p};
+    }
+    if(take('-'))return {kind:'neg',part:primary()};
+    const token=peek();
+    if(!token)throw Error('unexpected end');
+    i++;
+    if(/^Sumatorio$/i.test(token)){
+      if(!take('('))throw Error('sum needs parenthesis');
+      const p=expr();if(!take(')'))throw Error('sum unclosed');
+      return {kind:'sum',part:p};
+    }
+    if(/^(?:[A-Za-z_][A-Za-z_0-9]*|\d+(?:\.\d+)?)$/.test(token)){
+      return {kind:'atom',name:token};
+    }
+    throw Error('unsupported token');
+  }
+  function power(){let lhs=primary();if(take('^'))lhs={kind:'power',a:lhs,b:power()};return lhs;}
+  function term(){
+    let lhs=power();
+    while(peek()==='*'||peek()==='/'){
+      const op=tokens[i++];lhs={kind:op==='*'?'mul':'div',a:lhs,b:power()};
+    }
+    return lhs;
+  }
+  function expr(){
+    let lhs=term();
+    while(peek()==='+'||peek()==='-'){
+      const op=tokens[i++];lhs={kind:op==='+'?'add':'sub',a:lhs,b:term()};
+    }
+    return lhs;
+  }
+  function tex(n){
+    if(n.kind==='atom')return symbol(n.name);
+    if(n.kind==='group')return `\\left(${tex(n.part)}\\right)`;
+    if(n.kind==='sum')return `\\sum\\left(${tex(n.part)}\\right)`;
+    if(n.kind==='neg')return `-${tex(n.part)}`;
+    if(n.kind==='power')return `{${tex(n.a)}}^{${tex(n.b)}}`;
+    if(n.kind==='mul')return `${tex(n.a)}\\cdot ${tex(n.b)}`;
+    if(n.kind==='div')return `\\frac{${tex(n.a)}}{${tex(n.b)}}`;
+    if(n.kind==='add')return `${tex(n.a)}+${tex(n.b)}`;
+    if(n.kind==='sub')return `${tex(n.a)}-${tex(n.b)}`;
+    throw Error('unsupported expression');
+  }
+  try{
+    const tree=expr();
+    if(i!==tokens.length)return null;
+    return `${symbol(match[1])}=${tex(tree)}`;
+  }catch{return null;}
+}
+
+function formatExamContent(value){
+  let text=String(value ?? "");
+  if(window.katex){
+    const legacyMath=legacyExamFormulaToLatex(text);
+    if(legacyMath)text=`\\[${legacyMath}\\]`;
+  }
+  const mathRx=/\\\[([\s\S]*?)\\\]|\\\(([\s\S]*?)\\\)/g;
+  let last=0,html="",match;
+  while((match=mathRx.exec(text))!==null){
+    html+=escapeHtml(text.slice(last,match.index));
+    const displayMode=match[1]!==undefined;
+    const latex=displayMode?match[1]:match[2];
+    if(window.katex && latex.length<=1200){
+      try{
+        html+=window.katex.renderToString(latex,{
+          displayMode,
+          throwOnError:true,
+          trust:false,
+          strict:"warn",
+          output:"htmlAndMathml",
+          maxExpand:300
+        });
+      }catch(error){
+        console.warn('Fórmula no representable, manteniendo texto original:',error.message);
+        html+=escapeHtml(match[0]);
+      }
+    }else{
+      html+=escapeHtml(match[0]);
+    }
+    last=mathRx.lastIndex;
+  }
+  html+=escapeHtml(text.slice(last));
+  return html.replace(/\n/g,'<br>');
+}
 
 function escapeHtml(value){
   return String(value ?? "")
