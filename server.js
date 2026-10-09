@@ -4852,208 +4852,73 @@ No introduzcas constantes, reglas técnicas ni supuestos externos.
 
 Los distractores numéricos pueden derivarse de errores razonables de cálculo,
 unidades, operaciones o aplicación de la fórmula.
-REPRESENTACIÓN DE FÓRMULAS, SÍMBOLOS Y NOTACIÓN CIENTÍFICA:
+REPRESENTACIÓN MATEMÁTICA UNIFICADA (APLICABLE A TODOS LOS TEMAS):
 
-Toda fórmula, operación, magnitud, unidad, símbolo químico o expresión
-científica debe escribirse como texto plano Unicode seguro, estándar y
-directamente legible por el navegador.
+Los campos stem, options y explanation aceptan prosa normal junto con
+expresiones de notación matemática LaTeX, delimitadas SIEMPRE por
+\\( ... \\) para matemáticas en línea y \\[ ... \\] para fórmulas centradas.
+Usa únicamente comandos matemáticos estándar compatibles con KaTeX.
+No uses HTML, imágenes, MathML, Markdown matemático, delimitadores de dólares,
+ni la palabra "Sumatorio" dentro de una fórmula. El signo de sumatorio es \\sum.
 
-La notación debe conservar fielmente la utilizada en la fuente cuando sea
-relevante para responder correctamente.
+FORMATO OBLIGATORIO Y EJEMPLOS:
+- Fracción: \\(\\frac{a+b}{c}\\).
+- Suma de términos: \\(\\sum_{i=1}^{n} a_i\\).
+- Fórmula con varios factores: \\[Q_s=\\frac{\\sum_{i=1}^{n}q_i G_i C_i}{A}\\,R\\]
+- Radicales: \\(\\sqrt{x^2+y^2}\\).
+- Subíndices: \\(P_1\\), \\(Q_s\\), \\(C_i\\).
+- Potencias: \\(v^2\\), \\(10^{-3}\\), \\(m^3\\).
+- Índices y límites: \\(\\sum_{i=1}^{n}\\), \\(\\frac{dP}{dt}\\).
+- Griego y relaciones: \\(\\rho\\), \\(\\mu\\), \\(\\Delta\\), \\(\\leq\\), \\(\\geq\\), \\(\\approx\\).
+- Unidades: \\(25\\,\\mathrm{kN/m^2}\\), \\(3\\,\\mathrm{m/s^2}\\).
+- Relaciones, derivadas y conversiones: notación dimensional correcta, y
+  \\(\\mathrm{kg/m^3}\\) cuando sea necesario expresar unidades.
+- Química: fórmulas con subíndices mediante \\(\\mathrm{H_2O}\\) o
+  \\(\\mathrm{CO_2}\\); reacciones con notación matemática inequívoca.
+  Mantén símbolos y estados que aparezcan expresamente en la fuente.
 
-NO utilices:
-- LaTeX;
-- MathML;
-- comandos como \frac, \sqrt, \times, \cdot, \pi, \rho, \mu, etc.;
-- delimitadores como $, $$, \( \), \[ \];
-- caracteres decorativos o variantes tipográficas innecesarias;
-- sustitutos visuales de un símbolo científico real.
+Las fórmulas deben SER MATEMÁTICAMENTE EQUIVALENTES a las originales del PDF.
+No inventes variables, factores, operaciones, unidades, límites, índices,
+funciones ni constantes. Si la fuente no ofrece límites del sumatorio, no
+inventes n o los índices: usa la suma sin límites \\(\\sum q_iG_iC_i\\).
+Si la expresión original no distingue entre cocientes, factores o agrupaciones,
+NO la cambies. Nunca alteres el sentido por mejorar la tipografía.
 
-OPERADORES Y SÍMBOLOS MATEMÁTICOS:
+Escribe fórmulas completas, legibles y simétricas en las cuatro alternativas.
+No uses "Sumatorio(...)" ni "sqrt(...)" ni una división textual larga con / cuando
+pueda expresarse como una fracción clara. En cambio, deja como texto normal
+magnitudes simples como 25 kN/m² si no forman parte de una fórmula.
 
-Utiliza directamente, cuando corresponda:
+El campo sourceEvidence DEBE mantener el dato recuperado del PDF fielmente,
+sin transformarlo en ecuaciones distintas. sourcePage y manualPage sin cambios.
 
-+  suma
--  resta
-×  multiplicación
-/  división
-=  igualdad
-≈  aproximadamente
-<  menor que
->  mayor que
-≤  menor o igual que
-≥  mayor o igual que
-±  más/menos
-√  raíz cuadrada
-%  porcentaje
-°  grados
-π  pi
+En validación, una opción cuyo LaTeX sea ilegible, incompleto, tenga llaves
+sin cerrar, altere el orden de las operaciones o dé lugar a una equivalencia
+matemática indeseada es INVÁLIDA y debe regenerarse. Los cuatro resultados
+correctos y los distractores de cálculos deben verificarse numéricamente.
 
-Utiliza paréntesis ( ) siempre que sean necesarios para hacer inequívoco
-el orden de las operaciones.
+NIVEL ALTO PARA NORMATIVA TÉCNICA SIN ANKI:
 
-LETRAS GRIEGAS Y VARIABLES:
+- Exige aplicación real de límites, condiciones, tablas, clasificaciones,
+  fórmulas y excepciones de los documentos aportados.
+- En alternativas de CORRECTA, contrasta por separado LAS CUATRO contra la
+  misma cláusula reglamentaria: solo UNA puede ser verdadera.
+- En alternativas de INCORRECTA, las otras TRES deben ser afirmaciones verdaderas
+  aunque no sean enumeraciones exhaustivas. No conviertas una condición parcial
+  verdadera en falsa por el mero hecho de no citar los demás requisitos.
+- Prohibidas opciones descartables por pura lógica, absolutos artificiales,
+  inventos obvios, tecnicismos ajenos o términos como «automáticamente exento»
+  salvo que el PDF los respalde y hagan falta realmente para la pregunta.
+- Los cuatro distractores deben pertenecer al mismo eje conceptual y comparar
+  diferencias pequeñas pero inequívocas: una cifra, condición, tipo, coeficiente,
+  categoría, unidad, sujeto obligado, excepción o supuesto de aplicación.
+- Si el reglamento incluye VARIOS valores simultáneamente ciertos (por ejemplo,
+  anchura y gálibo de un vial), nunca conviertas dos valores ciertos en
+  respuestas alternativas a una pregunta de opción única.
+- No preguntes únicamente definiciones obvias cuando puedas evaluar el régimen
+  de aplicación, una excepción, una condición combinada o un cálculo.
+- Relee todas las opciones como un inspector adversarial antes de entregar.
 
-Cuando la fuente utilice letras griegas como símbolos de magnitudes,
-coeficientes o variables, conserva el símbolo Unicode correspondiente.
-
-Ejemplos de símbolos que pueden aparecer:
-
-ρ  rho
-μ  mu
-η  eta
-λ  lambda
-Δ  delta mayúscula
-δ  delta minúscula
-α  alfa
-β  beta
-γ  gamma
-θ  theta
-φ  phi
-ω  omega
-Ω  omega mayúscula
-Σ  sigma mayúscula
-σ  sigma minúscula
-
-Estos ejemplos NO constituyen una lista cerrada.
-Puede utilizarse cualquier letra griega o símbolo científico estándar que
-aparezca realmente en la fuente.
-
-Nunca sustituyas automáticamente una letra griega por una letra latina
-visualmente parecida si esa sustitución puede alterar el significado.
-
-POTENCIAS, ÍNDICES Y NOTACIÓN EXPONENCIAL:
-
-Para cuadrados y cubos pueden utilizarse:
-
-m²
-m³
-v²
-
-Para exponentes más complejos utiliza preferentemente notación ASCII clara:
-
-x^4
-d^5
-10^-3
-10^6
-
-Si un subíndice es importante y puede representarse de forma segura, puede
-utilizarse Unicode. Si existe riesgo de corrupción o ambigüedad, utiliza una
-representación textual inequívoca, por ejemplo:
-
-CO2
-H2O
-P1
-P2
-
-Nunca sacrifiques el significado científico por intentar reproducir una
-tipografía especial.
-
-RAÍCES:
-
-La raíz cuadrada puede escribirse con √ cuando la expresión sea sencilla:
-
-√25
-√(a² + b²)
-
-Si una raíz compleja pudiera resultar ambigua, utiliza una representación
-textual inequívoca equivalente.
-
-UNIDADES Y MAGNITUDES:
-
-Conserva exactamente las unidades necesarias para resolver la pregunta.
-
-Admite notación científica y técnica estándar como, entre otras:
-
-m
-m²
-m³
-s
-kg
-N
-Pa
-kPa
-bar
-J
-W
-V
-A
-Ω
-S
-Hz
-°C
-L
-L/min
-m/s
-m/s²
-kg/m³
-
-La lista NO es cerrada. Utiliza cualquier unidad presente en la fuente y
-respeta mayúsculas, minúsculas, exponentes, prefijos y símbolos cuando sean
-relevantes.
-
-QUÍMICA:
-
-Los símbolos de los elementos químicos deben conservar su escritura estándar
-y respetar mayúsculas y minúsculas:
-
-H
-O
-C
-N
-Na
-Cl
-Fe
-Ca
-
-Las fórmulas químicas, estados de oxidación, cargas, valencias y demás
-notación química deben reproducirse de forma inequívoca según la fuente.
-
-Cuando un superíndice o subíndice Unicode pueda provocar problemas de
-representación, utiliza una alternativa de texto plano que preserve
-inequívocamente el significado.
-
-No inventes elementos, valencias, cargas, fórmulas químicas ni propiedades:
-todo contenido científico sigue sujeto a la fuente factual.
-
-FÓRMULAS:
-
-Las fracciones deben escribirse preferentemente mediante "/" y paréntesis
-suficientes para conservar inequívocamente el orden de operaciones.
-
-Ejemplos de representación:
-
-Radio = perímetro / (2 × π)
-
-Área = π × r²
-
-ρ = m / V
-
-v = distancia / tiempo
-
-a = Δv / Δt
-
-√(a² + b²)
-
-La representación de una fórmula nunca debe introducir símbolos corruptos,
-caracteres de sustitución como � ni secuencias de escape visibles.
-
-COMPROBACIÓN FINAL:
-
-Antes de devolver cualquier pregunta, opción, explicación o evidencia que
-contenga notación matemática, física, química o técnica, comprueba que:
-
-1. todos los símbolos son legibles;
-2. no aparece el carácter �;
-3. no quedan comandos LaTeX ni secuencias de escape;
-4. la fórmula conserva inequívocamente su significado;
-5. las unidades están correctamente representadas;
-6. los exponentes, índices, cargas o valencias no han perdido significado;
-7. la notación coincide con la fuente cuando esa notación sea examinable.
-
-Si existe riesgo de que un carácter especial se represente incorrectamente,
-utiliza una alternativa de texto plano más simple que conserve exactamente
-el significado científico.
 ==================================================
 7. PROCEDIMIENTOS Y CLASIFICACIONES
 ==================================================
@@ -12216,6 +12081,30 @@ function legislationKnownAmbiguityIssue(question){
   return null;
 }
 
+
+function generatedMathNotationIssue(question){
+  for(const item of [question?.stem,...(Array.isArray(question?.options)?question.options:[]),question?.explanation]){
+    const t=String(item||'');
+    if(!t)continue;
+    if(t.includes('\uFFFD'))return 'FÓRMULA: hay un símbolo Unicode ilegible.';
+    if(/\bSumatorio\s*\(/i.test(t))return 'FÓRMULA: se usó Sumatorio textual, no notación matemática.';
+    const opens=(t.match(/\\\(/g)||[]).length;
+    const closes=(t.match(/\\\)/g)||[]).length;
+    const blockOpens=(t.match(/\\\[/g)||[]).length;
+    const blockCloses=(t.match(/\\\]/g)||[]).length;
+    if(opens!==closes || blockOpens!==blockCloses){
+      return 'FÓRMULA: delimitadores de notación matemática desequilibrados.';
+    }
+    const mathSegments=[...t.matchAll(/\\\(([\s\S]*?)\\\)|\\\[([\s\S]*?)\\\]/g)];
+    for(const segment of mathSegments){
+      const tex=segment[1]??segment[2]??'';
+      let braces=0;
+      for(const ch of tex){if(ch==='{')braces++;else if(ch==='}')braces--;if(braces<0)break;}
+      if(braces!==0 || tex.length>1200){return 'FÓRMULA: llaves incorrectas o expresión demasiado larga.';}
+    }
+  }
+  return null;
+}
 function legislationQuestionIssue(target,question){
   if(
     String(target?.topic_block || "")
@@ -12226,7 +12115,7 @@ function legislationQuestionIssue(target,question){
   }
 
   if(
-    ["GRAFICA","CALCULO_FORMULACION"]
+    ["GRAFICA"]
       .includes(question?.questionFamily)
   ){
     return (
@@ -12262,6 +12151,29 @@ function legislationQuestionIssue(target,question){
 
   const knownAmbiguity=legislationKnownAmbiguityIssue(question);
   if(knownAmbiguity){return knownAmbiguity;}
+
+  // Control objetivo adicional para legislación reglamentaria: descarta
+  // absolutos artificiales no sustentados que delatan opciones falsas.
+  // No altera la baraja Anki; solo se utiliza para preguntas generadas.
+  const evidence=String(question?.sourceEvidence||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const options=Array.isArray(question?.options)?question.options:[];
+  const suspicious=[
+    /\bautomaticamente\b/,
+    /\bsin (?:ninguna|cualquier) limitacion\b/,
+    /\bsiempre y en cualquier caso\b/,
+    /\btotalmente exent[oa]s?\b/,
+    /\ben exclusiva\b/,
+    /\bprioritaria y exclusivamente\b/,
+    /\bsin excepciones\b/
+  ];
+  for(const option of options){
+    const text=String(option||'').normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    if(suspicious.some(rx=>rx.test(text)&&!rx.test(evidence))){
+      return 'LEGISLACIÓN: distractor con absoluto lingüístico evidente no sustentado en la fuente.';
+    }
+  }
   return null;
 }
 
@@ -14464,19 +14376,53 @@ function geographyOptionPoolIssue(target,question){
 
   return null;
 }
-async function validateGeneratedQuestions(ai,questions){
-  const validationPrompt=`
+async function validateGeneratedQuestions(ai,questions,{independentPdfCheck=false,targets=[]}={}){
+  const independentInstructions=independentPdfCheck ? `
+============================================
+VERIFICACIÓN REGLAMENTARIA INDEPENDIENTE
+============================================
+Esta muestra consta de preguntas nuevas de legislación SIN Anki.
+No aceptes sourceEvidence como demostración suficiente de veracidad: fue
+redactado por el generador y puede contener errores u omisiones.
+Busca en File Search del TEMARIO ORIGINAL el pasaje concreto que determina la
+verdad o falsedad de CADA una de las cuatro alternativas; incluye condiciones
+que pudieran convertir en válidas varias respuestas.
+
+OBJETIVOS CURRICULARES (solo para localizar fragmentos; no son autoridad):
+${JSON.stringify(targets.map((target,index)=>({index,topic:target.topic_name,section:target.section,concept:target.concept})))}
+
+Para cada pregunta, devuelve optionAssessment con exactamente 4 etiquetas,
+en orden A, B, C, D. Usa:
+- ANSWER: satisface inequívocamente lo solicitado en el enunciado;
+- DISTRACTOR: no satisface lo solicitado según la norma recuperada;
+- UNVERIFIABLE: no puede justificarse o descartarse con datos recuperados.
+
+Una afirmación VERDADERA pero incompleta NO pasa a ser falsa por omitir
+otros requisitos: interpreta la afirmación que realmente dice.
+
+La respuesta es válida solo si hay EXACTAMENTE UNA etiqueta ANSWER,
+coincide con correctIndex y las otras TRES son DISTRACTOR.
+Si hay dos ANSWER, aunque correctIndex apunte a una de ellas, rechaza la
+pregunta y explica cuáles son los dos datos simultáneamente verdaderos.
+Si algún punto es UNVERIFIABLE, rechaza. Si el documento PDF contradice
+sourceEvidence, prevalece SIEMPRE el PDF.
+En CALCULO_FORMULACION, comprueba algebraicamente equivalencia, paréntesis,
+fracciones, unidades y orden de las operaciones de cada opción.
+` : '';
+  const validationPrompt= independentInstructions + `
 Eres un validador estricto de preguntas de oposición.
 
 FUENTE DE VERDAD
 
-- La ÚNICA fuente factual disponible durante esta validación es el campo sourceEvidence de cada pregunta.
+${independentPdfCheck ? `- La única fuente factual autoritativa es el PDF original recuperado nuevamente mediante File Search.
+- sourceEvidence es una pista redactada por el generador y debe verificarse, no asumirse.
+- Cualquier afirmación no contrastable con el PDF debe rechazarse.` : `- La ÚNICA fuente factual disponible durante esta validación es el campo sourceEvidence de cada pregunta.
 - sourceEvidence procede del temario recuperado mediante File Search durante la generación.
 - Valida cada pregunta exclusivamente contra su propio sourceEvidence.
+- Si sourceEvidence no permite demostrar una afirmación esencial de la pregunta, no la des por válida.`}
 - No uses conocimiento general, memoria propia ni información externa.
 - No uses los exámenes oficiales como fuente factual.
-- Si sourceEvidence no permite demostrar una afirmación esencial de la pregunta, no la des por válida.
-- No presupongas como cierto ningún dato que no esté respaldado por sourceEvidence.
+- No presupongas como cierto ningún dato que no esté respaldado por la fuente factual que corresponde a este modo.
 
 TAREA
 
@@ -14762,6 +14708,16 @@ ${JSON.stringify(questions)}
 `;
 
 const runtimeValidationSchema = structuredClone(validationSchema);
+if(independentPdfCheck){
+  const item=runtimeValidationSchema.properties.results.items;
+  item.properties.optionAssessment={
+    type:"array",
+    items:{type:"string",enum:["ANSWER","DISTRACTOR","UNVERIFIABLE"]},
+    minItems:4,
+    maxItems:4
+  };
+  item.required=[...item.required,"optionAssessment"];
+}
 
 runtimeValidationSchema.properties.results.minItems = questions.length;
 runtimeValidationSchema.properties.results.maxItems = questions.length;
@@ -14769,6 +14725,7 @@ runtimeValidationSchema.properties.results.maxItems = questions.length;
     model:"gemini-3.5-flash-lite",
     contents:validationPrompt,
     config:{
+      ...(independentPdfCheck ? {tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}]} : {}),
       responseMimeType:"application/json",
       responseJsonSchema:runtimeValidationSchema
     }
@@ -14803,6 +14760,18 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
     );
   }
 
+  if(independentPdfCheck){
+    const flags=Array.isArray(result.optionAssessment)
+      ? result.optionAssessment : [];
+    if(flags.length!==4 || flags.some(flag=>!['ANSWER','DISTRACTOR'].includes(flag)) ||
+      flags.filter(flag=>flag==='ANSWER').length!==1 ||
+      flags[Number(question.correctIndex)]!=='ANSWER'){
+      result.valid=false;
+      result.issues=[...(result.issues||[]),
+        'Validación independiente del PDF: no existe respuesta única comprobada. '+
+        'Evaluación A-D: '+JSON.stringify(flags)];
+    }
+  }
   const graphicInvalid =
     question?.questionFamily === "GRAFICA" &&
     result.graphicValid !== true;
@@ -16302,14 +16271,18 @@ finalQuestions = [...parsed.questions];
   }
 }
 
+const independentPdfCheck = quota84===null && generationTargets.length>0 &&
+  generationTargets.every(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion');
 let factualValidation =
-  await validateGeneratedQuestions(ai, finalQuestions);
+  await validateGeneratedQuestions(ai, finalQuestions,
+    {independentPdfCheck,targets:generationTargets});
 
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
 
   const legislationIssue =
+    generatedMathNotationIssue(question) ||
     legislationQuestionIssue(
       target,
       question
@@ -16446,7 +16419,9 @@ for(
   const replacementValidation =
     await validateGeneratedQuestions(
       ai,
-      regenerated.questions
+      regenerated.questions,
+      {independentPdfCheck,
+       targets:invalidQuestions.map(result=>generationTargets[result.index])}
     );
 
   const stillInvalid = [];
@@ -16458,6 +16433,7 @@ for(
       generationTargets[originalIndex];
 
     const legislationIssue =
+      generatedMathNotationIssue(regenerated.questions[i]) ||
       legislationQuestionIssue(
         targetForValidation,
         regenerated.questions[i]
