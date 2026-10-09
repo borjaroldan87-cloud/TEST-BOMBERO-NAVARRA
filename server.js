@@ -14435,36 +14435,35 @@ sourceEvidence, prevalece SIEMPRE el PDF.
 En CALCULO_FORMULACION, comprueba algebraicamente equivalencia, paréntesis,
 fracciones, unidades y orden de las operaciones de cada opción.
 
-AUDITORÍA OBLIGATORIA DE DIFICULTAD (competitivenessAudit):
+AUDITORÍA OBLIGATORIA DE DIFICULTAD (usar los CAMPOS YA EXISTENTES):
 Es un dictamen DISTINTO de la verdad factual. Evalúa la pregunta como si
-fueras un opositor experimentado, mirando solamente enunciado y cuatro
-opciones, y usando el PDF para saber si cada diferencia es un matiz real.
+fueras un opositor experimentado, mirando enunciado y las cuatro opciones,
+y contrastando con el PDF si cada diferencia es realmente reglamentaria.
 NO concedas distractorsValid=true por el mero hecho de tener respuesta unica.
 
-- answerStandsOut=true si la opcion marcada es detectable por su forma:
-  longitud muy distinta, tecnicismo extraño, afirmacion extrema gratuita,
-  cambio de eje conceptual o falsedad ridicula frente a tres opciones serias.
-- Para cada una de las otras TRES opciones proporciona un dictamen
-  competitive y explica el MOTIVO CONCRETO en reason. Devuelve SUS INDICES
-  ORIGINALES (0-3) SIN incluir correctIndex. Nada de juicios agrupados.
-- competitive=false si se descarta sin recordar la regla exacta, contiene
-  un procedimiento inverosimil, usa una magnitud incongruente, una
-  exageracion, un dato arbitrario o no es tecnicamente vecina.
-- competitive=true solo si un opositor formado NECESITA saber una cifra,
-  excepcion, condicion, limite, correspondencia, definicion o procedimiento
-  exacto para eliminar la opcion.
-- En INCORRECTA, correctIndex es la afirmacion FALSA: es especialmente
-  importante que NO destaque por usar absolutos o una consecuencia grotesca.
-  Las otras tres afirmaciones verdaderas pueden ser incompletas; no las
-  penalices por omision si siguen siendo ciertas.
-- En CALCULO_FORMULACION, rechaza alternativas algebraicamente equivalentes
-  entre si o absurdas por unidades. En NUMERICA, compara datos proximos de
-  la MISMA magnitud, nunca otras unidades absurdas.
-- Una afirmacion verdadera y completa puede ser larga porque el reglamento
-  lo exige: longitud NO es motivo automatico para descartar.
-- Si una pregunta es factualmente valida pero su opcion elegida destaca o
-  ALGUNA de las tres opciones no resulta competitiva, marca
-  distractorsValid=false, con motivos especificos para regeneracion.
+- Revisa por separado las TRES opciones que no son correctIndex: cada una
+  debe exigir conocer un dato, cifra, excepcion, condicion, limite,
+  categoria o procedimiento preciso para descartarla.
+- Si UNA de ellas se elimina por sentido comun, cambio de tema, magnitud
+  inverosimil, exageracion, absoluto no sustentado o detalle arbitrario,
+  devuelve distractorsValid=false e incluye en distractorIssues un motivo
+  concreto con la letra de esa opcion (A/B/C/D).
+- Revisa por separado si la opcion que corresponde a correctIndex destaca
+  artificialmente por redaccion, longitud, tono, detalle o inverosimilitud.
+  Si destaca, devuelve distractorsValid=false e incluye el motivo en
+  distractorIssues.
+- En preguntas INCORRECTA, correctIndex es la afirmacion FALSA: evita que
+  sea una falsedad ridicula. Las otras tres afirmaciones verdaderas pueden
+  ser incompletas sin dejar de ser verdaderas.
+- En CALCULO_FORMULACION, rechaza equivalencias algebraicas entre opciones
+  y magnitudes dimensionalmente absurdas. En NUMERICA compara magnitudes
+  homogeneas con valores cercanos y unidades coherentes.
+- Un requisito autenticamente absoluto o una opcion larga y exacta NO es
+  automaticamente invalido. Justifica todo defecto en la evidencia del PDF.
+- Si los tres distractores son competitivos Y la respuesta no destaca por
+  forma, marca distractorsValid=true y distractorIssues=[].
+- No añadas campos nuevos al JSON: usa distractorsValid y distractorIssues,
+  ambos definidos en el esquema de respuesta habitual del validador.
 
 EJEMPLOS GENERALES DE DESCARTE SIN MEMORIZAR (no son datos del temario):
   - Un requisito reglamentario frente a 'exencion automatica universal'.
@@ -14781,30 +14780,10 @@ if(independentPdfCheck){
     minItems:4,
     maxItems:4
   };
-  // Solo para los tests de Legislacion 100% nuevos: no cambia Anki, Geografia
-  // ni ningun otro schema. La misma validacion factual emite un juicio
-  // individual de competitividad, sin una peticion externa adicional.
-  item.properties.competitivenessAudit={
-    type:"object",
-    properties:{
-      answerStandsOut:{type:"boolean"},
-      standoutReason:{type:"string"},
-      distractors:{
-        type:"array",minItems:3,maxItems:3,
-        items:{
-          type:"object",
-          properties:{
-            optionIndex:{type:"integer",minimum:0,maximum:3},
-            competitive:{type:"boolean"},
-            reason:{type:"string"}
-          },
-          required:["optionIndex","competitive","reason"]
-        }
-      }
-    },
-    required:["answerStandsOut","standoutReason","distractors"]
-  };
-  item.required=[...item.required,"optionAssessment","competitivenessAudit"];
+  // Mantener el esquema exacto que ya funcionaba en SERVER 87 con File Search.
+  // La dificultad se informa mediante distractorsValid/distractorIssues,
+  // presentes en validationSchema. No se agregan objetos anidados nuevos.
+  item.required=[...item.required,"optionAssessment"];
 }
 
 runtimeValidationSchema.properties.results.minItems = questions.length;
@@ -14860,34 +14839,11 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
         'Evaluación A-D: '+JSON.stringify(flags)];
     }
 
-    // Auditoria por alternativa: imposible aceptar distractorsValid:true
-    // si algun distractor es descartable sin recordar el PDF. El auditor
-    // extra del codigo antiguo no se invoca: sus anclajes literales
-    // y similitud lexica causaban falsos rechazos de sinonimos tecnicos.
-    const audit=result.competitivenessAudit;
-    const others=[0,1,2,3].filter(n=>n!==Number(question.correctIndex));
-    const list=Array.isArray(audit?.distractors)?audit.distractors:[];
-    const indexes=list.map(a=>Number(a.optionIndex)).sort((a,b)=>a-b);
-    const shapeOk=list.length===3 &&
-      JSON.stringify(indexes)===JSON.stringify(others);
-    const problems=[];
-    if(!shapeOk){
-      problems.push('La auditoría de dificultad no evaluó exactamente las tres alternativas restantes.');
-    }else{
-      for(const item of list){
-        if(item.competitive!==true){
-          problems.push(`Opción ${String.fromCharCode(65+Number(item.optionIndex))}: ${String(item.reason||'no es competitiva').slice(0,350)}`);
-        }
-      }
-    }
-    if(audit?.answerStandsOut!==false){
-      problems.push('La respuesta destacada se identifica por redacción/tono antes de conocer la norma: '+String(audit?.standoutReason||'sin justificación').slice(0,350));
-    }
-    if(problems.length){
-      result.valid=false;
-      result.distractorsValid=false;
-      result.distractorIssues=[...(result.distractorIssues||[]),...problems];
-    }
+    // La dificultad se verifica con los campos de validacion ya soportados.
+    // No se introduce un nuevo objeto anidado en responseJsonSchema:
+    // los requisitos de competitividad se encuentran en el prompt y en
+    // distractorsValid/distractorIssues, con los reintentos habituales.
+
   }
   const graphicInvalid =
     question?.questionFamily === "GRAFICA" &&
