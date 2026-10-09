@@ -8443,13 +8443,14 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     if(isNew(picked))selectedNew++;
     return true;
   }
-  // Nunca sacrificar variedad por Anki: la cuota se persigue con enlaces nuevos.
-  const requestedAnki=Math.round(count*0.60);
+  // Seleccion preliminar: 80% objetivo Anki. La cuota obligatoria y la
+  // validacion del enlace se aplican finalmente en applyLegislationAnkiQuota84.
+  const requestedAnki=Math.ceil(count*0.80);
   const requestedNew=(strategy==='simulation')?0:Math.ceil(count*0.50);
   const actualFreshAnki=candidates.filter(c=>freshAnki(c)&&!recent(c)).length;
   const ankiGoal=Math.min(requestedAnki,actualFreshAnki);
-  // En ausencia de intersección nueva/Anki, 60 % Anki y 50 % nuevo
-  // son incompatibles; se da prioridad al 60 % Anki sin fingir ambos.
+  // Si no coincide con objetivos no trabajados, la prioridad Anki se comprueba
+  // posteriormente contra todo el banco validado del tema.
   const overlapCount=candidates.filter(c=>freshAnki(c)&&isNew(c)&&!recent(c)).length;
   const newGoal=Math.min(requestedNew,count-ankiGoal+overlapCount);
   function exhaust(predicate,goalFn){
@@ -15618,6 +15619,191 @@ app.post("/api/finish-test", async(req,res)=>{
     client.release();
   }
 });
+// SERVER_84: cuota Anki por fuente real, independiente de la seleccion inicial
+// de coverage_items. Solo se utilizan tarjetas validadas y enlazadas al dato
+// curricular correspondiente. Nunca se sustituye la cuota con generadas nuevas
+// sin informar al usuario de la causa.
+async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds){
+  const legalIndexes=originalTargets.map((item,index)=>
+    String(item?.topic_block||'').trim().toLowerCase()==='legislacion' ? index : -1
+  ).filter(index=>index>=0);
+  if(!legalIndexes.length){return null;}
+
+  const relevantOrders=[...new Set(legalIndexes.map(index=>
+    ankiLegislationSourceOrderForTopicName(originalTargets[index].topic_name)
+  ).filter(Number.isInteger))];
+  // Los temas sin baraja, por ejemplo las ITC o el CTE, siguen con generacion PDF.
+  if(!relevantOrders.length){return null;}
+
+  const inventory=await db.query(`
+    SELECT COUNT(*)::int AS imported,
+           COUNT(*) FILTER (WHERE validation_status='validated')::int AS validated,
+           COUNT(*) FILTER (WHERE validation_status='validated' AND direct_use_eligible=TRUE
+             AND validated_coverage_item_id IS NOT NULL)::int AS linked
+    FROM legislation_anki_questions
+    WHERE topic_order=ANY($1::int[])
+  `,[relevantOrders]);
+  const status=inventory.rows[0]||{};
+  if(!Number(status.imported)){
+    console.log('LEGISLACION ANKI 84:',JSON.stringify({status:'sin baraja importada',orders:relevantOrders}));
+    return null;
+  }
+  const importedByOrder=await db.query(`
+    SELECT topic_order,COUNT(*)::int AS total
+    FROM legislation_anki_questions
+    WHERE topic_order=ANY($1::int[])
+    GROUP BY topic_order
+  `,[relevantOrders]);
+  const knownOrders=new Set(importedByOrder.rows.filter(row=>Number(row.total)>0)
+    .map(row=>Number(row.topic_order)));
+  const ankiIndexes=legalIndexes.filter(index=>
+    knownOrders.has(ankiLegislationSourceOrderForTopicName(originalTargets[index].topic_name))
+  );
+  if(!ankiIndexes.length){return null;}
+
+  const required=Math.ceil(ankiIndexes.length*0.80);
+  const topicIds=[...new Set(ankiIndexes.map(index=>Number(originalTargets[index].topic_id)))];
+  // Reparto proporcional: la cuota no debe apropiarse de plazas de otro tema.
+  const groups=new Map();
+  for(const index of ankiIndexes){
+    const topicId=Number(originalTargets[index].topic_id);
+    if(!groups.has(topicId)){groups.set(topicId,[]);}
+    groups.get(topicId).push(index);
+  }
+  const quotas=new Map([...groups].map(([id,indices])=>[id,Math.floor(indices.length*0.8)]));
+  const remainder=[...groups].map(([id,indices])=>({
+    id,frac:indices.length*0.8-Math.floor(indices.length*0.8)
+  })).sort((a,b)=>b.frac-a.frac||a.id-b.id);
+  const outstanding=required-[...quotas.values()].reduce((a,b)=>a+b,0);
+  for(let i=0;i<outstanding;i++){
+    quotas.set(remainder[i].id,quotas.get(remainder[i].id)+1);
+  }
+  const counts=new Map();
+  const ankiSlots=ankiIndexes.filter(index=>{
+    const topicId=Number(originalTargets[index].topic_id),used=counts.get(topicId)||0;
+    if(used>=(quotas.get(topicId)||0)){return false;}
+    counts.set(topicId,used+1);return true;
+  });
+  const result=await db.query(`
+    SELECT ci.*,t.name AS topic_name,t.block AS topic_block,
+           a.id AS anki_id,a.anki_note_id,a.topic_order,
+           a.stem AS anki_stem,a.options AS anki_options,
+           a.correct_index AS anki_correct_index,a.correct_answer AS anki_correct_answer,
+           a.validation_evidence AS anki_validation_evidence,
+           a.validated_coverage_item_id,a.last_used_at AS anki_last_used_at,
+           a.times_used AS anki_times_used
+    FROM legislation_anki_questions a
+    JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    WHERE a.validation_status='validated' AND a.direct_use_eligible=TRUE
+      AND ci.exam_relevant=TRUE AND ci.topic_id=ANY($1::int[])
+      AND a.topic_order=ANY($2::int[])
+    ORDER BY a.times_used ASC,a.last_used_at ASC NULLS FIRST,ci.times_asked ASC,a.id ASC
+  `,[topicIds,relevantOrders]);
+  const norm=value=>normalizeLegislationMatchText(value);
+  const minAge=Date.now()-12*60*60*1000;
+  const eligible=[];
+  let rejectedRecent=0,rejectedLink=0,rejectedContent=0;
+  for(const row of result.rows){
+    if(row.anki_last_used_at && new Date(row.anki_last_used_at).getTime()>=minAge){rejectedRecent++;continue;}
+    const anki={
+      id:Number(row.anki_id),anki_note_id:Number(row.anki_note_id),
+      topic_order:Number(row.topic_order),stem:row.anki_stem,
+      options:row.anki_options,correct_index:Number(row.anki_correct_index),
+      correct_answer:row.anki_correct_answer,
+      validation_evidence:row.anki_validation_evidence,
+      validated_coverage_item_id:row.validated_coverage_item_id,
+      anki_times_used:Number(row.anki_times_used)||0
+    };
+    const target={...row,questionFamily:inferLegislationAnkiFamily(anki.stem)};
+    if(anki.topic_order!==ankiLegislationSourceOrderForTopicName(target.topic_name) ||
+      !Array.isArray(anki.options)||![3,4].includes(anki.options.length)||
+      !Number.isInteger(anki.correct_index)||anki.correct_index<0 ||
+      anki.correct_index>=anki.options.length||
+      legislationKnownAmbiguityIssue(anki)||legislationConflictingArticles(target,anki)){
+      rejectedContent++;continue;
+    }
+    const exact=legislationExactCoverageLink(target,anki);
+    // Un enlace persistente ya procede de una validacion semantica controlada;
+    // el segundo criterio solo lo acepta si tambien existe evidencia curricular
+    // escrita y un solapamiento suficiente. Nunca inventa un enlace nuevo.
+    const supportedLink=Number(row.validated_coverage_item_id)===Number(row.id) &&
+      String(anki.validation_evidence||'').trim().length>=20 &&
+      legislationLexicalScore(
+        [target.concept,target.source_evidence].filter(Boolean).join(' '),
+        [anki.stem,anki.correct_answer,anki.validation_evidence].filter(Boolean).join(' ')
+      )>=0.20;
+    if(!exact&&!supportedLink){rejectedLink++;continue;}
+    eligible.push({target,anki,exact,nucleus:legislationSectionKey(target)||`${target.topic_id}:${norm(target.section)}`,
+      stemKey:norm(anki.stem)});
+  }
+  const chosen=[],usedCoverage=new Set(),usedStems=new Set(),nuclei=new Map(),topics=new Map();
+  for(let index=0;index<required;index++){
+    const desiredTopic=Number(originalTargets[ankiSlots[index]].topic_id);
+    const options=eligible.filter(item=>
+      Number(item.target.topic_id)===desiredTopic &&
+      !usedCoverage.has(Number(item.target.id)) && !usedStems.has(item.stemKey)
+    );
+    if(!options.length)break;
+    options.sort((a,b)=>{
+      const score=x=>(nuclei.get(x.nucleus)||0)*500+(topics.get(Number(x.target.topic_id))||0)*30+
+        Number(x.anki.anki_times_used||0)*12+Number(x.target.times_asked||0)*4;
+      return score(a)-score(b)||Number(a.anki.id)-Number(b.anki.id);
+    });
+    const item=options[0];
+    chosen.push(item);usedCoverage.add(Number(item.target.id));usedStems.add(item.stemKey);
+    nuclei.set(item.nucleus,(nuclei.get(item.nucleus)||0)+1);
+    topics.set(Number(item.target.topic_id),(topics.get(Number(item.target.topic_id))||0)+1);
+  }
+  console.log('LEGISLACION CUOTA ANKI 84:',JSON.stringify({
+    requested:required,legislationSlots:legalIndexes.length,ankiScopeSlots:ankiIndexes.length,
+    imported:Number(status.imported),validated:Number(status.validated),
+    linked:Number(status.linked),linksInScope:result.rows.length,
+    eligible:eligible.length,rejectedRecent,rejectedLink,rejectedContent,
+    chosen:chosen.length,selectedAnkiIds:chosen.map(x=>x.anki.id),
+    distinctNuclei:nuclei.size
+  }));
+  if(chosen.length!==required){
+    throw new Error(`CUOTA ANKI: se requieren ${required} tarjetas Anki para ${ankiIndexes.length} plazas con baraja importada, pero solo hay ${chosen.length} utilizables, distintas y no recientes. Importadas: ${Number(status.imported)}; validadas: ${Number(status.validated)}; enlazadas: ${Number(status.linked)}. No se han sustituido silenciosamente por preguntas generadas. Hay que validar/enlazar mas tarjetas o ampliar el banco.`);
+  }
+
+  const targets=[...originalTargets];
+  const direct=new Map();
+  const reserved=new Set(originalTargets.filter((_,index)=>!legalIndexes.includes(index)).map(x=>Number(x.id)));
+  for(let i=0;i<required;i++){
+    const slot=ankiSlots[i],entry=chosen[i];
+    if(reserved.has(Number(entry.target.id))){
+      throw new Error('CUOTA ANKI: conocimiento duplicado con otro bloque.');
+    }
+    targets[slot]=entry.target;
+    const question=buildDirectAnkiQuestion(entry.anki,entry.target);
+    // La persistencia comprueba nuevamente el enlace existente, el ID y el estado.
+    question.ankiSemanticLinkApproved=!entry.exact;
+    direct.set(slot,question);
+    reserved.add(Number(entry.target.id));
+  }
+  // Mantener preguntas nuevas para los huecos restantes sin repetir conocimientos.
+  const generationSlots=legalIndexes.filter(index=>!direct.has(index));
+  let alternatives=originalTargets.filter((item,index)=>
+    legalIndexes.includes(index)&&!reserved.has(Number(item.id))
+  );
+  if(alternatives.length<generationSlots.length){
+    alternatives=alternatives.concat((await getAdaptiveCoverageCandidates(
+      Math.max(120,generationSlots.length*70),allowedTopicIds,'adaptive'
+    )).filter(item=>legalIndexes.some(index=>Number(originalTargets[index].topic_id)===Number(item.topic_id))));
+  }
+  for(const slot of generationSlots){
+    const slotTopic=Number(originalTargets[slot].topic_id);
+    const next=alternatives.find(item=>
+      Number(item.topic_id)===slotTopic && !reserved.has(Number(item.id))&&
+      !chosen.some(entry=>entry.nucleus===(legislationSectionKey(item)||`${item.topic_id}:${norm(item.section)}`))
+    ) || alternatives.find(item=>Number(item.topic_id)===slotTopic && !reserved.has(Number(item.id)));
+    if(!next){throw new Error('CUOTA ANKI: faltan conocimientos distintos para completar las preguntas nuevas.');}
+    targets[slot]=next;reserved.add(Number(next.id));
+  }
+  return {targets,direct,required};
+}
+
 app.post("/api/generate", async(req,res)=>{
   try{
     if(!STORE) throw new Error("Primero indexa el PDF.");
@@ -15654,7 +15840,7 @@ const examMode=
 const ai=aiClient();
 const allowedTopicIds =
   await resolveGenerationTopicScope(req.body);
-    const targets=
+    let targets=
   testType==="failed"
     ? await getFailedCoverageTargets(
         count,
@@ -15676,7 +15862,11 @@ const allowedTopicIds =
   );
 }
 
-   const generationCount = targets.length; 
+   const quota84=testType==='normal'
+     ? await applyLegislationAnkiQuota84(targets,allowedTopicIds)
+     : null;
+   if(quota84){targets=quota84.targets;}
+   const generationCount = targets.length;
     for(const target of targets){
   target.adaptiveDifficulty =
   getAdaptiveDifficulty(target);
@@ -15732,9 +15922,9 @@ console.log(
   targets.length
 );
 
-const directAnkiQuestions=new Map();
+const directAnkiQuestions=new Map(quota84?.direct||[]);
 
-if(testType === "normal"){
+if(testType === "normal" && !quota84){
   const unresolvedIndexes=[];
   const unresolvedTargets=[];
 
@@ -15754,7 +15944,7 @@ if(testType === "normal"){
     await getDirectLegislationAnkiQuestionsForTargets(
       ai,
       unresolvedTargets,
-      Math.round(legislationSlots*0.60)
+      Math.ceil(legislationSlots*0.80)
     );
 
   for(const [localIndex,question] of directLocal){
@@ -15770,6 +15960,9 @@ if(testType === "normal"){
   }
 }
 
+if(quota84 && directAnkiQuestions.size!==quota84.required){
+  throw new Error(`CUOTA ANKI: se esperaban ${quota84.required} preguntas Anki exactas.`);
+}
 console.log(
   "ANKI DIRECTO:",
   directAnkiQuestions.size,
