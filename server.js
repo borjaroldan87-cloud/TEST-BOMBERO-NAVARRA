@@ -11380,6 +11380,12 @@ POLÍTICA ESPECÍFICA — LEGISLACIÓN
   formulaciones del tipo "De acuerdo con...", "Según el artículo..." o equivalentes.
 - Si la norma o artículo NO están respaldados por la evidencia recuperada, no los inventes.
 - Los distractores deben ser jurídicamente plausibles y cercanos al contenido preguntado.
+- Constitución: si se pregunta por un propósito del preámbulo, no ofrezcas dos
+  propósitos verdaderos en una pregunta de respuesta correcta única, ni cuatro
+  verdaderos cuando se solicite la incorrecta.
+- Constitución: el Rey es Jefe del Estado (art. 56), pero la función ejecutiva
+  corresponde al Gobierno (art. 97); no presentes al Rey como cabeza del poder
+  ejecutivo en una opción que marques como correcta.
 `;
   }
 
@@ -11561,7 +11567,12 @@ async function getLegislationAnkiStyleReference(targets){
     [sourceOrders]
   );
 
-  if(!result.rows.length){
+  // SERVER_80: tampoco enseñar al generador ejemplos Anki que incumplen
+  // los dos controles normativos; la base de datos permanece intacta.
+  const safeStyleRows=result.rows.filter(row =>
+    !legislationKnownAmbiguityIssue(row)
+  );
+  if(!safeStyleRows.length){
     return "";
   }
 
@@ -11584,7 +11595,7 @@ NO sustituyen al temario.
 La única fuente factual continúa siendo File Search sobre los PDF del temario.
 
 EJEMPLOS:
-${result.rows.map((row,index)=>`
+${safeStyleRows.map((row,index)=>`
 EJEMPLO ${index+1}
 Tema Anki: ${row.topic}
 Enunciado: ${row.stem}
@@ -12012,10 +12023,10 @@ OBJETIVOS PDF Y PREGUNTAS FDF:\n${JSON.stringify(payload)}`;
   return direct;
 }
 
-// SERVER_77B: control puntual del doble acierto del preambulo.
-// Los enunciados breves como 'Segun la Constitucion Espanola:' son validos:
-// el examen puede evaluar literalidad sin pedir CORRECTA/INCORRECTA.
-// No modifica el texto FDF ni contenido curricular.
+// SERVER_80: dos barreras factuales de Constitución (BOE, preámbulo y arts. 56 y 97).
+// Detectan solamente contradicciones incontrovertibles; no alteran PDF, Anki,
+// banco, historial ni la validez de preguntas legítimas con distractores falsos.
+// Los enunciados literales sin CORRECTA/INCORRECTA siguen siendo válidos.
 function legislationKnownAmbiguityIssue(question){
   const norm = value => String(value || "")
     .normalize("NFD")
@@ -12027,12 +12038,48 @@ function legislationKnownAmbiguityIssue(question){
   const options = Array.isArray(question?.options)
     ? question.options.map(norm)
     : [];
-  if(
-    /preambulo/.test(stem) &&
-    options.some(o => o.includes("garantizar la convivencia democratica")) &&
-    options.some(o => o.includes("establecer una sociedad democratica avanzada"))
-  ){
-    return "LEGISLACIÓN: se presentan simultáneamente dos propósitos verdaderos del preámbulo como alternativas.";
+  if(!options.length){return null;}
+  const asksIncorrect = /\b(?:incorrect[ao]s?|fals[ao]s?|errone[ao]s?)\b/.test(stem) ||
+    /\bno\s+(?:es|son|resulta|resultan|se\s+ajusta|corresponde|pertenece)\b/.test(stem);
+
+  // FALLO 1: todos estos seis objetivos están literalmente proclamados en
+  // el preámbulo. Preguntar cuál es la INCORRECTA entre cuatro de ellos
+  // produce cero soluciones; dos o más en una pregunta positiva producen
+  // varias soluciones. Comparar POR OPCIÓN, no por coincidencia de dos frases
+  // concretas, que dejaba escapar la pregunta observada en server 79.
+  if(/preambulo/.test(stem)){
+    const declared=[
+      /garantizar\s+(?:la\s+)?convivencia\s+democratica/,
+      /consolidar\s+(?:un\s+)?estado\s+de\s+derecho/,
+      /proteger\s+a\s+todos\s+los\s+espanoles/,
+      /promover\s+(?:el\s+)?progreso\s+de\s+la\s+cultura/,
+      /establecer\s+(?:una\s+)?sociedad\s+democratica\s+avanzada/,
+      /colaborar\s+en\s+el\s+fortalecimiento\s+de\s+unas\s+relaciones\s+pacificas/
+    ];
+    const explicitlyTrue = options.filter(option =>
+      declared.some(pattern => pattern.test(option))
+    ).length;
+    if(asksIncorrect && explicitlyTrue===options.length){
+      return "LEGISLACIÓN (preámbulo): todas las opciones son propósitos constitucionales verdaderos; no existe una incorrecta.";
+    }
+    if(!asksIncorrect && explicitlyTrue>=2){
+      return "LEGISLACIÓN (preámbulo): existen varias alternativas verdaderas para una pregunta de respuesta única.";
+    }
+  }
+
+  // FALLO 2: la Corona es Jefatura del Estado (art. 56 CE). El Gobierno
+  // ejerce la función ejecutiva (art. 97 CE). La expresión del material de
+  // academia «Rey, cabeza del poder ejecutivo» NO puede ser opción correcta
+  // en una pregunta afirmativa, aunque figure en el PDF fuente.
+  // Sí puede emplearse COMO DISTRACTOR en una pregunta correcta, o como la
+  // opción falsa elegida en una pregunta de tipo INCORRECTA.
+  const selectedIndex=Number(question?.correctIndex ?? question?.correct_index);
+  if(!asksIncorrect && Number.isInteger(selectedIndex) &&
+     selectedIndex>=0 && selectedIndex<options.length){
+    const selected=options[selectedIndex];
+    if(/\b(?:rey|monarca)(?:\s*,)?\s+(?:(?:como|es|sera|actua|ejerce)\s+)?(?:la\s+)?(?:cabeza|jefe|titular)\s+del?\s+poder\s+ejecutivo\b/.test(selected)){
+      return "LEGISLACIÓN (Corona): la opción marcada atribuye erróneamente al Rey la jefatura del poder ejecutivo (arts. 56 y 97 CE).";
+    }
   }
   return null;
 }
