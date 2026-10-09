@@ -8483,106 +8483,7 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
   return {selected,metrics};
 }
 
-async function getCoverageTargetsForGeneration(
-  count,
-  ai,
-  allowedTopicIds = null,
-  selectionStrategy = "adaptive"
-){
-  /*
-    SELECCIÓN DE OBJETIVOS
-
-    - Las familias no gráficas conservan el funcionamiento normal.
-    - La plaza GRAFICA se resuelve buscando una combinación REAL:
-        coverage_item + graphic_asset compatible.
-    - Nunca se utiliza un asset de otro tema.
-    - Nunca se reutiliza un asset agotado si quedan alternativas.
-    - Si no existe ninguna combinación gráfica válida:
-        CALCULO_FORMULACION -> 2024_NUMERICA -> 2024_TEXTO.
-  */
-
-// LEGISLACIÓN (un único tema): ver suficientes páginas y núcleos.
-// El orden de prioridad adaptativa se conserva; la consulta sigue siendo
-// PostgreSQL local, sin llamadas adicionales a Gemini.
-const nucleusCandidateLimit =
-  Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
-    ? Math.max(count * 100, 1400)
-    : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
-const adaptiveCandidates =
-  await getAdaptiveCoverageCandidates(
-    nucleusCandidateLimit,
-    allowedTopicIds,
-    selectionStrategy
-  );
-
-if(adaptiveCandidates.length < count){
-  throw new Error(
-    `No hay suficientes coverage_items disponibles para generar ${count} preguntas.`
-  );
-}
-
-/*
-SELECCIÓN ANTI-SOLAPAMIENTO
-
-Evita incluir en el mismo test conocimientos prácticamente
-idénticos, sin eliminar ni fusionar coverage_items de la BD.
-
-La prioridad adaptativa ya viene ordenada desde SQL.
-Por tanto recorremos los candidatos en ese mismo orden y
-conservamos siempre el candidato de mayor prioridad.
-*/
-const selectedAdaptive = [];
-
-/*
-Mientras exista contenido nuevo, garantizamos una plaza
-para avance de cobertura.
-
-No fijamos porcentajes rígidos:
-el resto del test continúa gobernado por la prioridad adaptativa.
-*/
-let newCandidate = null;
-
-if(selectionStrategy !== "simulation"){
-  newCandidate =
-    adaptiveCandidates.find(
-      candidate => Number(candidate.times_asked || 0) === 0
-    );
-
-  if(!newCandidate){
-    newCandidate =
-      await getNewCoverageCandidate(
-        allowedTopicIds
-      );
-  }
-}
-
-// SERVER_82: la primera plaza nueva de Legislación se elige DESPUÉS
-// de ordenar subíndices según el historial; no por el menor id de BD.
-const legislationScope82 = adaptiveCandidates.length > 0 &&
-  adaptiveCandidates.every(item => String(item?.topic_block || '').trim().toLowerCase() === 'legislacion');
-if(newCandidate && !legislationScope82){
-  selectedAdaptive.push(newCandidate);
-}
-const deferredGeographyCandidates = [];
-const usedGeographyMunicipalities = new Set();
-
-/*
-DIVERSIDAD INTERNA — LEGISLACIÓN
-
-En tests de un mismo tema legal evitamos concentrar varias preguntas
-seguidas en la misma página/fragmento del temario mientras existan
-objetivos equivalentes de otras páginas.
-
-No elimina coverage_items ni altera prioridades SRS: únicamente difiere
-los candidatos de una página ya representada hasta completar primero
-una muestra más amplia del tema.
-*/
-const deferredLegislationPageCandidates = [];
-const deferredLegislationSemanticCandidates = [];
-const usedLegislationPages = new Set();
-const usedLegislationSections = new Set();
-const usedLegislationSemanticTexts = [];
-
+// SERVER_85: helpers compartidos entre seleccion de cobertura y cuota Anki 80 %.
 const legislationDiversityNormalize = value =>
   String(value || "")
     .normalize("NFD")
@@ -8591,33 +8492,6 @@ const legislationDiversityNormalize = value =>
     .replace(/[^a-z0-9]+/g," ")
     .trim()
     .replace(/\s+/g," ");
-
-const LEGISLATION_DIVERSITY_STOPWORDS = new Set([
-  "segun","conforme","acuerdo","articulo","articulos","ley","foral",
-  "real","decreto","organica","constitucion","espanola","navarra",
-  "sera","seran","puede","pueden","debe","deben","cual","cuales",
-  "siguiente","siguientes","respuesta","respuestas","correcta","incorrecta",
-  "verdadera","falsa","entre","sobre","para","como","cuando","donde",
-  "desde","hasta","este","esta","estos","estas","aquel","aquella",
-  "del","las","los","una","uno","unos","unas","que","por","con",
-  "sin","sus","son","sea","sean","tiene","tienen","corresponde"
-]);
-
-const legislationDiversityTokens = candidate => {
-  const text = legislationDiversityNormalize([
-    candidate?.section,
-    candidate?.concept,
-    candidate?.source_evidence
-  ].filter(Boolean).join(" "));
-
-  return new Set(
-    text.split(" ").filter(token =>
-      token &&
-      (token.length >= 4 || /^\d+$/.test(token)) &&
-      !LEGISLATION_DIVERSITY_STOPWORDS.has(token)
-    )
-  );
-};
 
 const legislationSectionKey = candidate => {
   if(
@@ -8765,6 +8639,134 @@ const legislationSectionKey = candidate => {
   }
   if(nucleus){ return `${topicId}:nucleus:${nucleus}`; }
   return section ? `${topicId}:section:${section}` : null;
+};
+
+
+async function getCoverageTargetsForGeneration(
+  count,
+  ai,
+  allowedTopicIds = null,
+  selectionStrategy = "adaptive"
+){
+  /*
+    SELECCIÓN DE OBJETIVOS
+
+    - Las familias no gráficas conservan el funcionamiento normal.
+    - La plaza GRAFICA se resuelve buscando una combinación REAL:
+        coverage_item + graphic_asset compatible.
+    - Nunca se utiliza un asset de otro tema.
+    - Nunca se reutiliza un asset agotado si quedan alternativas.
+    - Si no existe ninguna combinación gráfica válida:
+        CALCULO_FORMULACION -> 2024_NUMERICA -> 2024_TEXTO.
+  */
+
+// LEGISLACIÓN (un único tema): ver suficientes páginas y núcleos.
+// El orden de prioridad adaptativa se conserva; la consulta sigue siendo
+// PostgreSQL local, sin llamadas adicionales a Gemini.
+const nucleusCandidateLimit =
+  Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
+    ? Math.max(count * 100, 1400)
+    : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
+const adaptiveCandidates =
+  await getAdaptiveCoverageCandidates(
+    nucleusCandidateLimit,
+    allowedTopicIds,
+    selectionStrategy
+  );
+
+if(adaptiveCandidates.length < count){
+  throw new Error(
+    `No hay suficientes coverage_items disponibles para generar ${count} preguntas.`
+  );
+}
+
+/*
+SELECCIÓN ANTI-SOLAPAMIENTO
+
+Evita incluir en el mismo test conocimientos prácticamente
+idénticos, sin eliminar ni fusionar coverage_items de la BD.
+
+La prioridad adaptativa ya viene ordenada desde SQL.
+Por tanto recorremos los candidatos en ese mismo orden y
+conservamos siempre el candidato de mayor prioridad.
+*/
+const selectedAdaptive = [];
+
+/*
+Mientras exista contenido nuevo, garantizamos una plaza
+para avance de cobertura.
+
+No fijamos porcentajes rígidos:
+el resto del test continúa gobernado por la prioridad adaptativa.
+*/
+let newCandidate = null;
+
+if(selectionStrategy !== "simulation"){
+  newCandidate =
+    adaptiveCandidates.find(
+      candidate => Number(candidate.times_asked || 0) === 0
+    );
+
+  if(!newCandidate){
+    newCandidate =
+      await getNewCoverageCandidate(
+        allowedTopicIds
+      );
+  }
+}
+
+// SERVER_82: la primera plaza nueva de Legislación se elige DESPUÉS
+// de ordenar subíndices según el historial; no por el menor id de BD.
+const legislationScope82 = adaptiveCandidates.length > 0 &&
+  adaptiveCandidates.every(item => String(item?.topic_block || '').trim().toLowerCase() === 'legislacion');
+if(newCandidate && !legislationScope82){
+  selectedAdaptive.push(newCandidate);
+}
+const deferredGeographyCandidates = [];
+const usedGeographyMunicipalities = new Set();
+
+/*
+DIVERSIDAD INTERNA — LEGISLACIÓN
+
+En tests de un mismo tema legal evitamos concentrar varias preguntas
+seguidas en la misma página/fragmento del temario mientras existan
+objetivos equivalentes de otras páginas.
+
+No elimina coverage_items ni altera prioridades SRS: únicamente difiere
+los candidatos de una página ya representada hasta completar primero
+una muestra más amplia del tema.
+*/
+const deferredLegislationPageCandidates = [];
+const deferredLegislationSemanticCandidates = [];
+const usedLegislationPages = new Set();
+const usedLegislationSections = new Set();
+const usedLegislationSemanticTexts = [];
+
+const LEGISLATION_DIVERSITY_STOPWORDS = new Set([
+  "segun","conforme","acuerdo","articulo","articulos","ley","foral",
+  "real","decreto","organica","constitucion","espanola","navarra",
+  "sera","seran","puede","pueden","debe","deben","cual","cuales",
+  "siguiente","siguientes","respuesta","respuestas","correcta","incorrecta",
+  "verdadera","falsa","entre","sobre","para","como","cuando","donde",
+  "desde","hasta","este","esta","estos","estas","aquel","aquella",
+  "del","las","los","una","uno","unos","unas","que","por","con",
+  "sin","sus","son","sea","sean","tiene","tienen","corresponde"
+]);
+
+const legislationDiversityTokens = candidate => {
+  const text = legislationDiversityNormalize([
+    candidate?.section,
+    candidate?.concept,
+    candidate?.source_evidence
+  ].filter(Boolean).join(" "));
+
+  return new Set(
+    text.split(" ").filter(token =>
+      token &&
+      (token.length >= 4 || /^\d+$/.test(token)) &&
+      !LEGISLATION_DIVERSITY_STOPWORDS.has(token)
+    )
+  );
 };
 
 const legislationSemanticOverlap = (a,b) => {
