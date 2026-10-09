@@ -12177,6 +12177,32 @@ function legislationQuestionIssue(target,question){
   return null;
 }
 
+// Filtro conservador de pistas manifiestas observado en tests reales de
+// Legislacion sin Anki. No analiza la veracidad de una opcion ni sustituye
+// la validacion independiente del PDF. Solo se invoca con independentPdfCheck.
+function hardLegislationDistractorIssue(question){
+  const normalized=value=>String(value||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const source=normalized(question?.sourceEvidence);
+  const opts=Array.isArray(question?.options)?question.options:[];
+  const patterns=[
+    /\btotalmente prohibid[oa]s?\b/,
+    /\ben cualquier circunstancia\b/,
+    /\bde forma estricta\s+unicamente\b/,
+    /\bsin restricciones de ningun tipo\b/,
+    /\bse corresponde estrictamente\b/
+  ];
+  for(const option of opts){
+    const text=normalized(option);
+    for(const pattern of patterns){
+      if(pattern.test(text) && !pattern.test(source)){
+        return 'LEGISLACION (DIFICULTAD): opcion con una exageracion o absoluto no apoyado literalmente por sourceEvidence; reformular con una diferencia reglamentaria proxima.';
+      }
+    }
+  }
+  return null;
+}
+
 function coverageTargetsPrompt(targets){
   if(!targets.length) return "";
 
@@ -14408,6 +14434,45 @@ Si algún punto es UNVERIFIABLE, rechaza. Si el documento PDF contradice
 sourceEvidence, prevalece SIEMPRE el PDF.
 En CALCULO_FORMULACION, comprueba algebraicamente equivalencia, paréntesis,
 fracciones, unidades y orden de las operaciones de cada opción.
+
+AUDITORÍA OBLIGATORIA DE DIFICULTAD (competitivenessAudit):
+Es un dictamen DISTINTO de la verdad factual. Evalúa la pregunta como si
+fueras un opositor experimentado, mirando solamente enunciado y cuatro
+opciones, y usando el PDF para saber si cada diferencia es un matiz real.
+NO concedas distractorsValid=true por el mero hecho de tener respuesta unica.
+
+- answerStandsOut=true si la opcion marcada es detectable por su forma:
+  longitud muy distinta, tecnicismo extraño, afirmacion extrema gratuita,
+  cambio de eje conceptual o falsedad ridicula frente a tres opciones serias.
+- Para cada una de las otras TRES opciones proporciona un dictamen
+  competitive y explica el MOTIVO CONCRETO en reason. Devuelve SUS INDICES
+  ORIGINALES (0-3) SIN incluir correctIndex. Nada de juicios agrupados.
+- competitive=false si se descarta sin recordar la regla exacta, contiene
+  un procedimiento inverosimil, usa una magnitud incongruente, una
+  exageracion, un dato arbitrario o no es tecnicamente vecina.
+- competitive=true solo si un opositor formado NECESITA saber una cifra,
+  excepcion, condicion, limite, correspondencia, definicion o procedimiento
+  exacto para eliminar la opcion.
+- En INCORRECTA, correctIndex es la afirmacion FALSA: es especialmente
+  importante que NO destaque por usar absolutos o una consecuencia grotesca.
+  Las otras tres afirmaciones verdaderas pueden ser incompletas; no las
+  penalices por omision si siguen siendo ciertas.
+- En CALCULO_FORMULACION, rechaza alternativas algebraicamente equivalentes
+  entre si o absurdas por unidades. En NUMERICA, compara datos proximos de
+  la MISMA magnitud, nunca otras unidades absurdas.
+- Una afirmacion verdadera y completa puede ser larga porque el reglamento
+  lo exige: longitud NO es motivo automatico para descartar.
+- Si una pregunta es factualmente valida pero su opcion elegida destaca o
+  ALGUNA de las tres opciones no resulta competitiva, marca
+  distractorsValid=false, con motivos especificos para regeneracion.
+
+EJEMPLOS GENERALES DE DESCARTE SIN MEMORIZAR (no son datos del temario):
+  - Un requisito reglamentario frente a 'exencion automatica universal'.
+  - Una clasificacion tecnica frente a 'cualquier caso queda prohibido'.
+  - Una formula dimensionalmente posible frente a tres expresiones imposibles.
+  - Un valor preciso frente a alternativas de magnitudes diferentes.
+NO equipares el uso de un absoluto con falsedad: puede ser texto literal
+correcto; valora si constituye una pista no sustentada.
 ` : '';
   const validationPrompt= independentInstructions + `
 Eres un validador estricto de preguntas de oposición.
@@ -14716,7 +14781,30 @@ if(independentPdfCheck){
     minItems:4,
     maxItems:4
   };
-  item.required=[...item.required,"optionAssessment"];
+  // Solo para los tests de Legislacion 100% nuevos: no cambia Anki, Geografia
+  // ni ningun otro schema. La misma validacion factual emite un juicio
+  // individual de competitividad, sin una peticion externa adicional.
+  item.properties.competitivenessAudit={
+    type:"object",
+    properties:{
+      answerStandsOut:{type:"boolean"},
+      standoutReason:{type:"string"},
+      distractors:{
+        type:"array",minItems:3,maxItems:3,
+        items:{
+          type:"object",
+          properties:{
+            optionIndex:{type:"integer",minimum:0,maximum:3},
+            competitive:{type:"boolean"},
+            reason:{type:"string"}
+          },
+          required:["optionIndex","competitive","reason"]
+        }
+      }
+    },
+    required:["answerStandsOut","standoutReason","distractors"]
+  };
+  item.required=[...item.required,"optionAssessment","competitivenessAudit"];
 }
 
 runtimeValidationSchema.properties.results.minItems = questions.length;
@@ -14770,6 +14858,35 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
       result.issues=[...(result.issues||[]),
         'Validación independiente del PDF: no existe respuesta única comprobada. '+
         'Evaluación A-D: '+JSON.stringify(flags)];
+    }
+
+    // Auditoria por alternativa: imposible aceptar distractorsValid:true
+    // si algun distractor es descartable sin recordar el PDF. El auditor
+    // extra del codigo antiguo no se invoca: sus anclajes literales
+    // y similitud lexica causaban falsos rechazos de sinonimos tecnicos.
+    const audit=result.competitivenessAudit;
+    const others=[0,1,2,3].filter(n=>n!==Number(question.correctIndex));
+    const list=Array.isArray(audit?.distractors)?audit.distractors:[];
+    const indexes=list.map(a=>Number(a.optionIndex)).sort((a,b)=>a-b);
+    const shapeOk=list.length===3 &&
+      JSON.stringify(indexes)===JSON.stringify(others);
+    const problems=[];
+    if(!shapeOk){
+      problems.push('La auditoría de dificultad no evaluó exactamente las tres alternativas restantes.');
+    }else{
+      for(const item of list){
+        if(item.competitive!==true){
+          problems.push(`Opción ${String.fromCharCode(65+Number(item.optionIndex))}: ${String(item.reason||'no es competitiva').slice(0,350)}`);
+        }
+      }
+    }
+    if(audit?.answerStandsOut!==false){
+      problems.push('La respuesta destacada se identifica por redacción/tono antes de conocer la norma: '+String(audit?.standoutReason||'sin justificación').slice(0,350));
+    }
+    if(problems.length){
+      result.valid=false;
+      result.distractorsValid=false;
+      result.distractorIssues=[...(result.distractorIssues||[]),...problems];
     }
   }
   const graphicInvalid =
@@ -14864,6 +14981,13 @@ REGLAS OBLIGATORIAS:
   No te limites a cambiar palabras: corrige exactamente el problema de
   plausibilidad, proximidad conceptual, simetría o descarte superficial
   indicado por el validador.
+${replacementTargets.length && replacementTargets.every(t =>
+  String(t?.topic_block || '').trim().toLowerCase() === 'legislacion'
+) ? `- En legislación técnica SIN Anki, no sustituyas una falsedad grosera por otra
+  igual de obvia: cambia UN detalle normativo cercano (cifra, excepción,
+  sujeto, condicion, orden o categoría) usando exclusivamente el PDF.
+  La opción elegida en preguntas INCORRECTA no debe destacar visualmente.
+  Una afirmación verdadera aunque incompleta sigue siendo verdadera.` : ''}
 
 ========================================
 REFERENCIA DINÁMICA DE ESTILO
@@ -16166,6 +16290,52 @@ en los exámenes oficiales 2024/2026 siempre que puedan construirse
     : ""
 );
 
+    // Exigencia adicional acotada a Legislacion de generacion completamente
+    // nueva. No se aplica a preguntas Anki, ni a temas mixtos o Geografia.
+    const hardLegislationOnly = quota84 === null &&
+      generationTargets.length > 0 &&
+      generationTargets.every(t =>
+        String(t.topic_block || "").trim().toLowerCase() === "legislacion"
+      );
+    if(hardLegislationOnly){
+      prompt += `
+
+==================================================
+CONTROL FINAL DE DIFICULTAD — LEGISLACION SIN ANKI
+==================================================
+
+La exactitud juridica es irrenunciable: todas las respuestas deben poder
+justificarse en el PDF factual. Pero una pregunta valida NO es necesariamente
+dificil. Aplica estas reglas ANTES de devolver el test:
+
+1. Cada pregunta evalua el objetivo de cobertura asignado, no otro apartado.
+   Si dos objetivos proximos requieren dos preguntas, interroga hechos o
+   condiciones DISTINTAS. No inventes datos para fabricar variedad.
+2. Disena primero la discriminacion: cifra proxima con misma unidad,
+   condicion/excepcion concreta, sujeto obligado, categoria vecina,
+   plazo proximo, relacion reglamentaria o formula casi identica.
+3. Para CORRECTA, escribe tres alternativas falsas pero creibles para
+   alguien que haya estudiado; para INCORRECTA, redacta tres afirmaciones
+   VERDADERAS (aunque alguna sea parcial) y una falsedad MUY SUTIL.
+4. Evita opciones de otro eje, afirmaciones absurdas, absolutos gratuitos
+   y pistas como 'sin restriccion alguna' o 'automaticamente exento'.
+   Los absolutos autenticos del reglamento SI deben conservarse.
+5. Si una alternativa se elimina por su tono, longitud muy diferente,
+   sentido comun o terminologia extravagante, REHAZ LAS CUATRO.
+6. En numeros compara magnitudes homogeneas con valores vecinos; en
+   formulas respeta dimensiones, notacion KaTeX y equivalencia algebraica.
+7. No basta con que cuatro opciones parezcan tecnicas: para cada una,
+   verifica el detalle normativo concreto que la hace verdadera o falsa.
+   No marques una verdad parcial como falsa por falta de otros requisitos.
+8. Si el PDF no permite elaborar tres distractores competitivos sin
+   ambiguedad, cambia el enfoque de la pregunta SOBRE EL MISMO OBJETIVO.
+   Nunca inventes hechos ni cambies el objetivo para elevar la dificultad.
+
+La calidad buscada es SUPERIOR a un test de memorizacion superficial,
+pero siempre con exactamente UNA respuesta correcta y fundamento literal.
+`;
+    }
+
     const response=await ai.models.generateContent({
       model:"gemini-3.5-flash-lite",
       contents:prompt,
@@ -16286,7 +16456,8 @@ for(let i = 0; i < factualValidation.length; i++){
     legislationQuestionIssue(
       target,
       question
-    );
+    ) ||
+    (independentPdfCheck ? hardLegislationDistractorIssue(question) : null);
 
   if(legislationIssue){
     factualValidation[i] = {
@@ -16437,7 +16608,8 @@ for(
       legislationQuestionIssue(
         targetForValidation,
         regenerated.questions[i]
-      );
+      ) ||
+      (independentPdfCheck ? hardLegislationDistractorIssue(regenerated.questions[i]) : null);
 
     if(legislationIssue){
       validationResult.valid = false;
