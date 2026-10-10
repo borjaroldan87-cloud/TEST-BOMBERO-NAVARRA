@@ -14003,15 +14003,18 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
 // El control de calidad no puede descartar preguntas FACTUALMENTE validas:
 // un fallo de Gemini en esta auditoria deja el examen disponible, con
 // clasificacion conservadora "alta" y registro explicito del problema.
+// SERVER 93J — mejora iterativa y AUDITABLE de dificultad Muy alta.
+// Solo modifica preguntas NUEVAS de Legislación. No modifica Anki original,
+// metas curriculares, sesiones, SRS, estadisticas ni el resto de bloques.
 async function refineVeryHighLegislation93F({ai,finalQuestions,
   generationTargets,difficulty,testType,independentPdfCheck,mode,officialStyle}){
   if(difficulty!=='muy alta'||testType!=='normal'||!independentPdfCheck||
-     !finalQuestions.length||generationTargets.length!==finalQuestions.length){
+    !finalQuestions.length||generationTargets.length!==finalQuestions.length){
     return {audited:0,verifiedVeryHigh:0,downgraded:0,regenerated:0};
   }
   const indices=finalQuestions.map((q,i)=>
-    String(generationTargets[i]?.topic_block||'').toLowerCase()==='legislacion'
-      ?i:-1).filter(i=>i>=0);
+    String(generationTargets[i]?.topic_block||'').trim().toLowerCase()==='legislacion'
+      ? i : -1).filter(i=>i>=0);
   if(!indices.length)return {audited:0,verifiedVeryHigh:0,downgraded:0,regenerated:0};
   let first=[];
   try{
@@ -14023,69 +14026,163 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     return {audited:0,verifiedVeryHigh:0,downgraded:indices.length,
       regenerated:0,auditUnavailable:true};
   }
-  const weakSlots=[];
+  const pending=new Map();
+  const failureStats={structural:0,factual:0,duplicate:0,quality:0,
+    generationErrors:0,validationErrors:0,auditErrors:0};
+  const sourceReason=(assessment)=>({
+    issues:['Dificultad Muy alta insuficiente: '+assessment.reason],
+    distractorIssues:[assessment.weak.length
+      ? 'Opciones descartables: '+assessment.weak.map(x=>x+1).join(', ')
+      : 'Debe aumentar la discriminacion normativa o corregir pistas de la respuesta.']
+  });
   for(let j=0;j<indices.length;j++){
     const i=indices[j];
     if(first[j].strong){
       finalQuestions[i].difficulty='muy alta';
     }else{
       finalQuestions[i].difficulty='alta';
-      weakSlots.push({index:i,qualityRepair93I:true,
-        issues:['Dificultad Muy alta insuficiente: '+first[j].reason],
-        distractorIssues:[first[j].weak.length
-          ?'Opciones descartables: '+first[j].weak.map(x=>x+1).join(', ')
-          :'Falta contraste normativo realmente exigente o la correcta destaca.']});
+      pending.set(i,sourceReason(first[j]));
     }
   }
-  let upgraded=0;
-  if(weakSlots.length){
-    try{
-      // Un unico intento de mejora EN LOTE. Sin tres reintentos extra.
-      // Se conservan las preguntas originales ya aprobadas factualmente.
-      const regenerated=await regenerateInvalidQuestions(ai,weakSlots,
-        finalQuestions,generationTargets,difficulty,mode,officialStyle);
-      const targets=weakSlots.map(w=>generationTargets[w.index]);
-      const validations=await validateGeneratedQuestions(ai,regenerated.questions,
-        {independentPdfCheck:true,targets});
-      const validCandidates=[];
-      const validIndexes=[];
-      for(let j=0;j<weakSlots.length;j++){
-        const q=regenerated.questions[j],target=targets[j],v=validations[j];
-        if(!q||!v?.valid||!Array.isArray(q.options)||q.options.length!==4||
+  const initialRejected=pending.size;
+  let accepted=0,attempted=0;
+  // Lotes limitados para que el modelo corrija defectos concretos y no diez
+  // preguntas de materias diferentes en una unica salida extensa.
+  // Dos rondas maximo; nunca se relaja el baremo para completar el test.
+  for(let round=1;round<=2&&pending.size;round++){
+    const todo=[...pending.keys()];
+    for(let start=0;start<todo.length;start+=5){
+      const subset=todo.slice(start,start+5).filter(i=>pending.has(i));
+      if(!subset.length)continue;
+      attempted+=subset.length;
+      const invalid=subset.map(i=>({index:i,qualityRepair93I:true,
+        issues:pending.get(i).issues,distractorIssues:pending.get(i).distractorIssues}));
+      let generated;
+      try{
+        generated=await regenerateInvalidQuestions(ai,invalid,
+          finalQuestions,generationTargets,difficulty,mode,officialStyle);
+        if(!Array.isArray(generated?.questions)||generated.questions.length!==subset.length){
+          throw new Error('Numero de reparaciones inesperado.');
+        }
+      }catch(e){
+        failureStats.generationErrors+=subset.length;
+        console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
+          round,slots:subset.map(i=>i+1),phase:'generacion',
+          error:String(e?.message||e).slice(0,220)}));
+        continue;
+      }
+      const plausible=[];
+      for(let j=0;j<subset.length;j++){
+        const i=subset[j],q=generated.questions[j],target=generationTargets[i];
+        const structuralIssue=!q||!String(q.stem||'').trim()||
+          !Array.isArray(q.options)||q.options.length!==4||
+          !q.options.every(x=>typeof x==='string'&&x.trim())||
           !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3||
           generatedMathNotationIssue(q)||legislationQuestionIssue(target,q)||
-          veryHighAnkiCopyIssue93E(target,q)||hardLegislationDistractorIssue(q))continue;
-        if(await isExactBankDuplicate(target,q))continue;
-        if(finalQuestions.some((old,k)=>k!==weakSlots[j].index&&
-          String(old?.stem||'').trim().toLowerCase()===String(q.stem||'').trim().toLowerCase()))continue;
-        validCandidates.push(q);
-        validIndexes.push(weakSlots[j].index);
+          veryHighAnkiCopyIssue93E(target,q)||hardLegislationDistractorIssue(q);
+        if(structuralIssue){
+          failureStats.structural++;
+          pending.set(i,{issues:[String(structuralIssue===true
+            ? 'Pregunta incompleta o estructura no valida.' : structuralIssue)],
+            distractorIssues:['Reconstruir las cuatro opciones con proximidad normativa.']});
+          continue;
+        }
+        let duplicate=false;
+        try{
+          duplicate=await isExactBankDuplicate(target,q);
+        }catch(e){
+          failureStats.validationErrors++;
+          console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
+            round,slot:i+1,phase:'duplicados',error:String(e?.message||e).slice(0,160)}));
+          continue;
+        }
+        const stem=String(q.stem).trim().toLowerCase();
+        if(duplicate||finalQuestions.some((old,k)=>k!==i&&
+            String(old?.stem||'').trim().toLowerCase()===stem)||
+          plausible.some(entry=>String(entry.q.stem).trim().toLowerCase()===stem)){
+          failureStats.duplicate++;
+          pending.set(i,{issues:['Pregunta duplicada: formular otra discriminacion del mismo objetivo.'],
+            distractorIssues:[]});
+          continue;
+        }
+        plausible.push({i,q,target});
       }
-      if(validCandidates.length){
-        const second=await auditVeryHighLegislation93F(ai,validCandidates,
-          validIndexes.map(i=>generationTargets[i]));
-        for(let j=0;j<validCandidates.length;j++){
-          if(second[j].strong){
-            validCandidates[j].difficulty='muy alta';
-            finalQuestions[validIndexes[j]]=validCandidates[j];
-            upgraded++;
-          }
+      if(!plausible.length){
+        console.log('CALIDAD_MUY_ALTA_REPARACION_ETAPA:',JSON.stringify({
+          round,slots:subset.length,validasEstructura:0,aprobadas:0,
+          pendientes:pending.size,fallos:failureStats}));
+        continue;
+      }
+      let factual=[];
+      try{
+        factual=await validateGeneratedQuestions(ai,plausible.map(x=>x.q),
+          {independentPdfCheck:true,targets:plausible.map(x=>x.target)});
+        if(factual.length!==plausible.length)throw new Error('Cantidad factual distinta.');
+      }catch(e){
+        failureStats.validationErrors+=plausible.length;
+        console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
+          round,slots:plausible.map(x=>x.i+1),phase:'validacion_pdf',
+          error:String(e?.message||e).slice(0,220)}));
+        continue;
+      }
+      const factuallyValid=[];
+      for(let j=0;j<plausible.length;j++){
+        const entry=plausible[j],v=factual[j];
+        if(v?.valid!==true){
+          failureStats.factual++;
+          pending.set(entry.i,{issues:[...(v?.issues||[]).slice(0,4),
+            'Verificar de nuevo la respuesta unica y el detalle normativo con el PDF.'],
+            distractorIssues:[...(v?.distractorIssues||[]).slice(0,4)]});
+        }else factuallyValid.push(entry);
+      }
+      if(!factuallyValid.length){
+        console.log('CALIDAD_MUY_ALTA_REPARACION_ETAPA:',JSON.stringify({
+          round,slots:subset.length,validasEstructura:plausible.length,
+          validasPdf:0,aprobadas:0,pendientes:pending.size,fallos:failureStats}));
+        continue;
+      }
+      let quality=[];
+      try{
+        quality=await auditVeryHighLegislation93F(ai,
+          factuallyValid.map(x=>x.q),factuallyValid.map(x=>x.target));
+        if(quality.length!==factuallyValid.length)throw new Error('Cantidad de auditorias distinta.');
+      }catch(e){
+        failureStats.auditErrors+=factuallyValid.length;
+        console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
+          round,slots:factuallyValid.map(x=>x.i+1),phase:'auditoria_dificultad',
+          error:String(e?.message||e).slice(0,220)}));
+        continue;
+      }
+      let approved=0;
+      for(let j=0;j<factuallyValid.length;j++){
+        const entry=factuallyValid[j],assessment=quality[j];
+        if(assessment.strong){
+          // Solo se sustituye tras PASAR AMBAS auditorias.
+          entry.q.difficulty='muy alta';
+          finalQuestions[entry.i]=entry.q;
+          pending.delete(entry.i);
+          accepted++; approved++;
+        }else{
+          failureStats.quality++;
+          pending.set(entry.i,sourceReason(assessment));
         }
       }
-    }catch(e){
-      console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',String(e?.message||e).slice(0,220));
-      // Nunca se inserta una sustitucion no validada; conservar la anterior.
+      console.log('CALIDAD_MUY_ALTA_REPARACION_ETAPA:',JSON.stringify({
+        round,slots:subset.length,validasEstructura:plausible.length,
+        validasPdf:factuallyValid.length,aprobadas:approved,
+        pendientes:pending.size,fallos:failureStats}));
     }
   }
   const verifiedVeryHigh=indices.filter(i=>finalQuestions[i].difficulty==='muy alta').length;
   console.log('CALIDAD_MUY_ALTA_RESULTADO:',JSON.stringify({
     audited:indices.length,verifiedVeryHigh,downgraded:indices.length-verifiedVeryHigh,
-    regenerationRequested:weakSlots.length,regenerated:upgraded,
+    regenerationRequested:initialRejected,regenerationAttempts:attempted,
+    regenerated:accepted,remaining:pending.size,repairFailures:failureStats,
     examples:first.map((a,j)=>a.strong?null:{slot:indices[j]+1,
       reason:a.reason,weakOptions:a.weak.map(i=>i+1)}).filter(Boolean).slice(0,5)
   }));
   return {audited:indices.length,verifiedVeryHigh,
-    downgraded:indices.length-verifiedVeryHigh,regenerated:upgraded};
+    downgraded:indices.length-verifiedVeryHigh,regenerated:accepted};
 }
 
 function geographyForbiddenQuestionIssue(target,question){
@@ -15279,7 +15376,7 @@ REGENERACIÓN DE PREGUNTAS RECHAZADAS
 
 Debes generar EXACTAMENTE ${replacementTargets.length} preguntas.
 
-Estas preguntas sustituyen preguntas rechazadas por una validación factual independiente.
+${veryHighRepair93I ? "Estas preguntas se regeneran por insuficiente dificultad, NO por falsedad. El nuevo enunciado debe ser materialmente mas exigente que el anterior, pero conservar el objetivo y apoyar cada detalle en el PDF." : "Estas preguntas sustituyen preguntas rechazadas por una validación factual independiente."}
 
 MOTIVOS DEL RECHAZO:
 ${JSON.stringify(rejectedQuestions)}
@@ -15306,6 +15403,10 @@ CONTROL EXTRA DE MUY ALTA — SOLO PARA LAS PREGUNTAS RECHAZADAS POR DIFICULTAD:
   Una pregunta INCORRECTA exige tres opciones VERDADERAS comprobables en el PDF.
 - Para semilla Anki, añade una segunda discriminación real del PDF, no una
   paráfrasis. Mantén la unidad curricular vinculada y el origen como semilla.
+- No te limites a variar una fecha aislada; plantea cuando sea posible una
+  condición adicional, sujeto competente, excepción o efecto normativo del PDF.
+- Para cada opción, realiza internamente una prueba adversarial: ¿la descartaría
+  un opositor sin conocer exactamente la norma? Si sí, rehace esa opción.
 - Si faltan datos en la fuente, NO fabriques una dificultad aparente.
 ` : ''}
 - Todas las reglas normales de generación siguen siendo obligatorias.
