@@ -1608,10 +1608,39 @@ async function syncLegislationAnkiQuestions(){
     return;
   }
 
-  const parsed=
-    JSON.parse(
-      fs.readFileSync(indexPath,"utf8")
+  // 93K: no reescribir miles de preguntas Anki en cada despliegue
+  // cuando el índice es idéntico al ya sincronizado.
+  const indexRaw=fs.readFileSync(indexPath,"utf8");
+  const indexHash=createHash("sha256").update(indexRaw).digest("hex");
+  const syncKey="legislation_anki_index_sha256_v1";
+  const previousSync=await db.query(
+    "SELECT value FROM app_state WHERE key = $1",
+    [syncKey]
+  );
+  let previousMarker=null;
+  try{
+    previousMarker=JSON.parse(previousSync.rows[0]?.value || "null");
+  }catch(_error){
+    previousMarker=null;
+  }
+  if(
+    previousMarker?.sha256===indexHash &&
+    Number.isInteger(previousMarker?.count) &&
+    previousMarker.count>0
+  ){
+    const total=await db.query(
+      "SELECT COUNT(*)::int AS total FROM legislation_anki_questions"
     );
+    if(Number(total.rows[0]?.total)>=previousMarker.count){
+      console.log(
+        "[anki-legislation] Índice sin cambios; sincronización omitida:",
+        previousMarker.count
+      );
+      return;
+    }
+  }
+
+  const parsed=JSON.parse(indexRaw);
 
   const source=
     Array.isArray(parsed?.questions)
@@ -1771,10 +1800,42 @@ async function syncLegislationAnkiQuestions(){
       tags = EXCLUDED.tags,
       fingerprint = EXCLUDED.fingerprint,
       updated_at = NOW()
+    WHERE (
+      legislation_anki_questions.topic_order,
+      legislation_anki_questions.deck_path,
+      legislation_anki_questions.topic,
+      legislation_anki_questions.stem,
+      legislation_anki_questions.options,
+      legislation_anki_questions.correct_index,
+      legislation_anki_questions.correct_answer,
+      legislation_anki_questions.option_count,
+      legislation_anki_questions.direct_use_eligible,
+      legislation_anki_questions.tags,
+      legislation_anki_questions.fingerprint
+    ) IS DISTINCT FROM (
+      EXCLUDED.topic_order,
+      EXCLUDED.deck_path,
+      EXCLUDED.topic,
+      EXCLUDED.stem,
+      EXCLUDED.options,
+      EXCLUDED.correct_index,
+      EXCLUDED.correct_answer,
+      EXCLUDED.option_count,
+      EXCLUDED.direct_use_eligible,
+      EXCLUDED.tags,
+      EXCLUDED.fingerprint
+    )
     `,
     [
       JSON.stringify(rows)
     ]
+  );
+
+  // 93K: la marca se guarda solo después de completar la importación.
+  await db.query(
+    `INSERT INTO app_state (key,value) VALUES ($1,$2)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`,
+    [syncKey, JSON.stringify({sha256:indexHash,count:rows.length})]
   );
 
   const status=
@@ -18587,9 +18648,8 @@ async function startServer(){
     WHERE worked=TRUE AND COALESCE(times_asked,0)=0
   `);
   console.log("COBERTURA 83: elementos mostrados pero no respondidos reparados:",cleanup83.rowCount);
-console.log("STARTUP ANKI: syncLegislationAnkiQuestions");
-await syncLegislationAnkiQuestions();
-console.log("STARTUP ANKI OK");
+  // 93K: la sincronización masiva Anki nunca debe bloquear
+  // la apertura del puerto que Render utiliza para su health check.
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
@@ -18609,6 +18669,14 @@ console.log("STARTUP ANKI OK");
       "EXAM STYLE STORE recuperado:",
       EXAM_STYLE_STORE || "ninguno"
     );
+    console.log("STARTUP ANKI: sincronización post-arranque");
+    // Conexión activa antes de comenzar el trabajo pesado. No se
+    // modifica la base de preguntas ni su historial de validación.
+    syncLegislationAnkiQuestions()
+      .then(()=>console.log("STARTUP ANKI OK"))
+      .catch(error=>console.error(
+        "ERROR SINCRONIZANDO ANKI (servidor operativo):",error
+      ));
   });
 }
 
