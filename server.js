@@ -12254,6 +12254,15 @@ ${item.manual_page
   ? `- Página impresa del manual (uso interno): ${item.manual_page}`
   : ""}
 - Evidencia catalogada: ${geographyPromptSafeEvidence(item) || "No disponible"}
+${item.veryHighAnkiSeed ? `
+- SEMILLA ANKI VINCULADA A ESTE CONOCIMIENTO (SOLO COMO PUNTO DE PARTIDA):
+  ${JSON.stringify({stem:item.veryHighAnkiSeed.stem,options:item.veryHighAnkiSeed.options})}
+- Crea una pregunta NUEVA y más difícil sobre ESTE conocimiento del PDF:
+  exige comparar excepciones, sujetos, plazos o condiciones próximas SOLO cuando el PDF lo respalde.
+- NO copies el enunciado, ni tres opciones de la semilla; NO te limites a cambiar palabras.
+- NO uses la respuesta de Anki como autoridad: verifica los hechos mediante File Search.
+- Si el PDF no permite profundizar sin inventar hechos, genera una pregunta Alta correcta y marca la dificultad real.
+` : ""}
 ${item.territorialContext?.exact?.length ? `
 
 - CONTEXTO TERRITORIAL DEL TEMA 21 — RELACIÓN OPERATIVA EXACTA:
@@ -15897,7 +15906,11 @@ app.post("/api/finish-test", async(req,res)=>{
 // La plaza Anki no necesita inventar un enlace a otro coverage_item.
 // Las fichas técnicas quedan exam_relevant=FALSE y por tanto no contaminan el
 // porcentaje de temario cubierto. El mismo motor de historial y SRS las procesa.
-async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds){
+async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,requestedDifficulty="alta"){
+  // SERVER 93E: en Alta permanece 80/20. SOLO en Muy alta: 50 %
+  // originales validados y 50 % nuevas desde el PDF, usando Anki como
+  // semilla verificable si hay vínculo exacto; nunca reescribir originales.
+  const originalShare = requestedDifficulty === "muy alta" ? 0.50 : 0.80;
   const topicGroups=new Map();
   originalTargets.forEach((item,index)=>{
     if(String(item?.topic_block||'').trim().toLowerCase()!=='legislacion')return;
@@ -15920,9 +15933,9 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds){
   const groups=[...topicGroups].filter(([,g])=>availableOrders.has(g.order));
   if(!groups.length)return null; // Tema técnico sin baraja: generación PDF.
   const totalSlots=groups.reduce((sum,[,g])=>sum+g.indices.length,0);
-  const required=Math.ceil(totalSlots*0.8);
-  const quotas=new Map(groups.map(([id,g])=>[id,Math.floor(g.indices.length*0.8)]));
-  const rest=groups.map(([id,g])=>({id,fract:g.indices.length*0.8-Math.floor(g.indices.length*0.8)}))
+  const required=Math.ceil(totalSlots*originalShare);
+  const quotas=new Map(groups.map(([id,g])=>[id,Math.floor(g.indices.length*originalShare)]));
+  const rest=groups.map(([id,g])=>({id,fract:g.indices.length*originalShare-Math.floor(g.indices.length*originalShare)}))
     .sort((a,b)=>b.fract-a.fract||a.id-b.id);
   for(let i=0;i<required-[...quotas.values()].reduce((a,b)=>a+b,0);i++){
     quotas.set(rest[i].id,(quotas.get(rest[i].id)||0)+1);
@@ -16045,12 +16058,81 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds){
     }
     reserved.add(Number(targets[index].id));
   }
-  console.log('LEGISLACION CUOTA ANKI 86:',JSON.stringify({required,
+  console.log('LEGISLACION CUOTA ANKI 93E:',JSON.stringify({difficulty:requestedDifficulty,originalShare,required,
     anki:direct.size,nuevas:targets.length-direct.size,
     originalesSinEnlace:[...direct.values()].filter(q=>q.ankiIndependent).length,
     ids:[...direct.values()].map(q=>q.ankiQuestionId)}));
   if(direct.size!==required)throw new Error('ANKI: cuota incompleta; se cancela la sesión.');
   return {targets,direct,required};
+}
+
+/* SERVER 93E — semillas verificables para preguntas nuevas MUY ALTAS.
+ * Anki NO es fuente normativa. Solo se usa como pregunta de partida cuando
+ * la nota validada corresponde inequívocamente al mismo coverage_item.
+ * Sin enlace exacto, el generador continúa normalmente con el PDF y el
+ * corpus de estilo ya disponible. No modifica la DB ni contadores Anki.
+ */
+async function attachVeryHighLegislationAnkiSeeds93E(targets,requestedDifficulty,testType){
+  if(requestedDifficulty!=="muy alta" || testType!=="normal" || !targets?.length){
+    return {linked:0,withoutLink:0};
+  }
+  const eligible=targets.filter(t=>
+    String(t?.topic_block||"").trim().toLowerCase()==="legislacion" &&
+    t?.item_type!=="anki_independent" && Number.isInteger(Number(t?.id)) && Number(t.id)>0
+  );
+  if(!eligible.length)return {linked:0,withoutLink:0};
+  const ids=[...new Set(eligible.map(t=>Number(t.id)))];
+  // Una consulta acotada por el ID real de cobertura, sin matching semántico
+  // costoso ni asociación por parecido entre artículos incompatibles.
+  const result=await db.query(`
+    SELECT a.anki_note_id,a.topic_order,a.stem,a.options,a.correct_index,
+           a.correct_answer,a.validated_coverage_item_id,ci.topic_id AS linked_topic_id
+    FROM legislation_anki_questions a
+    JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
+    WHERE a.validated_coverage_item_id=ANY($1::int[])
+      AND a.validation_status='validated'
+      AND a.direct_use_eligible=TRUE
+      AND a.option_count=4
+    ORDER BY a.times_used ASC,a.id ASC
+    LIMIT 150`,[ids]);
+  let linked=0;
+  for(const target of eligible){
+    const sourceOrder=ankiLegislationSourceOrderForTopicName(target.topic_name);
+    const seed=result.rows.find(row=>
+      Number(row.validated_coverage_item_id)===Number(target.id) &&
+      Number(row.linked_topic_id)===Number(target.topic_id) &&
+      Number(row.topic_order)===sourceOrder &&
+      Array.isArray(row.options) && row.options.length===4 &&
+      Number.isInteger(Number(row.correct_index)) &&
+      Number(row.correct_index)>=0 && Number(row.correct_index)<4 &&
+      !legislationKnownAmbiguityIssue(row) &&
+      legislationExactCoverageLink(target,row) &&
+      !legislationConflictingArticles(target,row)
+    );
+    if(!seed)continue;
+    target.veryHighAnkiSeed={
+      noteId:Number(seed.anki_note_id),
+      stem:String(seed.stem||"").slice(0,500),
+      options:seed.options.map(v=>String(v).slice(0,300))
+    };
+    linked++;
+  }
+  return {linked,withoutLink:eligible.length-linked};
+}
+
+function veryHighAnkiCopyIssue93E(target,question){
+  const seed=target?.veryHighAnkiSeed;
+  if(!seed || !question)return null;
+  if(normalizeLegislationMatchText(seed.stem)===normalizeLegislationMatchText(question.stem)){
+    return "MUY ALTA: reproduce el enunciado Anki en lugar de crear una pregunta nueva.";
+  }
+  const oldOptions=new Set((seed.options||[]).map(normalizeLegislationMatchText));
+  const matching=Array.isArray(question.options)
+    ? question.options.filter(x=>oldOptions.has(normalizeLegislationMatchText(x))).length : 0;
+  if(matching>=3){
+    return "MUY ALTA: copia al menos tres opciones del Anki original en vez de generar distractores nuevos.";
+  }
+  return null;
 }
 
 /* SERVER 92 — Rotación semántica para tests de legislación SIN baraja.
@@ -16300,7 +16382,8 @@ if(!allowedCounts.has(requestedCount)){
 
 const count=requestedCount;
 
-  const difficulty = "alta";
+  // SERVER 93D: respetar la seleccion real del usuario; "media" obsoleta pasa a Alta.
+  const difficulty = req.body.difficulty === "muy alta" ? "muy alta" : "alta";
 
 const mode=
   ["literal","mixto","calculos"].includes(req.body.mode)
@@ -16341,7 +16424,7 @@ const allowedTopicIds =
 }
 
    const quota84=testType==='normal'
-     ? await applyLegislationAnkiQuota84(targets,allowedTopicIds)
+     ? await applyLegislationAnkiQuota84(targets,allowedTopicIds,difficulty)
      : null;
    if(quota84){targets=quota84.targets;}
    const generationCount = targets.length;
@@ -16384,7 +16467,9 @@ if(testType === "normal"){
     const reusable =
       await getReusableQuestionForTarget(
         targets[i],
-        targets[i].adaptiveDifficulty || difficulty
+        difficulty === "muy alta"
+          ? "muy alta"
+          : (targets[i].adaptiveDifficulty || difficulty)
       );
 
     if(reusable){
@@ -16508,6 +16593,12 @@ for(let i = 0; i < targets.length; i++){
     continue;
   }
 
+  // La exigencia solicitada se aplica a las preguntas NUEVAS, sin
+  // reetiquetar ni reescribir preguntas Anki originales ya validadas.
+  // En Alta se mantiene la adaptacion interna para conocimientos dominados.
+  targets[i].adaptiveDifficulty = difficulty === "muy alta"
+    ? "muy alta"
+    : (targets[i].adaptiveDifficulty || getAdaptiveDifficulty(targets[i]));
   generationTargets.push(targets[i]);
   generationIndexes.push(i);
 }
@@ -16517,6 +16608,12 @@ for(let i = 0; i < targets.length; i++){
       await getLatestBankQuestionForTarget(target);
   }
 } 
+const veryHighSeeds93E=await attachVeryHighLegislationAnkiSeeds93E(
+  generationTargets,difficulty,testType
+);
+if(difficulty==="muy alta"){
+  console.log("LEGISLACION_SEMILLAS_MUY_ALTA:",JSON.stringify(veryHighSeeds93E));
+}
 await attachDistractorContextToTargets(
   generationTargets
 );
@@ -16855,6 +16952,7 @@ for(let i = 0; i < factualValidation.length; i++){
       target,
       question
     ) ||
+    veryHighAnkiCopyIssue93E(target,question) ||
     (independentPdfCheck ? hardLegislationDistractorIssue(question) : null);
 
   if(legislationIssue){
@@ -17007,6 +17105,7 @@ for(
         targetForValidation,
         regenerated.questions[i]
       ) ||
+      veryHighAnkiCopyIssue93E(targetForValidation,regenerated.questions[i]) ||
       (independentPdfCheck ? hardLegislationDistractorIssue(regenerated.questions[i]) : null);
 
     if(legislationIssue){
@@ -17192,6 +17291,7 @@ if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck){
     // El nuevo objetivo recibe contexto factual del mismo tema, nunca datos
     // del anterior. El banco viejo sigue sin usarse para preguntas de legislación.
     for(const t of rescueTargets){t.previousBankQuestion=await getLatestBankQuestionForTarget(t);}
+    await attachVeryHighLegislationAnkiSeeds93E(rescueTargets,difficulty,testType);
     await attachDistractorContextToTargets(rescueTargets);
     try{
       const repair=await regenerateInvalidQuestions(
@@ -17210,7 +17310,7 @@ if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck){
           continue;
         }
         const legIssue=generatedMathNotationIssue(q) ||
-          legislationQuestionIssue(target,q) || hardLegislationDistractorIssue(q);
+          legislationQuestionIssue(target,q) || veryHighAnkiCopyIssue93E(target,q) || hardLegislationDistractorIssue(q);
         if(legIssue){v.valid=false;v.issues=[...(v.issues||[]),legIssue];}
         if(v.valid && await isExactBankDuplicate(target,q)){
           v.valid=false;
@@ -17310,6 +17410,18 @@ if(completeQuestions.some(question => !question)){
 }
 
 finalQuestions = completeQuestions;
+
+// Registro diagnostico: una solicitud Muy alta puede contener originales Anki
+// sin reescritura y preguntas nuevas con fallback honesto a Alta si la fuente
+// no permite mayor dificultad. Nunca falsear el nivel REAL generado.
+console.log("DIFICULTAD_TEST:",JSON.stringify({
+  requested:difficulty,
+  newGenerated:finalQuestions.filter(q=>!q?.ankiDirect && !q?.reused).length,
+  newVeryHigh:finalQuestions.filter(q=>!q?.ankiDirect && !q?.reused && q?.difficulty==="muy alta").length,
+  newHigh:finalQuestions.filter(q=>!q?.ankiDirect && !q?.reused && q?.difficulty==="alta").length,
+  originalsAnki:finalQuestions.filter(q=>q?.ankiDirect===true).length,
+  reused:finalQuestions.filter(q=>q?.reused===true).length
+}));
 
 console.log(
   "TEST SOURCES:",
