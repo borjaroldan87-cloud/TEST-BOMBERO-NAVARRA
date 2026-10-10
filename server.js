@@ -5,6 +5,7 @@ import fs from "fs";
 import path from "path";
 import { PDFDocument } from "pdf-lib";
 import pg from "pg";
+import { createHash } from "node:crypto";
 const { Pool } = pg;
 
 
@@ -12655,7 +12656,9 @@ async function persistGeneratedTest({
   requestedCount,
   difficulty,
   mode,
-  testType = "normal"
+  testType = "normal",
+  runId = null,
+  runSignature = null
 }){
   if(
     !Array.isArray(questions) ||
@@ -12970,6 +12973,29 @@ persistedQuestions.push({
 
     }
 
+    // La sesión y su comprobante de recuperación se confirman EN LA MISMA
+    // TRANSACCIÓN. No puede existir una sesión confirmada sin su runId
+    // recuperable cuando el navegador pierde la respuesta HTTP.
+    if(runId){
+      const completedPayload={
+        status:'completed',
+        signature:runSignature,
+        sessionId,
+        questions:persistedQuestions,
+        coverage:{targeted:targets.length,markedWorked:0},
+        updatedAt:new Date().toISOString()
+      };
+      const recoveryState=await client.query(
+        `UPDATE app_state SET value=$2 WHERE key=$1
+         AND value::jsonb->>'status'='processing'
+         AND value::jsonb->>'signature'=$3
+         RETURNING key`,
+        [`generation_run:${runId}`,JSON.stringify(completedPayload),runSignature]
+      );
+      if(recoveryState.rowCount!==1){
+        throw new Error('PERSISTENCIA: registro de recuperación del test inconsistente.');
+      }
+    }
     await client.query("COMMIT");
 
     return {
@@ -16124,8 +16150,140 @@ function diversifyLegislationTargets92(targets,candidates){
   return {targets:chosen,changes};
 }
 
-app.post("/api/generate", async(req,res)=>{
+// SERVER 93C: selección factual de objetivos alternativos de legislación.
+// Solo desplaza contenido nuevo/mantenimiento dentro del mismo tema y nivel
+// de prioridad; SRS vencido, debilidades/falladas (1-3) quedan intocables.
+function chooseLegislationRescueTargets93C(invalid,generationTargets,allTargets,candidates){
+  const selected=new Set(allTargets.map(x=>Number(x.id)));
+  const changes=[];
+  for(const rejection of invalid){
+    const index=Number(rejection.index);
+    const prior=generationTargets[index];
+    if(!prior || String(prior.topic_block||'').trim().toLowerCase()!=='legislacion')continue;
+    const priority=Number(prior.adaptive_priority);
+    if(!Number.isFinite(priority) || priority<=3)continue;
+    const wasNew=Number(prior.times_asked||0)===0;
+    const candidatesWithinTopic=candidates.filter(c=>
+      Number(c.topic_id)===Number(prior.topic_id) &&
+      Number(c.adaptive_priority)===priority &&
+      (Number(c.times_asked||0)===0)===wasNew &&
+      c.item_type!=='anki_independent' &&
+      !selected.has(Number(c.id)) &&
+      String(c.source_evidence||'').trim().length>=40 &&
+      (prior.questionFamily!=='2024_NUMERICA' ||
+        /\d/.test(`${c.concept||''} ${c.source_evidence||''}`))
+    );
+    const ranked=candidatesWithinTopic.map(c=>({
+      candidate:c,
+      score:legislationRedundancy92(c,allTargets.filter(t=>Number(t.id)!==Number(prior.id))) +
+        (c.item_type===prior.item_type?0:0.4)+
+        (c.evaluation_type===prior.evaluation_type?0:0.2)
+    })).sort((a,b)=>a.score-b.score);
+    if(!ranked.length)continue;
+    const c=ranked[0].candidate;
+    selected.add(Number(c.id));
+    changes.push({index,invalid:rejection,target:{...c,
+      questionFamily:prior.questionFamily,
+      adaptiveDifficulty:prior.adaptiveDifficulty||'alta'}});
+  }
+  return changes;
+}
+
+/* SERVIDOR 93: recuperación de tests tras interrupciones HTTP.
+ * Registro idempotente por petición del navegador, en PostgreSQL.
+ * No cambia la generación, la validación ni los ciclos de repaso.
+ */
+function normalizeGenerationRunId(value){
+  const id=String(value||'').trim();
+  return /^[a-zA-Z0-9_-]{16,100}$/.test(id)?id:null;
+}
+function generationRunSignature(body={}){
+  // Hash del ámbito solicitado: un runId NO puede recuperarse con otro
+  // cuestionario o diferente modo de examen por accidente.
+  const normalized={
+    count:Number(body.count)||10,
+    difficulty:String(body.difficulty||'alta'),
+    mode:String(body.mode||'mixto'),
+    testType:String(body.testType||'normal'),
+    examMode:String(body.examMode||'training'),
+    selectedBlocks:Array.isArray(body.selectedBlocks)
+      ? [...new Set(body.selectedBlocks.map(String))].sort():[],
+    selectedTopicIds:Array.isArray(body.selectedTopicIds)
+      ? [...new Set(body.selectedTopicIds.map(String))].sort():[]
+  };
+  return createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+}
+async function readGenerationRun(runId){
+  const result=await db.query('SELECT value FROM app_state WHERE key=$1',
+    [`generation_run:${runId}`]);
+  if(!result.rows.length)return null;
+  try{return JSON.parse(result.rows[0].value);}
+  catch{throw new Error('El registro de recuperación existe pero está dañado.');}
+}
+async function startGenerationRun(runId,signature){
+  const inserted=await db.query(`INSERT INTO app_state(key,value)
+      VALUES($1,$2) ON CONFLICT (key) DO NOTHING RETURNING key`,[
+    `generation_run:${runId}`,
+    JSON.stringify({status:'processing',signature,startedAt:new Date().toISOString()})
+  ]);
+  if(inserted.rows.length)return null;
+  const prior=await readGenerationRun(runId);
+  if(!prior)throw new Error('No se pudo consultar la generación ya registrada.');
+  return prior;
+}
+async function writeGenerationRun(runId,state){
+  if(!runId)return;
+  await db.query(`UPDATE app_state SET value=$2 WHERE key=$1`,[
+    `generation_run:${runId}`,
+    JSON.stringify({...state,updatedAt:new Date().toISOString()})
+  ]);
+}
+app.get('/api/generation-run/:runId',async(req,res)=>{
+  res.set('Cache-Control','no-store');
+  const runId=normalizeGenerationRunId(req.params.runId);
+  if(!runId)return res.status(400).json({ok:false,error:'Identificador de test inválido.'});
   try{
+    const state=await readGenerationRun(runId);
+    if(!state)return res.status(404).json({ok:false,error:'No existe esa generación.'});
+    if(state.status==='completed')return res.json({ok:true,status:'completed',
+      sessionId:state.sessionId,questions:state.questions,coverage:state.coverage});
+    if(state.status==='failed')return res.json({ok:true,status:'failed',
+      error:state.error||'La generación no pudo completarse.'});
+    const age=Date.now()-new Date(state.startedAt||0).getTime();
+    if(age>30*60*1000)return res.json({ok:true,status:'stale',
+      error:'La generación no concluyó. Comprueba los registros antes de reintentar.'});
+    return res.json({ok:true,status:'processing'});
+  }catch(error){
+    console.error('ERROR GENERATION-RUN:',error);
+    return res.status(500).json({ok:false,error:'No se pudo recuperar el test.'});
+  }
+});
+
+app.post("/api/generate", async(req,res)=>{
+  const requestStartedAt=Date.now();
+  const suppliedRunId=req.body?.runId;
+  const runId=normalizeGenerationRunId(suppliedRunId);
+  const runSignature=runId?generationRunSignature(req.body):null;
+  try{
+    if(suppliedRunId!=null && !runId){
+      return res.status(400).json({ok:false,error:'Identificador de test inválido.'});
+    }
+    if(runId){
+      const prior=await startGenerationRun(runId,runSignature);
+      if(prior){
+        if(prior.signature!==runSignature){
+          return res.status(409).json({ok:false,error:'El identificador pertenece a otra configuración de test.'});
+        }
+        if(prior.status==='completed')return res.json({ok:true,
+          sessionId:prior.sessionId,questions:prior.questions,coverage:prior.coverage});
+        if(prior.status==='failed')return res.status(409).json({ok:false,
+          error:prior.error||'Esta petición ya falló.'});
+        return res.json({ok:true,pending:true,runId});
+      }
+    }
+    console.log('GENERACION_INICIO:',JSON.stringify({
+      runId:runId||null,requestedCount:Number(req.body?.count)||10
+    }));
     if(!STORE) throw new Error("Primero indexa el PDF.");
 
     const requestedCount =
@@ -16678,7 +16836,10 @@ finalQuestions = [...parsed.questions];
   }
 }
 
-const independentPdfCheck = quota84===null && generationTargets.length>0 &&
+// SERVER 93C: la cuota Anki solo decide el origen de cada pregunta.
+// TODA pregunta NUEVA de un lote exclusivamente legislativo merece la
+// verificación independiente del PDF, aunque haya Anki en otras posiciones.
+const independentPdfCheck = generationTargets.length>0 &&
   generationTargets.every(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion');
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions,
@@ -16995,7 +17156,12 @@ if(geographyOptionIssue){
         distractorIssues:
           validationResult.distractorIssues || [],
         graphicIssues:
-          validationResult.graphicIssues || []
+          validationResult.graphicIssues || [],
+        familyValid:validationResult.familyValid===true,
+        distractorsValid:validationResult.distractorsValid===true,
+        graphicValid:validationResult.graphicValid,
+        optionAssessment:Array.isArray(validationResult.optionAssessment)
+          ? validationResult.optionAssessment:[]
       });
     }
   }
@@ -17003,7 +17169,111 @@ if(geographyOptionIssue){
   invalidQuestions = stillInvalid;
 }
 
+// SERVER 93C: rescate acotado de cobertura cuando un objetivo NUEVO de
+// legislación no se puede convertir en una pregunta válida en tres intentos.
+// NO afecta a Anki, repaso de fallos, ni a objetivos prioritarios SRS 1-3.
+// No sustituye objetivos por conceptos de otros temas ni reduce validaciones.
+if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck){
+  try{
+  const candidatePool = await getAdaptiveCoverageCandidates(
+    Math.max(800,generationTargets.length*100),allowedTopicIds,
+    examMode==='simulation'?'simulation':'adaptive'
+  );
+  const replacements = chooseLegislationRescueTargets93C(
+    invalidQuestions,generationTargets,targets,candidatePool
+  );
+  if(replacements.length){
+    console.log('LEGISLACION_RESCATE_OBJETIVOS:',JSON.stringify(
+      replacements.map(x=>({slot:x.index+1,from:Number(generationTargets[x.index]?.id),
+        to:Number(x.target.id),topicId:Number(x.target.topic_id),
+        priority:Number(x.target.adaptive_priority)}))
+    ));
+    const rescueTargets=replacements.map(x=>x.target);
+    // El nuevo objetivo recibe contexto factual del mismo tema, nunca datos
+    // del anterior. El banco viejo sigue sin usarse para preguntas de legislación.
+    for(const t of rescueTargets){t.previousBankQuestion=await getLatestBankQuestionForTarget(t);}
+    await attachDistractorContextToTargets(rescueTargets);
+    try{
+      const repair=await regenerateInvalidQuestions(
+        ai,replacements.map((x,i)=>({...x.invalid,index:i})),
+        replacements.map(x=>finalQuestions[x.index]),rescueTargets,
+        difficulty,mode,officialStyle
+      );
+      const checked=await validateGeneratedQuestions(ai,repair.questions,
+        {independentPdfCheck:true,targets:rescueTargets});
+      const passed=[];
+      for(let k=0;k<replacements.length;k++){
+        const {index,target}=replacements[k];
+        const q=repair.questions[k],v=checked[k];
+        if(!v || !q || !Array.isArray(q.options) || q.options.length!==4 ||
+          !Number.isInteger(q.correctIndex) || q.correctIndex<0 || q.correctIndex>3){
+          continue;
+        }
+        const legIssue=generatedMathNotationIssue(q) ||
+          legislationQuestionIssue(target,q) || hardLegislationDistractorIssue(q);
+        if(legIssue){v.valid=false;v.issues=[...(v.issues||[]),legIssue];}
+        if(v.valid && await isExactBankDuplicate(target,q)){
+          v.valid=false;
+          v.issues=[...(v.issues||[]),'La pregunta duplica una pregunta existente del banco.'];
+        }
+        // Además del banco, impedir una copia textual de cualquiera de las
+        // nueve preguntas ya aprobadas en esta misma sesión.
+        const rescueStem=String(q.stem||'').replace(/\s+/g,' ').trim().toLowerCase();
+        if(v.valid && finalQuestions.some((existing,j)=>j!==index &&
+            String(existing?.stem||'').replace(/\s+/g,' ').trim().toLowerCase()===rescueStem)){
+          v.valid=false;
+          v.issues=[...(v.issues||[]),'Enunciado duplicado dentro del test actual.'];
+        }
+        if(!v.valid){
+          console.warn('LEGISLACION_RESCATE_RECHAZADO:',JSON.stringify({
+            slot:index+1,targetId:Number(target.id),issues:v.issues||[],
+            familyIssues:v.familyIssues||[],distractorIssues:v.distractorIssues||[]
+          }));
+          continue;
+        }
+        q.difficulty=target.adaptiveDifficulty==='muy alta'?q.difficulty:'alta';
+        q.graphic=null;
+        finalQuestions[index]=q;
+        generationTargets[index]=target;
+        targets[generationIndexes[index]]=target;
+        passed.push(index);
+      }
+      invalidQuestions=invalidQuestions.filter(x=>!passed.includes(x.index));
+      console.log('LEGISLACION_RESCATE_RESULTADO:',JSON.stringify({
+        requested:replacements.length,recovered:passed.length,
+        stillRejected:invalidQuestions.length
+      }));
+    }catch(rescueError){
+      // El error de rescate NO invalida nueve preguntas ya validadas ni
+      // oculta el rechazo original. Se sigue al error diagnóstico normal.
+      console.error('LEGISLACION_RESCATE_ERROR:',String(rescueError?.message||rescueError));
+    }
+  }
+  }catch(lookupError){
+    console.error('LEGISLACION_RESCATE_CONSULTA_ERROR:',String(lookupError?.message||lookupError));
+  }
+}
+
 if(invalidQuestions.length > 0){
+  // El rechazo es informativo: NO se relaja una sola regla de calidad.
+  // Cada motivo queda vinculado al objetivo sin mostrar la opción correcta.
+  console.error('GENERACION_RECHAZOS_FINALES:',JSON.stringify({
+    runId:runId||null,
+    topicIds:[...new Set(generationTargets.map(t=>Number(t.topic_id)))],
+    rejected:invalidQuestions.map(result=>({
+      index:result.index,
+      targetId:Number(generationTargets[result.index]?.id||0),
+      questionFamily:generationTargets[result.index]?.questionFamily||null,
+      issues:result.issues||[],
+      familyIssues:result.familyIssues||[],
+      distractorIssues:result.distractorIssues||[],
+      graphicIssues:result.graphicIssues||[],
+      familyValid:result.familyValid===true,
+      distractorsValid:result.distractorsValid===true,
+      graphicValid:result.graphicValid??null,
+      optionAssessment:result.optionAssessment||[]
+    }))
+  }));
   throw new Error(
     `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final tras 3 regeneraciones.`
   );
@@ -17075,7 +17345,9 @@ console.log(
   requestedCount: count,
   difficulty,
   mode,
-  testType
+  testType,
+  runId,
+  runSignature
 });
 
     console.log(
@@ -17090,17 +17362,23 @@ console.log(
 
 console.log("COBERTURA 83: pendientes de respuesta, no trabajados al crear la sesión",targets.map(t=>t.id));
 
-    res.json({
-  ok:true,
-  sessionId:persistedTest.sessionId,
-  questions:finalQuestions,
-  coverage:{
-    targeted:targets.length,
-    markedWorked:0
-  }
-});
+    const responsePayload={
+      ok:true,
+      sessionId:persistedTest.sessionId,
+      questions:finalQuestions,
+      coverage:{targeted:targets.length,markedWorked:0}
+    };
+    // El resultado de recuperación ya se guardó atómicamente dentro de
+    // persistGeneratedTest; no existe escritura auxiliar tras el COMMIT.
+    console.log('GENERACION_FINALIZADA:',JSON.stringify({runId:runId||null,sessionId:responsePayload.sessionId,ms:Date.now()-requestStartedAt}));
+    res.json(responsePayload);
 
   }catch(e){
+    if(runId){
+      try{await writeGenerationRun(runId,{status:'failed',error:e?.message||String(e)});}
+      catch(statusError){console.error('ERROR GENERATION-RUN FAILURE:',statusError);}
+    }
+    console.error('GENERACION_FALLIDA:',JSON.stringify({runId:runId||null,ms:Date.now()-requestStartedAt,error:String(e?.message||e).slice(0,500)}));
     console.error("ERROR GENERATECONTENT:",e);
     res.status(500).json({
       ok:false,
