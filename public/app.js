@@ -857,6 +857,9 @@ async function finish(auto=false){
 
     </div>
   `;
+  // SERVER 93F: refrescar contadores tras confirmar el guardado del test.
+  // Si falla esta consulta, el resultado ya entregado permanece intacto.
+  void loadStatistics();
 }
 
 function review(){
