@@ -324,6 +324,28 @@ async function uploadTopicBatch(){
     btn.disabled=false;
   }
 }
+// Recuerda una generación que terminó en Render aunque se cortase HTTP.
+// No vuelve a pedir otro test: consulta el MISMO runId hasta obtenerlo.
+async function waitForGenerationRun93(runId){
+  const deadline=Date.now()+12*60*1000;
+  while(Date.now()<deadline){
+    await wait(4000);
+    let status;
+    try{status=await api(`/api/generation-run/${encodeURIComponent(runId)}`);}
+    catch(error){
+      // Los estados desconocidos no se resuelven por seguir esperando.
+      if(/No existe esa generaci|Identificador de test inv/i.test(String(error?.message||error))){
+        throw error;
+      }
+      continue; // Error temporal de red: no duplicar generación.
+    }
+    if(status.status==='completed')return status;
+    if(status.status==='failed'||status.status==='stale'){
+      throw new Error(status.error||'No se pudo completar la generación.');
+    }
+  }
+  throw new Error('No se recibió el test dentro del tiempo de espera. Comprueba Render antes de volver a generar.');
+}
 async function generate(){
   const btn=$("generate");
   const originalText=btn.textContent;
@@ -348,27 +370,53 @@ if(
 currentTestLabel=
   buildSelectionLabel();
 
-const j=await api("/api/generate",{
-  method:"POST",
-  body:JSON.stringify({
-    count:+$("count").value,
-    difficulty:$("difficulty").value,
-    mode:$("mode").value,
-    testType:
-      $("testType")?.value || "normal",
-examMode:
-  $("examMode")?.value || "training",
-    selectedBlocks:
-      allScope
-        ? []
-        : [...selectedBlocks],
-
-    selectedTopicIds:
-      allScope
-        ? []
-        : [...selectedTopicIds]
-  })
-});
+const runId=globalThis.crypto?.randomUUID?.() ||
+  `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const generationPayload={
+  runId,
+  count:+$("count").value,
+  difficulty:$("difficulty").value,
+  mode:$("mode").value,
+  testType:$("testType")?.value || "normal",
+  examMode:$("examMode")?.value || "training",
+  selectedBlocks:allScope?[]:[...selectedBlocks],
+  selectedTopicIds:allScope?[]:[...selectedTopicIds]
+};
+let j;
+let uncertainTransport=false;
+try{
+  const response=await fetch('/api/generate',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(generationPayload)
+  });
+  const raw=await response.text();
+  try{j=JSON.parse(raw);}catch{
+    // Un proxy puede devolver HTML (502/503/504) después del COMMIT.
+    // En ese caso el resultado es DESCONOCIDO, no un test fallido.
+    uncertainTransport=true;
+  }
+  // Una respuesta de gateway 408/502/503/504 no demuestra fracaso
+  // de la operación: también puede ocultar un COMMIT completado.
+  if([408,502,503,504].includes(response.status))uncertainTransport=true;
+  if(!uncertainTransport){
+    if(j?.ok===false){
+      throw new Error(j.error||`Error HTTP ${response.status}`);
+    }
+    if(!response.ok)throw new Error(`Error HTTP ${response.status}`);
+  }
+}catch(error){
+  if(!/failed to fetch|networkerror|network error|load failed/i.test(String(error?.message||error)))throw error;
+  uncertainTransport=true;
+}
+if(uncertainTransport){
+  btn.textContent='RECUPERANDO TEST...';
+  j=await waitForGenerationRun93(runId);
+}
+if(j?.pending){
+  btn.textContent='RECUPERANDO TEST...';
+  j=await waitForGenerationRun93(runId);
+}
 
     if(!j.ok){
       throw new Error(j.error||"No se pudo generar el test.");
@@ -738,18 +786,18 @@ async function finish(auto=false){
       }))
       .filter(item=>Number.isInteger(item.selectedIndex));
 
-    await Promise.all(
-      answeredQuestions.map(item=>
-        api("/api/answer",{
-          method:"POST",
-          body:JSON.stringify({
-            sessionId:Number(sessionId),
-            questionId:item.questionId,
-            selectedIndex:item.selectedIndex
-          })
+    // Guardado secuencial: evita saturar Render/PostgreSQL con 10–75
+    // escrituras simultáneas. La API conserva la idempotencia por pregunta.
+    for(const item of answeredQuestions){
+      await api("/api/answer",{
+        method:"POST",
+        body:JSON.stringify({
+          sessionId:Number(sessionId),
+          questionId:item.questionId,
+          selectedIndex:item.selectedIndex
         })
-      )
-    );
+      });
+    }
     await api("/api/finish-test",{
       method:"POST",
       body:JSON.stringify({
