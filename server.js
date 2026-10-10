@@ -17052,8 +17052,14 @@ const newGenerationCount =
 
 let prompt = null;
 let finalQuestions = [];
+// SERVER 93H: ambos datos se utilizan también DESPUÉS de la generación.
+// Declararlos aquí evita referencias fuera de ámbito en la auditoría final.
+const independentPdfCheck = generationTargets.length > 0 &&
+  generationTargets.every(t=>
+    String(t.topic_block||'').trim().toLowerCase()==='legislacion');
+let officialStyle = '';
 if(newGenerationCount > 0){
-const officialStyle =
+officialStyle =
   await getCachedOfficialExamStyleReference();
 
 const hasGeographyTargets =
@@ -17359,8 +17365,6 @@ finalQuestions = [...parsed.questions];
 // SERVER 93C: la cuota Anki solo decide el origen de cada pregunta.
 // TODA pregunta NUEVA de un lote exclusivamente legislativo merece la
 // verificación independiente del PDF, aunque haya Anki en otras posiciones.
-const independentPdfCheck = generationTargets.length>0 &&
-  generationTargets.every(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion');
 let factualValidation =
   await validateGeneratedQuestions(ai, finalQuestions,
     {independentPdfCheck,targets:generationTargets});
@@ -17993,7 +17997,7 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     res.json({
   ok:true,
   completed:true,
-  questions:finalQuestions
+  questions:parsed.questions
 });
 
   }catch(e){
