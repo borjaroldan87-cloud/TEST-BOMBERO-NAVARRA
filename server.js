@@ -12556,6 +12556,90 @@ REGLAS DE COBERTURA:
 - La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
 }
+// SERVER 109 — Control de coste y circuit breaker SOLO para generación de
+// Legislación Muy alta. Todas las comprobaciones normativas siguen activas.
+// Un 429 de Gemini/embeddings no equivale a dificultad insuficiente: se
+// interrumpe inmediatamente, sin repetir la misma llamada con cargo adicional.
+let legislationProviderPauseUntil109=0;
+function legislationProviderError109(err){
+  const message=String(err?.message||err||'');
+  const status=Number(err?.status??err?.response?.status??err?.code)||null;
+  return status===429||/(?:RESOURCE_EXHAUSTED|Failed to embed content|quota exceeded|rate limit exceeded)/i.test(message);
+}
+function legislationUnavailable109(original){
+  const e=new Error('Servicio documental de Gemini temporalmente no disponible (429 o limite de cuota). '+
+    'Se ha detenido el proceso para no consumir mas llamadas; no se ha guardado el test. '+
+    'No repitas la prueba hasta recuperar la cuota/capacidad del proveedor.');
+  e.status=429;e.noRetry109=true;e.providerUnavailable109=true;e.cause=original;
+  return e;
+}
+function budgetedLegislationAi109(ai,questionCount){
+  const count=Math.max(1,Number(questionCount)||5);
+  const readPositive=(key,fallback)=>{
+    const v=Number(process.env[key]);
+    return Number.isFinite(v)&&v>0?Math.floor(v):fallback;
+  };
+  const maxCalls=readPositive('LEGISLACION_MUY_ALTA_MAX_LLAMADAS',
+    Math.min(12,4+Math.ceil(count/5)*3));
+  const maxChars=readPositive('LEGISLACION_MUY_ALTA_MAX_CARACTERES',
+    90000+Math.ceil(count/5)*65000);
+  const maxMs=readPositive('LEGISLACION_MUY_ALTA_MAX_TIEMPO_MS',
+    count<=5?300000:count<=10?450000:600000);
+  const started=Date.now();let calls=0,chars=0;
+  const rawModels=ai.models;
+  const models=new Proxy(rawModels,{get(target,key){
+    if(key!=='generateContent'){
+      const value=Reflect.get(target,key,target);
+      return typeof value==='function'?value.bind(target):value;
+    }
+    return async function(request){
+      if(Date.now()<legislationProviderPauseUntil109){
+        throw legislationUnavailable109(new Error('Enfriamiento por error 429 anterior.'));
+      }
+      const content=typeof request?.contents==='string'?request.contents:
+        JSON.stringify(request?.contents||'');
+      const amount=content.length;
+      if(calls>=maxCalls || chars+amount>maxChars || Date.now()-started>maxMs){
+        console.warn('LEGISLACION_PRESUPUESTO_109:',JSON.stringify({
+          stage:'bloqueado_antes_de_llamar',calls,maxCalls,chars,maxChars,
+          nextChars:amount,ms:Date.now()-started,maxMs,noExtraCharge:true}));
+        const err=new Error('Presupuesto preventivo de llamadas a Gemini agotado. '+
+          'Se ha detenido la generación para evitar gastos repetidos. '+
+          'Las preguntas verificadas pueden recuperarse del banco pendiente; '+
+          'no se ha guardado ninguna sesión incompleta.');
+        err.status=429;err.budget109=true;err.noRetry109=true;throw err;
+      }
+      calls++;chars+=amount;
+      const remaining=Math.max(1000,maxMs-(Date.now()-started));
+      const originalTimeout=Number(request?.config?.httpOptions?.timeout)||145000;
+      const effectiveTimeout=Math.min(originalTimeout,remaining);
+      console.log('LEGISLACION_PRESUPUESTO_109:',JSON.stringify({
+        stage:'llamada',calls,maxCalls,chars,maxChars,
+        ms:Date.now()-started,maxMs,promptChars:amount,
+        timeoutMs:effectiveTimeout,model:request?.model}));
+      try{
+        return await target.generateContent.call(target,{
+          ...request,config:{...request?.config,httpOptions:{
+            ...(request?.config?.httpOptions||{}),timeout:effectiveTimeout}}
+        });
+      }catch(err){
+        if(legislationProviderError109(err)){
+          legislationProviderPauseUntil109=Date.now()+180000;
+          console.warn('LEGISLACION_CIRCUITO_109:',JSON.stringify({
+            status:429,pauseMs:180000,calls,chars,providerUnreachable:true}));
+          throw legislationUnavailable109(err);
+        }
+        throw err;
+      }
+    };
+  }});
+  return new Proxy(ai,{get(target,key){
+    if(key==='models')return models;
+    const value=Reflect.get(target,key,target);
+    return typeof value==='function'?value.bind(target):value;
+  }});
+}
+
 // SERVER 107: checkpoint de trabajo APROBADO pero sin entregar.
 // validation_version=107 + last_shown_at=NULL marca una pregunta que ha
 // superado verificacion factual independiente Y auditoria de dificultad.
@@ -14272,29 +14356,133 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
       }));
       return response;
     }catch(error){
+      // No convertir el limitador interno de consumo en un supuesto 429
+      // del proveedor, ni reintentar una llamada bloqueada localmente.
+      if(error?.noRetry109)throw error;
       const status=Number(error?.status ?? error?.response?.status ?? error?.code);
       const msg=String(error?.message||error);
       const permanent=[400,401,402,403,404,422].includes(status) ||
         /\b402\b|payment required|insufficient credits|billing disabled/i.test(msg);
       const transient=!permanent && ([429,502,503,504].includes(status) ||
         /(?:\b429\b|\b502\b|\b503\b|\b504\b|RESOURCE_EXHAUSTED|UNAVAILABLE|high demand|overloaded|temporarily unavailable)/i.test(msg));
-      const retryable=transient||error?.modelProtocol100===true;
+      const upstreamQuota109=status===429 || /RESOURCE_EXHAUSTED|Failed to embed content/i.test(msg);
+      const retryable=!error?.noRetry109 && !upstreamQuota109 &&
+        (transient||error?.modelProtocol100===true);
       console.warn('LEGISLACION_MODELO_PROTOCOLO_100:',JSON.stringify({
         phase,attempt,status:Number.isFinite(status)?status:null,
         retryable,error:msg.slice(0,170),
         action:retryable&&attempt<maxAttempts?'reintentar':'fallar_seguro'
       }));
-      if(!retryable||attempt===maxAttempts){
+      // SERVER 108: "Failed to embed content" originates inside Gemini File
+      // Search, BEFORE a question JSON is returned. This is NOT a rejected
+      // question nor a PostgreSQL problem. A quick 1.5 s retry just hammers
+      // the same upstream resource. Respect a bounded cooldown and surface
+      // the service fault distinctly; never bypass factual validation.
+      const embed429108=status===429 && /failed to embed content/i.test(msg);
+      if(embed429108){
+        console.warn('LEGISLACION_FILE_SEARCH_108:',JSON.stringify({
+          phase,attempt,embed429:true,possibleCauses:'quota_o_saturacion',
+          action:attempt===maxAttempts?'fallar_seguro':'esperar_y_reintentar'
+        }));
+      }
+      if(!retryable||attempt===maxAttempts||upstreamQuota109){
         console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
           phase,ms:Date.now()-startedAt103,attempt,questions:expectedCount,
           completed:false
         }));
+        if(embed429108){
+          const unavailable=new Error('Gemini File Search no ha podido procesar el contenido (429 RESOURCE_EXHAUSTED). Es un limite o saturacion del proveedor de busqueda documental; no es un rechazo por dificultad. Comprueba en Google AI Studio la cuota y el estado de File Search. No se ha guardado el test.');
+          unavailable.status=429;
+          unavailable.upstreamEmbed108=true;
+          unavailable.cause=error;
+          throw unavailable;
+        }
+        if(upstreamQuota109){
+          const quota=new Error('Gemini ha rechazado la operación por límite de cuota o recursos (429). No se ha guardado el test ni se reintentará automáticamente.');
+          quota.status=429;quota.providerUnavailable109=true;quota.cause=error;
+          throw quota;
+        }
         throw error;
       }
       await sleep(attempt*1500);
     }
   }
   throw new Error('Gemini Muy alta: respuesta no disponible.');
+}
+
+// SERVER 108: los exámenes de 10 o más preguntas Muy altas ya no
+// dependen de UNA sola generación larga con File Search. Se envían lotes
+// secuenciales de como máximo cinco objetivos. El contrato curricular,
+// PDF factual, auditoría, familia, orden y validación final se conservan.
+// ATENCIÓN: segmentar no elimina una cuota 429 agotada de Google; la
+// detectaríamos en el primer lote y no enviaríamos los siguientes.
+async function generateLegislationBatches108(ai,request,targets,mode,officialStyle){
+  if(!isPureLegislation95(targets) ||
+     request?.model!==LEGISLACION_MUY_ALTA_MODELO_99){
+    return generateLegislationVeryHigh100(ai,request,'generacion',targets.length,
+      isPureLegislation95(targets));
+  }
+  const batchSize=5;
+  const combined=[];
+  const totalBatches=Math.ceil(targets.length/batchSize);
+  for(let start=0;start<targets.length;start+=batchSize){
+    const group=targets.slice(start,start+batchSize);
+    const batchIndex=Math.floor(start/batchSize)+1;
+    const preceding=combined.map((q,j)=>({
+      slot:j+1,stem:String(q.stem||'').slice(0,240)
+    }));
+    const availableFromPdf109=group.every(t=>
+      String(t.source_evidence||'').trim().length>=180 &&
+      String(t.source_evidence||'').length +
+        (Array.isArray(t.distractorContext)?t.distractorContext.reduce((n,x)=>
+          n+String(x.source_evidence||'').length,0):0)>=350);
+    let contents=legislationVeryHighPrompt104(group,mode,officialStyle)+
+      (preceding.length ? '\nNO DUPLIQUES los núcleos ya generados en los lotes anteriores: '+
+        JSON.stringify(preceding)+'\n' : '');
+    if(availableFromPdf109){
+      contents='Esta llamada NO tiene acceso directo a File Search. Los EXTRACTOS '+
+        'LITERALES DEL PDF que figuran a continuación son la ÚNICA fuente '+
+        'factual para la generación. Nunca completes lagunas con memoria externa. '+
+        'La salida seguirá sometida a una SEGUNDA VERIFICACIÓN INDEPENDIENTE '+
+        'contra el PDF original mediante File Search; si faltan pasajes '+
+        'necesarios, abstente de inventar.\n'+
+        contents.replaceAll('recuperado con File Search','contenido en los extractos del PDF')
+          .replaceAll('mediante File Search','con los extractos PDF facilitados')
+          .replaceAll('Verifica mediante File Search','Contrasta con los extractos PDF');
+    }
+    console.log('LEGISLACION_LOTES_108:',JSON.stringify({
+      phase:'inicio',batch:batchIndex,totalBatches,
+      count:group.length,promptChars:contents.length,
+      usingExistingPdfExcerpts:availableFromPdf109,
+      independentVerificationRequired:true,
+      firstCoverageId:Number(group[0]?.id||0)
+    }));
+    try{
+      const answer=await generateLegislationVeryHigh100(ai,
+        {...request,contents,config:{...request.config,
+          ...(availableFromPdf109?{tools:undefined}:{})}},
+        'generacion',group.length,true);
+      const questions=JSON.parse(answer.text).questions;
+      if(!Array.isArray(questions)||questions.length!==group.length)
+        throw new Error('Lote legislativo 108 incompleto.');
+      combined.push(...questions);
+      console.log('LEGISLACION_LOTES_108:',JSON.stringify({
+        phase:'completo',batch:batchIndex,totalBatches,
+        received:questions.length,aggregate:combined.length
+      }));
+    }catch(e){
+      console.warn('LEGISLACION_LOTES_108:',JSON.stringify({
+        phase:'fallido',batch:batchIndex,totalBatches,
+        receivedBeforeFailure:combined.length,
+        status:Number(e?.status)||null,
+        upstreamEmbed:Boolean(e?.upstreamEmbed108),
+        noTestPersisted:true
+      }));
+      throw e;
+    }
+  }
+  if(combined.length!==targets.length)throw new Error('Lotes 108 incompletos.');
+  return {text:JSON.stringify({questions:combined})};
 }
 
 function legislationVeryHighModel99(targets,difficulty){
@@ -15001,6 +15189,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     first=await auditVeryHighLegislation93F(ai,
       indices.map(i=>finalQuestions[i]),indices.map(i=>generationTargets[i]));
   }catch(e){
+        if(e?.noRetry109||e?.providerUnavailable109||e?.budget109)throw e;
     console.warn('CALIDAD_MUY_ALTA_AUDITOR_ERROR:',String(e?.message||e).slice(0,220));
     for(const i of indices)finalQuestions[i].difficulty='alta';
     return {audited:0,verifiedVeryHigh:0,downgraded:indices.length,
@@ -15035,6 +15224,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     const i=indices[j];
     if(first[j].strong){
       finalQuestions[i].difficulty='muy alta';
+      finalQuestions[i].veryHighVerified109=true;
     }else{
       finalQuestions[i].difficulty='alta';
       pending.set(i,sourceReason(first[j]));
@@ -15046,7 +15236,14 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
   // Lotes limitados para que el modelo corrija defectos concretos y no diez
   // preguntas de materias diferentes en una unica salida extensa.
   // Dos rondas maximo; nunca se relaja el baremo para completar el test.
-  for(let round=1;round<=2&&pending.size;round++){
+  // Sólo una reparación de calidad en Legislación Muy alta: el segundo
+  // intento repetido ha demostrado un coste elevado. El checkpoint 107
+  // conserva las preguntas verificadas si la plaza restante no se recupera.
+  const maxRepairRounds109=indices.length?1:2;
+  for(let round=1;round<=maxRepairRounds109&&pending.size;round++){
+    if(Date.now()<legislationProviderPauseUntil109){
+      throw legislationUnavailable109(new Error('Circuit breaker activo tras 429 en la auditoría.'));
+    }
     if(round===2){
       // Un objetivo insuficiente se cambia solo cuando está permitido,
       // la alternativa es MÁS rica documentalmente y no altera las cuotas.
@@ -15120,6 +15317,11 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
           catch(e){taskResults[k]={ok:false,error:e};}
         }
       }));
+      // Un 429 real/limite de presupuesto es infraestructura, NO calidad.
+      // No lanzar otras reparaciones ni convertirlo en pregunta rechazada.
+      const terminal109=taskResults.find(r=>!r?.ok &&
+        (r?.error?.noRetry109||r?.error?.providerUnavailable109||r?.error?.budget109));
+      if(terminal109)throw terminal109.error;
       const successful=[];
       for(let k=0;k<subset.length;k++){
         if(taskResults[k]?.ok) successful.push({i:subset[k],q:taskResults[k].question});
@@ -15187,6 +15389,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
           {independentPdfCheck:true,targets:plausible.map(x=>x.target)});
         if(factual.length!==plausible.length)throw new Error('Cantidad factual distinta.');
       }catch(e){
+        if(e?.noRetry109||e?.providerUnavailable109||e?.budget109)throw e;
         failureStats.validationErrors+=plausible.length;
         console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
           round,slots:plausible.map(x=>x.i+1),phase:'validacion_pdf',
@@ -15215,6 +15418,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
           factuallyValid.map(x=>x.q),factuallyValid.map(x=>x.target));
         if(quality.length!==factuallyValid.length)throw new Error('Cantidad de auditorias distinta.');
       }catch(e){
+        if(e?.noRetry109||e?.providerUnavailable109||e?.budget109)throw e;
         failureStats.auditErrors+=factuallyValid.length;
         console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
           round,slots:factuallyValid.map(x=>x.i+1),phase:'auditoria_dificultad',
@@ -15243,6 +15447,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
             }));
           }
           entry.q.difficulty='muy alta';
+          entry.q.veryHighVerified109=true;
           finalQuestions[entry.i]=entry.q;
           pending.delete(entry.i);
           latestRejected95.delete(entry.i);
@@ -18438,7 +18643,7 @@ const examMode=
   req.body.examMode==="simulation"
     ? "simulation"
     : "training";
-const ai=aiClient();
+let ai=aiClient();
 const allowedTopicIds =
   await resolveGenerationTopicScope(req.body);
     let targets=
@@ -18462,6 +18667,13 @@ const allowedTopicIds =
       : "No quedan unidades de cobertura disponibles."
   );
 }
+
+   // SERVER 109: contrato de costes SOLO para solicitud de Legislación
+   // Muy alta. No afecta Alta (80/20), Geografia, Especifico ni otros modos.
+   if(difficulty==='muy alta' && testType==='normal' &&
+     targets.every(t=>String(t.topic_block||'').toLowerCase().trim()==='legislacion')){
+     ai=budgetedLegislationAi109(ai,count);
+   }
 
    // SERVER 106: Legislación Alta conserva íntegramente el 80/20 de
    // tarjetas Anki originales; en Muy alta no hay selección ni rescate
@@ -18981,7 +19193,7 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         phase:'generacion',model:generationModel99,count:newGenerationCount
       }));
     }
-    const response=await generateLegislationVeryHigh100(ai,{
+    const initialRequest108={
       model:generationModel99,
       contents:prompt,
       config:{
@@ -18993,7 +19205,12 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         responseMimeType:"application/json",
         responseJsonSchema:questionSchema
       }
-    },'generacion',newGenerationCount,difficulty==='muy alta' && isPureLegislation95(generationTargets));
+    };
+    const response=difficulty==='muy alta' && isPureLegislation95(generationTargets)
+      ? await generateLegislationBatches108(ai,initialRequest108,
+          generationTargets,mode,officialStyle)
+      : await generateLegislationVeryHigh100(ai,initialRequest108,
+          'generacion',newGenerationCount,false);
 console.log(
   "TARGETS GRAFICOS:",
   generationTargets.map((t, i) => ({
@@ -19244,7 +19461,8 @@ let invalidQuestions =
 
 for(
   let regenerationAttempt = 1;
-  regenerationAttempt <= 3 &&
+  regenerationAttempt <= (difficulty==='muy alta' &&
+    generationTargets.length && isPureLegislation95(generationTargets)?1:3) &&
   invalidQuestions.length > 0;
   regenerationAttempt++
 ){
@@ -19612,11 +19830,30 @@ const legislationOnly107=difficulty==='muy alta' && testType==='normal' &&
 const generatedOnly107=legislationOnly107 && generationIndexes.length!==finalQuestions.length;
 const qualitySubset107=generatedOnly107
   ? generationIndexes.map(i=>finalQuestions[i]) : finalQuestions;
-const qualityResult93I=await refineVeryHighLegislation93F({ai,
-  finalQuestions:qualitySubset107,generationTargets,
-  difficulty,testType,
-  independentPdfCheck:legislationOnly107?true:independentPdfCheck,
-  mode,officialStyle});
+let qualityResult93I;
+try{
+  qualityResult93I=await refineVeryHighLegislation93F({ai,
+    finalQuestions:qualitySubset107,generationTargets,
+    difficulty,testType,
+    independentPdfCheck:legislationOnly107?true:independentPdfCheck,
+    mode,officialStyle});
+}catch(e){
+  if(legislationOnly107 && (e?.noRetry109||e?.budget109||e?.providerUnavailable109)){
+    const safe=qualitySubset107.flatMap((q,j)=>q?.veryHighVerified109===true
+      ? [{q,t:generationTargets[j]}]:[]);
+    if(safe.length){
+      try{
+        await checkpointVerifiedVeryHigh107(safe.map(x=>x.q),safe.map(x=>x.t));
+        console.log('LEGISLACION_RESCATE_PRESUPUESTO_109:',JSON.stringify({
+          verifiedAndSaved:safe.length,notCountedAsAnswered:true}));
+      }catch(cacheError){
+        console.error('LEGISLACION_RESCATE_PRESUPUESTO_109_ERROR:',
+          String(cacheError?.message||cacheError).slice(0,180));
+      }
+    }
+  }
+  throw e;
+}
 if(generatedOnly107){
   for(let j=0;j<generationIndexes.length;j++)
     finalQuestions[generationIndexes[j]]=qualitySubset107[j];
@@ -19729,7 +19966,7 @@ console.log("COBERTURA 83: pendientes de respuesta, no trabajados al crear la se
     }
     console.error('GENERACION_FALLIDA:',JSON.stringify({runId:runId||null,ms:Date.now()-requestStartedAt,error:String(e?.message||e).slice(0,500)}));
     console.error("ERROR GENERATECONTENT:",e);
-    res.status(500).json({
+    res.status(e?.providerUnavailable109===true||e?.budget109===true||e?.upstreamEmbed108===true?429:500).json({
       ok:false,
       error:e?.message || String(e)
     });
