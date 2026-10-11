@@ -14270,10 +14270,6 @@ function legislationVeryHighPrompt104(targets,mode,officialStyle){
       .filter(x=>String(x.source_evidence||'').trim()).slice(0,4)
       .map(x=>({concept:String(x.concept||'').slice(0,230),
         evidence:String(x.source_evidence||'').slice(0,950)})),
-    ankiSeed:t.veryHighDerivation93G?{
-      stem:String(t.veryHighAnkiSeed?.stem||''),
-      options:t.veryHighAnkiSeed?.options||[],
-      answer:t.veryHighAnkiSeed?.correctIndex}:null,
     previousQuestion:t.failedQuestion?{
       stem:t.failedQuestion.stem,options:t.failedQuestion.options}:null,
     priorBank:t.previousBankQuestion?{
@@ -14293,13 +14289,17 @@ JERARQUÍA DE REGLAS:
    Una opción aparentemente verdadera que omite una excepción relevante NO
    puede marcarse como íntegramente CORRECTA.
 2. Un objetivo implica UNA pregunta del conocimiento exacto. Conserva
-   tema, familia obligatoria y prioridad. No sustituyas objetivos ni
-   cambies la semilla Anki sin indicación explícita. No reproduzcas la
-   pregunta previa, sino una discriminación auténtica y verificable.
-3. CONSTRUYE LA PREGUNTA ANTES DE ESCRIBIR LAS CUATRO OPCIONES:
-   identifica en el PDF una regla precisa y una condición, límite, excepción,
-   autoridad, consecuencia o aplicación estrechamente vinculada.
-   La dificultad NO debe depender del número de palabras.
+   tema, familia obligatoria y prioridad curricular/SRS. No sustituyas
+   objetivos en la generación inicial. No reproduzcas la pregunta previa,
+   sino una discriminación auténtica y verificable. Las preguntas son
+   100 % NUEVAS desde PDF: NO derives de tarjetas Anki.
+3. IDENTIFICA primero la regla central y una condición, límite, excepción,
+   autoridad, consecuencia o aplicación ESTRECHAMENTE vinculada al
+   conocimiento asignado, siempre que el PDF respalde ambos elementos.
+   Para Muy alta prioriza combinaciones normativas demostrables con 4
+   opciones casi gemelas y UN cambio decisivo en cada distractor;
+   si el objetivo es simple, intenta contraste de alcance o excepción
+   del propio PDF, sin inventar contenido. La longitud NO demuestra nivel.
 4. Para familia 2026_CORRECTA o 2026_RAZONAMIENTO: una sola opción
    íntegramente VERDADERA; tres FALSAS con un único cambio pequeño,
    diferente en cada distractor, frente a la misma base técnica.
@@ -14313,9 +14313,11 @@ JERARQUÍA DE REGLAS:
    sujeto y contexto. Cambia solo el punto jurídicamente decisivo; que
    ninguna pueda descartarse por tono, obviedad o absoluto gratuito.
    Verifica mediante File Search la falsedad o veracidad de CADA alternativa.
-6. Cuando la pregunta derive de Anki, conserva el mismo conocimiento
-   vinculado, pero añade discriminación sustancial de condición/excepción
-   sustentada por el PDF. No valen paráfrasis o cambios cosméticos.
+6. Prohibido basarse en tarjetas Anki u originales de exámenes como
+   plantillas de respuesta. Para la dificultad Muy alta construye una
+   discriminación jurídica SUSTANCIAL desde el PDF: sujeto, condición,
+   salvedad, límite, competencia o aplicación. No bastan paráfrasis ni
+   cambios cosméticos. 2024_TEXTO no es una cuota obligatoria.
 7. Datos de salida por pregunta: stem; options (4 textos no vacíos);
    correctIndex (0-3); explanation jurídica exacta; sourceEvidence
    con citas textuales suficientes de PDF; sourcePage; manualPage;
@@ -18318,11 +18320,20 @@ const allowedTopicIds =
   );
 }
 
-   const quota84=testType==='normal'
-     ? (difficulty==='muy alta'
-         ? await planVeryHighLegislation93G(targets,allowedTopicIds)
-         : await applyLegislationAnkiQuota84(targets,allowedTopicIds,difficulty))
+   // SERVER 106: Legislación Alta conserva íntegramente el 80/20 de
+   // tarjetas Anki originales; en Muy alta no hay selección ni rescate
+   // ni transformación de tarjetas. Todas las plazas son curriculares PDF.
+   const quota84=testType==='normal' && difficulty==='alta'
+     ? await applyLegislationAnkiQuota84(targets,allowedTopicIds,difficulty)
      : null;
+   if(testType==='normal' && difficulty==='muy alta' &&
+      targets.some(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion')){
+     console.log('LEGISLACION_ORIGEN_106:',JSON.stringify({
+       difficulty,source:'PDF_100_POR_CIENTO',
+       ankiDerivedRequested:0,ankiOriginalRequested:0,
+       pdfLegislationSlots:targets.filter(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion').length
+     }));
+   }
    if(quota84){targets=quota84.targets;}
    const generationCount = targets.length;
     for(const target of targets){
@@ -18473,6 +18484,32 @@ if(testType==='normal' && !quota84 && directAnkiQuestions.size===0 &&
   }));
 }
 
+// SERVER 106: selección de estilo adaptada a Muy alta, únicamente en
+// objetivos de Legislación. No imponemos 2024_TEXTO por periodicidad:
+// las preguntas literales de un único inciso fallaban sistemáticamente
+// el baremo. No tocamos el knowledge target, la prioridad SRS ni el orden.
+if(testType==='normal' && difficulty==='muy alta'){
+  const changed106=[];
+  let highLegislationOrdinal106=0;
+  for(let i=0;i<targets.length;i++){
+    const t=targets[i];
+    if(String(t.topic_block||'').trim().toLowerCase()!=='legislacion')continue;
+    highLegislationOrdinal106++;
+    const old=String(t.questionFamily||'');
+    // Reasignar solo el tipo literal de pregunta, NO el contenido curricular;
+    // usar familias que permitan preguntar condición + excepción sin
+    // fabricar una segunda norma inexistente.
+    if(old==='2024_TEXTO'){
+      t.questionFamily=highLegislationOrdinal106%2===0
+        ? '2026_INCORRECTA' : '2026_CORRECTA';
+      changed106.push({slot:i+1,from:old,to:t.questionFamily,id:Number(t.id)});
+    }
+  }
+  console.log('LEGISLACION_FAMILIAS_106:',JSON.stringify({
+    changed:changed106,legislationSlots:highLegislationOrdinal106,
+    automaticLiteralQuota:0
+  }));
+}
     console.log(
       "GENERATECONTENT: iniciando con",
       targets.length,
@@ -18541,6 +18578,11 @@ const veryHighSeeds93E=quota84?.derivedMode
          generationTargets,difficulty,testType));
 if(difficulty==="muy alta"){
   console.log("LEGISLACION_SEMILLAS_MUY_ALTA:",JSON.stringify(veryHighSeeds93E));
+  if(testType==='normal' &&
+      generationTargets.some(t=>String(t.topic_block||'').trim().toLowerCase()==='legislacion') &&
+      generationTargets.some(t=>t.veryHighDerivation93G || t.veryHighAnkiSeed)){
+    throw new Error('SERVER 106: detectada semilla Anki heredada en Legislación Muy alta.');
+  }
 }
 await attachDistractorContextToTargets(
   generationTargets
@@ -18591,9 +18633,9 @@ const geographyStyle =
     : "";
 
 const legislationAnkiStyle =
-  await getLegislationAnkiStyleReference(
-    generationTargets
-  );
+  difficulty==='muy alta'
+    ? '' // SERVER 106: no se consume Anki ni siquiera como plantilla.
+    : await getLegislationAnkiStyleReference(generationTargets);
 
 prompt =
   generationPrompt(
