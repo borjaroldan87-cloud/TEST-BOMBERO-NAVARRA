@@ -13955,6 +13955,158 @@ for(let i=0;i<questions.length;i++){
   
 return normalizedResults;
 }
+// SERVER 94 — Ejemplos pedagógicos acordados para LEGISLACIÓN, no hechos reutilizables.
+// Cada base es la única respuesta correcta; cada variante modifica un único detalle.
+// Ninguna pregunta de esta biblioteca puede constituir evidencia factual para otros temas.
+const LEGISLACION_REFERENCIAS_94 = Object.freeze([
+  {id:'CE-A',topic:'1',level:'alta',source:'Constitución, art. 55.2',
+    stem:'Según el artículo 55.2 de la Constitución Española, en las investigaciones sobre bandas armadas o elementos terroristas, ¿qué conjunto de derechos puede suspenderse individualmente con las garantías exigidas?',
+    base:'Los derechos reconocidos en los artículos 17.2, 18.2 y 18.3.',
+    variants:[[['17.2','17.3']], [['18.2','18.1']], [['18.3','18.4']], null],
+    why:'Tres apartados legales exactos. Cada opción cambia un único apartado; nivel Alta por depender de una disposición concreta.'},
+  {id:'CE-M',topic:'1',level:'muy alta',source:'Constitución, art. 99',
+    stem:'De conformidad con el artículo 99 de la Constitución Española, cuando la primera votación de investidura no obtiene mayoría absoluta, indique el procedimiento posterior íntegramente correcto: nueva votación, mayoría exigida, cómputo de los dos meses, disolución y refrendo.',
+    base:'La segunda votación se celebrará cuarenta y ocho horas después y bastará la mayoría simple. Si ningún candidato obtiene la confianza, transcurridos dos meses desde la primera votación de investidura, el Rey disolverá ambas Cámaras y convocará elecciones con el refrendo del Presidente del Congreso.',
+    variants:[[['primera votación de investidura','segunda votación de investidura']],null,[['Presidente del Congreso','Presidente del Gobierno']],[['mayoría simple','mayoría absoluta']]],
+    why:'Cuatro condiciones relacionadas; la alteración de un único cómputo, mayoría u órgano cambia la validez de toda la alternativa.'},
+  {id:'AT-A1',topic:'17',level:'alta',source:'ITC-RAT 01, aparato extraíble',
+    stem:'Según la ITC-RAT 01, ¿qué definición corresponde correctamente a un aparato extraíble?',
+    base:'Aparato que permite separarlo del conjunto de la instalación bajo tensión, pero sin carga, y situarlo en posición de seguridad, con sus circuitos de alta tensión sin tensión.',
+    variants:[[['pero sin carga','y con carga']],[['bajo tensión, pero sin carga','sin tensión, pero con carga']],null,[['con sus circuitos de alta tensión sin tensión','con sus circuitos de alta tensión bajo tensión']]],
+    why:'Diferencia precisa entre separación bajo tensión y circulación de carga y condición de seguridad final.'},
+  {id:'AT-A2',topic:'17',level:'alta',source:'ITC-RAT 01, interruptor automático',
+    stem:'De acuerdo con la ITC-RAT 01, ¿qué característica diferencia un interruptor automático de un interruptor?',
+    base:'Además de las funciones propias del interruptor, es capaz de interrumpir corrientes en condiciones anormales especificadas del circuito, tales como las de cortocircuito.',
+    variants:[null,[['es capaz de interrumpir','es capaz de soportar, pero no de interrumpir']],[['condiciones anormales','condiciones normales']],[['tales como las de cortocircuito','exceptuadas las de cortocircuito']]],
+    why:'Contrasta capacidad de soportar e interrumpir corrientes normales o de cortocircuito.'},
+  {id:'AT-M1',topic:'17',level:'muy alta',source:'ITC-RAT 01, corrientes de defecto y puesta a tierra',
+    stem:'Según las definiciones de la ITC-RAT 01, señale la distinción íntegramente correcta entre corriente de defecto a tierra y corriente de puesta a tierra, atendiendo a sus recorridos y a la elevación del potencial de tierra.',
+    base:'La corriente de defecto a tierra es la que, existiendo un solo punto de defecto, se deriva desde el circuito averiado a tierra o a partes conectadas a tierra. La corriente de puesta a tierra es la corriente total que se deriva a través de la puesta a tierra y es la parte de la corriente de defecto que provoca la elevación de su potencial.',
+    variants:[[['y es la parte de la corriente de defecto','y no es la parte de la corriente de defecto']],null,[['un solo punto de defecto','varios puntos de defecto']],[['a través de la puesta a tierra','directamente por el punto de defecto']]],
+    why:'Confronta dos conceptos técnicos casi idénticos y la relación normativa entre corriente total y elevación de potencial.'},
+  {id:'AT-M2',topic:'17',level:'muy alta',source:'Reglamento AT, arts. 20-21',
+    stem:'Atendiendo conjuntamente a los artículos 20 y 21 del Reglamento de AT, determine la alternativa íntegramente correcta respecto de instalaciones privadas no destinadas a cesión, instalaciones promovidas por terceros para cesión y régimen de inspecciones.',
+    base:'Las instalaciones privadas no destinadas a cesión siguen el procedimiento de puesta en servicio de la ITC-RAT 22 sin necesidad de autorización administrativa. Las promovidas por terceros para su cesión se someten al régimen de autorizaciones y presentan la documentación de la ITC-RAT 22. Las inspecciones periódicas se realizan cada tres años, salvo condiciones especiales de las ITC, por organismos de control habilitados.',
+    variants:[[['sin necesidad de autorización administrativa','con necesidad de autorización administrativa']],[['se someten al régimen de autorizaciones','no se someten al régimen de autorizaciones']],[['cada tres años','cada dos años']],null],
+    why:'Tres supuestos reglamentarios independientes, con autorización, documentación y plazos fácilmente confundibles.'},
+  {id:'BT-A1',topic:'18',level:'alta',source:'ITC-BT-11, acometida aérea posada sobre fachada',
+    stem:'Según la ITC-BT-11, ¿qué combinación de tensión asignada y altura de protección rígida se aplica a la acometida aérea posada sobre fachada?',
+    base:'Los cables serán aislados de tensión asignada 0,6/1 kV y los tramos situados a altura inferior a 2,5 m se protegerán con tubos o canales rígidos.',
+    variants:[[['inferior a 2,5 m','inferior a 3 m']],[['inferior a 2,5 m','igual o inferior a 2,5 m']],[['0,6/1 kV','0,45/0,75 kV']],null],
+    why:'Un límite estricto de altura y una tensión técnica concreta, con alternativas solo mínimamente distintas.'},
+  {id:'BT-A2',topic:'18',level:'alta',source:'ITC-BT-12, instalaciones de enlace',
+    stem:'De conformidad con la ITC-BT-12, ¿cuál de estas afirmaciones define correctamente los límites y la titularidad de las instalaciones de enlace?',
+    base:'Comienzan al finalizar la acometida, incluyen la caja general de protección y terminan en los dispositivos generales de mando y protección. Son propiedad del usuario, responsable de su conservación y mantenimiento.',
+    variants:[[['incluyen la caja general de protección','no incluyen la caja general de protección']],null,[['Son propiedad del usuario','Son propiedad de la empresa distribuidora']],[['terminan en los dispositivos generales de mando y protección','terminan en la derivación individual']]],
+    why:'Distingue cuatro conceptos limítrofes de las instalaciones de enlace.'},
+  {id:'BT-M1',topic:'18',level:'muy alta',source:'ITC-BT-12, esquema para un usuario',
+    stem:'En relación con el esquema simplificado para un solo usuario de la ITC-BT-12, determine la alternativa que describe correctamente la disposición de CGP, equipo de medida, LGA y fusibles de seguridad.',
+    base:'Cuando la caja general de protección y el equipo de medida coinciden en el mismo lugar, pueden simplificarse las instalaciones de enlace, sin existir línea general de alimentación. En consecuencia, el fusible de seguridad coincide con el fusible de la CGP.',
+    variants:[null,[['sin existir línea general de alimentación','existiendo línea general de alimentación']],[['el fusible de seguridad coincide','el fusible de seguridad no coincide']],[['en el mismo lugar','en lugares distintos']]],
+    why:'Conexión causal de cuatro piezas del esquema, una sola alteración por alternativa.'},
+  {id:'BT-M2',topic:'18',level:'muy alta',source:'ITC-BT-11, instalación de acometidas',
+    stem:'Según las prescripciones generales de la ITC-BT-11, determine la alternativa íntegramente correcta respecto de trazado, aislamiento, terrenos de dominio público y acometidas independientes.',
+    base:'Las acometidas seguirán con carácter general los trazados más cortos y mantendrán el aislamiento hasta los elementos de conexión de la CGP. Discurrirán por terrenos de dominio público salvo servidumbres de paso autorizadas, y podrán establecerse acometidas independientes para suministros complementarios o por características especiales.',
+    variants:[[['podrán establecerse acometidas independientes','no podrán establecerse acometidas independientes']],[['servidumbres de paso autorizadas','servidumbres de paso no autorizadas']],null,[['hasta los elementos de conexión de la CGP','únicamente hasta la entrada del edificio']]],
+    why:'Integra cuatro reglas cercanas con una salvedad y una excepción; mantiene estructura en las cuatro respuestas.'},
+  {id:'SI4-A1',topic:'19.1',level:'alta',source:'CTE SI 4, extintores portátiles',
+    stem:'Según las exigencias generales de dotación de extintores portátiles del CTE SI 4, señale la alternativa correcta.',
+    base:'Se dispondrá de extintores de eficacia 21A-113B a una distancia máxima de 15 m de recorrido desde todo origen de evacuación, situándose los de zonas de riesgo especial en el exterior del local y próximos a la puerta de acceso.',
+    variants:[[['en el exterior del local','en el interior del local']],null,[['15 m','20 m']],[['21A-113B','21A-89B']]],
+    why:'Precisión de eficacia, recorrido medido y ubicación exacta.'},
+  {id:'SI4-A2',topic:'19.1',level:'alta',source:'CTE SI 4, administrativo y detección',
+    stem:'De acuerdo con el CTE SI 4, ¿qué umbrales y ámbitos de detección son exigibles en edificios de uso Administrativo?',
+    base:'Si la superficie construida excede de 2.000 m², se dispondrán detectores en zonas de riesgo alto; si excede de 5.000 m², se dispondrán en todo el edificio.',
+    variants:[[['detectores en zonas de riesgo alto; si excede de 5.000 m², se dispondrán en todo el edificio','detectores en todo el edificio; si excede de 5.000 m², se dispondrán en zonas de riesgo alto']],[['excede de 2.000 m²','es igual o superior a 2.000 m²']],[['2.000 m²','2.500 m²']],null],
+    why:'Diferencia entre superar el umbral o igualarlo y el alcance del sistema.'},
+  {id:'SI4-M1',topic:'19.1',level:'muy alta',source:'CTE SI 4, uso Comercial',
+    stem:'Respecto del uso Comercial conforme al CTE SI 4, señale la opción íntegramente correcta para BIE, columna seca, alarma, detección y extinción automática.',
+    base:'Se exigen BIE si la superficie construida excede de 500 m², columna seca si la altura de evacuación excede de 24 m, alarma si la superficie excede de 1.000 m² y detección si excede de 2.000 m². La extinción automática se exige si el área pública de ventas excede de 1.500 m² y la carga de fuego ponderada y corregida aportada por los productos comercializados es superior a 500 MJ/m².',
+    variants:[[['superior a 500 MJ/m²','igual o superior a 500 MJ/m²']],[['excede de 24 m','excede de 20 m']],null,[['excede de 1.500 m²','es igual o superior a 1.500 m²']]],
+    why:'Cinco requisitos simultáneos, con errores aislados de umbral, cuantificador y magnitud.'},
+  {id:'SI4-M2',topic:'19.1',level:'muy alta',source:'CTE SI 4, aparcamientos',
+    stem:'Según el CTE SI 4, señale la diferencia íntegramente correcta entre aparcamientos convencionales y robotizados para BIE, detección, alarma y extinción automática.',
+    base:'En aparcamientos convencionales se exigen BIE y detección cuando la superficie construida excede de 500 m². Los aparcamientos robotizados están excluidos de esa exigencia de BIE, dispondrán de pulsadores de alarma en todo caso y contarán con instalación automática de extinción independientemente de su superficie.',
+    variants:[null,[['están excluidos de esa exigencia de BIE','están incluidos en esa exigencia de BIE']],[['pulsadores de alarma en todo caso','pulsadores de alarma cuando excedan de 500 m²']],[['independientemente de su superficie','cuando la superficie exceda de 500 m²']]],
+    why:'Diferencia de uso robotizado/convencional, excepción expresa, umbral y obligación incondicionada.'},
+  {id:'SI5-A1',topic:'19.2',level:'alta',source:'CTE SI 5, viales de aproximación',
+    stem:'De acuerdo con SI 5 del CTE, para edificios de altura de evacuación descendente superior a 9 m, indique la combinación correcta de ancho, gálibo, resistencia del vial y trazado curvo.',
+    base:'Anchura mínima libre de 3,5 m, altura libre de 4,5 m y capacidad portante de 20 kN/m²; en tramos curvos, radios mínimos de 5,30 m y 12,50 m y anchura libre de circulación de 7,20 m.',
+    variants:[null,[['7,20 m','7,50 m']],[['5,30 m','5,50 m']],[['20 kN/m²','25 kN/m²']]],
+    why:'Medidas próximas, iguales unidades y diferencias de pocos centímetros.'},
+  {id:'SI5-A2',topic:'19.2',level:'alta',source:'CTE SI 5, accesibilidad por fachada',
+    stem:'Según SI 5 del CTE, ¿qué medidas de alféizar, dimensiones de huecos y separación máxima entre ejes permiten la accesibilidad por fachada?',
+    base:'Alféizar a altura no mayor de 1,20 m respecto de la planta; huecos de dimensiones horizontal y vertical mínimas de 0,80 m y 1,20 m, respectivamente; separación máxima entre ejes verticales de 25 m.',
+    variants:[[['25 m','20 m']],[['0,80 m y 1,20 m','1,20 m y 0,80 m']],null,[['no mayor de 1,20 m','no mayor de 1,50 m']]],
+    why:'Exige identificar la orientación de cada dimensión, límite superior y separación de huecos.'},
+  {id:'SI5-M1',topic:'19.2',level:'muy alta',source:'CTE SI 5, espacios de maniobra',
+    stem:'Conforme a las condiciones de SI 5 sobre entorno de los edificios, seleccione la opción íntegramente correcta para distancia a fachada según altura de evacuación, recorrido hasta accesos y pendiente.',
+    base:'Con altura de evacuación de 15 m, la distancia máxima a fachada es 23 m; con altura de evacuación de 20 m, es 18 m; por encima de 20 m, es 10 m. La distancia máxima hasta los accesos necesarios es 30 m y la pendiente máxima del espacio de maniobra es 10 %.',
+    variants:[[['es 23 m','es 18 m']],[['es 18 m','es 10 m']],[['es 30 m','es 25 m']],null],
+    why:'Dos límites inclusivos, tres rangos de altura y dos características del espacio de maniobra.'},
+  {id:'SI5-M2',topic:'19.2',level:'muy alta',source:'CTE SI 5, zonas de interfaz forestal',
+    stem:'Según SI 5 del CTE en zonas edificadas limítrofes o interiores a áreas forestales, identifique la solución íntegramente correcta para franja, camino perimetral y acceso alternativo o único.',
+    base:'Se dispondrá una franja de separación de 25 m libre de vegetación propagadora del incendio y un camino perimetral de 5 m, que podrá incluirse en la franja. La zona dispondrá preferentemente de dos accesos alternativos y, si no es posible, el acceso único finalizará en fondo de saco circular de 12,50 m de radio.',
+    variants:[[['podrá incluirse en la franja','no podrá incluirse en la franja']],null,[['preferentemente de dos accesos','obligatoriamente de dos accesos']],[['12,50 m de radio','12,50 m de diámetro']]],
+    why:'Contrasta 25 m frente a 5 m, inclusión del camino, preferencia/no obligación y radio/diámetro.'}
+]);
+
+function buildLegislacionReference94(reference){
+  if(!reference || !Array.isArray(reference.variants) || reference.variants.length!==4){
+    throw new Error('Referencia Legislación 94 sin cuatro alternativas.');
+  }
+  const correctIndexes=reference.variants.map((changes,i)=>changes===null?i:-1).filter(i=>i>=0);
+  if(correctIndexes.length!==1)throw new Error('Referencia Legislación 94 sin respuesta única.');
+  const options=reference.variants.map(changes=>{
+    let answer=reference.base;
+    for(const [from,to] of changes||[]){
+      if(!answer.includes(from))throw new Error('Variante Legislativa 94 incorrecta '+reference.id+': '+from);
+      answer=answer.replace(from,to);
+    }
+    return answer;
+  });
+  if(new Set(options).size!==4)throw new Error('Referencia Legislativa 94 contiene duplicados: '+reference.id);
+  return {id:reference.id,level:reference.level,source:reference.source,
+    stem:reference.stem,options,correctIndex:correctIndexes[0],why:reference.why};
+}
+
+function legislationCalibrationTopic94(target){
+  const str=String(target?.topic_name||'').toLowerCase();
+  if(str.includes('si 4')||/19\.1\b/.test(str))return '19.1';
+  if(str.includes('si 5')||/19\.2\b/.test(str))return '19.2';
+  const n=Number((str.match(/(?:tema\s*)?(\d+)/)||[])[1]);
+  return Number.isFinite(n)?String(n):'';
+}
+
+function pickLegislationExamples94(targets,level,count){
+  const requestedTopic=legislationCalibrationTopic94(targets?.[0]);
+  const pool=LEGISLACION_REFERENCIAS_94.filter(q=>q.level===level);
+  // Diversidad: no usar siempre Constitución ni sesgar a la materia examinada.
+  const rotate=(requestedTopic.split('').reduce((n,s)=>n+s.charCodeAt(0),0)+
+    (Array.isArray(targets)?targets.length:0))%pool.length;
+  const rotated=[...pool.slice(rotate),...pool.slice(0,rotate)];
+  const chosen=[];
+  // Primero una referencia afín si existe; las demás, de otra materia:
+  // evitar que Gemini repita por mimetismo el contenido factual del ejemplo.
+  const related=rotated.find(q=>q.topic===requestedTopic);
+  if(related && count>0)chosen.push(related);
+  for(const q of rotated){
+    if(!chosen.some(x=>x.topic===q.topic))chosen.push(q);
+    if(chosen.length===count)break;
+  }
+  return chosen.map(buildLegislacionReference94);
+}
+
+function legislationCalibrationPrompt94(targets,difficulty,forAudit=false){
+  const pure=Array.isArray(targets)&&targets.length>0&&
+    targets.every(t=>String(t?.topic_block||'').toLowerCase().trim()==='legislacion');
+  if(!pure)return '';
+  const high=pickLegislationExamples94(targets,'alta',2);
+  const veryHigh=pickLegislationExamples94(targets,'muy alta',2);
+  const refs=[...high,...veryHigh];
+  return `\n==================================================\nCALIBRACION APROBADA POR OPOSITOR — SOLO BLOQUE LEGISLACION (94)\n==================================================\nTAREA: ${forAudit?'AUDITAR DIFICULTAD':'GENERAR PREGUNTAS'} — Nivel solicitado: ${difficulty}.\nEsta biblioteca contiene 18 ejemplos aprobados: 9 Alta, 9 Muy alta,\nde los que se muestran 2+2 con diferentes materias para CALIBRAR EL ESTILO.\nSon EXCLUSIVAMENTE EJEMPLOS DE REDACCION Y DIFICULTAD; NO son fuente\nfactual. NO USES sus cifras, respuestas, reglas o artículos para nuevas\npreguntas. NO COPIES preguntas ni plantillas literales. La unica fuente\nfactual de la pregunta evaluada sigue siendo SU PDF.\n\nALTA: cuatro opciones del mismo eje técnico con diferencias precisas,\npequeñas y creíbles; las tres incorrectas exigen estudio real. El opositor\npreparado discrimina un requisito exacto, aunque no combine varias normas.\n\nMUY ALTA: cuatro opciones COMPETITIVAS y casi paralelas en tecnicidad,\nestructura y cantidad de información; si el texto normativo lo permite,\nintegra varios límites, condiciones, sujetos, umbrales, competencias o\nexcepciones. Cada distractor cambia preferentemente UN detalle mínimo\npero decisivo de una combinación correcta: «no», «podrá/deberá»,\n«igual o superior / superior», «y/o», órgano competente, cómputo,\nradio/diámetro, etc. ENUNCIADO Y CUATRO OPCIONES desarrollados cuando\nsea útil para poner a prueba precisión y concentración.\nUn inciso literal con tres variantes cortas y difíciles suele ser ALTA;\nuna combinación de varios incisos normativos con cuatro alternativas\nplausibles que difieren en un único detalle puede ser MUY ALTA.\nNo son reglas absolutas: existen excepciones complejas y preguntas breves\nde muy alta precisión. La longitud por sí sola NO determina dificultad.\nNO obligues a relacionar dos artículos si el PDF no lo permite.\nEl contenido debe justificar UNA SOLA RESPUESTA, y cada distractor debe\nser inequívocamente incorrecto, no una verdad parcial confundida con falsa.\nNo emplees absolutos artificiosos ni pistas de longitud o tono.\n\nEJEMPLOS ETIQUETADOS (solo estilo, nunca hechos de respuesta):\n${JSON.stringify(refs)}\n\n${forAudit ? `CRITERIO DE EVALUACION: compara la pregunta nueva con el baremo,\nno con el tema factual de los ejemplos. No penalices automáticamente\npor ser literal, larga o por contener tres cifras próximas. Si un\ndistractor cambia una condición pero sigue siendo fácil de eliminar,\nindica su índice exacto. Para derivadas Anki exige profundización REAL\nrespecto de la semilla. No apruebes sin analizar las cuatro opciones.\n` : `CRITERIO DE GENERACION: diseña primero el núcleo verificable de la\nrespuesta y TRES variaciones distintas, muy cercanas y falsas; redacta\nsolo después el enunciado. Si el PDF no permite variantes seguras,\nrediseña la discriminación sobre el MISMO objetivo de cobertura; nunca\ninventes normativa ni conviertas una dificultad insuficiente en aprobada.\n`}`;
+}
+
 // SERVER 93F — Auditoría de dificultad SOLO para preguntas NUEVAS de
 // LEGISLACIÓN solicitadas en Muy alta. No revalida ni reescribe Anki.
 // La exactitud, respuesta única y polaridad se comprueban ANTES, mediante
@@ -14010,6 +14162,13 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
       correctOriginalIndex:targets[index].veryHighAnkiSeed?.correctIndex
     } : null
   }));
+  if(targets.length && targets.every(t=>
+    String(t?.topic_block||'').trim().toLowerCase()==='legislacion')){
+    console.log('LEGISLACION_CALIBRACION_94:',JSON.stringify({
+      phase:'auditoria',level:'muy alta',questions:questions.length,
+      corpus:LEGISLACION_REFERENCIAS_94.length,examplesIncluded:4
+    }));
+  }
   const prompt=`Actua como evaluador ADVERSARIAL de la DIFICULTAD de un examen
   de Bombero de Navarra. La veracidad ya se ha comprobado contra el PDF:
   NO reevalúes verdad, ni cambies correctIndex ni inventes reglas.
@@ -14041,7 +14200,13 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
   Si una sola de las condiciones falla, responde difficulty=\"alta\".
   No apruebes por ser factualmente valida: una pregunta correcta puede ser
   facil. NO interpretes las etiquetas difficulty preexistentes, se omiten.
+  IMPORTANTE: distingue preguntas ALTA con tres distractores muy proximos
+  sobre un unico requisito literal, de preguntas MUY ALTA que obligan a
+  discriminar simultaneamente varias condiciones relacionadas, o una
+  excepcion compleja excepcionalmente sutil. No consideres la longitud,
+  por sí sola, razon para aprobar o rechazar.
   Devuelve exactamente un resultado por index, en orden. Razones breves.
+  ${legislationCalibrationPrompt94(targets,'muy alta',true)}
   PREGUNTAS: ${JSON.stringify(compact)}`;
   const response=await ai.models.generateContent({
     model:'gemini-3.5-flash-lite',contents:prompt,
@@ -14091,10 +14256,14 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
   const failureStats={structural:0,factual:0,duplicate:0,quality:0,
     generationErrors:0,validationErrors:0,auditErrors:0};
   const sourceReason=(assessment)=>({
-    issues:['Dificultad Muy alta insuficiente: '+assessment.reason],
+    issues:[
+      'Dificultad Muy alta insuficiente: '+assessment.reason,
+      'Tipo de contraste diagnosticado: '+assessment.contrast,
+      'REPARAR: mantener el objetivo, reconstruir un enunciado y cuatro alternativas tecnicamente paralelas, verificar cada detalle contra PDF; tomar los ejemplos aprobados SOLO como patron de complejidad.'
+    ],
     distractorIssues:[assessment.weak.length
-      ? 'Opciones descartables: '+assessment.weak.map(x=>x+1).join(', ')
-      : 'Debe aumentar la discriminacion normativa o corregir pistas de la respuesta.']
+      ? 'Opciones descartables (indices 0-3): '+assessment.weak.join(', ')+'. Reformular cada una con un unico cambio juridico proximo respaldado por el PDF.'
+      : 'Aumentar combinacion de condiciones, sutileza de excepciones, o corregir pistas de redaccion; no insertar relleno ni hechos inventados.']
   });
   for(let j=0;j<indices.length;j++){
     const i=indices[j];
@@ -15426,9 +15595,17 @@ graphicIssues: result.graphicIssues || []
   // enseñar al modelo a aumentar discriminación, sin alterar los hechos.
   const veryHighRepair93I = invalidResults.some(result=>result.qualityRepair93I===true);
 
+  if(replacementTargets.length && replacementTargets.every(t=>
+    String(t?.topic_block||'').trim().toLowerCase()==='legislacion')){
+    console.log('LEGISLACION_CALIBRACION_94:',JSON.stringify({
+      phase:'regeneracion',level:difficulty,questions:replacementTargets.length,
+      corpus:LEGISLACION_REFERENCIAS_94.length,examplesIncluded:4
+    }));
+  }
   const replacementPrompt =
     generationPrompt(replacementTargets.length, difficulty, mode) +
     coverageTargetsPrompt(replacementTargets) +
+    legislationCalibrationPrompt94(replacementTargets,difficulty,false) +
     legislationAnkiStyle +
     `
 ========================================
@@ -15451,6 +15628,14 @@ REGLAS OBLIGATORIAS:
 - No inventes datos para completar información ausente.
 ${veryHighRepair93I ? `
 CONTROL EXTRA DE MUY ALTA — SOLO PARA LAS PREGUNTAS RECHAZADAS POR DIFICULTAD:
+- Aplica los ejemplos CALIBRADOS de Legislación, no solo una orden abstracta
+  de "hacerla mas difícil". Para cada distractor, identifica qué INCISO
+  verificable permite una variacion mínima que cambia su sentido.
+- Conserva un NÚCLEO de hechos jurídicos comunes en las cuatro respuestas
+  y altera un dato determinante por alternativa, en lugar de cambiar todo
+  el sentido de las opciones. Evita variantes con dos respuestas válidas.
+- Cuando lo permita el PDF, redacta las cuatro opciones con varios
+  elementos técnicos similares, para exigir concentración sin relleno.
 - El auditor ha considerado que una o varias opciones eran demasiado fáciles.
   Debes REDISEÑAR el enunciado y las cuatro opciones, no sustituir solo un adjetivo.
 - Exige discriminar un dato normativo preciso JUNTO A una condición, excepción,
@@ -17482,6 +17667,12 @@ let finalQuestions = [];
 const independentPdfCheck = generationTargets.length > 0 &&
   generationTargets.every(t=>
     String(t.topic_block||'').trim().toLowerCase()==='legislacion');
+if(independentPdfCheck){
+  console.log('LEGISLACION_CALIBRACION_94:',JSON.stringify({
+    phase:'generacion',level:difficulty,questions:newGenerationCount,
+    corpus:LEGISLACION_REFERENCIAS_94.length,examplesIncluded:4
+  }));
+}
 let officialStyle = '';
 if(newGenerationCount > 0){
 officialStyle =
@@ -17518,6 +17709,7 @@ prompt =
     coverageTargetsPrompt(
       generationTargets
     ) +
+    legislationCalibrationPrompt94(generationTargets,difficulty,false) +
     legislationAnkiStyle +
     `
 
