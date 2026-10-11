@@ -14070,6 +14070,75 @@ function buildLegislacionReference94(reference){
     stem:reference.stem,options,correctIndex:correctIndexes[0],why:reference.why};
 }
 
+// SERVER 99: use a reasoning-capable model only for Legislacion/Muy alta.
+// Default is an officially published, stable Gemini model supporting both
+// File Search and structured JSON. Env override is optional, not required.
+// This is intentionally separate from the factual PDF validation stage.
+const LEGISLACION_MUY_ALTA_MODELO_99 =
+  String(process.env.LEGISLACION_MUY_ALTA_GEMINI_MODEL || 'gemini-3.8-flash').trim();
+// SERVER 100 — Contrato resistente de respuesta para Gemini 3.8, SOLO
+// Legislacion Muy alta. Un error transitorio o JSON malformado no invalida
+// inmediatamente un lote entero; 402/400 y fallos no transitorios NO se
+// reintentan. No se aprueba ninguna pregunta en este nivel de transporte.
+async function generateLegislationVeryHigh100(ai, request, phase, expectedCount, active=false){
+  // Para el resto de modelos y tareas conservar exactamente el comportamiento.
+  if(!active || request?.model!==LEGISLACION_MUY_ALTA_MODELO_99){
+    return ai.models.generateContent(request);
+  }
+  const field=phase==='auditoria' ? 'results' : 'questions';
+  const maxAttempts=2;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    try{
+      const response=await ai.models.generateContent(request);
+      const output=typeof response?.text==='string' ? response.text.trim() : '';
+      if(!output){
+        const error=new Error('Gemini Muy alta: respuesta JSON vacia.');
+        error.modelProtocol100=true;
+        throw error;
+      }
+      let parsed;
+      try{parsed=JSON.parse(output)}catch(error){
+        const failure=new Error('Gemini Muy alta: JSON no interpretable.');
+        failure.modelProtocol100=true;
+        throw failure;
+      }
+      if(!Array.isArray(parsed?.[field]) ||
+        (Number.isInteger(expectedCount) && parsed[field].length!==expectedCount)){
+        const error=new Error('Gemini Muy alta: numero o estructura de '+
+          field+' inesperados.');
+        error.modelProtocol100=true;
+        throw error;
+      }
+      return response;
+    }catch(error){
+      const status=Number(error?.status ?? error?.response?.status ?? error?.code);
+      const msg=String(error?.message||error);
+      const permanent=[400,401,402,403,404,422].includes(status) ||
+        /\b402\b|payment required|insufficient credits|billing disabled/i.test(msg);
+      const transient=!permanent && ([429,502,503,504].includes(status) ||
+        /(?:\b429\b|\b502\b|\b503\b|\b504\b|RESOURCE_EXHAUSTED|UNAVAILABLE|high demand|overloaded|temporarily unavailable)/i.test(msg));
+      const retryable=transient||error?.modelProtocol100===true;
+      console.warn('LEGISLACION_MODELO_PROTOCOLO_100:',JSON.stringify({
+        phase,attempt,status:Number.isFinite(status)?status:null,
+        retryable,error:msg.slice(0,170),
+        action:retryable&&attempt<maxAttempts?'reintentar':'fallar_seguro'
+      }));
+      if(!retryable||attempt===maxAttempts)throw error;
+      await sleep(attempt*1500);
+    }
+  }
+  throw new Error('Gemini Muy alta: respuesta no disponible.');
+}
+
+function legislationVeryHighModel99(targets,difficulty){
+  return difficulty==='muy alta' && isPureLegislation95(targets)
+    ? LEGISLACION_MUY_ALTA_MODELO_99 : 'gemini-3.5-flash-lite';
+}
+function legislationAuditModel99(targets){
+  return isPureLegislation95(targets)
+    ? LEGISLACION_MUY_ALTA_MODELO_99 : 'gemini-3.5-flash-lite';
+}
+
 function legislationCalibrationTopic94(target){
   const str=String(target?.topic_name||'').toLowerCase();
   if(str.includes('si 4')||/19\.1\b/.test(str))return '19.1';
@@ -14080,7 +14149,10 @@ function legislationCalibrationTopic94(target){
 
 function pickLegislationExamples94(targets,level,count){
   const requestedTopic=legislationCalibrationTopic94(targets?.[0]);
-  const pool=LEGISLACION_REFERENCIAS_94.filter(q=>q.level===level);
+  // If we are testing labelled examples, NEVER show any of those same
+  // examples inside the calibration prompt: that would leak the answer.
+  const holdoutIds=new Set((targets||[]).map(t=>t?.benchmarkReferenceId99).filter(Boolean));
+  const pool=LEGISLACION_REFERENCIAS_94.filter(q=>q.level===level && !holdoutIds.has(q.id));
   // Diversidad: no usar siempre Constitución ni sesgar a la materia examinada.
   const rotate=(requestedTopic.split('').reduce((n,s)=>n+s.charCodeAt(0),0)+
     (Array.isArray(targets)?targets.length:0))%pool.length;
@@ -14254,7 +14326,7 @@ DEVUELVE UNICAMENTE JSON CON EXACTAMENTE ${targets.length} PREGUNTAS.
 function invalidVeryHighAudit98(question,reason){
   const correctIndex=Number(question?.correctIndex);
   return {strong:false,weak:[0,1,2,3].filter(i=>i!==correctIndex),
-    contrast:'insufficient',answerStandsOut:false,
+    contrast:'insufficient',answerStandsOut:false,claimedDifficulty:'no_valido',
     auditProtocolError98:true,reason:String(reason).slice(0,240)};
 }
 function interpretVeryHighQuality93F(question,assessment){
@@ -14276,6 +14348,7 @@ function interpretVeryHighQuality93F(question,assessment){
     weak.length===0 && assessment?.answerStandsOut===false;
   return {
     strong,weak,contrast,auditProtocolError98:false,
+    claimedDifficulty:String(assessment?.difficulty||'sin_clasificar'),
     answerStandsOut:assessment?.answerStandsOut===true,
     reason:String(assessment?.reason||'').slice(0,240)
   };
@@ -14366,10 +14439,15 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[],allowRetry98=
   Devuelve exactamente un resultado por index, en orden. Razones breves.
   ${legislationCalibrationPrompt94(targets,'muy alta',true)}
   PREGUNTAS: ${JSON.stringify(compact)}`;
-  const response=await ai.models.generateContent({
-    model:'gemini-3.5-flash-lite',contents:prompt,
+  const auditorModel99=legislationAuditModel99(targets);
+  console.log('LEGISLACION_MODELO_99:',JSON.stringify({
+    phase:'auditoria',model:auditorModel99,count:questions.length,
+    benchmarkHoldout:targets.some(t=>Boolean(t?.benchmarkReferenceId99))
+  }));
+  const response=await generateLegislationVeryHigh100(ai,{
+    model:auditorModel99,contents:prompt,
     config:{responseMimeType:'application/json',responseJsonSchema:schema,temperature:0.1}
-  });
+  },'auditoria',questions.length,isPureLegislation95(targets));
   const raw=JSON.parse(response.text);
   if(!Array.isArray(raw?.results)){
     throw new Error('Auditor Muy alta: no devolvio una lista de resultados.');
@@ -14428,6 +14506,7 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[],allowRetry98=
       protocolErrors98:normalized.filter(a=>a.auditProtocolError98).length,
       refused:normalized.map((q,i)=>q.strong?null:{
         slot:i+1,family:String(questions[i]?.questionFamily||'').slice(0,40),
+        claimedDifficulty:q.claimedDifficulty,
         contrast:q.contrast,weak:q.weak,answerStandsOut:q.answerStandsOut,
         reason:q.reason.slice(0,160)
       }).filter(Boolean).slice(0,5)
@@ -14451,7 +14530,8 @@ async function runLegislationBenchmark97(ai){
       sourceEvidence:ref.base}};
   });
   const targets=samples.map(x=>({topic_block:'legislacion',
-    topic_name:'Tema '+x.ref.topic,veryHighDerivation93G:false}));
+    topic_name:'Tema '+x.ref.topic,veryHighDerivation93G:false,
+    benchmarkReferenceId99:x.ref.id}));
   const verdicts=await auditVeryHighLegislation93F(ai,samples.map(x=>x.q),targets);
   const results=samples.map((x,i)=>({id:x.ref.id,
     expected:x.ref.level,
@@ -15237,7 +15317,16 @@ function geographyOptionPoolIssue(target,question){
 function isLegislationFalseStatementQuestion(question){
   const normalized=String(question?.stem||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  return /\b(?:incorrecta|incorrecto|falsa|falso)\b/.test(normalized) &&
+  const family=String(question?.questionFamily||'').toUpperCase();
+  // No reinterpretar una pregunta expresamente etiquetada CORRECTA solo
+  // porque su contexto mencione la palabra 'incorrecta'. Un desajuste real
+  // de familia/enunciado ya lo rechaza la validacion independiente.
+  if(family==='2026_CORRECTA')return false;
+  const negativeFamily=/INCORRECTA|FALSA|EXCEPTO/.test(family);
+  const negativeStem=/\b(?:incorrecta|incorrecto|falsa|falso|excepto)\b/.test(normalized) ||
+    /\bno\s+(?:es|resulta|se\s+considera)\s+(?:correcta|correcto|verdadera|verdadero|aplicable|conforme)\b/.test(normalized) ||
+    /\bno\s+se\s+(?:ajusta|corresponde)\b/.test(normalized);
+  return (negativeFamily||negativeStem) &&
     Array.isArray(question?.options) && question.options.length===4;
 }
 
@@ -15991,8 +16080,15 @@ FIN DE REFERENCIA
       examples:4,source:'PDF_EXCLUSIVO'
     }));
   }
-  const response = await ai.models.generateContent({
-    model:"gemini-3.5-flash-lite",
+  const repairModel99=legislationVeryHighModel99(replacementTargets,difficulty);
+  if(focusedRepair95){
+    console.log('LEGISLACION_MODELO_99:',JSON.stringify({
+      phase:'reparacion',model:repairModel99,count:replacementTargets.length,
+      round:qualityRound95
+    }));
+  }
+  const response = await generateLegislationVeryHigh100(ai,{
+    model:repairModel99,
     contents:effectiveRepairPrompt95,
     config:{
       tools:[{
@@ -16003,7 +16099,7 @@ FIN DE REFERENCIA
       responseMimeType:"application/json",
       responseJsonSchema:questionSchema
     }
-  });
+  },'reparacion',replacementTargets.length,focusedRepair95);
 
   const parsed = JSON.parse(response.text);
 
@@ -18195,8 +18291,14 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         calibratedExamples:4,promptChars:prompt.length
       }));
     }
-    const response=await ai.models.generateContent({
-      model:"gemini-3.5-flash-lite",
+    const generationModel99=legislationVeryHighModel99(generationTargets,difficulty);
+    if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
+      console.log('LEGISLACION_MODELO_99:',JSON.stringify({
+        phase:'generacion',model:generationModel99,count:newGenerationCount
+      }));
+    }
+    const response=await generateLegislationVeryHigh100(ai,{
+      model:generationModel99,
       contents:prompt,
       config:{
         tools:[{
@@ -18207,7 +18309,7 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         responseMimeType:"application/json",
         responseJsonSchema:questionSchema
       }
-    });
+    },'generacion',newGenerationCount,difficulty==='muy alta' && isPureLegislation95(generationTargets));
 console.log(
   "TARGETS GRAFICOS:",
   generationTargets.map((t, i) => ({
@@ -18220,6 +18322,10 @@ console.log(
     console.log("GENERATECONTENT: respuesta recibida");
 console.log("TEXTO GEMINI:", response.text.slice(0,1500));
     const parsed=JSON.parse(response.text);
+if(!Array.isArray(parsed?.questions) || parsed.questions.length!==newGenerationCount){
+  throw new Error(`Gemini debía devolver ${newGenerationCount} preguntas; recibió ${
+    Array.isArray(parsed?.questions)?parsed.questions.length:'estructura_invalida'}.`);
+}
 for(let i=0;i<parsed.questions.length;i++){
   const target = generationTargets[i];
   const question = parsed.questions[i];
