@@ -14302,12 +14302,14 @@ function buildLegislacionReference94(reference){
     stem:reference.stem,options,correctIndex:correctIndexes[0],why:reference.why};
 }
 
-// SERVER 99: use a reasoning-capable model only for Legislacion/Muy alta.
-// Default is an officially published, stable Gemini model supporting both
-// File Search and structured JSON. Env override is optional, not required.
-// This is intentionally separate from the factual PDF validation stage.
+// SERVER 110: la construcción de Muy Alta es 100% PDF, sin Anki.
+// Separar constructor y auditor evita usar el razonamiento más pesado para
+// todos los lotes, manteniendo la supervisión de calidad independiente.
+// Ambos modelos son configurables en Render sin editar server.js.
 const LEGISLACION_MUY_ALTA_MODELO_99 =
-  String(process.env.LEGISLACION_MUY_ALTA_GEMINI_MODEL || 'gemini-3.8-flash').trim();
+  String(process.env.LEGISLACION_MUY_ALTA_GEMINI_MODEL || 'gemini-3.6-flash').trim();
+const LEGISLACION_MUY_ALTA_AUDITOR_110 =
+  String(process.env.LEGISLACION_MUY_ALTA_AUDITOR_MODEL || 'gemini-3.8-flash').trim();
 // SERVER 100 — Contrato resistente de respuesta para Gemini 3.8, SOLO
 // Legislacion Muy alta. Un error transitorio o JSON malformado no invalida
 // inmediatamente un lote entero; 402/400 y fallos no transitorios NO se
@@ -14315,7 +14317,8 @@ const LEGISLACION_MUY_ALTA_MODELO_99 =
 async function generateLegislationVeryHigh100(ai, request, phase, expectedCount, active=false){
   const startedAt103=active?Date.now():null;
   // Para el resto de modelos y tareas conservar exactamente el comportamiento.
-  if(!active || request?.model!==LEGISLACION_MUY_ALTA_MODELO_99){
+  if(!active || ![LEGISLACION_MUY_ALTA_MODELO_99,
+    LEGISLACION_MUY_ALTA_AUDITOR_110].includes(request?.model)){
     return ai.models.generateContent(request);
   }
   const field=phase==='auditoria' ? 'results' : 'questions';
@@ -14366,8 +14369,12 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
       const transient=!permanent && ([429,502,503,504].includes(status) ||
         /(?:\b429\b|\b502\b|\b503\b|\b504\b|RESOURCE_EXHAUSTED|UNAVAILABLE|high demand|overloaded|temporarily unavailable)/i.test(msg));
       const upstreamQuota109=status===429 || /RESOURCE_EXHAUSTED|Failed to embed content/i.test(msg);
+      // SERVER 110: un 504 consumió 145 s y el reintento volvió a fallar.
+      // No reintentar un DEADLINE_EXCEEDED: se evita volver a consumir
+      // tiempo y presupuesto por la misma búsqueda documental bloqueada.
+      const deadline110=status===504 || /DEADLINE_EXCEEDED|Deadline expired before operation/i.test(msg);
       const retryable=!error?.noRetry109 && !upstreamQuota109 &&
-        (transient||error?.modelProtocol100===true);
+        !deadline110 && (transient||error?.modelProtocol100===true);
       console.warn('LEGISLACION_MODELO_PROTOCOLO_100:',JSON.stringify({
         phase,attempt,status:Number.isFinite(status)?status:null,
         retryable,error:msg.slice(0,170),
@@ -14491,7 +14498,7 @@ function legislationVeryHighModel99(targets,difficulty){
 }
 function legislationAuditModel99(targets){
   return isPureLegislation95(targets)
-    ? LEGISLACION_MUY_ALTA_MODELO_99 : 'gemini-3.5-flash-lite';
+    ? LEGISLACION_MUY_ALTA_AUDITOR_110 : 'gemini-3.5-flash-lite';
 }
 
 function legislationCalibrationTopic94(target){
