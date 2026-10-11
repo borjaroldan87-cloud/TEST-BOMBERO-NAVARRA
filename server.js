@@ -115,6 +115,11 @@ async function initDatabase(){
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+// SERVER 102: en una base de datos recien creada, `block` debe existir
+// ANTES de la normalizacion de temas. En Render con DB existente es idempotente.
+await db.query(`
+  ALTER TABLE topics ADD COLUMN IF NOT EXISTS block TEXT
+`);
 await db.query(`
   UPDATE topics
   SET block = 'especifico'
@@ -14234,7 +14239,8 @@ function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestio
   if(!isPureLegislation95(targets))return '';
   const compact=targets.map((t,j)=>{
     const invalid=invalidResults[j]||{};
-    const orig=originalQuestions[invalid.index]||{};
+    const curriculumswapped101=invalid.curriculumSwap101===true;
+    const orig=curriculumswapped101?{}:(originalQuestions[invalid.index]||{});
     const supporting=Array.isArray(t.distractorContext)
       ? t.distractorContext.filter(x=>String(x.source_evidence||'').trim())
           .slice(0,5).map(x=>({section:String(x.section||'').slice(0,160),
@@ -14249,7 +14255,8 @@ function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestio
         stem:t.veryHighAnkiSeed?.stem,
         options:t.veryHighAnkiSeed?.options,
         correctIndex:t.veryHighAnkiSeed?.correctIndex}:null,
-      lastRejectedQuestion:{stem:orig.stem,options:orig.options,
+      curriculumSwap101:curriculumswapped101,
+      lastRejectedQuestion:curriculumswapped101?null:{stem:orig.stem,options:orig.options,
         correctIndex:orig.correctIndex},
       auditFailures:invalid.issues,
       weakOptionIndexes97:Array.isArray(invalid.weakOptionIndexes97)
@@ -14266,6 +14273,12 @@ en el orden recibido, con el esquema JSON de preguntas suministrado.
 NO copies sin cambios una pregunta rechazada. Tu misión es CORREGIR
 las opciones defectuosas de manera dirigida, no desechar indiscriminadamente
 el trabajo que ya fue validado contra el PDF.
+- Si curriculumSwap101=true, el objetivo anterior se consideró inadecuado
+  para el nivel requerido. IGNORA POR COMPLETO el enunciado anterior y
+  CONSTRUYE una pregunta nueva exclusivamente sobre el objetivo ACTUAL
+  proporcionado. No mezcles su materia con el objetivo sustituido.
+- En caso de cambio curricular debes conservar la familia, verificar cada
+  condición en el PDF actual, y usar la nueva evidencia como única autoridad.
 - Si el enunciado y la opción normativamente válida son sólidos, CONSÉRVALOS
   cuando resulte posible y reescribe solamente los distractores débiles.
 - weakOptionIndexes97 contiene los índices REALES 0..3 que el auditor
@@ -14544,6 +14557,157 @@ async function runLegislationBenchmark97(ai){
   return results;
 }
 
+/* SERVER 102 — candidatos exclusivamente de prioridades 4/5 de los
+ * TEMAS ya seleccionados; no consumir la ventana de 450 filas en SRS/fallos.
+ * La prioridad se CALCULA con la misma regla que el selector adaptativo.
+ * Ningún candidato se marca como trabajado por esta consulta.
+ */
+async function getLegislationVeryHighAlternatives102(topicIds,limit=1200){
+  const ids=[...new Set((topicIds||[]).map(Number).filter(x=>
+    Number.isSafeInteger(x)&&x>0))];
+  if(!ids.length)return [];
+  const capped=Math.min(2400,Math.max(1,Math.floor(Number(limit)||1200)));
+  const result=await db.query(`
+    WITH graded AS (
+      SELECT ci.id,ci.topic_id,t.name AS topic_name,
+        t.block AS topic_block,ci.section,ci.concept,ci.item_type,
+        ci.evaluation_type,ci.source_page,ci.manual_page,ci.source_evidence,
+        ci.worked,ci.times_asked,ci.times_correct,ci.times_wrong,
+        ci.times_blank,ci.last_asked_at,
+        crs.review_stage,crs.next_review_at,crs.last_review_at,
+        CASE
+          WHEN ci.times_asked>0 AND crs.next_review_at IS NOT NULL
+            AND crs.next_review_at<=NOW() THEN 1
+          WHEN ci.times_asked>0 AND last_nonblank_answer.is_correct=FALSE THEN 2
+          WHEN ci.times_asked>0 AND (ci.times_wrong+ci.times_blank)>0
+            AND (ci.times_correct::numeric/NULLIF(
+              ci.times_correct+ci.times_wrong+ci.times_blank,0))<0.70 THEN 3
+          WHEN COALESCE(ci.times_asked,0)=0 THEN 4
+          ELSE 5
+        END AS adaptive_priority
+      FROM coverage_items ci
+      JOIN topics t ON t.id=ci.topic_id
+      LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+      LEFT JOIN LATERAL (
+        SELECT tsq.is_correct FROM test_session_questions tsq
+        WHERE tsq.coverage_item_id=ci.id
+          AND tsq.answered_at IS NOT NULL AND tsq.is_blank=FALSE
+        ORDER BY tsq.answered_at DESC,tsq.id DESC LIMIT 1
+      ) last_nonblank_answer ON TRUE
+      WHERE ci.exam_relevant=TRUE AND t.block='legislacion'
+        AND ci.topic_id=ANY($1::int[])
+        AND LENGTH(COALESCE(ci.source_evidence,''))>=120
+        AND ci.item_type<>'anki_independent'
+    ), balanced AS (
+      SELECT graded.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY topic_id,adaptive_priority
+          ORDER BY LENGTH(COALESCE(source_evidence,'')) DESC,id ASC
+        ) AS candidate_rank
+      FROM graded WHERE adaptive_priority IN (4,5)
+    )
+    SELECT * FROM balanced WHERE candidate_rank<=250
+    ORDER BY candidate_rank ASC,topic_id ASC,adaptive_priority ASC,id ASC
+    LIMIT $2
+  `,[ids,capped]);
+  return result.rows;
+}
+
+/* SERVER 101: evitar reparaciones estériles y sustituir SOLO objetivos de
+ * contenido nuevo/mantenimiento NO Anki si existe una alternativa mejor del
+ * MISMO tema, prioridad, clase nuevo/repaso y familia. La sustitución no se
+ * compromete hasta que la nueva pregunta supera ambas validaciones.
+ * No se modifica la DB ni el seguimiento del objetivo anterior.
+ */
+function legislationQuestionFingerprint101(question){
+  const text=[question?.stem,...(Array.isArray(question?.options)?question.options:[])];
+  return text.map(v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ')).join(' || ');
+}
+function legislationEditRatio101(oldQuestion,newQuestion){
+  // Diferencia de trigramas, independiente de signos; acotada [0,1].
+  const a=legislationQuestionFingerprint101(oldQuestion);
+  const b=legislationQuestionFingerprint101(newQuestion);
+  if(a===b)return 0;
+  const tris=x=>{const t=new Set();for(let i=0;i<=x.length-3;i++)t.add(x.slice(i,i+3));return t;};
+  const ta=tris(a),tb=tris(b);
+  if(!ta.size||!tb.size)return 1;
+  let hits=0;for(const item of ta)if(tb.has(item))hits++;
+  return 1-hits/Math.max(ta.size,tb.size);
+}
+function legislationStagnantRepair101(beforeQuestion,afterQuestion,beforeAudit,afterAudit){
+  if(!beforeQuestion||!afterQuestion||!afterAudit||afterAudit.strong)return false;
+  if(legislationQuestionFingerprint101(beforeQuestion)===
+     legislationQuestionFingerprint101(afterQuestion))return true;
+  const weakBefore=(beforeAudit?.weak||[]).join(',');
+  const weakAfter=(afterAudit?.weak||[]).join(',');
+  const noQualityProgress=beforeAudit?.strong!==true &&
+    weakBefore===weakAfter &&
+    beforeAudit?.contrast===afterAudit.contrast &&
+    beforeAudit?.claimedDifficulty===afterAudit.claimedDifficulty;
+  // Solo considerar estancado cuando NO hay progreso y el texto es
+  // prácticamente idéntico; una mínima variación jurídica puede ser decisiva.
+  // SERVER 102: tres indices debiles son habituales. NO cancelar una
+  // segunda reparacion solo porque ambas versiones tengan tres debilidades:
+  // si la reformulacion cambia de forma sustancial, merece una oportunidad.
+  // Suprimir unicamente repeticion material con juicio igualmente negativo.
+  return noQualityProgress &&
+    legislationEditRatio101(beforeQuestion,afterQuestion)<0.04;
+}
+function legislationRichness101(item){
+  const t=String(item?.source_evidence||'').trim();
+  if(t.length<120)return -1;
+  let n=Math.min(5,Math.floor(t.length/180));
+  n+=Math.min(4,(t.match(/\b(?:si|cuando|salvo|excepto|siempre|nunca|sin|exceptuad[oa]s?|podr[aá]n?|deber[aá]n?)\b/gi)||[]).length);
+  n+=Math.min(3,(t.match(/\b\d+(?:[.,]\d+)?\s*(?:%|meses?|a[nñ]os?|d[ií]as?|m²|mm|m|kV|kN)?\b/g)||[]).length);
+  n+=Math.min(2,(t.match(/[;:]/g)||[]).length);
+  return n;
+}
+function legislationMaySwap101(t){
+  if(!t||String(t.topic_block||'').trim().toLowerCase()!=='legislacion')return false;
+  const p=Number(t.adaptive_priority);
+  if(!Number.isFinite(p)||p<=3||p>5)return false;
+  if(t.veryHighDerivation93G||t.veryHighAnkiSeed||t.ankiDirect||
+    t.ankiIndependent||t.item_type==='anki_independent'||t.failedQuestion)return false;
+  if(['CALCULO_FORMULACION','GRAFICA','2026_RAZONAMIENTO'].includes(t.questionFamily))return false;
+  return Number.isInteger(Number(t.id))&&Number(t.id)>0;
+}
+function chooseLegislationQualitySwap101(target,allTargets,candidates,reserved){
+  if(!legislationMaySwap101(target))return null;
+  const priority=Number(target.adaptive_priority);
+  const origNew=Number(target.times_asked||0)===0;
+  const origRichness=legislationRichness101(target);
+  const candidatesEligible=candidates.filter(c=>
+    String(c?.topic_block||'').trim().toLowerCase()==='legislacion'&&
+    Number(c.topic_id)===Number(target.topic_id)&&
+    Number(c.adaptive_priority)===priority&&
+    (Number(c.times_asked||0)===0)===origNew&&
+    Number.isInteger(Number(c.id))&&Number(c.id)>0&&
+    !reserved.has(Number(c.id))&&
+    c.item_type===target.item_type&&
+    c.evaluation_type===target.evaluation_type&&
+    c.item_type!=='anki_independent'&&
+    String(c.concept||'').trim()!==String(target.concept||'').trim()&&
+    legislationRichness101(c)>=Math.max(5,origRichness+2)&&
+    (target.questionFamily!=='2024_NUMERICA'||
+       /\d/.test(`${c.concept||''} ${c.source_evidence||''}`))
+  );
+  if(!candidatesEligible.length)return null;
+  const ranked=candidatesEligible.sort((a,b)=>
+    legislationRichness101(b)-legislationRichness101(a)||
+    Number(a.id)-Number(b.id));
+  const candidate={...ranked[0],questionFamily:target.questionFamily,
+    adaptiveDifficulty:'muy alta',previousBankQuestion:null};
+  // Contexto cercano solo para desarrollar contraste, sin contaminar la
+  // evidencia factual ni consultar masivamente otros bloques.
+  candidate.distractorContext=candidates.filter(c=>
+    Number(c.topic_id)===Number(candidate.topic_id)&&
+    String(c.section||'')===String(candidate.section||'')&&
+    Number(c.id)!==Number(candidate.id)&&
+    String(c.source_evidence||'').trim().length>=50
+  ).slice(0,3);
+  return candidate;
+}
 // El control de calidad no puede descartar preguntas FACTUALMENTE validas:
 // un fallo de Gemini en esta auditoria deja el examen disponible, con
 // clasificacion conservadora "alta" y registro explicito del problema.
@@ -14586,6 +14750,12 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
   const latestRejected95=new Map();
   const failureStats={structural:0,factual:0,duplicate:0,quality:0,
     generationErrors:0,validationErrors:0,auditErrors:0};
+  const noSecondRepair101=new Set();
+  const proposedSwaps101=new Map();
+  const swapStats101={considered:0,selected:0,committed:0,skippedRepeat:0,
+    noSafeAlternative:0,candidates:0};
+  const currentQualityAudit101=new Map();
+  const curriculumswapSources101=new Map();
   const sourceReason=(assessment)=>({
     issues:[
       (assessment.auditProtocolError98
@@ -14606,6 +14776,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     }else{
       finalQuestions[i].difficulty='alta';
       pending.set(i,sourceReason(first[j]));
+      currentQualityAudit101.set(i,first[j]);
     }
   }
   const initialRejected=pending.size;
@@ -14614,20 +14785,64 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
   // preguntas de materias diferentes en una unica salida extensa.
   // Dos rondas maximo; nunca se relaja el baremo para completar el test.
   for(let round=1;round<=2&&pending.size;round++){
-    const todo=[...pending.keys()];
+    if(round===2){
+      // Un objetivo insuficiente se cambia solo cuando está permitido,
+      // la alternativa es MÁS rica documentalmente y no altera las cuotas.
+      const eligible=[...pending.keys()].filter(i=>legislationMaySwap101(generationTargets[i]));
+      let pool=[];
+      if(eligible.length){
+        try{
+          const topicIds=[...new Set(eligible.map(i=>Number(generationTargets[i].topic_id)))];
+          pool=await getLegislationVeryHighAlternatives102(topicIds,
+            Math.max(600,eligible.length*180));
+          swapStats101.candidates=pool.length;
+          console.log('LEGISLACION_ALTERNATIVAS_102:',JSON.stringify({
+            topics:topicIds,received:pool.length,
+            priority4:pool.filter(x=>Number(x.adaptive_priority)===4).length,
+            priority5:pool.filter(x=>Number(x.adaptive_priority)===5).length,
+            candidateRanks:pool.slice(0,3).map(x=>({topic:x.topic_id,
+              priority:Number(x.adaptive_priority),chars:String(x.source_evidence||'').length}))
+          }));
+        }catch(e){
+          console.warn('LEGISLACION_OBJETIVO_101_CONSULTA_ERROR:',String(e?.message||e).slice(0,160));
+        }
+      }
+      const reserved=new Set(generationTargets.map(t=>Number(t.id)));
+      for(const i of eligible){
+        swapStats101.considered++;
+        const candidate=chooseLegislationQualitySwap101(generationTargets[i],generationTargets,pool,reserved);
+        if(candidate){
+          proposedSwaps101.set(i,candidate);
+          curriculumswapSources101.set(i,Number(generationTargets[i].id));
+          reserved.add(Number(candidate.id));
+          swapStats101.selected++;
+          noSecondRepair101.delete(i);
+        }else{
+          swapStats101.noSafeAlternative++;
+        }
+      }
+      console.log('LEGISLACION_OBJETIVOS_101:',JSON.stringify({
+        phase:'preparados_no_confirmados',pending:pending.size,...swapStats101,
+        reservedAnki:eligible.length!==pending.size,
+        unchangedSrs:pending.size-eligible.length
+      }));
+    }
+    const todo=[...pending.keys()].filter(i=>!noSecondRepair101.has(i));
     for(let start=0;start<todo.length;start+=5){
       const subset=todo.slice(start,start+5).filter(i=>pending.has(i));
       if(!subset.length)continue;
       attempted+=subset.length;
       const invalid=subset.map(i=>({index:i,qualityRepair93I:true,
+        curriculumSwap101:proposedSwaps101.has(i),
         issues:pending.get(i).issues,
         weakOptionIndexes97:pending.get(i).weakOptionIndexes97||[],
         distractorIssues:pending.get(i).distractorIssues}));
       let generated;
       try{
         const workingQuestions95=finalQuestions.map((q,i)=>latestRejected95.get(i)||q);
+        const activeTargets101=generationTargets.map((t,i)=>proposedSwaps101.get(i)||t);
         generated=await regenerateInvalidQuestions(ai,invalid,
-          workingQuestions95,generationTargets,difficulty,mode,officialStyle,round);
+          workingQuestions95,activeTargets101,difficulty,mode,officialStyle,round);
         if(!Array.isArray(generated?.questions)||generated.questions.length!==subset.length){
           throw new Error('Numero de reparaciones inesperado.');
         }
@@ -14640,7 +14855,8 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
       }
       const plausible=[];
       for(let j=0;j<subset.length;j++){
-        const i=subset[j],q=generated.questions[j],target=generationTargets[i];
+        const i=subset[j],q=generated.questions[j],target=
+          proposedSwaps101.get(i)||generationTargets[i];
         const structuralIssue=!q||!String(q.stem||'').trim()||
           !Array.isArray(q.options)||q.options.length!==4||
           !q.options.every(x=>typeof x==='string'&&x.trim())||
@@ -14724,15 +14940,42 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
       for(let j=0;j<factuallyValid.length;j++){
         const entry=factuallyValid[j],assessment=quality[j];
         if(assessment.strong){
-          // Solo se sustituye tras PASAR AMBAS auditorias.
+          // Compromiso atomico EN MEMORIA despues de ambas auditorias.
+          // targets y generationTargets comparten referencia por posicion;
+          // la DB permanece sin cambios hasta persistGeneratedTest().
+          const proposed=proposedSwaps101.get(entry.i);
+          if(proposed){
+            const original=generationTargets[entry.i];
+            delete original.distractorContext;
+            Object.assign(original,proposed,{questionFamily:original.questionFamily,
+              adaptiveDifficulty:'muy alta',previousBankQuestion:null});
+            proposedSwaps101.delete(entry.i);
+            swapStats101.committed++;
+            console.log('LEGISLACION_OBJETIVO_101_CAMBIO:',JSON.stringify({
+              slot:entry.i+1,from:curriculumswapSources101.get(entry.i)||null,
+              to:Number(original.id),topicId:Number(original.topic_id),
+              committedAfterPdfAndQuality:true
+            }));
+          }
           entry.q.difficulty='muy alta';
           finalQuestions[entry.i]=entry.q;
           pending.delete(entry.i);
           latestRejected95.delete(entry.i);
+          currentQualityAudit101.delete(entry.i);
           accepted++; approved++;
         }else{
           failureStats.quality++;
+          const beforeQuestion=latestRejected95.get(entry.i)||finalQuestions[entry.i];
+          const beforeAudit=currentQualityAudit101.get(entry.i);
+          if(round===1 && legislationStagnantRepair101(beforeQuestion,entry.q,
+              beforeAudit,assessment)){
+            noSecondRepair101.add(entry.i);
+            swapStats101.skippedRepeat++;
+          }
+          // Las preguntas factualmente validas rechazadas no se persisten;
+          // guardar solo borrador en memoria para el siguiente intento.
           latestRejected95.set(entry.i,entry.q);
+          currentQualityAudit101.set(entry.i,assessment);
           pending.set(entry.i,sourceReason(assessment));
         }
       }
@@ -14751,6 +14994,11 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     }
   }
   const verifiedVeryHigh=indices.filter(i=>finalQuestions[i].difficulty==='muy alta').length;
+  console.log('LEGISLACION_ANTIESTANCAMIENTO_101:',JSON.stringify({
+    ...swapStats101,secondRoundSuppressed:[...noSecondRepair101].length,
+    pending:pending.size,unchangedIfTestRejected:true,
+    verifiedVeryHigh
+  }));
   console.log('CALIDAD_MUY_ALTA_RESULTADO:',JSON.stringify({
     audited:indices.length,verifiedVeryHigh,downgraded:indices.length-verifiedVeryHigh,
     regenerationRequested:initialRejected,regenerationAttempts:attempted,
@@ -15943,10 +16191,13 @@ distractorIssues: result.distractorIssues || [],
 graphicIssues: result.graphicIssues || []
   }));
 
-  const legislationAnkiStyle =
-    await getLegislationAnkiStyleReference(
-      replacementTargets
-    );
+  // La reparacion de MUY ALTA sobre Legislacion utiliza su propio prompt
+  // focalizado y NO necesita volver a consultar estilos Anki generales.
+  const legislacionRepairSolo102=difficulty==='muy alta' &&
+    isPureLegislation95(replacementTargets) &&
+    invalidResults.some(result=>result.qualityRepair93I===true);
+  const legislationAnkiStyle=legislacionRepairSolo102?'':
+    await getLegislationAnkiStyleReference(replacementTargets);
 
   // SERVER 93I: cuando el rechazo es de dificultad y NO de veracidad,
   // enseñar al modelo a aumentar discriminación, sin alterar los hechos.
@@ -18360,15 +18611,42 @@ for(let i=0;i<parsed.questions.length;i++){
   );
 }
 
-    for(const q of parsed.questions){
-      if(
-        q.options?.length!==4 ||
-        !Number.isInteger(q.correctIndex) ||
-        q.correctIndex<0 ||
-        q.correctIndex>3
-      ){
-        throw new Error("Pregunta inválida detectada.");
+    // SERVER 102: en un lote de Muy alta una respuesta nula o incompleta
+    // no debe hacer perder las otras N-1 preguntas. Un UNICO rescate de
+    // estructura, con la misma evidencia PDF y familia del objetivo.
+    const pureLegisVeryHigh102=difficulty==='muy alta' &&
+      isPureLegislation95(generationTargets);
+    const structBad=q=>!q||!Array.isArray(q.options)||q.options.length!==4||
+      !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3||
+      (pureLegisVeryHigh102 && (
+        typeof q.stem!=='string'||!q.stem.trim()||
+        !q.options.every(o=>typeof o==='string'&&o.trim())));
+    const malformed=parsed.questions.flatMap((q,i)=>structBad(q)?[i]:[]);
+    const rescueMalform=malformed.length>0 && pureLegisVeryHigh102;
+    if(rescueMalform){
+      console.warn('LEGISLACION_ESTRUCTURA_102:',JSON.stringify({
+        total:parsed.questions.length,malformed:malformed.map(i=>i+1),
+        action:'rescate_una_vez_solo_afectadas'}));
+      try{
+        const repaired=await regenerateInvalidQuestions(ai,
+          malformed.map(i=>({index:i,issues:[
+            'Objeto JSON incompleto: conservar objetivo/familia y devolver stem, 4 options y correctIndex valido.'
+          ]})),parsed.questions,generationTargets,difficulty,mode,officialStyle);
+        if(!Array.isArray(repaired?.questions)||repaired.questions.length!==malformed.length)
+          throw new Error('Rescate estructural: cantidad inesperada.');
+        for(let j=0;j<malformed.length;j++){
+          if(structBad(repaired.questions[j]))
+            throw new Error('Rescate estructural: respuesta aun incompleta.');
+          parsed.questions[malformed[j]]=repaired.questions[j];
+        }
+      }catch(e){
+        console.warn('LEGISLACION_ESTRUCTURA_102:',JSON.stringify({
+          action:'fallar_seguro',error:String(e?.message||e).slice(0,170)}));
+        throw new Error('Gemini devolvio preguntas incompletas; rescate estructural fallido. No se guardo test.');
       }
+    }
+    for(const q of parsed.questions){
+      if(structBad(q))throw new Error('Pregunta inválida detectada.');
     }
 console.log("VALIDACIÓN FACTUAL: iniciando");
 
