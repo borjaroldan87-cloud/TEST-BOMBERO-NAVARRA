@@ -14362,7 +14362,8 @@ function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestio
         correctIndex:t.veryHighAnkiSeed?.correctIndex}:null,
       curriculumSwap101:curriculumswapped101,
       lastRejectedQuestion:curriculumswapped101?null:{stem:orig.stem,options:orig.options,
-        correctIndex:orig.correctIndex},
+        correctIndex:orig.correctIndex,
+        pdfCitationPreviouslyValidated:String(orig.sourceEvidence||'').slice(0,1800)},
       auditFailures:invalid.issues,
       weakOptionIndexes97:Array.isArray(invalid.weakOptionIndexes97)
         ? invalid.weakOptionIndexes97 : [],
@@ -14414,6 +14415,11 @@ FASE DE DISEÑO (INTERNA; NO DEVUELVAS ESTA FASE):
   es falso por CONTRADICCION demostrable con el PDF, no por intuición.
 - No es suficiente una mera paráfrasis de Anki ni una frase literal simple
   con tres nombres que se descartan fácilmente.
+- Si questionFamily=2024_TEXTO, no reproduzcas una sola oración del artículo
+  ni las opciones de la tarjeta original con frases de relleno. Diseña un
+  contraste de literalidad con VARIAS condiciones normativas próximas que
+  estén respaldadas por la evidencia exacta disponible del MISMO objetivo;
+  si no hay esa evidencia, no inventes una segunda regla.
 - Verifica que todas las cuatro alternativas comparten sintaxis, extensión,
   ámbito normativo y vocabulario técnico. La diferencia mínima cambia
   el significado pero no delata visualmente la respuesta.
@@ -16517,15 +16523,41 @@ FIN DE REFERENCIA
       round:qualityRound95
     }));
   }
+  // SERVER 105: la pregunta rechazada pasó antes la verificación factual
+  // independiente; la fuente del PDF y evidencias próximas ya están disponibles.
+  // Evitar segunda búsqueda File Search EN LA PRIMERA REPARACIÓN cuando existe
+  // contexto suficientemente amplio. Una segunda ronda puede recuperar
+  // nueva evidencia con File Search. En ambos casos el resultado se valida
+  // DESPUÉS contra el PDF en validateGeneratedQuestions().
+  const existingEvidence105=focusedRepair95 && qualityRound95===1 &&
+    invalidResults.every((invalid,j)=>{
+      if(invalid.curriculumSwap101===true)return false;
+      const t=replacementTargets[j];
+      const q=originalQuestions[invalid.index]||{};
+      const snippets=[String(t.source_evidence||''),String(q.sourceEvidence||''),
+        ...(Array.isArray(t.distractorContext)?t.distractorContext.slice(0,5)
+          .map(x=>String(x.source_evidence||'')):[])];
+      return snippets.filter(x=>x.trim().length>=45).length>=2 &&
+        snippets.join(' ').length>=400;
+    });
+  if(focusedRepair95)console.log('LEGISLACION_REPARACION_EVIDENCIA_105:',JSON.stringify({
+    round:qualityRound95,count:replacementTargets.length,
+    preverifiedPdfOnly:existingEvidence105,independentPdfCheckStillRequired:true
+  }));
+  const evidenceOnlyRepairPrompt105=existingEvidence105
+    ? effectiveRepairPrompt95
+        .replaceAll('mediante File Search','en los extractos del PDF adjuntos')
+        .replaceAll('contra File Search','con los extractos literales PDF adjuntos')
+    : effectiveRepairPrompt95;
   const response = await generateLegislationVeryHigh100(ai,{
     model:repairModel99,
-    contents:effectiveRepairPrompt95,
+    contents:existingEvidence105
+      ? ('REPARACIÓN CON EXTRACTOS YA RECUPERADOS DEL PDF: en esta llamada NO hay búsqueda adicional; emplea ÚNICAMENTE citas y datos del PDF suministrados, sin inventar requisitos. Después se hará una NUEVA verificación documental independiente.\n'+evidenceOnlyRepairPrompt105)
+      : effectiveRepairPrompt95,
     config:{
-      tools:[{
-        fileSearch:{
-          fileSearchStoreNames:[STORE]
-        }
-      }],
+      ...(existingEvidence105?{}:{tools:[{
+        fileSearch:{fileSearchStoreNames:[STORE]}
+      }]}),
       responseMimeType:"application/json",
       responseJsonSchema:questionSchema
     }
@@ -17818,59 +17850,72 @@ async function rescueVeryHighLegislationSeeds93I(ai,targets,generationIndexes,qu
     ankiStem:String(x.row.stem||'').slice(0,480),
     ankiOptions:x.row.options.map(o=>String(o).slice(0,240)),
     ankiCorrectIndex:Number(x.row.correct_index)}));
-  let decisions=[];
-  // Evitar solicitudes gigantes en simulacros de 40-75 preguntas.
-  // Una auditoría fallida no convierte en aprobada ninguna semilla.
-  for(let start=0;start<compact.length;start+=24){
-    const batch=compact.slice(start,start+24);
-    let parsed;
-    try{
-      const response=await ai.models.generateContent({
-        model:'gemini-3.5-flash-lite',
-        contents:`Comprueba la correspondencia factual de cada tarjeta Anki con
-el objetivo y la evidencia literal extraída del PDF del alumno. NO uses
-conocimiento externo; el PDF es la única autoridad.
-Aprueba solo si el mismo dato concreto y su respuesta se pueden justificar
-con el texto PDF disponible. Coincidencia de órgano, artículo, sección o
-palabras no demuestra por sí sola equivalencia. En preguntas de señalar
-la INCORRECTA, exige evidencia suficiente para identificar exactamente una
-afirmación falsa y tres verdaderas; ante falta de contexto rechaza.
-Para cada propuesta devuelve approved true/false, razón y evidenceQuote.
-Una cita aprobada debe ser COPIA LITERAL de al menos dos palabras significativas
-de pdfEvidence que demuestre el dato exacto, no únicamente la ley u órgano.
-No apruebes si la cita no permite comprobar la respuesta: ante duda false.
-PROPUESTAS: ${JSON.stringify(batch)}`,
-        config:{responseMimeType:'application/json',responseJsonSchema:schema,temperature:0.1}
-      });
-      parsed=JSON.parse(String(response?.text||''));
-    }catch(error){
-      console.warn('LEGISLACION_DERIVACION_RESCATE_ERROR_93I:',
-        String(error?.message||error).slice(0,220));
-      continue;
-    }
-    if(!Array.isArray(parsed?.decisions))continue;
-    decisions.push(...parsed.decisions);
+  // SERVER 105: consultar primero DOS propuestas por plaza y solo ampliar
+  // a las restantes si las evidencias verificadas no cubren la cuota.
+  // No se confunde "modelo dijo sí" con pareja válida: todas las citas
+  // siguen pasando los filtros de literalidad y de respuesta normativa.
+  const primary105=[],secondary105=[],seenBySlot105=new Map();
+  for(const proposal of proposals){
+    const count=seenBySlot105.get(proposal.slot)||0;
+    if(count<2)primary105.push(proposal);
+    else secondary105.push(proposal);
+    seenBySlot105.set(proposal.slot,count+1);
   }
   const approvedById=new Set();
-  for(const d of decisions){
-    const pair=proposals[Number(d.proposalId)];
-    if(!pair || d.approved!==true || approvedById.has(Number(d.proposalId)) ||
-       !String(d.reason||'').trim())continue;
-    const quote=normalizeLegislationMatchText(d.evidenceQuote);
-    const evidence=normalizeLegislationMatchText(pair.item.source_evidence);
-    if(quote.length<14 || legislationMatchTokens(quote).size<2 ||
-       !evidence.includes(quote))continue;
-    // Para una pregunta positiva, exigir que la cita apoye también el
-    // contenido de la respuesta Anki, no solo que nombre el mismo órgano.
-    if(inferLegislationAnkiFamily(pair.row.stem)!=='2026_INCORRECTA'){
-      const answer=pair.row.options[Number(pair.row.correct_index)]||'';
-      const answerTokens=legislationMatchTokens(answer);
-      const quotedTokens=legislationMatchTokens(quote);
-      const answerHits=[...answerTokens].filter(t=>quotedTokens.has(t)).length;
-      if(answerTokens.size && answerHits<Math.min(2,answerTokens.size))continue;
+  const needed105=[...outstanding.values()].reduce((total,n)=>total+Math.max(0,n),0);
+  let modelCalls105=0;
+  for(const [stage105,source105] of [[1,primary105],[2,secondary105]]){
+    if(stage105===2 && new Set([...approvedById]
+      .map(id=>proposals[id]?.slot)).size>=needed105)break;
+    for(let start=0;start<source105.length;start+=12){
+      const batch=source105.slice(start,start+12).map(x=>compact[x.proposalId]);
+      let parsed;
+      try{
+        modelCalls105++;
+        const response=await ai.models.generateContent({
+          model:'gemini-3.5-flash-lite',
+          contents:`Verifica el vínculo de cada tarjeta Anki con la evidencia
+LITERAL del PDF del alumno (única fuente factual). Acepta SOLO cuando la
+respuesta y el dato exacto de la tarjeta estén demostrados por pdfEvidence.
+No basta compartir artículo, órgano o vocabulario. INCORRECTA: exige una
+única falsedad demostrable y tres verdades. Ante duda, approved=false.
+Devuelve proposalId, approved, reason y evidenceQuote. evidenceQuote debe
+ser una CITA COPIADA del pdfEvidence que acredite realmente la respuesta,
+con dos o más términos relevantes. No inventes textos.
+PROPUESTAS: ${JSON.stringify(batch)}`,
+          config:{responseMimeType:'application/json',responseJsonSchema:schema,temperature:0.1}
+        });
+        parsed=JSON.parse(String(response?.text||''));
+      }catch(error){
+        console.warn('LEGISLACION_DERIVACION_RESCATE_ERROR_93I:',
+          String(error?.message||error).slice(0,220));
+        continue;
+      }
+      if(!Array.isArray(parsed?.decisions))continue;
+      for(const d of parsed.decisions){
+        const pair=proposals[Number(d.proposalId)];
+        if(!pair || d.approved!==true || approvedById.has(Number(d.proposalId)) ||
+           !String(d.reason||'').trim() || !source105.includes(pair))continue;
+        const quote=normalizeLegislationMatchText(d.evidenceQuote);
+        const evidence=normalizeLegislationMatchText(pair.item.source_evidence);
+        if(quote.length<14 || legislationMatchTokens(quote).size<2 ||
+           !evidence.includes(quote))continue;
+        if(inferLegislationAnkiFamily(pair.row.stem)!=='2026_INCORRECTA'){
+          const answer=pair.row.options[Number(pair.row.correct_index)]||'';
+          const answerTokens=legislationMatchTokens(answer);
+          const quotedTokens=legislationMatchTokens(quote);
+          const answerHits=[...answerTokens].filter(t=>quotedTokens.has(t)).length;
+          if(answerTokens.size && answerHits<Math.min(2,answerTokens.size))continue;
+        }
+        approvedById.add(Number(d.proposalId));
+      }
     }
-    approvedById.add(Number(d.proposalId));
   }
+  console.log('LEGISLACION_SEMILLAS_105:',JSON.stringify({
+    proposals:proposals.length,primary:primary105.length,
+    fallbackAvailable:secondary105.length,modelCalls:modelCalls105,
+    verifiedPairs:approvedById.size,needed:needed105
+  }));
   diagnostics.modelApproved=approvedById.size;
   const bySlot=new Map();
   for(const id of approvedById){
