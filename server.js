@@ -309,6 +309,13 @@ await db.query(`
   CREATE INDEX IF NOT EXISTS idx_question_bank_coverage
   ON question_bank(coverage_item_id)
 `);
+// SERVER 107: una pregunta aprobada no entregada no puede duplicarse
+// por dos peticiones concurrentes sobre el mismo objetivo curricular.
+await db.query(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_legislation_ready107_dedupe
+  ON question_bank (coverage_item_id, md5(lower(btrim(stem))))
+  WHERE validation_version=107 AND active=TRUE
+`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS test_sessions (
@@ -12549,6 +12556,128 @@ REGLAS DE COBERTURA:
 - La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
 }
+// SERVER 107: checkpoint de trabajo APROBADO pero sin entregar.
+// validation_version=107 + last_shown_at=NULL marca una pregunta que ha
+// superado verificacion factual independiente Y auditoria de dificultad.
+// No hay sesion, respuesta, uso Anki ni modificación de cobertura/SRS.
+const LEGISLATION_READY_VERSION_107 = 107;
+function readyLegislationQuestion107(row){
+  if(!row || Number(row.validation_version)!==LEGISLATION_READY_VERSION_107 ||
+     row.last_shown_at!=null || Number(row.times_shown||0)!==0 ||
+     row.difficulty!=='muy alta' || !Array.isArray(row.options) ||
+     row.options.length!==4 || !Number.isInteger(Number(row.correct_index)) ||
+     Number(row.correct_index)<0 || Number(row.correct_index)>3 ||
+     !String(row.stem||'').trim() ||
+     !row.options.every(x=>typeof x==='string'&&x.trim()))return null;
+  return {
+    questionId:Number(row.id),coverageItemId:Number(row.coverage_item_id),
+    stem:row.stem,options:row.options,correctIndex:Number(row.correct_index),
+    explanation:row.explanation||'',sourceEvidence:row.source_evidence||'',
+    sourcePage:row.source_page??null,manualPage:row.manual_page??null,
+    questionFamily:row.question_family,difficulty:'muy alta',graphic:null,
+    reused:true,readyVerified107:true
+  };
+}
+async function useReadyLegislation107(targets,allowedTopicIds,selectionStrategy,reusableQuestions){
+  if(!targets.length || !targets.every(t=>
+     String(t.topic_block||'').trim().toLowerCase()==='legislacion'))return {found:0,used:0,swaps:0};
+  const topicIds=[...new Set(targets.map(t=>Number(t.topic_id)))];
+  if(!topicIds.length)return {found:0,used:0,swaps:0};
+  const result=await db.query(`
+    SELECT qb.* FROM question_bank qb
+    JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    WHERE ci.topic_id=ANY($1::int[]) AND ci.exam_relevant=TRUE
+      AND qb.active=TRUE AND qb.validation_version=107
+      AND qb.difficulty='muy alta' AND qb.graphic IS NULL
+      AND qb.times_shown=0 AND qb.last_shown_at IS NULL
+      AND NOT EXISTS(SELECT 1 FROM test_session_questions tsq WHERE tsq.question_id=qb.id)
+    ORDER BY qb.created_at ASC,qb.id ASC LIMIT 400`,[topicIds]);
+  const prepared=result.rows.map(readyLegislationQuestion107).filter(Boolean);
+  if(!prepared.length)return {found:0,used:0,swaps:0};
+  const byCoverage=new Map();
+  for(const q of prepared){
+    if(!byCoverage.has(q.coverageItemId))byCoverage.set(q.coverageItemId,q);
+  }
+  const taken=new Set();
+  let used=0,swaps=0;
+  // Primero coincidencias IDENTICAS: nunca desplazar un repaso prioritario.
+  for(let i=0;i<targets.length;i++){
+    const q=byCoverage.get(Number(targets[i].id));
+    if(!q||taken.has(q.questionId))continue;
+    targets[i].questionFamily=q.questionFamily;
+    reusableQuestions.set(i,q);taken.add(q.questionId);used++;
+  }
+  // Para contenidos nuevos/mantenimiento (prioridades 4/5), se permite
+  // reemplazar un objetivo por otro YA preparado del MISMO tema, tipo,
+  // prioridad SRS y situacion nuevo-vs-trabajado. Nunca prioridades 1-3.
+  if(used<targets.length && prepared.length>used){
+    const candidates=await getAdaptiveCoverageCandidates(
+      Math.max(1400,targets.length*150),allowedTopicIds,selectionStrategy);
+    const candidateById=new Map(candidates.map(c=>[Number(c.id),c]));
+    const reservedIds=new Set(targets.map(t=>Number(t.id)));
+    for(let i=0;i<targets.length;i++){
+      if(reusableQuestions.has(i))continue;
+      const old=targets[i],priority=Number(old.adaptive_priority);
+      if(![4,5].includes(priority) || old.item_type==='anki_independent')continue;
+      let choice=null,candidate=null;
+      for(const q of prepared){
+        if(taken.has(q.questionId)||reservedIds.has(q.coverageItemId))continue;
+        const c=candidateById.get(q.coverageItemId);
+        if(!c || Number(c.topic_id)!==Number(old.topic_id) ||
+          Number(c.adaptive_priority)!==priority ||
+          (Number(c.times_asked||0)===0)!==(Number(old.times_asked||0)===0) ||
+          c.item_type!==old.item_type || c.evaluation_type!==old.evaluation_type ||
+          c.latest_nonblank_failed===true ||
+          legislationRedundancy92(c,targets.filter((_,j)=>j!==i))>=5)continue;
+        choice=q;candidate=c;break;
+      }
+      if(!choice)continue;
+      reservedIds.delete(Number(old.id));reservedIds.add(Number(candidate.id));
+      targets[i]={...candidate,questionFamily:choice.questionFamily,adaptiveDifficulty:'muy alta'};
+      reusableQuestions.set(i,choice);taken.add(choice.questionId);used++;swaps++;
+    }
+  }
+  console.log('LEGISLACION_CHECKPOINT_107:',JSON.stringify({phase:'recuperacion',
+    found:prepared.length,used,swaps,pendingGeneration:targets.length-used,
+    srsUnchanged:true,ankiUnchanged:true}));
+  return {found:prepared.length,used,swaps};
+}
+async function checkpointVerifiedVeryHigh107(questions,targets){
+  if(!Array.isArray(questions)||questions.length!==targets.length)
+    throw new Error('Checkpoint 107: correspondencia de objetivos invalida.');
+  const approved=questions.map((q,i)=>({q,t:targets[i]})).filter(({q,t})=>
+    q && q.difficulty==='muy alta' && q.reused!==true && q.ankiDirect!==true &&
+    String(t?.topic_block||'').trim().toLowerCase()==='legislacion' &&
+    Number.isInteger(Number(t.id)) && Number(t.id)>0 &&
+    String(q.stem||'').trim() && Array.isArray(q.options) && q.options.length===4 &&
+    q.options.every(o=>typeof o==='string'&&o.trim()) &&
+    Number.isInteger(q.correctIndex) && q.correctIndex>=0 && q.correctIndex<=3);
+  let saved=0;
+  for(const {q,t} of approved){
+    const response=await db.query(`
+      INSERT INTO question_bank(coverage_item_id,stem,options,correct_index,
+        explanation,source_evidence,source_page,manual_page,question_family,
+        difficulty,graphic,validation_version,times_shown,last_shown_at)
+      SELECT $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,'muy alta',NULL,107,0,NULL
+      WHERE NOT EXISTS(
+        SELECT 1 FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+        WHERE qb.active=TRUE AND ci.topic_id=$10
+          AND LOWER(REGEXP_REPLACE(BTRIM(qb.stem),'[[:space:]]+',' ','g'))=
+              LOWER(REGEXP_REPLACE(BTRIM($2),'[[:space:]]+',' ','g'))
+      ) ON CONFLICT DO NOTHING RETURNING id`,[
+        Number(t.id),q.stem,JSON.stringify(q.options),q.correctIndex,
+        q.explanation||null,q.sourceEvidence||null,q.sourcePage??null,
+        q.manualPage!=null?String(q.manualPage):null,q.questionFamily,
+        Number(t.topic_id)
+      ]);
+    if(response.rows.length)saved++;
+  }
+  console.log('LEGISLACION_CHECKPOINT_107:',JSON.stringify({phase:'guardado_parcial',
+    approved:approved.length,saved,duplicates:approved.length-saved,
+    noSession:true,noSrs:true,noAnki:true}));
+  return saved;
+}
+
 async function getLatestBankQuestionForTarget(target){
 
   if(!target?.id){
@@ -12943,13 +13072,14 @@ if(
   Number.isInteger(Number(question.questionId))
 ){
   const reusableCheck = await client.query(
-    `SELECT id
+    `SELECT id,validation_version,times_shown,last_shown_at,question_family,difficulty,
+            stem,options,correct_index
 FROM question_bank
 WHERE id = $1
   AND coverage_item_id = $2
   AND active = TRUE
   AND validation_version >= 6
-LIMIT 1`,
+LIMIT 1 FOR UPDATE`,
     [
       Number(question.questionId),
       Number(target.id)
@@ -12962,13 +13092,26 @@ LIMIT 1`,
     );
   }
 
+  const bankRow107=reusableCheck.rows[0];
+  if(question.readyVerified107===true){
+    if(Number(bankRow107.validation_version)!==107 ||
+       bankRow107.last_shown_at!=null || Number(bankRow107.times_shown||0)!==0 ||
+       bankRow107.difficulty!=='muy alta' ||
+       bankRow107.stem!==question.stem ||
+       JSON.stringify(bankRow107.options)!==JSON.stringify(question.options) ||
+       Number(bankRow107.correct_index)!==question.correctIndex ||
+       bankRow107.question_family!==question.questionFamily){
+      throw new Error('Checkpoint 107: pregunta consumida o alterada concurrentemente.');
+    }
+  }else if(Number(bankRow107.validation_version)===107){
+    throw new Error('Checkpoint 107: consumo no autorizado de pregunta sin entregar.');
+  }
   questionId = Number(question.questionId);
 await client.query(
   `UPDATE question_bank
-   SET
-     last_shown_at = NOW(),
-     updated_at = NOW()
-   WHERE id = $1`,
+   SET last_shown_at=NOW(), updated_at=NOW(),
+       validation_version=CASE WHEN validation_version=107 THEN 6 ELSE validation_version END
+   WHERE id=$1`,
   [questionId]
 );
 }else{
@@ -18510,6 +18653,14 @@ if(testType==='normal' && difficulty==='muy alta'){
     automaticLiteralQuota:0
   }));
 }
+    // SERVER 107: rescatar preguntas ya aprobadas en una ejecucion fallida.
+    // No consume el registro hasta el COMMIT de la sesion.
+    if(testType==='normal' && difficulty==='muy alta' &&
+       targets.length>0 && targets.every(t=>
+         String(t.topic_block||'').trim().toLowerCase()==='legislacion')){
+      await useReadyLegislation107(targets,allowedTopicIds,
+        examMode==='simulation'?'simulation':'adaptive',reusableQuestions);
+    }
     console.log(
       "GENERATECONTENT: iniciando con",
       targets.length,
@@ -19455,17 +19606,32 @@ finalQuestions = completeQuestions;
 // SERVER 93F: calificar competitividad y complejidad en una pasada
 // separada; SOLO preguntas NUEVAS de Legislación Muy alta. Sin tocar las
 // originales Anki, el flujo Alta o el resto de bloques.
-const qualityResult93I=await refineVeryHighLegislation93F({ai,finalQuestions,generationTargets,
-  difficulty,testType,independentPdfCheck,mode,officialStyle});
+const legislationOnly107=difficulty==='muy alta' && testType==='normal' &&
+  targets.length>0 && targets.every(t=>
+    String(t.topic_block||'').trim().toLowerCase()==='legislacion');
+const generatedOnly107=legislationOnly107 && generationIndexes.length!==finalQuestions.length;
+const qualitySubset107=generatedOnly107
+  ? generationIndexes.map(i=>finalQuestions[i]) : finalQuestions;
+const qualityResult93I=await refineVeryHighLegislation93F({ai,
+  finalQuestions:qualitySubset107,generationTargets,
+  difficulty,testType,
+  independentPdfCheck:legislationOnly107?true:independentPdfCheck,
+  mode,officialStyle});
+if(generatedOnly107){
+  for(let j=0;j<generationIndexes.length;j++)
+    finalQuestions[generationIndexes[j]]=qualitySubset107[j];
+}
 // SERVER 93I: una solicitud Muy alta no debe entregarse como si lo fuera
 // cuando los controles determinan que hay preguntas de dificultad Alta.
 // El rechazo sucede ANTES de insertar una sesión; no afecta historial ni SRS.
-const pureLegislation93I=difficulty==='muy alta' && testType==='normal' &&
-  independentPdfCheck && generationTargets.length===finalQuestions.length &&
-  generationTargets.length>0 && generationTargets.every(t=>
-    String(t.topic_block||'').trim().toLowerCase()==='legislacion');
+const pureLegislation93I=legislationOnly107;
 if(pureLegislation93I && (qualityResult93I.auditUnavailable ||
    finalQuestions.some(q=>q.difficulty!=='muy alta'))){
+  // Preguntas Muy altas aprobadas se guardan como NO entregadas; fallo de
+  // otra plaza no obliga a volver a generar/auditar este trabajo.
+  try{await checkpointVerifiedVeryHigh107(finalQuestions,targets);}
+  catch(cacheError){console.error('LEGISLACION_CHECKPOINT_107_ERROR:',
+    String(cacheError?.message||cacheError).slice(0,220));}
   const insufficient=finalQuestions.filter(q=>q.difficulty!=='muy alta').length;
   console.warn('CALIDAD_MUY_ALTA_NO_APTA_93I:',JSON.stringify({
     requested:finalQuestions.length,insufficient,
@@ -19502,7 +19668,7 @@ console.log(
       question?.ankiDirect === true
         ? (question?.ankiIndependent ? "ANKI_ORIGINAL" : "ANKI_VALIDADO")
         : question?.reused === true
-          ? "BANCO_REUTILIZADO"
+          ? (question?.readyVerified107 ? "PDF_VALIDADO_PENDIENTE_107" : "BANCO_REUTILIZADO")
           : quota84?.derivedIndices?.includes(index)
             ? "ANKI_DERIVADA_VERIFICADA_PDF"
             : "GENERADA_NUEVA_PDF",
