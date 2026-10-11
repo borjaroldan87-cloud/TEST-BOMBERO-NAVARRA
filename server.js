@@ -14248,14 +14248,25 @@ DEVUELVE UNICAMENTE JSON CON EXACTAMENTE ${targets.length} PREGUNTAS.
 // LEGISLACIÓN solicitadas en Muy alta. No revalida ni reescribe Anki.
 // La exactitud, respuesta única y polaridad se comprueban ANTES, mediante
 // validateGeneratedQuestions() con File Search. Esta auditoría es de calidad.
+// SERVER 98 — La salida de Gemini no es un contrato confiable: un indice
+// incorrecto NO debe cancelar la auditoria de otras preguntas. Si se rompe
+// el protocolo, esta pregunta NO puede aprobarse sin una reevaluacion valida.
+function invalidVeryHighAudit98(question,reason){
+  const correctIndex=Number(question?.correctIndex);
+  return {strong:false,weak:[0,1,2,3].filter(i=>i!==correctIndex),
+    contrast:'insufficient',answerStandsOut:false,
+    auditProtocolError98:true,reason:String(reason).slice(0,240)};
+}
 function interpretVeryHighQuality93F(question,assessment){
   const correctIndex=Number(question?.correctIndex);
   const permitted=new Set([0,1,2,3].filter(i=>i!==correctIndex));
-  const weak=Array.isArray(assessment?.weakOptionIndexes)
-    ? [...new Set(assessment.weakOptionIndexes.map(Number))]
-    : [];
+  if(!Array.isArray(assessment?.weakOptionIndexes)){
+    return invalidVeryHighAudit98(question,'Gemini no devolvio weakOptionIndexes como lista.');
+  }
+  const weak=[...new Set(assessment.weakOptionIndexes.map(Number))];
   if(weak.some(i=>!Number.isInteger(i)||!permitted.has(i))){
-    throw new Error('Auditor Muy alta: indices de distractores invalidos.');
+    return invalidVeryHighAudit98(question,
+      'Gemini devolvio indices de distractores no validos (se requiere 0..3 y excluir correctIndex).');
   }
   const acceptedContrast=['normative_combination','precise_exception',
     'near_literal','applied_decision'];
@@ -14264,15 +14275,13 @@ function interpretVeryHighQuality93F(question,assessment){
     acceptedContrast.includes(contrast) &&
     weak.length===0 && assessment?.answerStandsOut===false;
   return {
-    strong,
-    weak,
-    contrast,
+    strong,weak,contrast,auditProtocolError98:false,
     answerStandsOut:assessment?.answerStandsOut===true,
     reason:String(assessment?.reason||'').slice(0,240)
   };
 }
 
-async function auditVeryHighLegislation93F(ai,questions,targets=[]){
+async function auditVeryHighLegislation93F(ai,questions,targets=[],allowRetry98=true){
   if(!questions.length)return [];
   const schema={
     type:'object',
@@ -14283,7 +14292,7 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
         contrastType:{type:'string',enum:[
           'normative_combination','precise_exception','near_literal',
           'applied_decision','insufficient']},
-        weakOptionIndexes:{type:'array',items:{type:'integer'}},
+        weakOptionIndexes:{type:'array',items:{type:'integer',minimum:0,maximum:3}},
         answerStandsOut:{type:'boolean'},
         reason:{type:'string'}
       },required:['index','difficulty','contrastType',
@@ -14334,8 +14343,10 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
   adicional que el PDF justifique, no una mera paráfrasis o sustitución
   cosmética de distractores. Si no profundiza REALMENTE, asigna
   difficulty="alta" y contrastType="insufficient" con motivo claro.
-  Anota en weakOptionIndexes los indices de los distractores facilmente
-  descartables (NUNCA incluyas correctIndex). Marca answerStandsOut=true
+  Anota en weakOptionIndexes indices basados en CERO: unicamente
+  0, 1, 2 o 3; excluye SIEMPRE correctIndex. Ante la duda, lista vacia
+  y difficulty=alta. Nunca uses 1..4 ni incluyas la respuesta correcta.
+  Una infraccion de estos indices anula SOLO esa evaluacion. Marca answerStandsOut=true
   solo si la respuesta elegida se delata por pistas de redaccion/formato.
   Para una pregunta INCORRECTA, correctIndex es la afirmacion FALSA;
   las otras tres son verdaderas y deben ser tan proximas en estructura,
@@ -14360,15 +14371,45 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
     config:{responseMimeType:'application/json',responseJsonSchema:schema,temperature:0.1}
   });
   const raw=JSON.parse(response.text);
-  if(!Array.isArray(raw?.results)||raw.results.length!==questions.length){
-    throw new Error('Auditor Muy alta: cantidad de resultados incorrecta.');
+  if(!Array.isArray(raw?.results)){
+    throw new Error('Auditor Muy alta: no devolvio una lista de resultados.');
   }
-  const normalized=[];
-  for(let i=0;i<questions.length;i++){
-    if(Number(raw.results[i]?.index)!==i){
-      throw new Error('Auditor Muy alta: indice u orden incorrecto.');
+  // Reordenamos por index y rechazamos los indices duplicados o ausentes
+  // SOLO para su pregunta. No interpretamos 1-based por conjetura.
+  const received=new Map();
+  for(const result of raw.results){
+    const index=Number(result?.index);
+    if(!Number.isInteger(index)||index<0||index>=questions.length)continue;
+    if(received.has(index))received.set(index,null); // duplicado: ambiguo
+    else received.set(index,result);
+  }
+  const normalized=questions.map((q,i)=>received.get(i)
+    ? interpretVeryHighQuality93F(q,received.get(i))
+    : invalidVeryHighAudit98(q,'Resultado ausente o indice duplicado para esta pregunta.'));
+  const invalidSlots=normalized.flatMap((item,i)=>
+    item.auditProtocolError98?[i]:[]);
+  if(invalidSlots.length){
+    console.warn('LEGISLACION_AUDITOR_PROTOCOLO_98:',JSON.stringify({
+      questions:questions.length,invalidSlots:invalidSlots.map(i=>i+1),
+      errors:invalidSlots.map(i=>normalized[i].reason),
+      action:allowRetry98?'reevaluar_solo_afectadas':'rechazar_solo_afectadas'
+    }));
+    // Una nueva auditoria con un lote MAS PEQUENO evita que un fallo de
+    // formato detenga las preguntas correctamente auditadas. Nunca aprobar
+    // por omision; la segunda salida debe respetar todas las condiciones.
+    if(allowRetry98){
+      try{
+        const retried=await auditVeryHighLegislation93F(ai,
+          invalidSlots.map(i=>questions[i]),
+          invalidSlots.map(i=>targets[i]||{}),false);
+        for(let j=0;j<invalidSlots.length;j++){
+          normalized[invalidSlots[j]]=retried[j];
+        }
+      }catch(e){
+        console.warn('LEGISLACION_AUDITOR_REINTENTO_98:',
+          String(e?.message||e).slice(0,220));
+      }
     }
-    normalized.push(interpretVeryHighQuality93F(questions[i],raw.results[i]));
   }
   if(isPureLegislation95(targets)){
     const families={};
@@ -14384,6 +14425,7 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
     }
     console.log('LEGISLACION_DIAGNOSTICO_AUDITOR_96:',JSON.stringify({
       questions:questions.length,byFamily:families,
+      protocolErrors98:normalized.filter(a=>a.auditProtocolError98).length,
       refused:normalized.map((q,i)=>q.strong?null:{
         slot:i+1,family:String(questions[i]?.questionFamily||'').slice(0,40),
         contrast:q.contrast,weak:q.weak,answerStandsOut:q.answerStandsOut,
@@ -14466,7 +14508,9 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     generationErrors:0,validationErrors:0,auditErrors:0};
   const sourceReason=(assessment)=>({
     issues:[
-      'Dificultad Muy alta insuficiente: '+assessment.reason,
+      (assessment.auditProtocolError98
+        ? 'Auditoria incompleta por protocolo de Gemini: '+assessment.reason
+        : 'Dificultad Muy alta insuficiente: '+assessment.reason),
       'Tipo de contraste diagnosticado: '+assessment.contrast,
       'REPARAR: mantener el objetivo, reconstruir un enunciado y cuatro alternativas tecnicamente paralelas, verificar cada detalle contra PDF; tomar los ejemplos aprobados SOLO como patron de complejidad.'
     ],
