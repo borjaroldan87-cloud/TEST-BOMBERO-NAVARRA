@@ -14104,7 +14104,132 @@ function legislationCalibrationPrompt94(targets,difficulty,forAudit=false){
   const high=pickLegislationExamples94(targets,'alta',2);
   const veryHigh=pickLegislationExamples94(targets,'muy alta',2);
   const refs=[...high,...veryHigh];
-  return `\n==================================================\nCALIBRACION APROBADA POR OPOSITOR — SOLO BLOQUE LEGISLACION (94)\n==================================================\nTAREA: ${forAudit?'AUDITAR DIFICULTAD':'GENERAR PREGUNTAS'} — Nivel solicitado: ${difficulty}.\nEsta biblioteca contiene 18 ejemplos aprobados: 9 Alta, 9 Muy alta,\nde los que se muestran 2+2 con diferentes materias para CALIBRAR EL ESTILO.\nSon EXCLUSIVAMENTE EJEMPLOS DE REDACCION Y DIFICULTAD; NO son fuente\nfactual. NO USES sus cifras, respuestas, reglas o artículos para nuevas\npreguntas. NO COPIES preguntas ni plantillas literales. La unica fuente\nfactual de la pregunta evaluada sigue siendo SU PDF.\n\nALTA: cuatro opciones del mismo eje técnico con diferencias precisas,\npequeñas y creíbles; las tres incorrectas exigen estudio real. El opositor\npreparado discrimina un requisito exacto, aunque no combine varias normas.\n\nMUY ALTA: cuatro opciones COMPETITIVAS y casi paralelas en tecnicidad,\nestructura y cantidad de información; si el texto normativo lo permite,\nintegra varios límites, condiciones, sujetos, umbrales, competencias o\nexcepciones. Cada distractor cambia preferentemente UN detalle mínimo\npero decisivo de una combinación correcta: «no», «podrá/deberá»,\n«igual o superior / superior», «y/o», órgano competente, cómputo,\nradio/diámetro, etc. ENUNCIADO Y CUATRO OPCIONES desarrollados cuando\nsea útil para poner a prueba precisión y concentración.\nUn inciso literal con tres variantes cortas y difíciles suele ser ALTA;\nuna combinación de varios incisos normativos con cuatro alternativas\nplausibles que difieren en un único detalle puede ser MUY ALTA.\nNo son reglas absolutas: existen excepciones complejas y preguntas breves\nde muy alta precisión. La longitud por sí sola NO determina dificultad.\nNO obligues a relacionar dos artículos si el PDF no lo permite.\nEl contenido debe justificar UNA SOLA RESPUESTA, y cada distractor debe\nser inequívocamente incorrecto, no una verdad parcial confundida con falsa.\nNo emplees absolutos artificiosos ni pistas de longitud o tono.\n\nEJEMPLOS ETIQUETADOS (solo estilo, nunca hechos de respuesta):\n${JSON.stringify(refs)}\n\n${forAudit ? `CRITERIO DE EVALUACION: compara la pregunta nueva con el baremo,\nno con el tema factual de los ejemplos. No penalices automáticamente\npor ser literal, larga o por contener tres cifras próximas. Si un\ndistractor cambia una condición pero sigue siendo fácil de eliminar,\nindica su índice exacto. Para derivadas Anki exige profundización REAL\nrespecto de la semilla. No apruebes sin analizar las cuatro opciones.\n` : `CRITERIO DE GENERACION: diseña primero el núcleo verificable de la\nrespuesta y TRES variaciones distintas, muy cercanas y falsas; redacta\nsolo después el enunciado. Si el PDF no permite variantes seguras,\nrediseña la discriminación sobre el MISMO objetivo de cobertura; nunca\ninventes normativa ni conviertas una dificultad insuficiente en aprobada.\n`}`;
+  return `\n==================================================\nCALIBRACION APROBADA POR OPOSITOR — SOLO BLOQUE LEGISLACION (94)\n==================================================\nTAREA: ${forAudit?'AUDITAR DIFICULTAD':'GENERAR PREGUNTAS'} — Nivel solicitado: ${difficulty}.\nEsta biblioteca contiene 18 ejemplos aprobados: 9 Alta, 9 Muy alta,\nde los que se muestran 2+2 con diferentes materias para CALIBRAR EL ESTILO.\nSon EXCLUSIVAMENTE EJEMPLOS DE REDACCION Y DIFICULTAD; NO son fuente\nfactual. NO USES sus cifras, respuestas, reglas o artículos para nuevas\npreguntas. NO COPIES preguntas ni plantillas literales. La unica fuente\nfactual de la pregunta evaluada sigue siendo SU PDF.\n\nALTA: cuatro opciones del mismo eje técnico con diferencias precisas,\npequeñas y creíbles; las tres alternativas no elegidas exigen estudio real.\nEn preguntas CORRECTA esas tres son afirmaciones falsas; en INCORRECTA\nson afirmaciones verdaderas. El opositor preparado discrimina un\nrequisito exacto, aunque no combine varias normas.\n\nMUY ALTA: cuatro opciones COMPETITIVAS y casi paralelas en tecnicidad,\nestructura y cantidad de información; si el texto normativo lo permite,\nintegra varios límites, condiciones, sujetos, umbrales, competencias o\nexcepciones. Cada distractor cambia preferentemente UN detalle mínimo\npero decisivo de una combinación correcta: «no», «podrá/deberá»,\n«igual o superior / superior», «y/o», órgano competente, cómputo,\nradio/diámetro, etc. ENUNCIADO Y CUATRO OPCIONES desarrollados cuando\nsea útil para poner a prueba precisión y concentración.\nUn inciso literal con tres variantes cortas y difíciles suele ser ALTA;\nuna combinación de varios incisos normativos con cuatro alternativas\nplausibles que difieren en un único detalle puede ser MUY ALTA.\nNo son reglas absolutas: existen excepciones complejas y preguntas breves\nde muy alta precisión. La longitud por sí sola NO determina dificultad.\nNO obligues a relacionar dos artículos si el PDF no lo permite.\nEl contenido debe justificar UNA SOLA RESPUESTA segun la POLARIDAD:\nCORRECTA = una opcion VERDADERA y tres afirmaciones FALSAS;\nINCORRECTA = una opcion FALSA y tres afirmaciones VERDADERAS.\nEn INCORRECTA es un fallo critico tratar una verdad parcial como falsa.\nLas tres opciones no seleccionadas se llaman distractores en ambos casos,\npero no son obligatoriamente afirmaciones falsas.\nNo emplees absolutos artificiosos ni pistas de longitud o tono.\n\nEJEMPLOS ETIQUETADOS (solo estilo, nunca hechos de respuesta):\n${JSON.stringify(refs)}\n\n${forAudit ? `CRITERIO DE EVALUACION: compara la pregunta nueva con el baremo,\nno con el tema factual de los ejemplos. No penalices automáticamente\npor ser literal, larga o por contener tres cifras próximas. Si un\ndistractor cambia una condición pero sigue siendo fácil de eliminar,\nindica su índice exacto. Para derivadas Anki exige profundización REAL\nrespecto de la semilla. No apruebes sin analizar las cuatro opciones.\n` : `CRITERIO DE GENERACION: diseña primero el núcleo verificable de la\nrespuesta y tres alternativas proximas segun polaridad. En CORRECTA:\ntres variaciones falsas. En INCORRECTA: tres variantes VERDADERAS y\nuna unica falsa, todas muy proximas; redacta solo despues el enunciado. Si el PDF no permite variantes seguras,\nrediseña la discriminación sobre el MISMO objetivo de cobertura; nunca\ninventes normativa ni conviertas una dificultad insuficiente en aprobada.\n`}`;
+}
+
+/* SERVER 95 — Contrato y reparador de contraste NORMATIVO para legislación.
+ * Solo se activa con dificultad Muy alta y targets exclusivamente legislativos.
+ * No cambia la única fuente factual (PDF), selección curricular, Anki, SRS,
+ * persistencia, y NO altera los controles de verdad o dificultad existentes.
+ */
+function isPureLegislation95(targets){
+  return Array.isArray(targets)&&targets.length>0&&targets.every(t=>
+    String(t?.topic_block||'').trim().toLowerCase()==='legislacion');
+}
+
+function legislationVeryHighContract95(targets){
+  if(!isPureLegislation95(targets))return '';
+  return `\n==================================================
+CONTRATO FINAL DE CONSTRUCCION MUY ALTA — LEGISLACION 95
+==================================================
+Los ejemplos aprobados deben reproducirse en CALIDAD de contraste,
+no en su contenido factual, que solo procede del PDF de cada objetivo.
+
+PROCEDIMIENTO OBLIGATORIO PARA CADA PREGUNTA:
+1. Ancla el conocimiento exacto del OBJETIVO en su documento y localiza
+   con File Search sus condiciones, limitaciones, efectos, excepciones o
+   requisitos relacionados dentro de ESE MISMO TEMA y apartado.
+2. Construye mentalmente una AFIRMACION BASE completamente cierta y
+   probada por el PDF. Si hay varios requisitos vinculados, incorporalos
+   sin cambiar el concepto principal evaluado.
+3. Para CORRECTA: redacta 4 opciones PARALELAS partiendo de esa misma
+   base. UNA permanece íntegramente cierta; en cada una de las otras 3
+   modifica SOLO UN requisito, limite, sujeto, plazo, condición, excepción
+   o negación en un punto DIFERENTE. Demuestra contra el PDF la falsedad
+   de las tres variantes. Evita diferencias de longitud o tono.
+4. Para INCORRECTA: tres proposiciones VERDADERAS y una FALSA, cercanas
+   por materia, estructura y tecnicidad. Cambia solo una condición de la
+   afirmación falsa, cuidando que las tres verdaderas lo sigan siendo.
+5. Tres errores evidentes no valen como Muy alta aunque tengan 150 palabras.
+   Las opciones deben compartir tanto texto correcto como sea necesario
+   para que la única diferencia resulte normativamente decisiva.
+6. No construyas una pregunta larga si las fuentes carecen de datos para
+   sostenerla; una excepción muy sutil puede ser Muy alta sin varios artículos.
+7. La semilla Anki es SOLO el punto de partida. La pregunta nueva debe añadir
+   un requisito o excepción DEL PDF, no copiar ni parafrasear el Anki.
+8. El campo sourceEvidence incorpora las pruebas TEXTUALES de todos los
+   requisitos verdaderos de la afirmación base; cada distractor se refuta
+   por contraste con ellos. NO uses estos ejemplos como fuente factual.
+9. Para las cuatro opciones: mismo sujeto, mismo marco temporal, misma
+   regla de aplicación, salvo el ÚNICO detalle falseado en cada distractor.
+10. Conserva el objetivo, la familia si es factual y los cuatro campos
+    de opciones; una sola respuesta indiscutible, sin conocimientos externos.
+
+No añadas un comentario sobre tu proceso; devuelve el JSON exigido.\n`;
+}
+
+function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestions,round){
+  if(!isPureLegislation95(targets))return '';
+  const compact=targets.map((t,j)=>{
+    const invalid=invalidResults[j]||{};
+    const orig=originalQuestions[invalid.index]||{};
+    const supporting=Array.isArray(t.distractorContext)
+      ? t.distractorContext.filter(x=>String(x.source_evidence||'').trim())
+          .slice(0,5).map(x=>({section:String(x.section||'').slice(0,160),
+            concept:String(x.concept||'').slice(0,240),
+            evidence:String(x.source_evidence||'').slice(0,650)})) : [];
+    return {
+      taskNumber:j+1,topic:t.topic_name,section:t.section,concept:t.concept,
+      page:t.source_page,questionFamily:t.questionFamily,
+      principalEvidence:String(t.source_evidence||'').slice(0,1500),
+      nearbyEvidenceForPossibleRelatedClauses:supporting,
+      ankiSeed:t.veryHighDerivation93G?{
+        stem:t.veryHighAnkiSeed?.stem,
+        options:t.veryHighAnkiSeed?.options,
+        correctIndex:t.veryHighAnkiSeed?.correctIndex}:null,
+      lastRejectedQuestion:{stem:orig.stem,options:orig.options,
+        correctIndex:orig.correctIndex},
+      auditFailures:invalid.issues,
+      weakDistractors:invalid.distractorIssues
+    };
+  });
+  return `Eres un constructor de preguntas de DIFICULTAD MUY ALTA para
+oposiciones de Bombero Navarra. REPARACION dirigida, RONDA ${round}.
+SOLO LEGISLACION, exclusivamente PDF del tema como fuente factual.
+Genera EXACTAMENTE ${targets.length} preguntas nuevas, UNA por objetivo,
+en el orden recibido, con el esquema JSON de preguntas suministrado.
+
+NO repitas la pregunta rechazada. Tu misión NO es justificarla: es
+transformar el contraste sobre el MISMO CONOCIMIENTO en uno que ni un
+opositor preparado pueda descartar sin recordar la condición literal.
+
+FASE DE DISEÑO (INTERNA; NO DEVUELVAS ESTA FASE):
+- Para cada objetivo extrae del PDF mediante File Search una PROPOSICION
+  VERDADERA con suficientes detalles, idealmente 2 o 3 condiciones
+  independientes del mismo supuesto (plazo+órgano+excepción, etc.).
+- La polaridad es INNEGOCIABLE: CORRECTA = tres opciones FALSAS y una
+  VERDADERA; INCORRECTA/FALSA/EXCEPTO = tres VERDADERAS y una FALSA.
+  En INCORRECTA no marques una opcion como falsa solo porque omita una
+  condicion no exigida por el enunciado.
+- El banco cercano incluido es solo CONTEXTO; verifica contra File Search
+  antes de usar un dato y NO cambies el objeto curricular por un hecho vecino.
+- Redacta una opción íntegramente verdadera de extensión técnica suficiente.
+- En CORRECTA, crea las tres alternativas INCORRECTAS copiando casi
+  íntegra la opción verdadera, cambiando UN SOLO detalle distinto por opción.
+- En INCORRECTA, construye 3 alternativas VERDADERAS y una falsa con
+  variación mínima, sin tratar como falsa una afirmación verdadera incompleta.
+- Evita inventar excepciones o falsedades caricaturescas; un distractor
+  es falso por CONTRADICCION demostrable con el PDF, no por intuición.
+- No es suficiente una mera paráfrasis de Anki ni una frase literal simple
+  con tres nombres que se descartan fácilmente.
+- Verifica que todas las cuatro alternativas comparten sintaxis, extensión,
+  ámbito normativo y vocabulario técnico. La diferencia mínima cambia
+  el significado pero no delata visualmente la respuesta.
+- sourceEvidence debe contener extracto PDF literal y suficiente de cada
+  condición real que se comprueba. Cita la página exacta cuando corresponda.
+- Conserva questionFamily solicitado si el PDF lo permite, 4 opciones,
+  1 respuesta correcta, indice 0..3, explanation exacta, sourceEvidence.
+- No uses las preguntas modelo como hechos normativos de este nuevo tema.
+
+BAREMO APROBADO POR EL OPOSITOR:
+${legislationCalibrationPrompt94(targets,'muy alta',false)}
+
+OBJETIVOS, EVIDENCIA Y ULTIMO DIAGNOSTICO:
+${JSON.stringify(compact)}
+
+${legislationVeryHighContract95(targets)}
+DEVUELVE UNICAMENTE JSON CON EXACTAMENTE ${targets.length} PREGUNTAS.
+`;
 }
 
 // SERVER 93F — Auditoría de dificultad SOLO para preguntas NUEVAS de
@@ -14174,8 +14299,16 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
   NO reevalúes verdad, ni cambies correctIndex ni inventes reglas.
   Evalua cada pregunta y las TRES opciones distintas de correctIndex.
   Para considerar dificultad "muy alta" son OBLIGATORIOS todos estos puntos:
-  1. Los tres distractores son errores normativos CREIBLES y cercanos a la
-     respuesta marcada. Ninguno se descarta sin conocimiento preciso.
+  1. Comprueba primero la POLARIDAD de la pregunta (stem/family):
+     - CORRECTA: correctIndex marca la unica afirmacion VERDADERA;
+       los otros tres distractores son afirmaciones FALSAS pero creibles.
+     - INCORRECTA/FALSA/EXCEPTO: correctIndex marca la unica afirmacion
+       FALSA y los otros tres distractores son afirmaciones VERDADERAS.
+       No los penalices como si tuvieran que ser errores normativos.
+     En ambos casos las tres opciones no seleccionadas deben ser
+     tecnicamente PROXIMAS, competitivas e imposibles de descartar
+     sin un dominio preciso de la norma. Para INCORRECTA, el unico
+     enunciado falso ha de ser extremadamente sutil entre tres verdades.
   2. Ninguna opcion sobresale por longitud, absolutismos injustificados,
      redaccion artificial o procedimiento evidentemente absurdo.
   3. La exigencia real proviene de comparar varias condiciones/reglas,
@@ -14193,7 +14326,9 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
   descartables (NUNCA incluyas correctIndex). Marca answerStandsOut=true
   solo si la respuesta elegida se delata por pistas de redaccion/formato.
   Para una pregunta INCORRECTA, correctIndex es la afirmacion FALSA;
-  las otras tres son verdaderas, pero deben ser creibles como alternativas.
+  las otras tres son verdaderas y deben ser tan proximas en estructura,
+  longitud y terminologia que no se identifique la falsedad por descarte.
+  No confundas COMPETITIVIDAD de una opcion con ser factualmente falsa.
   contrastType: normative_combination (dos o mas elementos),
   precise_exception (excepcion fina), near_literal (literalidad sutil),
   applied_decision (aplicar regla), insufficient (no hay contraste exigente).
@@ -14222,6 +14357,27 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
       throw new Error('Auditor Muy alta: indice u orden incorrecto.');
     }
     normalized.push(interpretVeryHighQuality93F(questions[i],raw.results[i]));
+  }
+  if(isPureLegislation95(targets)){
+    const families={};
+    for(let i=0;i<questions.length;i++){
+      const family=String(questions[i]?.questionFamily||'NO_DECLARADA');
+      const key=/INCORRECTA|FALSA|EXCEPTO/i.test(family+' '+String(questions[i]?.stem||''))
+        ? 'INCORRECTA' : (/2024_TEXTO/.test(family)?'LITERAL':'CORRECTA_OTRAS');
+      families[key]??={count:0,approved:0,notApproved:0,weak:0};
+      families[key].count++;
+      if(normalized[i].strong)families[key].approved++;
+      else families[key].notApproved++;
+      families[key].weak+=normalized[i].weak.length;
+    }
+    console.log('LEGISLACION_DIAGNOSTICO_AUDITOR_96:',JSON.stringify({
+      questions:questions.length,byFamily:families,
+      refused:normalized.map((q,i)=>q.strong?null:{
+        slot:i+1,family:String(questions[i]?.questionFamily||'').slice(0,40),
+        contrast:q.contrast,weak:q.weak,answerStandsOut:q.answerStandsOut,
+        reason:q.reason.slice(0,160)
+      }).filter(Boolean).slice(0,5)
+    }));
   }
   return normalized;
 }
@@ -14253,6 +14409,9 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
       regenerated:0,auditUnavailable:true};
   }
   const pending=new Map();
+  // Las versiones que no superan el umbral se conservan SOLO en memoria,
+  // para no repetir el mismo borrador en la siguiente ronda de reparación.
+  const latestRejected95=new Map();
   const failureStats={structural:0,factual:0,duplicate:0,quality:0,
     generationErrors:0,validationErrors:0,auditErrors:0};
   const sourceReason=(assessment)=>({
@@ -14289,8 +14448,9 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
         issues:pending.get(i).issues,distractorIssues:pending.get(i).distractorIssues}));
       let generated;
       try{
+        const workingQuestions95=finalQuestions.map((q,i)=>latestRejected95.get(i)||q);
         generated=await regenerateInvalidQuestions(ai,invalid,
-          finalQuestions,generationTargets,difficulty,mode,officialStyle);
+          workingQuestions95,generationTargets,difficulty,mode,officialStyle,round);
         if(!Array.isArray(generated?.questions)||generated.questions.length!==subset.length){
           throw new Error('Numero de reparaciones inesperado.');
         }
@@ -14391,12 +14551,22 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
           entry.q.difficulty='muy alta';
           finalQuestions[entry.i]=entry.q;
           pending.delete(entry.i);
+          latestRejected95.delete(entry.i);
           accepted++; approved++;
         }else{
           failureStats.quality++;
+          latestRejected95.set(entry.i,entry.q);
           pending.set(entry.i,sourceReason(assessment));
         }
       }
+      console.log('LEGISLACION_REPARACION_DIAGNOSTICO_95:',JSON.stringify({
+        round,failed:factuallyValid.filter((x,j)=>!quality[j]?.strong).slice(0,2)
+          .map(x=>{const a=quality[factuallyValid.indexOf(x)];
+            return {slot:x.i+1,reason:a?.reason,
+              stemChars:String(x.q.stem||'').length,
+              optionChars:x.q.options.map(o=>String(o).length),
+              weakOptions:a?.weak};})
+      }));
       console.log('CALIDAD_MUY_ALTA_REPARACION_ETAPA:',JSON.stringify({
         round,slots:subset.length,validasEstructura:plausible.length,
         validasPdf:factuallyValid.length,aprobadas:approved,
@@ -15571,7 +15741,8 @@ async function regenerateInvalidQuestions(
   targets,
   difficulty,
   mode,
-  officialStyle
+  officialStyle,
+  qualityRound95=1
 ){
   const replacementTargets =
     invalidResults.map(result => targets[result.index]);
@@ -15706,9 +15877,26 @@ FIN DE REFERENCIA
 ========================================
 `;
 
+  // SERVER 95: no reutilizar el enorme prompt generico para reparar
+  // dificultad. Una instruccion focalizada, con la evidencia y el ultimo
+  // candidato concreto, evita repetir cuatro veces el mismo tipo de pregunta.
+  const focusedRepair95=veryHighRepair93I && difficulty==='muy alta' &&
+    isPureLegislation95(replacementTargets);
+  const effectiveRepairPrompt95=focusedRepair95
+    ? legislationQualityRepairPrompt95(replacementTargets,invalidResults,
+        originalQuestions,qualityRound95)
+    : replacementPrompt;
+  if(focusedRepair95){
+    console.log('LEGISLACION_REPARACION_95:',JSON.stringify({
+      round:qualityRound95,questions:replacementTargets.length,
+      compactPromptChars:effectiveRepairPrompt95.length,
+      fullPromptChars:replacementPrompt.length,
+      examples:4,source:'PDF_EXCLUSIVO'
+    }));
+  }
   const response = await ai.models.generateContent({
     model:"gemini-3.5-flash-lite",
-    contents:replacementPrompt,
+    contents:effectiveRepairPrompt95,
     config:{
       tools:[{
         fileSearch:{
@@ -17874,6 +18062,13 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
 `;
     }
 
+    if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
+      prompt+=legislationVeryHighContract95(generationTargets);
+      console.log('LEGISLACION_CONSTRUCCION_95:',JSON.stringify({
+        questions:newGenerationCount,finalContract:true,
+        calibratedExamples:4,promptChars:prompt.length
+      }));
+    }
     const response=await ai.models.generateContent({
       model:"gemini-3.5-flash-lite",
       contents:prompt,
