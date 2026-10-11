@@ -14180,6 +14180,8 @@ function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestio
       lastRejectedQuestion:{stem:orig.stem,options:orig.options,
         correctIndex:orig.correctIndex},
       auditFailures:invalid.issues,
+      weakOptionIndexes97:Array.isArray(invalid.weakOptionIndexes97)
+        ? invalid.weakOptionIndexes97 : [],
       weakDistractors:invalid.distractorIssues
     };
   });
@@ -14189,9 +14191,19 @@ SOLO LEGISLACION, exclusivamente PDF del tema como fuente factual.
 Genera EXACTAMENTE ${targets.length} preguntas nuevas, UNA por objetivo,
 en el orden recibido, con el esquema JSON de preguntas suministrado.
 
-NO repitas la pregunta rechazada. Tu misión NO es justificarla: es
-transformar el contraste sobre el MISMO CONOCIMIENTO en uno que ni un
-opositor preparado pueda descartar sin recordar la condición literal.
+NO copies sin cambios una pregunta rechazada. Tu misión es CORREGIR
+las opciones defectuosas de manera dirigida, no desechar indiscriminadamente
+el trabajo que ya fue validado contra el PDF.
+- Si el enunciado y la opción normativamente válida son sólidos, CONSÉRVALOS
+  cuando resulte posible y reescribe solamente los distractores débiles.
+- weakOptionIndexes97 contiene los índices REALES 0..3 que el auditor
+  señaló como fácilmente descartables. No añadas pistas al corregirlos.
+- Si los tres distractores son débiles o el núcleo no permite comparación
+  suficiente, reconstruye las cuatro alternativas desde otra combinación
+  del MISMO conocimiento, con sus condiciones próximas del PDF.
+- Si el formato es INCORRECTA, la opción marcada debe ser la única FALSA:
+  preserva la veracidad de los otros tres enunciados incluso al repararlos.
+- Nunca utilices material de la biblioteca de ejemplos como autoridad factual.
 
 FASE DE DISEÑO (INTERNA; NO DEVUELVAS ESTA FASE):
 - Para cada objetivo extrae del PDF mediante File Search una PROPOSICION
@@ -14382,6 +14394,34 @@ async function auditVeryHighLegislation93F(ai,questions,targets=[]){
   return normalized;
 }
 
+// SERVER 97: comprobar una sola vez por proceso si el mismo auditor distingue
+// ejemplos Alta/Muy alta APROBADOS POR EL USUARIO. No influye en el veredicto
+// de preguntas reales y no utiliza ejemplos como hechos del temario.
+let legislationBenchmark97Promise=null;
+async function runLegislationBenchmark97(ai){
+  const ids=['CE-A','CE-M','AT-A1','AT-M1','SI5-A1','SI5-M1'];
+  const samples=ids.map(id=>{
+    const ref=LEGISLACION_REFERENCIAS_94.find(x=>x.id===id);
+    if(!ref)throw new Error('Ejemplo calibrador ausente: '+id);
+    const q=buildLegislacionReference94(ref);
+    return {ref,q:{stem:q.stem,options:q.options,
+      correctIndex:q.correctIndex,questionFamily:'2026_CORRECTA',
+      sourceEvidence:ref.base}};
+  });
+  const targets=samples.map(x=>({topic_block:'legislacion',
+    topic_name:'Tema '+x.ref.topic,veryHighDerivation93G:false}));
+  const verdicts=await auditVeryHighLegislation93F(ai,samples.map(x=>x.q),targets);
+  const results=samples.map((x,i)=>({id:x.ref.id,
+    expected:x.ref.level,
+    actual:verdicts[i].strong?'muy alta':'alta',
+    agrees:(x.ref.level==='muy alta')===verdicts[i].strong,
+    reason:verdicts[i].reason}));
+  console.log('LEGISLACION_BENCHMARK_AUDITOR_97:',JSON.stringify({
+    tested:results.length,agrees:results.filter(x=>x.agrees).length,results
+  }));
+  return results;
+}
+
 // El control de calidad no puede descartar preguntas FACTUALMENTE validas:
 // un fallo de Gemini en esta auditoria deja el examen disponible, con
 // clasificacion conservadora "alta" y registro explicito del problema.
@@ -14398,6 +14438,16 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     String(generationTargets[i]?.topic_block||'').trim().toLowerCase()==='legislacion'
       ? i : -1).filter(i=>i>=0);
   if(!indices.length)return {audited:0,verifiedVeryHigh:0,downgraded:0,regenerated:0};
+  // La calibración no cambia ni bloquea el examen: si el juez no reconoce
+  // los ejemplos aprobados, los logs revelarán el sesgo y podremos corregirlo.
+  if(!legislationBenchmark97Promise){
+    legislationBenchmark97Promise=runLegislationBenchmark97(ai).catch(e=>{
+      console.warn('LEGISLACION_BENCHMARK_ERROR_97:',
+        String(e?.message||e).slice(0,240));
+      return null;
+    });
+  }
+  await legislationBenchmark97Promise;
   let first=[];
   try{
     first=await auditVeryHighLegislation93F(ai,
@@ -14420,6 +14470,7 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
       'Tipo de contraste diagnosticado: '+assessment.contrast,
       'REPARAR: mantener el objetivo, reconstruir un enunciado y cuatro alternativas tecnicamente paralelas, verificar cada detalle contra PDF; tomar los ejemplos aprobados SOLO como patron de complejidad.'
     ],
+    weakOptionIndexes97:[...assessment.weak],
     distractorIssues:[assessment.weak.length
       ? 'Opciones descartables (indices 0-3): '+assessment.weak.join(', ')+'. Reformular cada una con un unico cambio juridico proximo respaldado por el PDF.'
       : 'Aumentar combinacion de condiciones, sutileza de excepciones, o corregir pistas de redaccion; no insertar relleno ni hechos inventados.']
@@ -14445,7 +14496,9 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
       if(!subset.length)continue;
       attempted+=subset.length;
       const invalid=subset.map(i=>({index:i,qualityRepair93I:true,
-        issues:pending.get(i).issues,distractorIssues:pending.get(i).distractorIssues}));
+        issues:pending.get(i).issues,
+        weakOptionIndexes97:pending.get(i).weakOptionIndexes97||[],
+        distractorIssues:pending.get(i).distractorIssues}));
       let generated;
       try{
         const workingQuestions95=finalQuestions.map((q,i)=>latestRejected95.get(i)||q);
@@ -16946,6 +16999,35 @@ async function planVeryHighLegislation93G(originalTargets,allowedTopicIds){
     }
   }
   derivedIndices.sort((a,b)=>a-b);
+  // SERVER 97: distinguir tarjetas ausentes, no validadas, no enlazadas y
+  // enlaces realmente utilizables en los temas solicitados. Solo telemetría.
+  if(derivedIndices.length<derivedRequested){
+    for(const [topicId,group] of usable){
+      try{
+        const report=await db.query(`
+          SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE a.validation_status='validated')::int AS validated,
+            COUNT(*) FILTER (WHERE a.validation_status='validated'
+              AND a.direct_use_eligible=TRUE)::int AS validated_eligible,
+            COUNT(*) FILTER (WHERE ci.topic_id=$2)::int AS linked_topic,
+            COUNT(*) FILTER (WHERE ci.topic_id=$2 AND a.validation_status='validated'
+              AND a.direct_use_eligible=TRUE AND ci.exam_relevant=TRUE
+              AND ci.item_type<>'anki_independent')::int AS linked_eligible
+          FROM legislation_anki_questions a
+          LEFT JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
+          WHERE a.topic_order=$1`,[group.order,topicId]);
+        console.log('LEGISLACION_ANKI_FILTROS_97:',JSON.stringify({
+          topicId,sourceOrder:group.order,
+          targets:group.indices.length,
+          safePairs:(eligibleByTopic.get(topicId)||[]).length,
+          ...report.rows[0]
+        }));
+      }catch(e){
+        console.warn('LEGISLACION_ANKI_FILTROS_ERROR_97:',
+          String(e?.message||e).slice(0,240));
+      }
+    }
+  }
   console.log('LEGISLACION_DERIVACION_MUY_ALTA_93G:',JSON.stringify({
     requested:derivedRequested,verifiedSeeds:derivedIndices.length,
     fallbackPdf:derivedRequested-derivedIndices.length,
