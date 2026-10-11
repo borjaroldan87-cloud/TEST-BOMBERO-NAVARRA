@@ -14086,6 +14086,7 @@ const LEGISLACION_MUY_ALTA_MODELO_99 =
 // inmediatamente un lote entero; 402/400 y fallos no transitorios NO se
 // reintentan. No se aprueba ninguna pregunta en este nivel de transporte.
 async function generateLegislationVeryHigh100(ai, request, phase, expectedCount, active=false){
+  const startedAt103=active?Date.now():null;
   // Para el resto de modelos y tareas conservar exactamente el comportamiento.
   if(!active || request?.model!==LEGISLACION_MUY_ALTA_MODELO_99){
     return ai.models.generateContent(request);
@@ -14114,6 +14115,10 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
         error.modelProtocol100=true;
         throw error;
       }
+      console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+        phase,ms:Date.now()-startedAt103,attempt,questions:expectedCount,
+        model:request?.model,completed:true
+      }));
       return response;
     }catch(error){
       const status=Number(error?.status ?? error?.response?.status ?? error?.code);
@@ -14128,7 +14133,13 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
         retryable,error:msg.slice(0,170),
         action:retryable&&attempt<maxAttempts?'reintentar':'fallar_seguro'
       }));
-      if(!retryable||attempt===maxAttempts)throw error;
+      if(!retryable||attempt===maxAttempts){
+        console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+          phase,ms:Date.now()-startedAt103,attempt,questions:expectedCount,
+          completed:false
+        }));
+        throw error;
+      }
       await sleep(attempt*1500);
     }
   }
@@ -14720,20 +14731,26 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     !finalQuestions.length||generationTargets.length!==finalQuestions.length){
     return {audited:0,verifiedVeryHigh:0,downgraded:0,regenerated:0};
   }
+  const qualityStarted103=Date.now();
   const indices=finalQuestions.map((q,i)=>
     String(generationTargets[i]?.topic_block||'').trim().toLowerCase()==='legislacion'
       ? i : -1).filter(i=>i>=0);
   if(!indices.length)return {audited:0,verifiedVeryHigh:0,downgraded:0,regenerated:0};
   // La calibración no cambia ni bloquea el examen: si el juez no reconoce
   // los ejemplos aprobados, los logs revelarán el sesgo y podremos corregirlo.
-  if(!legislationBenchmark97Promise){
-    legislationBenchmark97Promise=runLegislationBenchmark97(ai).catch(e=>{
-      console.warn('LEGISLACION_BENCHMARK_ERROR_97:',
-        String(e?.message||e).slice(0,240));
-      return null;
-    });
+  // SERVER 103: el benchmark de 6 ejemplos es DIAGNOSTICO, no certificacion
+  // factual ni de dificultad. No bloquear cada nuevo proceso/request con
+  // una llamada Gemini extra. Puede activarse a voluntad para investigacion.
+  if(process.env.LEGISLACION_BENCHMARK_ON_DEMAND === '1'){
+    if(!legislationBenchmark97Promise){
+      legislationBenchmark97Promise=runLegislationBenchmark97(ai).catch(e=>{
+        console.warn('LEGISLACION_BENCHMARK_ERROR_97:',
+          String(e?.message||e).slice(0,240));
+        return null;
+      });
+    }
+    await legislationBenchmark97Promise;
   }
-  await legislationBenchmark97Promise;
   let first=[];
   try{
     first=await auditVeryHighLegislation93F(ai,
@@ -14998,6 +15015,10 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     ...swapStats101,secondRoundSuppressed:[...noSecondRepair101].length,
     pending:pending.size,unchangedIfTestRejected:true,
     verifiedVeryHigh
+  }));
+  console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+    phase:'auditoria_y_reparaciones_total',ms:Date.now()-qualityStarted103,
+    questions:indices.length,attempted
   }));
   console.log('CALIDAD_MUY_ALTA_RESULTADO:',JSON.stringify({
     audited:indices.length,verifiedVeryHigh,downgraded:indices.length-verifiedVeryHigh,
@@ -15667,6 +15688,8 @@ ${JSON.stringify(payload)}`,
 }
 
 async function validateGeneratedQuestions(ai,questions,{independentPdfCheck=false,targets=[]}={}){
+  const startedAt103=independentPdfCheck&&targets.every(t=>
+    String(t?.topic_block||'').toLowerCase()==='legislacion') ? Date.now():null;
   const independentInstructions=independentPdfCheck ? `
 ============================================
 VERIFICACIÓN REGLAMENTARIA INDEPENDIENTE
@@ -15677,6 +15700,15 @@ redactado por el generador y puede contener errores u omisiones.
 Busca en File Search del TEMARIO ORIGINAL el pasaje concreto que determina la
 verdad o falsedad de CADA una de las cuatro alternativas; incluye condiciones
 que pudieran convertir en válidas varias respuestas.
+VERIFICACION EXPRESA DE SALVEDADES Y REMISIONES: cuando una alternativa dice
+"en ningun caso", "siempre", "sin excepcion", "unicamente" o presenta
+una prohibicion absoluta, busca en el mismo articulo y en las remisiones
+normativas TODAS las salvedades. NO aceptes una afirmacion absoluta
+si el texto contiene "salvo", "excepto", "sin perjuicio" o una remision
+que la limite. Ejemplo de patron (solo alerta de lectura, nunca fuente
+factual): una regla general de un ano puede tener una excepcion expresa
+por otro articulo. Si la opcion omite esa excepcion y dice "en ningun
+caso", NO la marques como ANSWER. Verifica primero en el PDF original.
 
 OBJETIVOS CURRICULARES (solo para localizar fragmentos; no son autoridad):
 ${JSON.stringify(targets.map((target,index)=>({index,topic:target.topic_name,section:target.section,concept:target.concept})))}
@@ -16052,6 +16084,7 @@ if(independentPdfCheck){
 
 runtimeValidationSchema.properties.results.minItems = questions.length;
 runtimeValidationSchema.properties.results.maxItems = questions.length;
+  const pdfCallAt103=startedAt103!==null?Date.now():null;
   const response=await ai.models.generateContent({
     model:"gemini-3.5-flash-lite",
     contents:validationPrompt,
@@ -16062,6 +16095,9 @@ runtimeValidationSchema.properties.results.maxItems = questions.length;
     }
   });
 
+  if(pdfCallAt103!==null)console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+    phase:'verificacion_pdf_gemini',ms:Date.now()-pdfCallAt103,questions:questions.length
+  }));
   const validation=JSON.parse(response.text);
 console.log("VALIDATOR RAW RESPONSE:", response.text);
  console.log(
@@ -16092,6 +16128,27 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
   }
 
   if(independentPdfCheck){
+    // SERVER 103: regresion concreta de CE 115.3: la disolucion por
+    // investidura fallida (99.5) excepciona la prohibicion de un ano.
+    // NO se permite calificar como VERDADERA una prohibicion absoluta sin
+    // la salvedad. Este detector solo afecta al art. 115 identificado.
+    const stemText=String(question?.stem||'').toLowerCase();
+    const correctText=String(question?.options?.[Number(question?.correctIndex)]||'')
+      .toLowerCase();
+    const constitution115=/(?:art[ií]culo\s*115|disolu(?:ci[oó]n|ci[oó]nes)\s+de\s+las\s+c[aá]maras|limitaciones\s+y\s+prohibiciones.*disolu)/i
+      .test(stemText);
+    const absoluteYearBan=/(?:en\s+ning[uú]n\s+caso|sin\s+excepci[oó]n)/i.test(correctText) &&
+      /(?:disol|c[aá]maras)/i.test(correctText) &&
+      /(?:a[nñ]o|doce\s+meses)/i.test(correctText) &&
+      !/(?:art[ií]culo\s*99|99\s*[,\.]?\s*5|salvo|excepto|sin\s+perjuicio)/i.test(correctText);
+    if(constitution115 && absoluteYearBan){
+      result.valid=false;
+      result.issues=[...(result.issues||[]),
+        'CE 115.3: prohibicion absoluta de disolucion anterior a un ano sin contemplar la excepcion del articulo 99.5.'];
+      console.warn('LEGISLACION_SALVEDAD_103:',JSON.stringify({
+        index:i,article:'115.3',exception:'99.5',action:'rechazo_factual'
+      }));
+    }
     const flags=Array.isArray(result.optionAssessment)
       ? result.optionAssessment : [];
     if(flags.length!==4 || flags.some(flag=>!['ANSWER','DISTRACTOR'].includes(flag)) ||
@@ -16166,6 +16223,9 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
       }
     }
   }
+  if(startedAt103!==null)console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+    phase:'verificacion_pdf_completa',ms:Date.now()-startedAt103,questions:questions.length
+  }));
   return validation.results;
 }
 async function regenerateInvalidQuestions(
@@ -16210,7 +16270,9 @@ graphicIssues: result.graphicIssues || []
       corpus:LEGISLACION_REFERENCIAS_94.length,examplesIncluded:4
     }));
   }
-  const replacementPrompt =
+  // SERVER 103: reparacion focal de dificultad NO materializa otro prompt
+  // generico que nunca se envia a Gemini; los demas casos no cambian.
+  const replacementPrompt = legislacionRepairSolo102 ? '' : (
     generationPrompt(replacementTargets.length, difficulty, mode) +
     coverageTargetsPrompt(replacementTargets) +
     legislationCalibrationPrompt94(replacementTargets,difficulty,false) +
@@ -16312,7 +16374,7 @@ ${officialStyle}
 ========================================
 FIN DE REFERENCIA
 ========================================
-`;
+`);
 
   // SERVER 95: no reutilizar el enorme prompt generico para reparar
   // dificultad. Una instruccion focalizada, con la evidencia y el ultimo
@@ -18282,13 +18344,23 @@ for(let i = 0; i < targets.length; i++){
   }
 }
 if(quota84?.derivedMode){
+  const started=Date.now();
   await fillVeryHighLegislationAnkiSeedsSemantic93G(
     ai,targets,generationIndexes,quota84);
+  console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+    phase:'semillas_anki_semantica',ms:Date.now()-started,
+    present:quota84.derivedIndices.length,expected:quota84.derivedRequested
+  }));
 }
 // SERVER 93I: complemento seguro cuando los vínculos heredados no bastan.
 if(quota84?.derivedMode && quota84.derivedIndices.length<quota84.derivedRequested){
   try{
+    const started=Date.now();
     await rescueVeryHighLegislationSeeds93I(ai,targets,generationIndexes,quota84);
+    console.log('LEGISLACION_TIEMPOS_103:',JSON.stringify({
+      phase:'rescate_semillas_anki',ms:Date.now()-started,
+      present:quota84.derivedIndices.length,expected:quota84.derivedRequested
+    }));
   }catch(seedRescueError){
     console.warn('LEGISLACION_DERIVACION_RESCATE_FATAL_93I:',
       String(seedRescueError?.message||seedRescueError).slice(0,220));
