@@ -14092,10 +14092,18 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
     return ai.models.generateContent(request);
   }
   const field=phase==='auditoria' ? 'results' : 'questions';
-  const maxAttempts=2;
+  // 104: una reparación no puede monopolizar 300 s ni reintentarlo
+  // internamente durante otros 300 s. Los intentos de calidad ya están
+  // acotados por las rondas de refineVeryHighLegislation93F.
+  const repair104=phase==='reparacion';
+  const maxAttempts=repair104?1:2;
+  const actualRequest=repair104?{
+    ...request,config:{...request.config,
+      httpOptions:{...(request.config?.httpOptions||{}),timeout:120000}}
+  }:request;
   for(let attempt=1;attempt<=maxAttempts;attempt++){
     try{
-      const response=await ai.models.generateContent(request);
+      const response=await ai.models.generateContent(actualRequest);
       const output=typeof response?.text==='string' ? response.text.trim() : '';
       if(!output){
         const error=new Error('Gemini Muy alta: respuesta JSON vacia.');
@@ -14244,6 +14252,92 @@ PROCEDIMIENTO OBLIGATORIO PARA CADA PREGUNTA:
     de opciones; una sola respuesta indiscutible, sin conocimientos externos.
 
 No añadas un comentario sobre tu proceso; devuelve el JSON exigido.\n`;
+}
+
+// SERVER 104: contrato inicial específico para Legislación Muy alta.
+// Antes se enviaba un prompt multipropósito >100.000 caracteres con reglas
+// de Geografía, gráficos y otros bloques. Este contrato mantiene los
+// requisitos curriculares y factuales sin instrucciones irrelevantes.
+function legislationVeryHighPrompt104(targets,mode,officialStyle){
+  if(!isPureLegislation95(targets))return '';
+  const objects=targets.map((t,i)=>({
+    slot:i+1,topic:t.topic_name,section:t.section,
+    concept:t.concept,contentType:t.item_type,
+    evaluationType:t.evaluation_type,
+    family:t.questionFamily,sourcePage:t.source_page,
+    evidence:String(t.source_evidence||'').slice(0,3200),
+    nearbyEvidence:(Array.isArray(t.distractorContext)?t.distractorContext:[])
+      .filter(x=>String(x.source_evidence||'').trim()).slice(0,4)
+      .map(x=>({concept:String(x.concept||'').slice(0,230),
+        evidence:String(x.source_evidence||'').slice(0,950)})),
+    ankiSeed:t.veryHighDerivation93G?{
+      stem:String(t.veryHighAnkiSeed?.stem||''),
+      options:t.veryHighAnkiSeed?.options||[],
+      answer:t.veryHighAnkiSeed?.correctIndex}:null,
+    previousQuestion:t.failedQuestion?{
+      stem:t.failedQuestion.stem,options:t.failedQuestion.options}:null,
+    priorBank:t.previousBankQuestion?{
+      stem:t.previousBankQuestion.stem,
+      options:t.previousBankQuestion.options}:null,
+    adaptivePriority:Number(t.adaptive_priority||0)
+  }));
+  return `CONSTRUCTOR DE EXAMEN: BOMBERO DE NAVARRA — LEGISLACIÓN MUY ALTA.
+Devuelve EXACTAMENTE ${targets.length} preguntas en formato JSON del schema suministrado,
+una por objetivo y en el MISMO ORDEN. Modalidad: ${mode}.
+
+JERARQUÍA DE REGLAS:
+1. ÚNICA autoridad factual: PDF del temario recuperado con File Search.
+   El ejemplo de estilo, el Anki y el examen oficial JAMÁS son prueba factual.
+   Comprueba todos los requisitos, remisiones, excepciones y condiciones,
+   incluida cualquier SALVEDAD aplicable antes de afirmar «en ningún caso».
+   Una opción aparentemente verdadera que omite una excepción relevante NO
+   puede marcarse como íntegramente CORRECTA.
+2. Un objetivo implica UNA pregunta del conocimiento exacto. Conserva
+   tema, familia obligatoria y prioridad. No sustituyas objetivos ni
+   cambies la semilla Anki sin indicación explícita. No reproduzcas la
+   pregunta previa, sino una discriminación auténtica y verificable.
+3. CONSTRUYE LA PREGUNTA ANTES DE ESCRIBIR LAS CUATRO OPCIONES:
+   identifica en el PDF una regla precisa y una condición, límite, excepción,
+   autoridad, consecuencia o aplicación estrechamente vinculada.
+   La dificultad NO debe depender del número de palabras.
+4. Para familia 2026_CORRECTA o 2026_RAZONAMIENTO: una sola opción
+   íntegramente VERDADERA; tres FALSAS con un único cambio pequeño,
+   diferente en cada distractor, frente a la misma base técnica.
+   Para 2026_INCORRECTA: una FALSA extremadamente sutil y tres afirmaciones
+   VERDADERAS completas. No conviertas verdades parciales en falsedades.
+   Para 2024_TEXTO: exactitud literal fina, al menos tres opciones
+   competitivas, no una frase exacta frente a tres disparates.
+   En familias NUMERICA o CALCULO, exige y resuelve el dato/cálculo real
+   del objetivo; no introduzcas cifras inventadas ni cambies la familia.
+5. Las cuatro respuestas serán PARALELAS en sintaxis, extensión, unidades,
+   sujeto y contexto. Cambia solo el punto jurídicamente decisivo; que
+   ninguna pueda descartarse por tono, obviedad o absoluto gratuito.
+   Verifica mediante File Search la falsedad o veracidad de CADA alternativa.
+6. Cuando la pregunta derive de Anki, conserva el mismo conocimiento
+   vinculado, pero añade discriminación sustancial de condición/excepción
+   sustentada por el PDF. No valen paráfrasis o cambios cosméticos.
+7. Datos de salida por pregunta: stem; options (4 textos no vacíos);
+   correctIndex (0-3); explanation jurídica exacta; sourceEvidence
+   con citas textuales suficientes de PDF; sourcePage; manualPage;
+   difficulty='muy alta'; questionFamily exacta; graphic=null.
+   No uses datos de normativa externa no presente en el PDF. Mantén
+   estrictamente UNA respuesta correcta y evita duplicados entre preguntas.
+8. Si la evidencia de un objetivo no permite alto nivel, NO fabriques
+   complejidad ni hechos; devuelve la mejor pregunta factual y el auditor
+   decidirá si requiere sustitución curricular. No rebajes la veracidad.
+
+PATRONES VALIDADOS POR EL OPOSITOR (SOLO ESTILO, NUNCA HECHOS):
+${legislationCalibrationPrompt94(targets,'muy alta',false)}
+
+OBJETIVOS Y CONTEXTO FACTUAL DEL PDF (CONTROL OBLIGATORIO):
+${JSON.stringify(objects)}
+
+REFERENCIA DE EXÁMENES OFICIALES, ÚNICAMENTE ESTILO:
+${String(officialStyle||'').slice(0,1800)}
+
+ANTES DE DEVOLVER JSON: comprueba polaridad, índice de respuesta, las
+cuatro alternativas, condiciones, remisiones, excepciones, y la fuente
+literal de cada afirmación. No generes comentarios fuera del JSON.`;
 }
 
 function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestions,round){
@@ -14846,30 +14940,53 @@ async function refineVeryHighLegislation93F({ai,finalQuestions,
     }
     const todo=[...pending.keys()].filter(i=>!noSecondRepair101.has(i));
     for(let start=0;start<todo.length;start+=5){
-      const subset=todo.slice(start,start+5).filter(i=>pending.has(i));
+      // Cada sublote conserva SOLO reparaciones efectivamente devueltas.
+      // Un fetch failed de la plaza 1 no destruye la reparación de la 3.
+      let subset=todo.slice(start,start+5).filter(i=>pending.has(i));
       if(!subset.length)continue;
       attempted+=subset.length;
-      const invalid=subset.map(i=>({index:i,qualityRepair93I:true,
-        curriculumSwap101:proposedSwaps101.has(i),
-        issues:pending.get(i).issues,
-        weakOptionIndexes97:pending.get(i).weakOptionIndexes97||[],
-        distractorIssues:pending.get(i).distractorIssues}));
-      let generated;
-      try{
-        const workingQuestions95=finalQuestions.map((q,i)=>latestRejected95.get(i)||q);
-        const activeTargets101=generationTargets.map((t,i)=>proposedSwaps101.get(i)||t);
-        generated=await regenerateInvalidQuestions(ai,invalid,
+      const workingQuestions95=finalQuestions.map((q,i)=>latestRejected95.get(i)||q);
+      const activeTargets101=generationTargets.map((t,i)=>proposedSwaps101.get(i)||t);
+      const tasks=subset.map(i=>async()=>{
+        const invalid=[{index:i,qualityRepair93I:true,
+          curriculumSwap101:proposedSwaps101.has(i),
+          issues:pending.get(i).issues,
+          weakOptionIndexes97:pending.get(i).weakOptionIndexes97||[],
+          distractorIssues:pending.get(i).distractorIssues}];
+        const repaired=await regenerateInvalidQuestions(ai,invalid,
           workingQuestions95,activeTargets101,difficulty,mode,officialStyle,round);
-        if(!Array.isArray(generated?.questions)||generated.questions.length!==subset.length){
-          throw new Error('Numero de reparaciones inesperado.');
+        if(!Array.isArray(repaired?.questions)||repaired.questions.length!==1){
+          throw new Error('Reparación individual sin pregunta única.');
         }
-      }catch(e){
-        failureStats.generationErrors+=subset.length;
-        console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
-          round,slots:subset.map(i=>i+1),phase:'generacion',
-          error:String(e?.message||e).slice(0,220)}));
-        continue;
+        return repaired.questions[0];
+      });
+      const taskResults=new Array(tasks.length);
+      let taskCursor=0;
+      await Promise.all(Array.from({length:Math.min(2,tasks.length)},async()=>{
+        while(taskCursor<tasks.length){
+          const k=taskCursor++;
+          try{taskResults[k]={ok:true,question:await tasks[k]()};}
+          catch(e){taskResults[k]={ok:false,error:e};}
+        }
+      }));
+      const successful=[];
+      for(let k=0;k<subset.length;k++){
+        if(taskResults[k]?.ok) successful.push({i:subset[k],q:taskResults[k].question});
+        else{
+          failureStats.generationErrors++;
+          console.warn('CALIDAD_MUY_ALTA_REPARACION_ERROR:',JSON.stringify({
+            round,slots:[subset[k]+1],phase:'generacion_individual_104',
+            error:String(taskResults[k]?.error?.message||taskResults[k]?.error||'sin respuesta').slice(0,220)}));
+        }
       }
+      console.log('LEGISLACION_REPARACIONES_104:',JSON.stringify({
+        round,requested:subset.length,succeeded:successful.length,
+        failed:subset.length-successful.length,parallelism:2,
+        individualTimeoutMs:120000
+      }));
+      subset=successful.map(x=>x.i);
+      const generated={questions:successful.map(x=>x.q)};
+      if(!subset.length)continue;
       const plausible=[];
       for(let j=0;j<subset.length;j++){
         const i=subset[j],q=generated.questions[j],target=
@@ -18608,10 +18725,16 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
     }
 
     if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
-      prompt+=legislationVeryHighContract95(generationTargets);
+      const beforeCompact104=prompt.length;
+      prompt=legislationVeryHighPrompt104(generationTargets,mode,officialStyle);
       console.log('LEGISLACION_CONSTRUCCION_95:',JSON.stringify({
         questions:newGenerationCount,finalContract:true,
         calibratedExamples:4,promptChars:prompt.length
+      }));
+      console.log('LEGISLACION_PROMPT_104:',JSON.stringify({
+        beforeChars:beforeCompact104,afterChars:prompt.length,
+        reductionPct:Math.round((1-prompt.length/Math.max(1,beforeCompact104))*100),
+        questions:newGenerationCount,scope:'solo_legislacion_muy_alta'
       }));
     }
     const generationModel99=legislationVeryHighModel99(generationTargets,difficulty);
