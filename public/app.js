@@ -1,6 +1,6 @@
 let qs=[],ans=[],i=0,sessionId=null;
 const $=id=>document.getElementById(id);
-async function api(url,opts={}){let r=await fetch(url,{headers:{"Content-Type":"application/json"},...opts});let j=await r.json();if(!j.ok)throw Error(j.error||"Error");return j}
+async function api(url,opts={}){let r=await fetch(url,{headers:{"Content-Type":"application/json"},...opts});let j=await r.json();if(!r.ok||!j.ok){const e=Error(j.error||"Error HTTP "+r.status);e.httpStatus=r.status;throw e;}return j}
 async function status(){try{let j=await api("/api/status");$("status").textContent=j.keyConfigured?"API preparada":"Falta configurar GEMINI_API_KEY"}catch(e){$("status").textContent=e.message}}
 async function ingest(){try{$("ingest").textContent="Indexando…";await api("/api/ingest-benchmark",{method:"POST"});$("ingest").textContent="✓ PDF INDEXADO"}catch(e){alert(e.message);$("ingest").textContent="1. INDEXAR PDF"}}
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -324,119 +324,124 @@ async function uploadTopicBatch(){
     btn.disabled=false;
   }
 }
-// Recuerda una generación que terminó en Render aunque se cortase HTTP.
-// No vuelve a pedir otro test: consulta el MISMO runId hasta obtenerlo.
-async function waitForGenerationRun93(runId){
-  const deadline=Date.now()+12*60*1000;
-  while(Date.now()<deadline){
-    await wait(4000);
-    let status;
-    try{status=await api(`/api/generation-run/${encodeURIComponent(runId)}`);}
-    catch(error){
-      // Los estados desconocidos no se resuelven por seguir esperando.
-      if(/No existe esa generaci|Identificador de test inv/i.test(String(error?.message||error))){
-        throw error;
+// SERVER/FRONT 112: recuperación de una generación larga SIN reenviar
+// peticiones pagadas. runId es idempotente en PostgreSQL.
+const GENERATION_PENDING_112='bombero_navarra_generation_112';
+function newGenerationId112(){
+  if(globalThis.crypto?.randomUUID)return crypto.randomUUID().replace(/-/g,'');
+  const bytes=new Uint8Array(20);
+  if(globalThis.crypto?.getRandomValues)crypto.getRandomValues(bytes);
+  else throw new Error('El navegador no permite generar identificadores seguros.');
+  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+}
+function generationProgress112(message){
+  const el=$('generateProgress');
+  if(el)el.textContent=message||'';
+}
+function showGeneratedTest112(j){
+  if(!j?.questions?.length||!j.sessionId)
+    throw new Error('El servidor no confirmó el test completo.');
+  qs=j.questions;
+  sessionId=j.sessionId;
+  ans=Array(qs.length).fill(null);
+  i=0;
+  $('quiz').style.display='block';
+  $('result').innerHTML='';
+  show();
+  startExamTimer();
+  generationProgress112('Test preparado y guardado.');
+}
+async function waitForGenerationRun112(runId,launch=null){
+  const started=Date.now();let transientFailures=0;
+  // launch corresponde SOLO al POST original; nunca se envía otro POST.
+  let launchedResult=null;
+  if(launch)launch.then(result=>{launchedResult=result;});
+  while(Date.now()-started<15*60*1000){
+    if(launchedResult?.ok && launchedResult.data?.questions)
+      return launchedResult.data;
+    let state=null;
+    try{
+      state=await api('/api/generation-run/'+encodeURIComponent(runId));
+      transientFailures=0;
+    }catch(e){
+      // SERVER 114: Render puede tardar en arrancar; un 404 temprano
+      // no demuestra que no exista una petición ya aceptada por el POST.
+      // No borrar su runId por esa carrera de inicialización.
+      if(e?.httpStatus===404 &&
+         [400,409,422].includes(launchedResult?.error?.httpStatus)){
+        localStorage.removeItem(GENERATION_PENDING_112);
+        throw launchedResult.error;
       }
-      continue; // Error temporal de red: no duplicar generación.
+      transientFailures++;
+      if(launchedResult && !launchedResult.ok && e?.httpStatus!==404 &&
+         transientFailures>=3)throw launchedResult.error;
+      // Dar margen a arranque en frío sin repetir la llamada de generación.
+      if(transientFailures >= (e?.httpStatus===404 ? 30 : 6))throw new Error(
+        'No se ha podido confirmar el estado del test. Se conserva el identificador: '+
+        'pulsa Generar test para recuperarlo SIN volver a lanzar una generación pagada.');
     }
-    if(status.status==='completed')return status;
-    if(status.status==='failed'||status.status==='stale'){
-      throw new Error(status.error||'No se pudo completar la generación.');
+    if(state?.status==='completed')return state;
+    if(state?.status==='failed'||state?.status==='stale'){
+      localStorage.removeItem(GENERATION_PENDING_112);
+      throw new Error(state.error||'La generación no finalizó.');
     }
+    generationProgress112('Gemini está preparando y verificando el test. '+
+      'No cierres esta página ni pulses varias veces; se consulta el mismo trabajo.');
+    await wait(3500);
   }
-  throw new Error('No se recibió el test dentro del tiempo de espera. Comprueba Render antes de volver a generar.');
+  throw new Error('La generación continúa sin confirmación. '+
+    'Su identificador está guardado: pulsa Generar test para recuperar el resultado '+
+    'sin iniciar otra petición pagada.');
 }
 async function generate(){
-  const btn=$("generate");
+  const btn=$('generate');
   const originalText=btn.textContent;
-
   try{
     btn.disabled=true;
-    btn.textContent="GENERANDO TEST...";
-
-    const allScope=
-  $("scopeAll")?.checked === true;
-
-if(
-  !allScope &&
-  selectedBlocks.size===0 &&
-  selectedTopicIds.size===0
-){
-  throw new Error(
-    "Selecciona al menos un bloque o tema."
-  );
-}
-
-currentTestLabel=
-  buildSelectionLabel();
-
-const runId=globalThis.crypto?.randomUUID?.() ||
-  `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-const generationPayload={
-  runId,
-  count:+$("count").value,
-  difficulty:$("difficulty").value,
-  mode:$("mode").value,
-  testType:$("testType")?.value || "normal",
-  examMode:$("examMode")?.value || "training",
-  selectedBlocks:allScope?[]:[...selectedBlocks],
-  selectedTopicIds:allScope?[]:[...selectedTopicIds]
-};
-let j;
-let uncertainTransport=false;
-try{
-  const response=await fetch('/api/generate',{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(generationPayload)
-  });
-  const raw=await response.text();
-  try{j=JSON.parse(raw);}catch{
-    // Un proxy puede devolver HTML (502/503/504) después del COMMIT.
-    // En ese caso el resultado es DESCONOCIDO, no un test fallido.
-    uncertainTransport=true;
-  }
-  // Una respuesta de gateway 408/502/503/504 no demuestra fracaso
-  // de la operación: también puede ocultar un COMMIT completado.
-  if([408,502,503,504].includes(response.status))uncertainTransport=true;
-  if(!uncertainTransport){
-    if(j?.ok===false){
-      throw new Error(j.error||`Error HTTP ${response.status}`);
+    btn.textContent='PREPARANDO TEST...';
+    let stored=null;
+    try{stored=JSON.parse(localStorage.getItem(GENERATION_PENDING_112)||'null');}
+    catch{localStorage.removeItem(GENERATION_PENDING_112);}
+    let runId,body,launch=null;
+    // El reintento desde la interfaz recupera la petición anterior,
+    // no la cobra de nuevo aunque el navegador haya perdido el HTTP POST.
+    if(stored?.runId && stored?.body){
+      runId=stored.runId;
+      body=stored.body;
+      generationProgress112('Recuperando el test anterior sin volver a generarlo...');
+    }else{
+      const allScope=$('scopeAll')?.checked===true;
+      if(!allScope && selectedBlocks.size===0 && selectedTopicIds.size===0)
+        throw new Error('Selecciona al menos un bloque o tema.');
+      currentTestLabel=buildSelectionLabel();
+      runId=newGenerationId112();
+      body={
+        count:+$('count').value,
+        difficulty:$('difficulty').value,
+        mode:$('mode').value,
+        testType:$('testType')?.value||'normal',
+        examMode:$('examMode')?.value||'training',
+        selectedBlocks:allScope?[]:[...selectedBlocks],
+        selectedTopicIds:allScope?[]:[...selectedTopicIds],
+        runId
+      };
+      localStorage.setItem(GENERATION_PENDING_112,
+        JSON.stringify({runId,body,startedAt:Date.now()}));
+      generationProgress112('Solicitando generación y verificación del PDF...');
+      // La promesa absorbe errores HTTP 504 del gateway. El estado real
+      // se lee de PostgreSQL; NO se lanza una segunda generación.
+      launch=api('/api/generate',{
+        method:'POST',body:JSON.stringify(body)
+      }).then(data=>({ok:true,data}),error=>({ok:false,error}));
     }
-    if(!response.ok)throw new Error(`Error HTTP ${response.status}`);
-  }
-}catch(error){
-  if(!/failed to fetch|networkerror|network error|load failed/i.test(String(error?.message||error)))throw error;
-  uncertainTransport=true;
-}
-if(uncertainTransport){
-  btn.textContent='RECUPERANDO TEST...';
-  j=await waitForGenerationRun93(runId);
-}
-if(j?.pending){
-  btn.textContent='RECUPERANDO TEST...';
-  j=await waitForGenerationRun93(runId);
-}
-
-    if(!j.ok){
-      throw new Error(j.error||"No se pudo generar el test.");
-    }
-
-    if(!j.questions || j.questions.length===0){
-      throw new Error("No se recibieron preguntas.");
-    }
-
-    qs=j.questions;
-    sessionId=j.sessionId;
-ans=Array(qs.length).fill(null);
-i=0;
-
-    $("quiz").style.display="block";
-    $("result").innerHTML="";
-    show();
-    startExamTimer();
-
+    const j=await waitForGenerationRun112(runId,launch);
+    if(!j?.questions?.length)
+      throw new Error('Generación confirmada sin preguntas: no se inicia el test.');
+    localStorage.removeItem(GENERATION_PENDING_112);
+    showGeneratedTest112(j);
   }catch(e){
+    generationProgress112('No se ha confirmado un test completo. '+
+      'Si hubo un error de red, puedes recuperar la petición con el mismo botón.');
     alert(e?.message||String(e));
   }finally{
     btn.disabled=false;
@@ -786,18 +791,18 @@ async function finish(auto=false){
       }))
       .filter(item=>Number.isInteger(item.selectedIndex));
 
-    // Guardado secuencial: evita saturar Render/PostgreSQL con 10–75
-    // escrituras simultáneas. La API conserva la idempotencia por pregunta.
-    for(const item of answeredQuestions){
-      await api("/api/answer",{
-        method:"POST",
-        body:JSON.stringify({
-          sessionId:Number(sessionId),
-          questionId:item.questionId,
-          selectedIndex:item.selectedIndex
+    await Promise.all(
+      answeredQuestions.map(item=>
+        api("/api/answer",{
+          method:"POST",
+          body:JSON.stringify({
+            sessionId:Number(sessionId),
+            questionId:item.questionId,
+            selectedIndex:item.selectedIndex
+          })
         })
-      });
-    }
+      )
+    );
     await api("/api/finish-test",{
       method:"POST",
       body:JSON.stringify({
@@ -857,9 +862,6 @@ async function finish(auto=false){
 
     </div>
   `;
-  // SERVER 93F: refrescar contadores tras confirmar el guardado del test.
-  // Si falla esta consulta, el resultado ya entregado permanece intacto.
-  void loadStatistics();
 }
 
 function review(){
