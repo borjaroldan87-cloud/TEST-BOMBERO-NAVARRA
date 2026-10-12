@@ -15124,9 +15124,10 @@ async function validateLegislationSimple112(ai,questions,targets,level){
   if(!isPureLegislation95(targets)||questions.length!==targets.length)
     throw new Error('112: auditoría no corresponde a los objetivos.');
   const approved=[];
-  // Con 10 preguntas: 2 lotes generador + 3 auditor (antes 4),
-  // y como máximo 2+3 en una reparación. Respeta 10 llamadas de presupuesto.
-  const batchSize=4;
+  // SERVER 121 (experimento de rendimiento): auditoría en lotes de 5
+  // en lugar de 4. La validación factual sigue siendo independiente.
+  // Dos lotes para 10 preguntas; sin cambiar la generación ni su presupuesto.
+  const batchSize=5;
   for(let start=0;start<questions.length;start+=batchSize){
     const group=questions.slice(start,start+batchSize);
     const points=targets.slice(start,start+batchSize);
@@ -15146,6 +15147,7 @@ async function validateLegislationSimple112(ai,questions,targets,level){
     console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'auditar',level,
       count:group.length,batch:Math.floor(start/batchSize)+1,
       chars:contents.length,pdfOriginal:true}));
+    const auditStarted121=Date.now();
     const response=await ai.models.generateContent({
       model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim(),
       contents,config:{
@@ -15153,6 +15155,11 @@ async function validateLegislationSimple112(ai,questions,targets,level){
         responseMimeType:'application/json',responseJsonSchema:schema
       }
     });
+    console.log('LEGISLACION_AUDITOR_LOTE_121:',JSON.stringify({
+      count:group.length,batch:Math.floor(start/batchSize)+1,
+      durationMs:Date.now()-auditStarted121,
+      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim()
+    }));
     let parsed;
     try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: auditoría JSON ilegible.');}
     if(!Array.isArray(parsed?.results)||parsed.results.length!==group.length)
