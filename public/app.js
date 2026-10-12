@@ -713,6 +713,12 @@ function show(){
 
           <div class="question-stem">
             ${k+1}. ${formatExamContent(q.stem)}
+            ${q.rescueFallback119
+              ? `<span style="font-size:0.82em;font-weight:normal;margin-left:0.5em">
+                   [Alta · ${q.rescueFallback119==="anki_validada"
+                     ? "Anki validada" : "PDF verificado"} · sustitución]
+                 </span>`
+              : ""}
           </div>
 ${renderGraphic(q)}
           <div>
