@@ -316,6 +316,13 @@ await db.query(`
   ON question_bank (coverage_item_id, md5(lower(btrim(stem))))
   WHERE validation_version=107 AND active=TRUE
 `);
+// SERVER 114: VERSION 113 necesita su propio índice único para evitar
+// preguntas pendientes duplicadas si coinciden dos generaciones concurrentes.
+await db.query(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_legislation_ready113_dedupe
+  ON question_bank (coverage_item_id, md5(lower(btrim(stem))))
+  WHERE validation_version=113 AND active=TRUE
+`);
 
   await db.query(`
     CREATE TABLE IF NOT EXISTS test_sessions (
@@ -8583,6 +8590,333 @@ const legislationSectionKey = candidate => {
 };
 
 
+
+/* SERVER 115 — Geografía 21–24: datos concretos, diversidad y coste acotado.
+   Solo se activa cuando TODOS los objetivos nuevos pertenecen a esos temas.
+   Fuera de ese caso permanece el motor original del SERVER 114. */
+const GEOGRAFIA_GENERACION_MODELO_115=
+  String(process.env.GEOGRAFIA_GENERACION_MODEL || 'gemini-3.6-flash').trim();
+const geographyNorm115 = value => String(value ?? '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+  .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+const geographyTopic115 = target =>
+  Number(coverageTopicNumber(target?.topic_name));
+const geographyPure115 = targets => Array.isArray(targets) && targets.length>0 &&
+  targets.every(t=>String(t?.topic_block||'').toLowerCase()==='geografia' &&
+    [21,22,23,24].includes(geographyTopic115(t)));
+function geographyAreaGroup115(item){
+  const concept=String(item?.concept||'');
+  const arrow=concept.split('->').map(s=>s.trim()).filter(Boolean);
+  const area=arrow.length>=2 ? arrow[arrow.length-1] :
+    concept.match(/\bcon\s+el\s+parque\s+(?:de\s+)?([^,]+)/i)?.[1] ||
+    concept.match(/\bparque\s+(?:de\s+bomberos\s+)?asociado\s*[:\-]?\s*([^,]+)/i)?.[1] ||
+    String(item?.section||'');
+  return `${item?.topic_id||0}:${geographyNorm115(area)||'sin_area'}`;
+}
+function geographyDiverseCandidates115(rows){
+  if(!geographyPure115(rows))return rows;
+  // Respetar la prelación SRS/errores (prioridades 1 a 3 intactas).
+  // Solo repartir las candidaturas no urgentes 4–5 por ámbitos reales.
+  const urgent=rows.filter(r=>Number(r.adaptive_priority)<4);
+  const output=[...urgent];
+  for(const priority of [4,5]){
+    const candidates=rows.filter(r=>Number(r.adaptive_priority)===priority);
+    const byTimes=new Map();
+    for(const row of candidates){
+      const asked=Number(row.times_asked||0);
+      if(!byTimes.has(asked))byTimes.set(asked,[]);
+      byTimes.get(asked).push(row);
+    }
+    for(const asked of [...byTimes.keys()].sort((a,b)=>a-b)){
+      const byArea=new Map();
+      for(const row of byTimes.get(asked)){
+        const key=geographyAreaGroup115(row);
+        if(!byArea.has(key))byArea.set(key,[]);
+        byArea.get(key).push(row);
+      }
+      // Intercalar grupos, en lugar de recorrer el PDF desde su primera fila.
+      const bins=[...byArea.values()];
+      let remaining=true;
+      while(remaining){
+        remaining=false;
+        for(const bin of bins){
+          if(bin.length){output.push(bin.shift());remaining=true;}
+        }
+      }
+    }
+  }
+  // Candidaturas futuras/desconocidas sin perder registros.
+  const seen=new Set(output.map(r=>r.id));
+  return output.concat(rows.filter(r=>!seen.has(r.id)));
+}
+function geographyAssignedFamily115(target,index){
+  const context=Array.isArray(target?.distractorContext)?target.distractorContext:[];
+  const nearby=Array.isArray(target?.territorialContext?.nearby)
+    ?target.territorialContext.nearby:[];
+  // INCORRECTA solo con al menos tres asociaciones reales adicionales.
+  if(index%5===3 && context.length>=3)return '2026_INCORRECTA';
+  if(index%5===2 && nearby.length>=2)return '2026_RAZONAMIENTO';
+  if(index%5===1 && context.length>=2)return '2026_CORRECTA';
+  return '2024_TEXTO';
+}
+function geographyFactText115(target,text){
+  const topic=geographyTopic115(target);
+  let value=geographyPromptSafeText(target,text);
+  if(topic===23 || topic===24){
+    // Nunca mostrar metadatos como objetivo de pregunta geográfica.
+    value=value.replace(/,?\s*(?:promotor|potencia|producci[oó]n|a[nñ]o\s+de|a[nñ]o\s+puesta|n[uú]mero\s+de\s+aerogeneradores)\b.*$/i,'').trim();
+  }
+  return value;
+}
+function geographyFocalPrompt115(targets,difficulty,mode,defects=[]){
+  const facts=targets.map((t,i)=>{
+    const pool=t.optionPools||{};
+    const rows=Array.isArray(t.distractorContext)?t.distractorContext:[];
+    const exact=Array.isArray(t.territorialContext?.exact)?t.territorialContext.exact:[];
+    const areas=[...new Set(exact.map(x=>x.operationalArea).filter(Boolean))];
+    const noUnambiguousPark=areas.length!==1;
+    return {
+      index:i,topic:t.topic_name,coverageId:t.id,
+      family:t.questionFamily,concept:geographyFactText115(t,t.concept).slice(0,530),
+      evidence:geographyFactText115(t,geographyPromptSafeEvidence(t)).slice(0,430),
+      page:t.source_page??null,
+      // T21 concejo -> municipio -> parque: la primera entidad es el
+      // concejo y la segunda su municipio. No llamarlo municipio en Gemini.
+      municipality:geographyTopic115(t)===21 &&
+        String(t.concept||'').split('->').length>=3
+        ? String(t.concept).split('->')[1].trim()
+        : (pool.correctLocation||null),
+      entity:geographyTopic115(t)===21 ? (pool.correctLocation||null) : null,
+      operationalSite:noUnambiguousPark?null:areas[0],
+      territorialStatus:noUnambiguousPark?'NO_PREGUNTAR_SEDE_AMBIGUA_O_DESCONOCIDA':'SEDE_COMPROBADA_EN_T21',
+      townCandidates:(pool.municipalitiesSameOperationalArea||[]).slice(0,5).map(r=>r.entity),
+      siteCandidates:(pool.alternativeOperationalAreas||[]).slice(0,5).map(r=>r.operationalArea),
+      subordinateCandidates:(pool.subordinatesSameMunicipality||[]).slice(0,5).map(r=>({name:r.entity,municipality:r.parentMunicipality})),
+      otherSubordinates:(pool.subordinatesOtherMunicipalitiesSameOperationalArea||[]).slice(0,4).map(r=>({name:r.entity,municipality:r.parentMunicipality})),
+      relatedFacts:rows.slice(0,7).map(r=>geographyFactText115(t,r.concept).slice(0,190)),
+      errors:defects[i]||[]
+    };
+  });
+  return `Eres un preparador experto de oposiciones de Bombero de Navarra.
+Genera EXACTAMENTE ${targets.length} preguntas de GEOGRAFÍA, nivel ${difficulty}, modo ${mode}.
+Usa una pregunta por registro y el mismo orden. Devuelve el JSON de questionSchema.
+FUENTE ÚNICA de HECHOS: PDFs del temario en File Search; las fichas de abajo
+son extractos del mismo temario y NO autorizan extrapolaciones.
+
+ESTILO APROBADO DE EXAMEN 2024/2026: breve, directo, operativo;
+- «¿En qué municipio está situado el polígono X?»
+- «SOS Navarra recibe aviso de incendio en la localidad X. ¿Qué parque
+   de bomberos se movilizaría en primer lugar?» (SOLO si T21 acredita la sede
+   de atención inicial, sin inferir recursos reales por otras condiciones).
+- «Si se originase un incendio en la planta FV X, ¿qué parque se movilizaría
+   inicialmente?» (solo con relación territorial inequívoca).
+- «¿Cuál de estas asociaciones instalación–municipio es INCORRECTA?»
+- «¿Cuál de las siguientes localidades NO pertenece al municipio X?»
+Son moldes de redacción, NO datos factuales. Distribuye la letra correcta sin patrón.
+
+CRITERIOS:
+1) Cuatro alternativas de igual categoría y longitud comparable; exactamente
+   UNA responde al enunciado. INCORRECTA exige TRES afirmaciones verdaderas y
+   UNA falsa; demuestra cada relación con PDF. No confundas ausencia con falsedad.
+2) Distractores reales y plausibles del mismo ámbito, sin inventar entidades,
+   colindancias, rutas ni hechos. Una única diferencia territorial decisiva.
+3) No preguntes superficies/perímetros T22, promotores/potencias/años T23–24,
+   ni números de turbinas o producción T24; tampoco páginas o metadatos.
+4) La denominación del parque ADMINISTRATIVO agrupado NO equivale a la sede de
+   ATENCIÓN INICIAL: Lodosa ≠ Peralta, Altsasu ≠ Auritz, Navascués ≠ Sangüesa.
+   Los exámenes oficiales de 2024 SÍ preguntan «¿qué parque se movilizará
+   en primer lugar?». Se permite ese formato bajo el supuesto de asignación
+   territorial de atención inicial del temario si está inequívocamente documentada;
+   nunca deducir una movilización real condicionada por disponibilidad o mando.
+5) Si 'operationalSite' es null, NO preguntes sede/parque ni inventes una.
+   Si la instalación tiene varios municipios, no preguntes como si hubiera
+   uno solo: pregunta por el conjunto exacto o por UNA pertenencia con tres
+   ubicaciones realmente ajenas. No uses la falsa opción por omisión de datos.
+6) Si la familia es 2026_INCORRECTA, escribe literalmente INCORRECTA o NO
+   en el enunciado. Si falta evidencia para 3 verdades + 1 falsedad,
+   cambia a 2024_TEXTO y di la familia real; no inventes hechos.
+7) Dificultad ALTA: distinciones territoriales plausibles. MUY ALTA: relaciones
+   sutiles de municipio/concejo/sede/instalación cuando el PDF las sostenga.
+   Nunca subas dificultad inventando normativa o escenarios.
+8) Indica sourceEvidence textual comprobable, sourcePage real si consta,
+   manualPage solo si consta literalmente, graphic:null, y questionFamily real.
+   No copies toda la tabla a la explicación.
+
+HECHOS POR OBJETIVO (NO MEZCLAR OBJETIVOS):
+${JSON.stringify(facts)}
+Antes de responder, comprueba todas las alternativas contra el PDF, la
+unicidad y que las opciones no revelen la respuesta por descarte trivial.`;
+}
+function geographyStructureIssue115(target,question,requestedDifficulty){
+  const opts=question?.options;
+  if(!Array.isArray(opts)||opts.length!==4 ||
+    opts.some(x=>typeof x!=='string'||!x.trim()))
+    return 'GEOGRAFÍA 115: cuatro opciones no vacías obligatorias.';
+  if(!Number.isInteger(question.correctIndex)||question.correctIndex<0||question.correctIndex>3)
+    return 'GEOGRAFÍA 115: correctIndex inválido.';
+  const canonical=v=>geographyNorm115(v)
+    .replace(/^(?:(?:el|la) )?(?:parque de bomberos |parque de |sede de |sede |municipio de |concejo de )/,'')
+    .replace(/^el parque central de /,'parque central de ');
+  if(new Set(opts.map(canonical)).size!==4)
+    return 'GEOGRAFÍA 115: opciones iguales o equivalentes.';
+  if(requestedDifficulty && question?.difficulty!==requestedDifficulty)
+    return 'GEOGRAFÍA 115: dificultad declarada diferente de la solicitada.';
+  const stem=geographyNorm115(question.stem);
+  const asksPark=/\b(?:que|cual)\s+(?:es\s+el\s+)?(?:parque|sede)\b|\b(?:parque|sede)\s+(?:corresponde|atiende|actua|moviliza)\b/.test(stem);
+  const asksIncorrect=question.questionFamily==='2026_INCORRECTA' ||
+    /\bincorrecta?\b|\bno\b/.test(stem);
+  const areas=[...new Set((target?.territorialContext?.exact||[])
+    .map(x=>canonical(x.operationalArea)).filter(Boolean))];
+  if(asksPark && !asksIncorrect){
+    // El examen oficial 2024 pregunta expresamente por movilización inicial;
+    // aceptarlo SOLO como correspondencia territorial unívoca del Tema 21.
+    if(areas.length!==1)return 'GEOGRAFÍA 115: no consta una única sede operativa en Tema 21.';
+    const expected=areas[0];
+    const expectedCentral=/pamplona.*trinitarios/.test(expected);
+    const option=canonical(opts[question.correctIndex]);
+    const centralAlias=expectedCentral &&
+      /^(?:parque central de |central de )?pamplona iruna$/.test(option);
+    const cordovillaAlias=/pamplona.*cordovilla/.test(expected) &&
+      option==='cordovilla';
+    // Las denominaciones bilingües de una MISMA sede (Peralta/Azkoien,
+    // Altsasu/Alsasua, etc.) pueden escribirse con uno de sus dos nombres.
+    // No dividir áreas agrupadas por guion: Lodosa-Peralta NO es una sede.
+    const rawSite=String(target?.territorialContext?.exact?.[0]?.operationalArea||'');
+    const bilingualAlias=!rawSite.includes('-') && rawSite.includes('/') &&
+      rawSite.split('/').map(canonical).filter(Boolean).includes(option);
+    if(option!==expected && !centralAlias && !cordovillaAlias && !bilingualAlias)
+      return 'GEOGRAFÍA 116: sede correcta incompatible con la relación T21.';
+    if(opts.some(o=>/lodosa peralta azkoien|altsasu alsasua auritz burguete|navascues nabaskoze sanguesa zangoza/i.test(geographyNorm115(o))))
+      return 'GEOGRAFÍA 115: respuesta administrativa agrupada no es sede concreta.';
+  }
+  // La pregunta simple singular no es válida cuando la fuente da varios lugares.
+  if(!asksIncorrect && /\ben que municipio\b|\ba que municipio\b/.test(stem)){
+    // T21 concejo -> municipio -> parque: correctLocation contiene el
+    // CONCEJO, no el MUNICIPIO. Para preguntas concejo->municipio,
+    // contrastar la segunda columna de la unidad de cobertura.
+    const conceptParts=String(target?.concept||'').split('->').map(x=>x.trim()).filter(Boolean);
+    const fromConcejo=geographyTopic115(target)===21 && conceptParts.length>=3;
+    const raw=fromConcejo ? conceptParts[1] :
+      String(target?.optionPools?.correctLocation||'');
+    // Una barra entre localidades distintas también representa pluralidad.
+    // No interpretar las denominaciones bilingües de un único municipio
+    // como dos municipios diferentes (p. ej., Peralta/Azkoien).
+    const knownSingleBilingual=(target?.territorialContext?.exact||[])
+      .some(row=>geographyNorm115(row.rawEntity)===geographyNorm115(raw) ||
+        geographyNorm115(row.parentMunicipality)===geographyNorm115(raw));
+    const multiple=/,|\s+y\s+/i.test(raw) ||
+      ( /\s+\/\s+/.test(raw) && !knownSingleBilingual );
+    if(multiple && !/\buno de los\b|\balguno de\b/.test(stem))
+      return 'GEOGRAFÍA 115: el registro tiene varios municipios; no pedir uno único.';
+    const correct=canonical(opts[question.correctIndex]);
+    const full=canonical(raw);
+    const bilingual=raw.split(/\s*\/\s*/).map(canonical).filter(Boolean);
+    const choices=multiple ? raw.split(/\s*,\s*|\s+y\s+|\s+\/\s+/i).map(canonical) :
+      [full,...bilingual];
+    if(raw && !choices.includes(correct) && !(
+      // También es admisible preguntar por el conjunto completo de municipios.
+      multiple && correct===full))
+      return 'GEOGRAFÍA 115: municipio correcto no figura en la fuente.';
+    const valid=new Set(choices);
+    for(let i=0;i<opts.length;i++){
+      if(i===question.correctIndex)continue;
+      if(valid.has(canonical(opts[i])))
+        return 'GEOGRAFÍA 115: hay más de un municipio asociado entre las opciones.';
+    }
+  }
+  if(question.questionFamily==='2026_INCORRECTA' &&
+    !/incorrect|\bno\b/.test(stem))
+    return 'GEOGRAFÍA 115: familia INCORRECTA sin polaridad explícita.';
+  return null;
+}
+async function geographyValidate115(ai,questions,targets){
+  // Auditorías focales de máximo cinco; un 504 no desencadena reintentos.
+  const aggregated=[];
+  for(let begin=0;begin<questions.length;begin+=5){
+    const checked=await geographyValidateChunk115(
+      ai,questions.slice(begin,begin+5),targets.slice(begin,begin+5));
+    aggregated.push(...checked.map(r=>({...r,index:r.index+begin})));
+  }
+  return aggregated;
+}
+async function geographyValidateChunk115(ai,questions,targets){
+  const schema=structuredClone(validationSchema);
+  schema.properties.results.minItems=questions.length;
+  schema.properties.results.maxItems=questions.length;
+  // Auditor realmente ciego: emite su propia elección sin recibir la clave.
+  const resultSchema=schema.properties.results.items;
+  resultSchema.properties.selectedIndex={type:'integer',minimum:-1,maximum:3};
+  resultSchema.required=[...resultSchema.required,'selectedIndex'];
+  const blindQuestions=questions.map(q=>({stem:q.stem,options:q.options,
+    questionFamily:q.questionFamily}));
+  const prompt=`Comprueba independientemente estas preguntas de Geografía
+contra el PDF ORIGINAL del tema en File Search, no usando la solución del generador
+como prueba. Cuatro opciones: clasifica mentalmente cada una como responde/no responde.
+Para INCORRECTA: tres asociaciones documentadas verdaderas, una falsedad probada;
+para CORRECTA: una válida, tres falsas demostrables. Rechaza opciones cuyo
+carácter falso no pueda acreditarse con el temario o que sean igualmente válidas.
+Distingue sede física de parque administrativo agrupado (Anexo I de T21).
+No deduzcas respuestas por cercanía, sentido común ni nombre de instalación.
+Rechaza distractores grotescos y preguntas sobre columnas no examinables.
+La etiqueta de dificultad debe ser real: discriminación alta/muy alta, no memoria obvia.
+Devuelve exactamente un objeto results del esquema con campos index,valid,
+issues,familyValid,familyIssues,distractorsValid,distractorIssues,
+graphicValid:null,graphicIssues:[],selectedIndex para cada índice. Elige
+selectedIndex=0..3 solo si una única alternativa cumple el enunciado y
+puedes probarlo con el PDF; si es ambiguo o no verificable, devuelve -1
+y valid=false. NO recibes la clave y NO puedes deducirla del generador.
+OBJETIVOS:
+${JSON.stringify(targets.map((t,i)=>({index:i,topic:t.topic_name,
+  concept:geographyFactText115(t,t.concept).slice(0,360),
+  evidence:geographyFactText115(t,geographyPromptSafeEvidence(t)).slice(0,280),
+  exact:(t.territorialContext?.exact||[]).map(x=>x.concept).slice(0,3)})))}
+PREGUNTAS SIN CLAVE NI EXPLICACIÓN DEL GENERADOR:
+${JSON.stringify(blindQuestions)}`;
+  const response=await ai.models.generateContent({
+    model:'gemini-3.5-flash-lite',contents:prompt,
+    config:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+      responseMimeType:'application/json',responseJsonSchema:schema}
+  });
+  const data=JSON.parse(response.text);
+  if(!Array.isArray(data.results)||data.results.length!==questions.length ||
+    data.results.some((r,i)=>r.index!==i))
+    throw new Error('GEOGRAFÍA 115: validador incompleto o índices alterados.');
+  return data.results.map((r,i)=>({...r,valid:r.valid===true &&
+    r.familyValid===true && r.distractorsValid===true &&
+    Number.isInteger(r.selectedIndex) && r.selectedIndex===questions[i].correctIndex,
+    issues:(r.selectedIndex!==questions[i].correctIndex)
+      ? [...(r.issues||[]),'La clave del generador no coincide con la auditoría ciega.']
+      : (r.issues||[])}));
+}
+async function geographyGenerate115(ai,targets,difficulty,mode,defects=[]){
+  const questions=[];
+  for(let begin=0;begin<targets.length;begin+=5){
+    const subset=targets.slice(begin,begin+5);
+    const contents=geographyFocalPrompt115(subset,difficulty,mode,
+      defects.slice(begin,begin+5));
+    console.log('GEOGRAFIA_FOCAL_115:',JSON.stringify({
+      count:subset.length,promptChars:contents.length}));
+    const response=await ai.models.generateContent({
+      model:GEOGRAFIA_GENERACION_MODELO_115,
+      contents,
+      config:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+        responseMimeType:'application/json',responseJsonSchema:questionSchema}
+    });
+    const data=JSON.parse(response.text);
+    if(!Array.isArray(data.questions)||data.questions.length!==subset.length)
+      throw new Error('GEOGRAFÍA 115: lote incompleto; no reintentar automáticamente.');
+    questions.push(...data.questions);
+  }
+  return {text:JSON.stringify({questions})};
+}
+async function geographyRegenerate115(ai,invalid,targets,difficulty,mode){
+  const subset=invalid.map(r=>targets[r.index]);
+  const errors=invalid.map(r=>[...(r.issues||[]),
+    ...(r.familyIssues||[]),...(r.distractorIssues||[])].slice(0,4));
+  const result=await geographyGenerate115(ai,subset,difficulty,mode,errors);
+  return {questions:JSON.parse(result.text).questions};
+}
+
 async function getCoverageTargetsForGeneration(
   count,
   ai,
@@ -8608,12 +8942,13 @@ const nucleusCandidateLimit =
   Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
     ? Math.max(count * 100, 1400)
     : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
-const adaptiveCandidates =
+const adaptiveCandidates = geographyDiverseCandidates115(
   await getAdaptiveCoverageCandidates(
     nucleusCandidateLimit,
     allowedTopicIds,
     selectionStrategy
-  );
+  )
+);
 
 if(adaptiveCandidates.length < count){
   throw new Error(
@@ -8759,7 +9094,7 @@ const geographyMunicipalityKey = candidate => {
 
   const match =
     concept.match(
-      /\bubicad[oa]\s+en\s+(.+?)(?=,\s*(?:asociad[oa]|adscrit[oa]|con\b)|$)/i
+      /\bubicad[oa]s?\s+en\s+(.+?)(?=\s+con\s+(?:el|la)\s+parque\b|,\s*(?:asociad[oa]|adscrit[oa]|superficie|per[ií]metro)\b|$)/i
     );
 
   if(!match?.[1]){
@@ -9644,8 +9979,8 @@ for(let index = 0; index < selected.length; index++){
   Contexto territorial maestro del Tema 21.
   Se carga una sola vez por generación.
   */
-  const territorialResult =
-    await db.query(`
+  const territorialResult = targets.some(t=>String(t?.topic_block||" ").toLowerCase()==="geografia")
+    ? await db.query(`
       SELECT
         ci.id,
         ci.section,
@@ -9664,7 +9999,7 @@ for(let index = 0; index < selected.length; index++){
 )
         AND ci.concept LIKE '%->%'
       ORDER BY ci.id ASC
-    `);
+    `) : {rows:[]};
 
   const normalizeGeo=value=>
     String(value || "")
@@ -9819,6 +10154,7 @@ return {
               )
             ELSE 999
           END,
+          ABS(ci.id - $2) ASC,
           ci.id ASC
         LIMIT 12
         `,
@@ -9890,6 +10226,13 @@ if(topicNumber===21){
   evitando que "Parque Central de Pamplona/Iruña"
   provoque una falsa detección de Pamplona.
   */
+  // T22: el coverage dice «ubicado en Funes con el Parque de ...».
+  // El viejo patrón solo separaba «, con ...» y absorbía los nombres
+  // de sedes dentro del municipio: unía falsas coincidencias territoriales.
+  const location22=topicNumber===22
+    ? conceptText.match(/\bubicad[oa]s?\s+en\s+(.+?)(?=\s+con\s+(?:el|la)\s+parque\b|,\s*(?:superficie|per[ií]metro)\b|$)/i)
+    : null;
+  if(location22?.[1])operationalLocationText=String(location22[1]).trim();
   const locationPatterns=[
     /\bubicad[oa]s?\s+en\s+(.+?)(?=,\s*(?:asociad|adscrit|correspond|depend|con\s+(?:una|un|el|la)|parque)|\.\s*$|$)/i,
 
@@ -9905,7 +10248,7 @@ if(topicNumber===21){
   ];
 
   for(const pattern of locationPatterns){
-
+    if(operationalLocationText)break;
     const match=
       conceptText.match(pattern);
 
@@ -12197,6 +12540,12 @@ function legislationQuestionIssue(target,question){
     );
   }
 
+  // SERVER 111: cuatro alternativas textualmente diferentes. Este control
+  // determinista evita que pasen JSONs con opciones A/B duplicadas.
+  const options111=Array.isArray(question?.options)?question.options:[];
+  if(options111.length!==4 || new Set(options111.map(x=>
+    String(x||'').normalize('NFKC').toLowerCase().replace(/\s+/g,' ').trim()
+  )).size!==4)return 'LEGISLACIÓN: cuatro alternativas diferentes obligatorias.';
   const stem=
     String(question?.stem || "")
       .normalize("NFD")
@@ -12618,10 +12967,21 @@ function budgetedLegislationAi109(ai,questionCount){
         ms:Date.now()-started,maxMs,promptChars:amount,
         timeoutMs:effectiveTimeout,model:request?.model}));
       try{
-        return await target.generateContent.call(target,{
+        const response=await target.generateContent.call(target,{
           ...request,config:{...request?.config,httpOptions:{
             ...(request?.config?.httpOptions||{}),timeout:effectiveTimeout}}
         });
+        const usage=response?.usageMetadata||{};
+        console.log('LEGISLACION_TOKENS_111:',JSON.stringify({
+          call:calls,model:request?.model,
+          inputTokens:Number(usage.promptTokenCount)||null,
+          outputTokens:Number(usage.candidatesTokenCount)||null,
+          totalTokens:Number(usage.totalTokenCount)||null,
+          thoughtsTokens:Number(usage.thoughtsTokenCount)||null,
+          cachedTokens:Number(usage.cachedContentTokenCount)||null,
+          usageReported:Boolean(response?.usageMetadata)
+        }));
+        return response;
       }catch(err){
         if(legislationProviderError109(err)){
           legislationProviderPauseUntil109=Date.now()+180000;
@@ -12640,11 +13000,11 @@ function budgetedLegislationAi109(ai,questionCount){
   }});
 }
 
-// SERVER 107: checkpoint de trabajo APROBADO pero sin entregar.
-// validation_version=107 + last_shown_at=NULL marca una pregunta que ha
+// SERVER 113: checkpoint de trabajo APROBADO pero sin entregar.
+// validation_version=113 + last_shown_at=NULL marca una pregunta que ha
 // superado verificacion factual independiente Y auditoria de dificultad.
 // No hay sesion, respuesta, uso Anki ni modificación de cobertura/SRS.
-const LEGISLATION_READY_VERSION_107 = 107;
+const LEGISLATION_READY_VERSION_107 = 113; // 113: auditoría ciega contra PDF + controles deterministas
 function readyLegislationQuestion107(row){
   if(!row || Number(row.validation_version)!==LEGISLATION_READY_VERSION_107 ||
      row.last_shown_at!=null || Number(row.times_shown||0)!==0 ||
@@ -12671,7 +13031,7 @@ async function useReadyLegislation107(targets,allowedTopicIds,selectionStrategy,
     SELECT qb.* FROM question_bank qb
     JOIN coverage_items ci ON ci.id=qb.coverage_item_id
     WHERE ci.topic_id=ANY($1::int[]) AND ci.exam_relevant=TRUE
-      AND qb.active=TRUE AND qb.validation_version=107
+      AND qb.active=TRUE AND qb.validation_version=113
       AND qb.difficulty='muy alta' AND qb.graphic IS NULL
       AND qb.times_shown=0 AND qb.last_shown_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM test_session_questions tsq WHERE tsq.question_id=qb.id)
@@ -12730,7 +13090,8 @@ async function checkpointVerifiedVeryHigh107(questions,targets){
   if(!Array.isArray(questions)||questions.length!==targets.length)
     throw new Error('Checkpoint 107: correspondencia de objetivos invalida.');
   const approved=questions.map((q,i)=>({q,t:targets[i]})).filter(({q,t})=>
-    q && q.difficulty==='muy alta' && q.reused!==true && q.ankiDirect!==true &&
+    q && q.difficulty==='muy alta' && q.simpleVerified113===true &&
+    q.reused!==true && q.ankiDirect!==true &&
     String(t?.topic_block||'').trim().toLowerCase()==='legislacion' &&
     Number.isInteger(Number(t.id)) && Number(t.id)>0 &&
     String(q.stem||'').trim() && Array.isArray(q.options) && q.options.length===4 &&
@@ -12742,7 +13103,7 @@ async function checkpointVerifiedVeryHigh107(questions,targets){
       INSERT INTO question_bank(coverage_item_id,stem,options,correct_index,
         explanation,source_evidence,source_page,manual_page,question_family,
         difficulty,graphic,validation_version,times_shown,last_shown_at)
-      SELECT $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,'muy alta',NULL,107,0,NULL
+      SELECT $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,'muy alta',NULL,113,0,NULL
       WHERE NOT EXISTS(
         SELECT 1 FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
         WHERE qb.active=TRUE AND ci.topic_id=$10
@@ -13178,7 +13539,7 @@ LIMIT 1 FOR UPDATE`,
 
   const bankRow107=reusableCheck.rows[0];
   if(question.readyVerified107===true){
-    if(Number(bankRow107.validation_version)!==107 ||
+    if(Number(bankRow107.validation_version)!==LEGISLATION_READY_VERSION_107 ||
        bankRow107.last_shown_at!=null || Number(bankRow107.times_shown||0)!==0 ||
        bankRow107.difficulty!=='muy alta' ||
        bankRow107.stem!==question.stem ||
@@ -13187,14 +13548,14 @@ LIMIT 1 FOR UPDATE`,
        bankRow107.question_family!==question.questionFamily){
       throw new Error('Checkpoint 107: pregunta consumida o alterada concurrentemente.');
     }
-  }else if(Number(bankRow107.validation_version)===107){
+  }else if(Number(bankRow107.validation_version)===LEGISLATION_READY_VERSION_107){
     throw new Error('Checkpoint 107: consumo no autorizado de pregunta sin entregar.');
   }
   questionId = Number(question.questionId);
 await client.query(
   `UPDATE question_bank
    SET last_shown_at=NOW(), updated_at=NOW(),
-       validation_version=CASE WHEN validation_version=107 THEN 6 ELSE validation_version END
+       validation_version=CASE WHEN validation_version=${LEGISLATION_READY_VERSION_107} THEN 6 ELSE validation_version END
    WHERE id=$1`,
   [questionId]
 );
@@ -14326,7 +14687,7 @@ async function generateLegislationVeryHigh100(ai, request, phase, expectedCount,
   // internamente durante otros 300 s. Los intentos de calidad ya están
   // acotados por las rondas de refineVeryHighLegislation93F.
   const repair104=phase==='reparacion';
-  const maxAttempts=repair104?1:2;
+  const maxAttempts=repair104||phase==='generacion_simple_113'?1:2;
   const actualRequest=repair104?{
     ...request,config:{...request.config,
       httpOptions:{...(request.config?.httpOptions||{}),timeout:120000}}
@@ -14443,7 +14804,7 @@ async function generateLegislationBatches108(ai,request,targets,mode,officialSty
       String(t.source_evidence||'').length +
         (Array.isArray(t.distractorContext)?t.distractorContext.reduce((n,x)=>
           n+String(x.source_evidence||'').length,0):0)>=350);
-    let contents=legislationVeryHighPrompt104(group,mode,officialStyle)+
+    let contents=legislationSimplePrompt111(group,'muy alta',mode)+
       (preceding.length ? '\nNO DUPLIQUES los núcleos ya generados en los lotes anteriores: '+
         JSON.stringify(preceding)+'\n' : '');
     if(availableFromPdf109){
@@ -14596,6 +14957,266 @@ No añadas un comentario sobre tu proceso; devuelve el JSON exigido.\n`;
 // Antes se enviaba un prompt multipropósito >100.000 caracteres con reglas
 // de Geografía, gráficos y otros bloques. Este contrato mantiene los
 // requisitos curriculares y factuales sin instrucciones irrelevantes.
+// SERVER 111 CANDIDATO: un solo contrato corto para generar desde PDF.
+// Los 18 ejemplos aprobados siguen intactos. Seleccionamos solo 2 del
+// nivel solicitado y 1 del otro para NO repetir toda la biblioteca.
+// No cambia selección de cobertura, bloque, Anki, banco, SRS ni persistencia.
+function legislationSimplePrompt111(targets,level,mode){
+  if(!isPureLegislation95(targets))return '';
+  const main=pickLegislationExamples94(targets,level,2);
+  const other=pickLegislationExamples94(targets,
+    level==='muy alta'?'alta':'muy alta',1);
+  const points=targets.map((t,i)=>({
+    slot:i+1,topic:t.topic_name,section:t.section,concept:t.concept,
+    family:t.questionFamily,sourcePage:t.source_page,
+    pdfExcerpt:String(t.source_evidence||'').slice(0,2400),
+    relatedPdfExcerpts:(Array.isArray(t.distractorContext)?t.distractorContext:[])
+      .filter(x=>String(x.source_evidence||'').trim()).slice(0,2)
+      .map(x=>({concept:String(x.concept||'').slice(0,150),
+        text:String(x.source_evidence||'').slice(0,650)})),
+    doNotRepeat:t.failedQuestion?.stem||t.previousBankQuestion?.stem||null
+  }));
+  const high=level==='muy alta';
+  return `EXAMINADOR EXPERTO: OPOSICIÓN BOMBERO DE NAVARRA, LEGISLACIÓN.
+TAREA: ${targets.length} preguntas NUEVAS de dificultad ${level.toUpperCase()}.
+Una pregunta por objetivo, EN ORDEN; modalidad ${mode}.
+Usa SOLO los extractos literales de su PDF y, cuando esté habilitada,
+la búsqueda en ese MISMO PDF. No completes huecos con conocimientos generales.
+Los ejemplos aprobados son solo patrones de nivel, nunca hechos de respuesta.
+
+PROCEDIMIENTO DE REDACCIÓN (como un examinador humano):
+1) Lee el pasaje, identifica la regla exacta, la excepción y sus salvedades.
+2) Escoge un detalle decisivo que discrimine al opositor preparado.
+${high?'   Para MUY ALTA combina condiciones relacionadas cuando el PDF lo permita, o una excepción extraordinariamente sutil; evita preguntas de recuerdo trivial.':'   Para ALTA exige precisión en condiciones, sujetos, artículos, cifras y excepciones; no admitas preguntas elementales.'}
+3) Escribe cuatro opciones PARALELAS, creíbles, de extensión y eje similares.
+   CORRECTA: una verdadera y tres falsas por cambios mínimos DIFERENTES.
+   INCORRECTA/FALSA/EXCEPTO: tres verdaderas y una falsa sutil.
+   Verifica que una verdad parcial no se trate como falsa.
+4) Comprueba mentalmente A,B,C,D una a una contra el pasaje, incluida
+   cualquier excepción o remisión. EXACTAMENTE UNA satisface la pregunta.
+5) Descarta opciones obvias por exageración, tono, unidades, longitud o
+   cambio de tema. No inventes cifras o excepciones para endurecerla.
+6) Respeta exactamente la familia asignada y el concepto del objetivo;
+   no repitas preguntas previas ni núcleos de otros objetivos.
+
+ENTREGA: JSON ajustado al esquema: stem, options (4 distintas), correctIndex
+(0-3), explanation, sourceEvidence (citas textuales del PDF), sourcePage,
+manualPage (solo si figura impresa), difficulty='${level}', questionFamily
+exacta y graphic=null. Sin texto externo al JSON. Preguntas auditables;
+no aportes fuentes exteriores.
+
+EJEMPLOS ${level.toUpperCase()} APROBADOS (SOLO ESTILO): ${JSON.stringify(main)}
+EJEMPLO CONTRASTE DE OTRO NIVEL (SOLO ESTILO): ${JSON.stringify(other)}
+OBJETIVOS PDF: ${JSON.stringify(points)}
+REVISIÓN FINAL: cuatro opciones diferentes, una respuesta sin ambigüedad,
+dificultad ${level}, fidelidad al PDF, condiciones y excepciones.`;
+}
+
+// Una verificación independiente comprueba verdad, polaridad, respuesta
+// única, competitividad y nivel. La comprobación determinista sigue aparte.
+// No damos por correcto el dictamen si falta cualquier campo: usa File Search.
+function legislationSimpleValidationPrompt111(questions,targets,level='muy alta'){
+  // Auditor CIEGO: no se facilitan correctIndex, explicaciones ni evidencias
+  // autodeclaradas por Gemini. El servidor compara el dictamen con la clave.
+  const rows=questions.map((q,index)=>({index,topic:targets[index]?.topic_name,
+    section:targets[index]?.section,concept:targets[index]?.concept,
+    pdfPage:targets[index]?.source_page,
+    stem:q.stem,options:q.options,family:q.questionFamily}));
+  return `VERIFICADOR INDEPENDIENTE DEL PDF DEL TEMARIO DE BOMBERO NAVARRA.
+Consulta el PDF ORIGINAL en File Search para cada pregunta. La evidencia
+redactada por el generador es orientativa, NUNCA prueba por sí misma.
+No emplees conocimientos externos, exámenes oficiales ni ejemplos como hechos.
+
+POR CADA PREGUNTA:
+1. Determina si pregunta CORRECTA (una verdad) o INCORRECTA/EXCEPTO
+   (una falsedad). Comprueba cada opción con el PDF; busca SALVEDADES,
+   remisiones, límites y excepciones. Una verdad parcial sigue siendo
+   verdadera. Devuelve optionAssessment A-D: ANSWER solo para la única
+   opción que satisface lo preguntado, DISTRACTOR para cada una de las
+   otras tres, UNVERIFIABLE si falta prueba. Debe haber solo un ANSWER,
+   señala la opción que cumple el enunciado SIN conocer la respuesta
+   marcada por el generador. El servidor contrastará tu dictamen con su
+   índice; si hay dos o dudas, valid=false.
+2. familyValid: respeta familia y objetivo, sin pregunta editorial.
+3. distractorsValid: las tres otras opciones son jurídicamente plausibles,
+   próximas, sin pistas de tono, longitud o absolutos artificiales.
+4. levelValid: el nivel solicitado es ${level.toUpperCase()}.
+   Para MUY ALTA exige contraste sutil y serio de condiciones, excepciones
+   o una combinación jurídica respaldada; no aceptes un recuerdo trivial.
+   Para ALTA exige precisión y distractores competitivos, no trivialidades.
+   No impongas longitud ni dos artículos como condición automática.
+   Si no alcanza MUY ALTA, levelValid=false (NO rebajar silenciosamente).
+5. No corrijas preguntas. Devuelve index 0..N-1 y todos los campos del
+   esquema: valid, issues, familyValid, familyIssues, distractorsValid,
+   distractorIssues, graphicValid=null, graphicIssues=[], optionAssessment,
+   levelValid, levelReason breve y pdfQuote (cita textual hallada en PDF).
+   valid=false si falla cualquiera de las
+   cuatro comprobaciones o falta respaldo del PDF. No apruebes por omisión.
+
+CITA pdfQuote: copia texto comprobable del PDF, no del generador.
+No se adjunta respuesta correcta ni explicación para evitar sesgo.
+PREGUNTAS: ${JSON.stringify(rows)}`;
+}
+
+// SERVER 112 — motor de Legislación Alta / Muy Alta con contrato pequeño.
+// Sólo se usa en test NORMAL y de un bloque legislativo puro. Ninguna regla
+// se traslada a Geografía, Específico, test de falladas, cobertura o SRS.
+function legislationSimple112(targets,difficulty,testType){
+  return testType==='normal' && ['alta','muy alta'].includes(difficulty) &&
+    isPureLegislation95(targets);
+}
+function legislationSimpleSufficientPdf112(targets){
+  return targets.every(t=>String(t.source_evidence||'').trim().length>=180 &&
+    String(t.source_evidence||'').length+
+    (Array.isArray(t.distractorContext)?t.distractorContext.reduce((n,x)=>
+      n+String(x.source_evidence||'').length,0):0)>=350);
+}
+async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
+  if(!isPureLegislation95(targets)||!['alta','muy alta'].includes(level))
+    throw new Error('112: ámbito de generación inválido.');
+  const count=targets.length,batchSize=5,generated=[];
+  // El mismo constructor competente para Alta y Muy Alta; el nivel lo fija
+  // el contrato, no la capacidad reducida de un generador económico.
+  const model=LEGISLACION_MUY_ALTA_MODELO_99;
+  for(let from=0;from<count;from+=batchSize){
+    const group=targets.slice(from,from+batchSize);
+    const docReady=legislationSimpleSufficientPdf112(group);
+    const seen=[...previous,...generated].slice(-14).map(q=>
+      String(q?.stem||'').trim().slice(0,180)).filter(Boolean);
+    let contents=legislationSimplePrompt111(group,level,mode);
+    if(seen.length)contents+='\nENUNCIADOS YA USADOS (NO REPRODUCIR): '+JSON.stringify(seen);
+    if(docReady)contents='Los extractos aportados proceden de la cobertura del PDF '+
+      'y son la única base factual de ESTA generación. No completes con memoria. '+
+      'Una verificación independiente consultará después el PDF original.\n'+contents;
+    console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'generar',level,
+      count:group.length,batch:Math.floor(from/batchSize)+1,
+      chars:contents.length,pdfLocal:docReady,model}));
+    const response=await generateLegislationVeryHigh100(ai,{
+      model,contents,config:{
+        ...(docReady?{}:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}]}),
+        responseMimeType:'application/json',responseJsonSchema:questionSchema
+      }
+    },'generacion_simple_113',group.length,true);
+    let parsed;
+    try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: JSON de preguntas no válido.');}
+    if(!Array.isArray(parsed?.questions)||parsed.questions.length!==group.length)
+      throw new Error('112: lote de preguntas incompleto. No se ha guardado test.');
+    for(let i=0;i<group.length;i++){
+      const q=parsed.questions[i];
+      if(!q||typeof q.stem!=='string'||!q.stem.trim()||
+        !Array.isArray(q.options)||q.options.length!==4||
+        q.options.some(o=>typeof o!=='string'||!o.trim())||
+        !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3){
+        throw new Error('112: pregunta mal formada. No se ejecutan reparaciones antiguas.');
+      }
+      if(q.questionFamily!==group[i].questionFamily){
+        // El validador la rechazará si incumple familia, sin manipular hechos.
+        console.warn('LEGISLACION_FAMILIA_112:',JSON.stringify({slot:from+i+1,
+          received:q.questionFamily,expected:group[i].questionFamily}));
+      }
+    }
+    generated.push(...parsed.questions);
+  }
+  if(generated.length!==count)throw new Error('112: faltan preguntas.');
+  return {text:JSON.stringify({questions:generated})};
+}
+async function validateLegislationSimple112(ai,questions,targets,level){
+  if(!isPureLegislation95(targets)||questions.length!==targets.length)
+    throw new Error('112: auditoría no corresponde a los objetivos.');
+  const approved=[];
+  // Con 10 preguntas: 2 lotes generador + 3 auditor (antes 4),
+  // y como máximo 2+3 en una reparación. Respeta 10 llamadas de presupuesto.
+  const batchSize=4;
+  for(let start=0;start<questions.length;start+=batchSize){
+    const group=questions.slice(start,start+batchSize);
+    const points=targets.slice(start,start+batchSize);
+    const schema=structuredClone(validationSchema);
+    const row=schema.properties.results.items;
+    row.properties.optionAssessment={type:'array',items:{type:'string',
+      enum:['ANSWER','DISTRACTOR','UNVERIFIABLE']},minItems:4,maxItems:4};
+    row.properties.levelValid={type:'boolean'};
+    row.properties.levelReason={type:'string'};
+    row.properties.pdfQuote={type:'string'};
+    row.required=[...row.required,'optionAssessment','levelValid','levelReason','pdfQuote'];
+    schema.properties.results.minItems=group.length;
+    schema.properties.results.maxItems=group.length;
+    const contents=legislationSimpleValidationPrompt111(group,points,level)+
+      '\nREFERENCIA APROBADA DE DIFICULTAD (SOLO ESTILO, NO HECHOS DEL PDF): '+
+      JSON.stringify(pickLegislationExamples94(points,level,1));
+    console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'auditar',level,
+      count:group.length,batch:Math.floor(start/batchSize)+1,
+      chars:contents.length,pdfOriginal:true}));
+    const response=await ai.models.generateContent({
+      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim(),
+      contents,config:{
+        tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+        responseMimeType:'application/json',responseJsonSchema:schema
+      }
+    });
+    let parsed;
+    try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: auditoría JSON ilegible.');}
+    if(!Array.isArray(parsed?.results)||parsed.results.length!==group.length)
+      throw new Error('112: auditoría PDF incompleta. No se guardó test.');
+    for(let j=0;j<group.length;j++){
+      const q=group[j],t=points[j],v=parsed.results[j];
+      if(v?.index!==j)throw new Error('112: auditoría con índices incorrectos.');
+      const flags=Array.isArray(v.optionAssessment)?v.optionAssessment:[];
+      const one=flags.length===4&&flags.filter(x=>x==='ANSWER').length===1&&
+        flags[Number(q.correctIndex)]==='ANSWER'&&
+        flags.every(x=>['ANSWER','DISTRACTOR'].includes(x));
+      const opts=Array.isArray(q.options)?q.options:[];
+      const norm=x=>String(x||'').normalize('NFKC').toLowerCase()
+        .replace(/\s+/g,' ').trim();
+      const unique=opts.length===4&&new Set(opts.map(norm)).size===4;
+      const ownLevel=q.difficulty===level && q.questionFamily===t.questionFamily;
+      const evidence=typeof v.pdfQuote==='string'&&v.pdfQuote.trim().length>=18;
+      const valid=v.valid===true&&v.familyValid===true&&
+        v.distractorsValid===true&&v.levelValid===true&&
+        typeof v.levelReason==='string'&&v.levelReason.trim().length>5&&
+        evidence&&one&&unique&&ownLevel;
+      approved.push({...v,index:start+j,valid,
+        issues:valid?(v.issues||[]):[...(v.issues||[]),
+          ...(!one?['PDF: no acreditada respuesta única']:[]),
+          ...(!unique?['Opciones duplicadas']:[]),
+          ...(!ownLevel?['Familia o nivel incorrectos']:[]),
+          ...(!evidence?['Sin cita PDF contrastable']:[]),
+          ...(v.levelValid!==true?['Dificultad no acreditada']:[])]});
+    }
+  }
+  return approved;
+}
+// SERVER 114: control ESTRUCTURAL acotado. No se pronuncia sobre
+// la veracidad: esa decisión pertenece a la auditoría PDF independiente.
+// Evita heredar filtros de expresiones absolutas basados en evidencia
+// autodeclarada que pueden rechazar normas que sí contienen "en exclusiva".
+function legislationSimpleStructuralIssue114(target,q){
+  if(String(target?.topic_block||'').trim().toLowerCase()!=='legislacion')return null;
+  if(typeof q?.stem!=='string'||!q.stem.trim())return 'Enunciado vacío.';
+  if(!Array.isArray(q.options)||q.options.length!==4||
+    q.options.some(x=>typeof x!=='string'||!x.trim()))
+    return 'Las cuatro alternativas deben estar completas.';
+  const norm=x=>x.normalize('NFKC').toLowerCase().replace(/\s+/g,' ').trim();
+  if(new Set(q.options.map(norm)).size!==4)
+    return 'Existen alternativas duplicadas.';
+  if(!Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3)
+    return 'Índice de respuesta inválido.';
+  if(q.questionFamily!==target.questionFamily)
+    return 'Familia distinta de la unidad curricular seleccionada.';
+  if(q.graphic!=null)return 'Una pregunta de Legislación no puede incorporar un gráfico externo.';
+  const editorial=norm(q.stem);
+  if(/\b(?:en el pdf|segun la pagina \d+|numero de orden del documento)\b/.test(
+    editorial.normalize('NFD').replace(/[\u0300-\u036f]/g,'')))
+    return 'Pregunta editorial sobre el PDF, no sobre la norma.';
+  return generatedMathNotationIssue(q);
+}
+
+async function regenerateLegislationSimple112(ai,invalid,targets,level,mode,original){
+  const failedTargets=invalid.map(v=>targets[v.index]);
+  const seen=original.filter(Boolean);
+  const result=await generateLegislationSimple112(ai,failedTargets,level,mode,seen);
+  return {questions:JSON.parse(result.text).questions};
+}
+
 function legislationVeryHighPrompt104(targets,mode,officialStyle){
   if(!isPureLegislation95(targets))return '';
   const objects=targets.map((t,i)=>({
@@ -16167,7 +16788,7 @@ ${JSON.stringify(payload)}`,
   return answer;
 }
 
-async function validateGeneratedQuestions(ai,questions,{independentPdfCheck=false,targets=[]}={}){
+async function validateGeneratedQuestions(ai,questions,{independentPdfCheck=false,targets=[],requireVeryHigh111=false}={}){
   const startedAt103=independentPdfCheck&&targets.every(t=>
     String(t?.topic_block||'').toLowerCase()==='legislacion') ? Date.now():null;
   const independentInstructions=independentPdfCheck ? `
@@ -16249,7 +16870,7 @@ EJEMPLOS GENERALES DE DESCARTE SIN MEMORIZAR (no son datos del temario):
 NO equipares el uso de un absoluto con falsedad: puede ser texto literal
 correcto; valora si constituye una pista no sustentada.
 ` : '';
-  const validationPrompt= independentInstructions + `
+  let validationPrompt= independentInstructions + `
 Eres un validador estricto de preguntas de oposición.
 
 FUENTE DE VERDAD
@@ -16547,6 +17168,11 @@ PREGUNTAS A VALIDAR:
 ${JSON.stringify(questions)}
 `;
 
+if(requireVeryHigh111){
+  if(!independentPdfCheck || !isPureLegislation95(targets))
+    throw new Error('111: validación Muy Alta exige PDF y bloque legislativo.');
+  validationPrompt=legislationSimpleValidationPrompt111(questions,targets);
+}
 const runtimeValidationSchema = structuredClone(validationSchema);
 if(independentPdfCheck){
   const item=runtimeValidationSchema.properties.results.items;
@@ -16562,6 +17188,15 @@ if(independentPdfCheck){
   item.required=[...item.required,"optionAssessment"];
 }
 
+if(requireVeryHigh111){
+  const item=runtimeValidationSchema.properties.results.items;
+  item.properties.levelValid={type:'boolean'};
+  item.properties.levelReason={type:'string'};
+  item.required=[...item.required,'levelValid','levelReason'];
+  console.log('LEGISLACION_VALIDADOR_SIMPLE_111:',JSON.stringify({
+    questions:questions.length,promptChars:validationPrompt.length,
+    independentPdf:true,combinedQuality:true}));
+}
 runtimeValidationSchema.properties.results.minItems = questions.length;
 runtimeValidationSchema.properties.results.maxItems = questions.length;
   const pdfCallAt103=startedAt103!==null?Date.now():null;
@@ -16646,6 +17281,12 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
     // distractorsValid/distractorIssues, con los reintentos habituales.
 
   }
+  if(requireVeryHigh111 && (result.levelValid!==true ||
+     typeof result.levelReason!=='string')){
+    result.valid=false;
+    result.issues=[...(result.issues||[]),
+      'MUY ALTA no acreditada: '+String(result.levelReason||'sin veredicto')];
+  }
   const graphicInvalid =
     question?.questionFamily === "GRAFICA" &&
     result.graphicValid !== true;
@@ -16662,7 +17303,7 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
   // La misma segunda auditoría actúa tanto en generación inicial como en
   // regeneraciones, únicamente para legislación sin Anki. Las demás rutas
   // conservan idéntico flujo, coste y esquema de validación del SERVER 90.
-  if(independentPdfCheck){
+  if(independentPdfCheck && !requireVeryHigh111){
     const toAudit=questions.map((question,index)=>({
       index,question,target:targets[index]
     })).filter(entry=>
@@ -16708,6 +17349,25 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
   }));
   return validation.results;
 }
+// SERVER 111: un solo reintento compacto por los objetivos rechazados.
+// Nunca se usan las reparaciones individuales ni cambio especulativo de tema.
+async function regenerateLegislationSimple111(ai,invalidResults,targets,mode){
+  const subset=invalidResults.map(v=>targets[v.index]);
+  if(!isPureLegislation95(subset))throw new Error('111: objetivos no legislativos.');
+  const model=legislationVeryHighModel99(subset,'muy alta');
+  const request={model,contents:'',config:{
+    tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+    responseMimeType:'application/json',responseJsonSchema:questionSchema
+  }};
+  const answer=await generateLegislationBatches108(ai,request,subset,mode,'');
+  const questions=JSON.parse(answer.text).questions;
+  if(!Array.isArray(questions)||questions.length!==subset.length)
+    throw new Error('111: cantidad incorrecta de preguntas del reintento.');
+  console.log('LEGISLACION_REINTENTO_SIMPLE_111:',JSON.stringify({
+    rejected:subset.length,returned:questions.length,maxRounds:1}));
+  return {questions};
+}
+
 async function regenerateInvalidQuestions(
   ai,
   invalidResults,
@@ -18675,9 +19335,37 @@ const allowedTopicIds =
   );
 }
 
+   // SERVER 112: guardia ANTES de cualquier preparación Anki o generación
+   // de tests jurídicos grandes, para impedir gastar en un examen que
+   // superaría el presupuesto preventivo. Es un piloto configurable.
+   const pilotLimit112=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||10);
+   const safePilotLimit112=Number.isInteger(pilotLimit112)&&pilotLimit112>0
+     ? pilotLimit112:10;
+   if(testType==='normal' && ['alta','muy alta'].includes(difficulty) &&
+     targets.length>safePilotLimit112 && isPureLegislation95(targets)){
+     throw new Error('Piloto de Legislación 112: máximo '+safePilotLimit112+
+       ' preguntas por test para evitar consumo de Gemini no verificado. '+
+       'La cobertura curricular no se limita. Ampliaremos el máximo '+
+       'tras una prueba real de coste y calidad. No se ha iniciado generación pagada.');
+   }
+
+   // SERVER 116: límite PILOTO de Geografía 21-24, antes de cualquier
+   // llamada pagada; 75 preguntas podrían implicar hasta 60 llamadas Gemini
+   // (generación, auditoría y una ronda de reparación). Se amplía con
+   // GEOGRAFIA_PILOTO_MAX_116 cuando el coste de cinco/diez esté medido.
+   const geographyPilotMax116=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||10);
+   const safeGeographyPilot116=Number.isInteger(geographyPilotMax116)&&
+     geographyPilotMax116>0?geographyPilotMax116:10;
+   if(geographyPure115(targets) &&
+      targets.length>safeGeographyPilot116){
+     throw new Error('Piloto Geografía 116: máximo '+safeGeographyPilot116+
+       ' preguntas por test hasta medir tiempo y consumo reales. '+
+       'La cobertura permanece íntegra; no se ha iniciado una llamada pagada.');
+   }
+
    // SERVER 109: contrato de costes SOLO para solicitud de Legislación
    // Muy alta. No afecta Alta (80/20), Geografia, Especifico ni otros modos.
-   if(difficulty==='muy alta' && testType==='normal' &&
+   if(['alta','muy alta'].includes(difficulty) && testType==='normal' &&
      targets.every(t=>String(t.topic_block||'').toLowerCase().trim()==='legislacion')){
      ai=budgetedLegislationAi109(ai,count);
    }
@@ -18900,16 +19588,24 @@ for(let i = 0; i < targets.length; i++){
   // La exigencia solicitada se aplica a las preguntas NUEVAS, sin
   // reetiquetar ni reescribir preguntas Anki originales ya validadas.
   // En Alta se mantiene la adaptacion interna para conocimientos dominados.
-  targets[i].adaptiveDifficulty = difficulty === "muy alta"
-    ? "muy alta"
-    : (targets[i].adaptiveDifficulty || getAdaptiveDifficulty(targets[i]));
+  targets[i].adaptiveDifficulty = isPureLegislation95(targets) &&
+    testType==='normal' ? difficulty : (difficulty==='muy alta'
+      ? 'muy alta' : (targets[i].adaptiveDifficulty||getAdaptiveDifficulty(targets[i])));
   generationTargets.push(targets[i]);
   generationIndexes.push(i);
 }
    if(testType === "normal"){
-  for(const target of generationTargets){
-    target.previousBankQuestion =
-      await getLatestBankQuestionForTarget(target);
+  // Consultas independientes: en rutas focales (máximo 10) no se esperan
+  // secuencialmente. El resto de bloques conserva el recorrido previo.
+  if(legislationSimple112(generationTargets,difficulty,testType) ||
+     geographyPure115(generationTargets)){
+    const previous=await Promise.all(
+      generationTargets.map(getLatestBankQuestionForTarget));
+    generationTargets.forEach((t,i)=>{t.previousBankQuestion=previous[i];});
+  }else{
+    for(const target of generationTargets){
+      target.previousBankQuestion=await getLatestBankQuestionForTarget(target);
+    }
   }
 }
 if(quota84?.derivedMode){
@@ -18957,6 +19653,12 @@ if(difficulty==="muy alta"){
 await attachDistractorContextToTargets(
   generationTargets
 );
+const pureGeography115=geographyPure115(generationTargets);
+if(pureGeography115){
+  generationTargets.forEach((target,index)=>{
+    target.questionFamily=geographyAssignedFamily115(target,index);
+  });
+}
 console.log(
   "GENERACIÓN NUEVA:",
   generationTargets.length,
@@ -18974,6 +19676,7 @@ let finalQuestions = [];
 const independentPdfCheck = generationTargets.length > 0 &&
   generationTargets.every(t=>
     String(t.topic_block||'').trim().toLowerCase()==='legislacion');
+const simpleLegislation112=legislationSimple112(generationTargets,difficulty,testType);
 if(independentPdfCheck){
   console.log('LEGISLACION_CALIBRACION_94:',JSON.stringify({
     phase:'generacion',level:difficulty,questions:newGenerationCount,
@@ -18982,6 +19685,19 @@ if(independentPdfCheck){
 }
 let officialStyle = '';
 if(newGenerationCount > 0){
+if(pureGeography115){
+  // geographyGenerate115 crea el prompt por lote; no construir aquí otro
+  // prompt completo que nunca llegará a Gemini.
+  prompt='';
+}else if(simpleLegislation112){
+  // No se lee caché oficial ni se construye un prompt multipropósito gigantesco.
+  // Solo las referencias aprobadas y los extractos del objetivo concreto.
+  // El constructor del lote genera UN prompt compacto por cada grupo.
+  // No se prepara otro prompt completo con los mismos objetivos.
+  prompt='';
+  console.log('LEGISLACION_SIMPLE_114:',JSON.stringify({phase:'ruta_simplificada',
+    difficulty,objectives:generationTargets.length,ankiQuotaIntact:true}));
+}else{
 officialStyle =
   await getCachedOfficialExamStyleReference();
 
@@ -19183,7 +19899,7 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
 
     if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
       const beforeCompact104=prompt.length;
-      prompt=legislationVeryHighPrompt104(generationTargets,mode,officialStyle);
+      prompt=legislationSimplePrompt111(generationTargets,'muy alta',mode);
       console.log('LEGISLACION_CONSTRUCCION_95:',JSON.stringify({
         questions:newGenerationCount,finalContract:true,
         calibratedExamples:4,promptChars:prompt.length
@@ -19194,7 +19910,17 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         questions:newGenerationCount,scope:'solo_legislacion_muy_alta'
       }));
     }
-    const generationModel99=legislationVeryHighModel99(generationTargets,difficulty);
+    if(difficulty==='alta' && isPureLegislation95(generationTargets)){
+      prompt=legislationSimplePrompt111(generationTargets,'alta',mode);
+      console.log('LEGISLACION_SIMPLE_111:',JSON.stringify({
+        level:'alta',newQuestions:newGenerationCount,promptChars:prompt.length,
+        ankiQuotaUnchanged:true,independentPdfCheck:true}));
+    }
+
+}
+    const generationModel99=pureGeography115
+      ? GEOGRAFIA_GENERACION_MODELO_115
+      : legislationVeryHighModel99(generationTargets,difficulty);
     if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
       console.log('LEGISLACION_MODELO_99:',JSON.stringify({
         phase:'generacion',model:generationModel99,count:newGenerationCount
@@ -19213,11 +19939,17 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
         responseJsonSchema:questionSchema
       }
     };
-    const response=difficulty==='muy alta' && isPureLegislation95(generationTargets)
-      ? await generateLegislationBatches108(ai,initialRequest108,
-          generationTargets,mode,officialStyle)
-      : await generateLegislationVeryHigh100(ai,initialRequest108,
-          'generacion',newGenerationCount,false);
+    // Una sola llamada factual directa para Geografía focal:
+    // no pasar por los retries/budgets especializados en Legislación.
+    const response=pureGeography115
+      ? await geographyGenerate115(ai,generationTargets,difficulty,mode)
+      : simpleLegislation112
+      ? await generateLegislationSimple112(ai,generationTargets,difficulty,mode)
+      : (difficulty==='muy alta' && isPureLegislation95(generationTargets)
+        ? await generateLegislationBatches108(ai,initialRequest108,
+            generationTargets,mode,officialStyle)
+        : await generateLegislationVeryHigh100(ai,initialRequest108,
+            'generacion',newGenerationCount,false));
 console.log(
   "TARGETS GRAFICOS:",
   generationTargets.map((t, i) => ({
@@ -19279,6 +20011,9 @@ for(let i=0;i<parsed.questions.length;i++){
         typeof q.stem!=='string'||!q.stem.trim()||
         !q.options.every(o=>typeof o==='string'&&o.trim())));
     const malformed=parsed.questions.flatMap((q,i)=>structBad(q)?[i]:[]);
+    if(simpleLegislation112 && malformed.length){
+      throw new Error('112: generación con preguntas incompletas; no se invocará el reparador antiguo.');
+    }
     const rescueMalform=malformed.length>0 && pureLegisVeryHigh102;
     if(rescueMalform){
       console.warn('LEGISLACION_ESTRUCTURA_102:',JSON.stringify({
@@ -19311,10 +20046,9 @@ finalQuestions = [...parsed.questions];
     for (let i = 0; i < finalQuestions.length; i++) {
   const target = generationTargets[i];
   const q = finalQuestions[i];
-      q.difficulty =
-  target?.adaptiveDifficulty === "muy alta"
-    ? q.difficulty
-    : "alta";
+      q.difficulty = pureGeography115
+  ? q.difficulty
+  : (target?.adaptiveDifficulty === "muy alta" ? q.difficulty : "alta");
 
   if (target?.questionFamily === "GRAFICA" && target?.graphicAsset) {
     q.questionFamily = "GRAFICA";
@@ -19344,22 +20078,30 @@ finalQuestions = [...parsed.questions];
 // SERVER 93C: la cuota Anki solo decide el origen de cada pregunta.
 // TODA pregunta NUEVA de un lote exclusivamente legislativo merece la
 // verificación independiente del PDF, aunque haya Anki en otras posiciones.
-let factualValidation =
-  await validateGeneratedQuestions(ai, finalQuestions,
-    {independentPdfCheck,targets:generationTargets});
+let factualValidation = pureGeography115
+  ? await geographyValidate115(ai,finalQuestions,generationTargets)
+  : simpleLegislation112
+  ? await validateLegislationSimple112(ai,finalQuestions,generationTargets,difficulty)
+  : await validateGeneratedQuestions(ai, finalQuestions,
+      {independentPdfCheck,targets:generationTargets,
+       requireVeryHigh111:difficulty==='muy alta' && isPureLegislation95(generationTargets)});
 
+// La comprobación del banco es independiente para cada pregunta.
+// Solo las rutas focales (máximo piloto 10) la ejecutan concurrentemente.
+const duplicateChecks118=(simpleLegislation112||pureGeography115)
+  ? await Promise.all(finalQuestions.map((q,i)=>
+      isExactBankDuplicate(generationTargets[i],q))) : null;
 for(let i = 0; i < factualValidation.length; i++){
   const target = generationTargets[i];
   const question = finalQuestions[i];
 
   const legislationIssue =
-    generatedMathNotationIssue(question) ||
-    legislationQuestionIssue(
-      target,
-      question
-    ) ||
-    veryHighAnkiCopyIssue93E(target,question) ||
-    (independentPdfCheck ? hardLegislationDistractorIssue(question) : null);
+    (pureGeography115 ? null : simpleLegislation112
+      ? legislationSimpleStructuralIssue114(target,question)
+      : (generatedMathNotationIssue(question) ||
+        legislationQuestionIssue(target,question) ||
+        veryHighAnkiCopyIssue93E(target,question) ||
+        (independentPdfCheck ? hardLegislationDistractorIssue(question) : null)));
 
   if(legislationIssue){
     factualValidation[i] = {
@@ -19402,11 +20144,9 @@ for(let i = 0; i < factualValidation.length; i++){
       ]
     };
   }
-  const geographyOperationalIssue =
-  geographyOperationalParkIssue(
-    target,
-    question
-  );
+  const geographyOperationalIssue = pureGeography115
+    ? geographyStructureIssue115(target,question,difficulty)
+    : geographyOperationalParkIssue(target,question);
 
 if(geographyOperationalIssue){
   factualValidation[i] = {
@@ -19418,11 +20158,9 @@ if(geographyOperationalIssue){
     ]
   };
 }
-const geographyOptionIssue =
-  geographyOptionPoolIssue(
-    target,
-    question
-  );
+const geographyOptionIssue = pureGeography115
+  ? null
+  : geographyOptionPoolIssue(target,question);
 
 if(geographyOptionIssue){
   factualValidation[i] = {
@@ -19434,6 +20172,12 @@ if(geographyOptionIssue){
     ]
   };
 }
+  if(difficulty==='muy alta' && isPureLegislation95(generationTargets) &&
+     question?.difficulty!=='muy alta'){
+    factualValidation[i]={...factualValidation[i],valid:false,issues:[
+      ...(factualValidation[i].issues||[]),
+      'El generador no ha declarado nivel Muy Alta; se exige validación sin reetiquetar.']};
+  }
   if(
     target?.failed_difficulty === "muy alta" &&
     question?.difficulty !== "muy alta"
@@ -19448,8 +20192,9 @@ if(geographyOptionIssue){
     };
   }
 
-  const exactDuplicate =
-    await isExactBankDuplicate(target, question);
+  const exactDuplicate = duplicateChecks118
+    ? duplicateChecks118[i]
+    : await isExactBankDuplicate(target, question);
 
   if(exactDuplicate){
     factualValidation[i] = {
@@ -19463,42 +20208,85 @@ if(geographyOptionIssue){
   }
 }
 
+if(simpleLegislation112){
+  // No repetir enunciados exactos dentro de una misma generación.
+  const usedStems=new Map();
+  for(let i=0;i<finalQuestions.length;i++){
+    const normalized=String(finalQuestions[i]?.stem||'').normalize('NFKC')
+      .toLowerCase().replace(/\s+/g,' ').trim();
+    if(usedStems.has(normalized)){
+      factualValidation[i]={...factualValidation[i],valid:false,
+        issues:[...(factualValidation[i]?.issues||[]),
+          'Enunciado idéntico en dos preguntas del mismo test.']};
+    }else{usedStems.set(normalized,i);}
+  }
+}
+if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
+  for(let i=0;i<finalQuestions.length;i++){
+    if(factualValidation[i]?.valid===true){
+      finalQuestions[i].difficulty='muy alta';
+      finalQuestions[i].veryHighVerified109=true;
+      if(simpleLegislation112)finalQuestions[i].simpleVerified113=true;
+    }
+  }
+}
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
 
 for(
   let regenerationAttempt = 1;
-  regenerationAttempt <= (difficulty==='muy alta' &&
-    generationTargets.length && isPureLegislation95(generationTargets)?1:3) &&
+  regenerationAttempt <= ((simpleLegislation112||pureGeography115)?1:3) &&
   invalidQuestions.length > 0;
   regenerationAttempt++
 ){
   console.log(
     "VALIDACIÓN FINAL:",
     invalidQuestions.length,
-    `preguntas rechazadas. Regeneración ${regenerationAttempt}/3.`
+    `preguntas rechazadas. Regeneración ${regenerationAttempt}/${(simpleLegislation112||pureGeography115)?1:3}.`
   );
 
-  const regenerated =
-    await regenerateInvalidQuestions(
-      ai,
-      invalidQuestions,
-      finalQuestions,
-      generationTargets,
-      difficulty,
-      mode,
-      officialStyle
-    );
-
-  const replacementValidation =
-    await validateGeneratedQuestions(
-      ai,
-      regenerated.questions,
-      {independentPdfCheck,
-       targets:invalidQuestions.map(result=>generationTargets[result.index])}
-    );
+  let regenerated, replacementTargets, replacementValidation;
+  try{
+    regenerated=pureGeography115
+      ? await geographyRegenerate115(ai,invalidQuestions,generationTargets,difficulty,mode)
+      : simpleLegislation112
+      ? await regenerateLegislationSimple112(ai,invalidQuestions,generationTargets,
+          difficulty,mode,finalQuestions)
+      : await regenerateInvalidQuestions(
+          ai,invalidQuestions,finalQuestions,generationTargets,
+          difficulty,mode,officialStyle);
+    replacementTargets=invalidQuestions.map(result=>generationTargets[result.index]);
+    replacementValidation=pureGeography115
+      ? await geographyValidate115(ai,regenerated.questions,replacementTargets)
+      : simpleLegislation112
+      ? await validateLegislationSimple112(ai,regenerated.questions,
+          replacementTargets,difficulty)
+      : await validateGeneratedQuestions(ai,regenerated.questions,
+          {independentPdfCheck,targets:replacementTargets,
+           requireVeryHigh111:difficulty==='muy alta' && isPureLegislation95(generationTargets)});
+  }catch(regenerationError){
+    // La generación o auditoría adicional puede fallar por cuota o 504.
+    // En ese caso se conservan únicamente preguntas 113 ya aprobadas,
+    // sin marcarlas como contestadas ni crear una sesión incompleta.
+    if(simpleLegislation112 && difficulty==='muy alta'){
+      const verified=finalQuestions.flatMap((q,i)=>
+        q?.simpleVerified113===true && factualValidation[i]?.valid===true
+          ? [{q,t:generationTargets[i]}]:[]);
+      if(verified.length){
+        try{await checkpointVerifiedVeryHigh107(
+          verified.map(x=>x.q),verified.map(x=>x.t));}
+        catch(checkpointError){console.error('LEGISLACION_CHECKPOINT_113_ERROR:',
+          String(checkpointError?.message||checkpointError).slice(0,180));}
+      }
+    }
+    throw regenerationError;
+  }
 
   const stillInvalid = [];
+  const regeneratedTargets118=invalidQuestions.map(r=>generationTargets[r.index]);
+  const regeneratedDuplicates118=(simpleLegislation112||pureGeography115)
+    ? await Promise.all(regenerated.questions.map((q,i)=>
+        isExactBankDuplicate(regeneratedTargets118[i],q))) : null;
 
   for(let i = 0; i < regenerated.questions.length; i++){
     const originalIndex = invalidQuestions[i].index;
@@ -19507,13 +20295,12 @@ for(
       generationTargets[originalIndex];
 
     const legislationIssue =
-      generatedMathNotationIssue(regenerated.questions[i]) ||
-      legislationQuestionIssue(
-        targetForValidation,
-        regenerated.questions[i]
-      ) ||
-      veryHighAnkiCopyIssue93E(targetForValidation,regenerated.questions[i]) ||
-      (independentPdfCheck ? hardLegislationDistractorIssue(regenerated.questions[i]) : null);
+      (pureGeography115 ? null : simpleLegislation112
+        ? legislationSimpleStructuralIssue114(targetForValidation,regenerated.questions[i])
+        : (generatedMathNotationIssue(regenerated.questions[i]) ||
+          legislationQuestionIssue(targetForValidation,regenerated.questions[i]) ||
+          veryHighAnkiCopyIssue93E(targetForValidation,regenerated.questions[i]) ||
+          (independentPdfCheck ? hardLegislationDistractorIssue(regenerated.questions[i]) : null)));
 
     if(legislationIssue){
       validationResult.valid = false;
@@ -19551,11 +20338,9 @@ for(
         geographyRelevanceIssue
       ];
     }
-    const geographyOperationalIssue =
-  geographyOperationalParkIssue(
-    targetForValidation,
-    regenerated.questions[i]
-  );
+    const geographyOperationalIssue=pureGeography115
+      ? geographyStructureIssue115(targetForValidation,regenerated.questions[i],difficulty)
+      : geographyOperationalParkIssue(targetForValidation,regenerated.questions[i]);
 
 if(geographyOperationalIssue){
   validationResult.valid = false;
@@ -19565,11 +20350,9 @@ if(geographyOperationalIssue){
   ];
 }
 
-const geographyOptionIssue =
-  geographyOptionPoolIssue(
-    targetForValidation,
-    regenerated.questions[i]
-  );
+const geographyOptionIssue=pureGeography115
+  ? null
+  : geographyOptionPoolIssue(targetForValidation,regenerated.questions[i]);
 
 if(geographyOptionIssue){
   validationResult.valid = false;
@@ -19590,11 +20373,9 @@ if(geographyOptionIssue){
       ];
     }
 
-    const exactDuplicate =
-      await isExactBankDuplicate(
-        targetForValidation,
-        regenerated.questions[i]
-      );
+    const exactDuplicate = regeneratedDuplicates118
+      ? regeneratedDuplicates118[i]
+      : await isExactBankDuplicate(targetForValidation,regenerated.questions[i]);
 
     if(exactDuplicate){
       validationResult.valid = false;
@@ -19604,17 +20385,39 @@ if(geographyOptionIssue){
       ];
     }
 
+    if(difficulty==='muy alta' && isPureLegislation95(generationTargets) &&
+       regenerated.questions[i]?.difficulty!=='muy alta'){
+      validationResult.valid=false;
+      validationResult.issues=[...(validationResult.issues||[]),
+        'Pregunta regenerada autodeclarada inferior a Muy Alta.'];
+    }
+    if(validationResult.valid && simpleLegislation112){
+      const candidateStem=String(regenerated.questions[i]?.stem||'').normalize('NFKC')
+        .toLowerCase().replace(/\s+/g,' ').trim();
+      if(finalQuestions.some((old,j)=>j!==originalIndex &&
+        factualValidation[j]?.valid===true &&
+        String(old?.stem||'').normalize('NFKC').toLowerCase()
+          .replace(/\s+/g,' ').trim()===candidateStem)){
+        validationResult.valid=false;
+        validationResult.issues=[...(validationResult.issues||[]),
+          'Reintento con enunciado ya aprobado en este test.'];
+      }
+    }
     if(validationResult.valid){
+      if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
+        regenerated.questions[i].difficulty='muy alta';
+        regenerated.questions[i].veryHighVerified109=true;
+        if(simpleLegislation112)regenerated.questions[i].simpleVerified113=true;
+      }
       const replacementQuestion =
         regenerated.questions[i];
 
       const originalTarget =
         generationTargets[originalIndex];
 
-      replacementQuestion.difficulty =
-        originalTarget?.adaptiveDifficulty === "muy alta"
-          ? replacementQuestion.difficulty
-          : "alta";
+      replacementQuestion.difficulty = pureGeography115
+        ? replacementQuestion.difficulty
+        : (originalTarget?.adaptiveDifficulty === "muy alta" ? replacementQuestion.difficulty : "alta");
 
       if(
         originalTarget?.questionFamily === "GRAFICA" &&
@@ -19652,6 +20455,7 @@ if(geographyOptionIssue){
 
       finalQuestions[originalIndex] =
         replacementQuestion;
+      if(simpleLegislation112||pureGeography115)factualValidation[originalIndex]=validationResult;
     }else{
       stillInvalid.push({
         index:originalIndex,
@@ -19679,7 +20483,8 @@ if(geographyOptionIssue){
 // legislación no se puede convertir en una pregunta válida en tres intentos.
 // NO afecta a Anki, repaso de fallos, ni a objetivos prioritarios SRS 1-3.
 // No sustituye objetivos por conceptos de otros temas ni reduce validaciones.
-if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck){
+if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck &&
+   !simpleLegislation112 && !(difficulty==='muy alta' && isPureLegislation95(generationTargets))){
   try{
   const candidatePool = await getAdaptiveCoverageCandidates(
     Math.max(800,generationTargets.length*100),allowedTopicIds,
@@ -19791,8 +20596,19 @@ if(invalidQuestions.length > 0){
       optionAssessment:result.optionAssessment||[]
     }))
   }));
+  if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
+    const savedPairs=finalQuestions.flatMap((q,i)=>q?.veryHighVerified109===true &&
+      factualValidation[i]?.valid===true ? [{q,t:generationTargets[i]}]:[]);
+    if(savedPairs.length){
+      try{await checkpointVerifiedVeryHigh107(savedPairs.map(x=>x.q),
+        savedPairs.map(x=>x.t));}
+      catch(e){console.error('LEGISLACION_CHECKPOINT_111_ERROR:',String(e?.message||e));}
+    }
+  }
   throw new Error(
-    `Quedaron ${invalidQuestions.length} preguntas sin superar la validación final tras 3 regeneraciones.`
+    `Quedaron ${invalidQuestions.length} preguntas sin validar. `+
+    `En las rutas simplificadas se realizó como máximo una ronda de reparación; `+
+    `no se guardó un test incompleto.`
   );
 }
 
@@ -19839,7 +20655,12 @@ const qualitySubset107=generatedOnly107
   ? generationIndexes.map(i=>finalQuestions[i]) : finalQuestions;
 let qualityResult93I;
 try{
-  qualityResult93I=await refineVeryHighLegislation93F({ai,
+  qualityResult93I=legislationOnly107 ? {
+    audited:qualitySubset107.filter(q=>q?.veryHighVerified109===true).length,
+    verifiedVeryHigh:qualitySubset107.filter(q=>q?.veryHighVerified109===true).length,
+    downgraded:qualitySubset107.filter(q=>q?.veryHighVerified109!==true).length,
+    regenerated:0,auditUnavailable:false
+  } : await refineVeryHighLegislation93F({ai,
     finalQuestions:qualitySubset107,generationTargets,
     difficulty,testType,
     independentPdfCheck:legislationOnly107?true:independentPdfCheck,
@@ -19912,7 +20733,7 @@ console.log(
       question?.ankiDirect === true
         ? (question?.ankiIndependent ? "ANKI_ORIGINAL" : "ANKI_VALIDADO")
         : question?.reused === true
-          ? (question?.readyVerified107 ? "PDF_VALIDADO_PENDIENTE_107" : "BANCO_REUTILIZADO")
+          ? (question?.readyVerified107 ? "PDF_VALIDADO_PENDIENTE_113" : "BANCO_REUTILIZADO")
           : quota84?.derivedIndices?.includes(index)
             ? "ANKI_DERIVADA_VERIFICADA_PDF"
             : "GENERADA_NUEVA_PDF",
