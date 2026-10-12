@@ -20576,6 +20576,81 @@ if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck &&
   }
 }
 
+// SERVER 119: única plaza fallida en test NORMAL exclusivamente legislativo Muy Alta.
+// Primero Anki original VALIDADA del mismo tema; si no existe, UNA pregunta Alta
+// nueva, verificada contra el PDF. No se relajan las validaciones de las otras
+// preguntas ni se realizan rondas adicionales de reparación.
+if(invalidQuestions.length===1 && simpleLegislation112 &&
+   difficulty==='muy alta' && testType==='normal' &&
+   generationTargets.every(t=>
+     String(t.topic_block||'').trim().toLowerCase()==='legislacion')){
+  const failedIndex=invalidQuestions[0].index;
+  const oldTarget=generationTargets[failedIndex];
+  const accepted=finalQuestions.filter((q,i)=>
+    i!==failedIndex && factualValidation[i]?.valid===true);
+  const norm119=s=>String(s||'').normalize('NFKC').toLowerCase()
+    .replace(/\s+/g,' ').trim();
+  const repeated119=q=>accepted.some(v=>norm119(v.stem)===norm119(q.stem));
+  let rescued119=null;
+
+  // Reutilizar el selector Anki Alta EXISTENTE: permite tarjeta independiente
+  // sin atribuir cobertura curricular falsa, y conserva su corrección original.
+  try{
+    const fromAnki119=await applyLegislationAnkiQuota84(
+      [oldTarget],[Number(oldTarget.topic_id)],'alta');
+    const q=fromAnki119?.direct?.get(0);
+    const t=fromAnki119?.targets?.[0];
+    const duplicateTarget=targets.some((v,i)=>
+      i!==generationIndexes[failedIndex] && Number(v.id)===Number(t?.id));
+    if(q && t && q.ankiDirect===true &&
+       q.ankiOriginalStatus==='validated' &&
+       Array.isArray(q.options) && q.options.length===4 &&
+       !repeated119(q) && !duplicateTarget){
+      rescued119={question:{...q,difficulty:'alta',
+        rescueFallback119:'anki_validada'},target:t,source:'ANKI_VALIDADA'};
+    }
+  }catch(e){
+    console.warn('LEGISLACION_RESCATE_119_ANKI:',String(e?.message||e).slice(0,160));
+  }
+
+  // Si el tema carece de Anki apta, intentar una sola Alta nueva:
+  // 1 generación y 1 validación contra el PDF, dentro del presupuesto vigente.
+  if(!rescued119){
+    try{
+      const response119=await generateLegislationSimple112(
+        ai,[oldTarget],'alta',mode,accepted);
+      const q=JSON.parse(response119.text||'{}')?.questions?.[0];
+      if(q && !legislationSimpleStructuralIssue114(oldTarget,q) &&
+         q.difficulty==='alta' && !repeated119(q)){
+        const v=(await validateLegislationSimple112(
+          ai,[q],[oldTarget],'alta'))[0];
+        if(v?.valid===true && !(await isExactBankDuplicate(oldTarget,q))){
+          rescued119={question:{...q,graphic:null,
+            rescueFallback119:'alta_pdf_validada'},
+            target:oldTarget,source:'ALTA_PDF_VALIDADA'};
+        }
+      }
+    }catch(e){
+      console.warn('LEGISLACION_RESCATE_119_ALTA:',String(e?.message||e).slice(0,160));
+    }
+  }
+
+  if(rescued119){
+    finalQuestions[failedIndex]=rescued119.question;
+    generationTargets[failedIndex]=rescued119.target;
+    targets[generationIndexes[failedIndex]]=rescued119.target;
+    factualValidation[failedIndex]={valid:true,
+      issues:[],recovery119:rescued119.source};
+    invalidQuestions=[];
+    console.log('LEGISLACION_RESCATE_119:',JSON.stringify({
+      slot:generationIndexes[failedIndex]+1,source:rescued119.source,
+      originalRequested:'muy alta',deliveredDifficulty:'alta',
+      highDifficultyQuestions:finalQuestions.filter(q=>
+        q?.difficulty==='muy alta').length,
+      extraAudits:rescued119.source==='ALTA_PDF_VALIDADA'?1:0}));
+  }
+}
+
 if(invalidQuestions.length > 0){
   // El rechazo es informativo: NO se relaja una sola regla de calidad.
   // Cada motivo queda vinculado al objetivo sin mostrar la opción correcta.
@@ -20691,7 +20766,8 @@ if(generatedOnly107){
 // El rechazo sucede ANTES de insertar una sesión; no afecta historial ni SRS.
 const pureLegislation93I=legislationOnly107;
 if(pureLegislation93I && (qualityResult93I.auditUnavailable ||
-   finalQuestions.some(q=>q.difficulty!=='muy alta'))){
+   finalQuestions.some(q=>q.difficulty!=='muy alta' &&
+     !(q.rescueFallback119 && q.difficulty==='alta')))){
   // Preguntas Muy altas aprobadas se guardan como NO entregadas; fallo de
   // otra plaza no obliga a volver a generar/auditar este trabajo.
   try{await checkpointVerifiedVeryHigh107(finalQuestions,targets);}
