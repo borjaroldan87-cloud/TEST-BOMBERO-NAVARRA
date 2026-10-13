@@ -14884,17 +14884,31 @@ dificultad ${level}, fidelidad al PDF, condiciones y excepciones.`;
 // Una verificación independiente comprueba verdad, polaridad, respuesta
 // única, competitividad y nivel. La comprobación determinista sigue aparte.
 // No damos por correcto el dictamen si falta cualquier campo: usa File Search.
-function legislationSimpleValidationPrompt111(questions,targets,level='muy alta'){
+function legislationSimpleValidationPrompt111(questions,targets,level='muy alta',localPdf133=false){
   // Auditor CIEGO: no se facilitan correctIndex, explicaciones ni evidencias
   // autodeclaradas por Gemini. El servidor compara el dictamen con la clave.
   const rows=questions.map((q,index)=>({index,topic:targets[index]?.topic_name,
     section:targets[index]?.section,concept:targets[index]?.concept,
     pdfPage:targets[index]?.source_page,
     stem:q.stem,options:q.options,family:q.questionFamily}));
+  const source133=localPdf133?`EXTRACTOS LITERALES DEL PDF ORIGINAL, YA
+INDEXADOS EN LA COBERTURA CURRICULAR (NO SON REDACTADOS POR EL GENERADOR):
+${JSON.stringify(targets.map((t,i)=>({index:i,
+  excerpt:String(t.source_evidence||'').slice(0,2400),
+  surrounding:(Array.isArray(t.distractorContext)?t.distractorContext:[])
+    .filter(x=>String(x.source_evidence||'').trim()).slice(0,2)
+    .map(x=>String(x.source_evidence).slice(0,850))})))}
+Verifica SOLO contra esos extractos. Si faltan fundamentos de cualquiera
+ de las cuatro opciones, valid=false y UNVERIFIABLE; NO rellenes
+vacíos con conocimientos generales. pdfQuote debe ser una subcadena
+LITERAL de alguno de los extractos facilitados.
+`:
+`Consulta el PDF ORIGINAL en File Search para cada pregunta.
+`;
   return `VERIFICADOR INDEPENDIENTE DEL PDF DEL TEMARIO DE BOMBERO NAVARRA.
-Consulta el PDF ORIGINAL en File Search para cada pregunta. La evidencia
-redactada por el generador es orientativa, NUNCA prueba por sí misma.
-No emplees conocimientos externos, exámenes oficiales ni ejemplos como hechos.
+${source133}
+La evidencia redactada por el generador es orientativa, NUNCA prueba
+por sí misma. No emplees conocimientos externos ni ejemplos como hechos.
 
 POR CADA PREGUNTA:
 1. Determina si pregunta CORRECTA (una verdad) o INCORRECTA/EXCEPTO
@@ -14947,14 +14961,22 @@ function recordGenerationCall122(phase,started,response,details={}){
 
 // SERVER 131: dos lotes independientes en vuelo como máximo, sin añadir
 // llamadas ni reintentos. FOCAL_PARALLELISM=1 conserva ejecución secuencial.
-async function focalBatches131(count,size,processBatch){
+async function focalBatches131(count,size,processBatch,onError133=null){
   const parallel=String(process.env.FOCAL_PARALLELISM||'2')==='1'?1:2;
   const completed=[];
   for(let start=0;start<count;start+=size*parallel){
     const starts=Array.from({length:Math.min(parallel,Math.ceil((count-start)/size))},
       (_,i)=>start+i*size);
     const preceding=completed.flat();
-    const wave=await Promise.all(starts.map(from=>processBatch(from,preceding)));
+    // Nunca perder un lote ya resuelto porque otro falle en esta misma oleada.
+    const settled=await Promise.allSettled(starts.map(from=>processBatch(from,preceding)));
+    const wave=[];
+    for(let i=0;i<settled.length;i++){
+      if(settled[i].status==='fulfilled')wave.push(settled[i].value);
+      else if(onError133)wave.push(await onError133(settled[i].reason,starts[i],
+        Math.min(size,count-starts[i])));
+      else throw settled[i].reason;
+    }
     completed.push(...wave);
   }
   return completed.flat();
@@ -14997,6 +15019,8 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
     const response=await generateLegislationVeryHigh100(ai,{
       model,contents,config:{
         ...(docReady?{}:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}]}),
+        httpOptions:{timeout:Math.min(95000,
+          Math.max(20000,Number(process.env.LEGISLACION_GENERADOR_TIMEOUT_133_MS)||70000))},
         responseMimeType:'application/json',responseJsonSchema:questionSchema
       }
     },'generacion_simple_113',group.length,true);
@@ -15004,15 +15028,18 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
       questions:group.length,batch:Math.floor(from/batchSize)+1,model});
     let parsed;
     try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: JSON de preguntas no válido.');}
-    if(!Array.isArray(parsed?.questions)||parsed.questions.length!==group.length)
-      throw new Error('112: lote de preguntas incompleto. No se ha guardado test.');
+    if(!Array.isArray(parsed?.questions))
+      throw new Error('112: lote sin array de preguntas.');
     for(let i=0;i<group.length;i++){
-      const q=parsed.questions[i];
+      let q=parsed.questions[i];
       if(!q||typeof q.stem!=='string'||!q.stem.trim()||
         !Array.isArray(q.options)||q.options.length!==4||
         q.options.some(o=>typeof o!=='string'||!o.trim())||
         !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3){
-        throw new Error('112: pregunta mal formada. No se ejecutan reparaciones antiguas.');
+        // Solo la plaza defectuosa irá a rescate; no inventamos una respuesta.
+        q={stem:'',options:[],correctIndex:-1,questionFamily:group[i].questionFamily,
+          difficulty:level,graphic:null,failedToGenerate133:true};
+        parsed.questions[i]=q;
       }
       if(q.questionFamily!==group[i].questionFamily){
         // El validador la rechazará si incumple familia, sin manipular hechos.
@@ -15020,7 +15047,15 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
           received:q.questionFamily,expected:group[i].questionFamily}));
       }
     }
-    return parsed.questions;
+    return parsed.questions.slice(0,group.length);
+  },(error,from,n)=>{
+    // Un 429/cuota/presupuesto NUNCA se oculta ni desencadena otra llamada.
+    console.warn('LEGISLACION_LOTE_133:',JSON.stringify({phase:'generar',
+      from,n,error:String(error?.message||error).slice(0,180),
+      action:'rescate_sin_repetir_la_llamada'}));
+    return Array.from({length:n},(_,j)=>({stem:'',options:[],correctIndex:-1,
+      questionFamily:targets[from+j].questionFamily,difficulty:level,
+      graphic:null,failedToGenerate133:true}));
   });
   // Los duplicados entre lotes los marca la validación existente,
   // que permite regenerar solo esa plaza sin perder las demás preguntas.
@@ -15030,13 +15065,24 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
 async function validateLegislationSimple112(ai,questions,targets,level){
   if(!isPureLegislation95(targets)||questions.length!==targets.length)
     throw new Error('112: auditoría no corresponde a los objetivos.');
-  // Conservar SERVER 121: auditoría jurídica en lotes de cinco.
-  // Diagnóstico de consumo 122 no debe revertir esta mejora ya desplegada.
   const batchSize=5;
+  const bad=(i,reason)=>({index:i,valid:false,familyValid:false,
+    distractorsValid:false,levelValid:false,optionAssessment:[],
+    issues:[reason],familyIssues:[],distractorIssues:[],graphicIssues:[]});
+  const norm=x=>String(x||'').normalize('NFKC').toLowerCase()
+    .replace(/\s+/g,' ').trim();
   return focalBatches131(questions.length,batchSize,async start=>{
-    const approved=[];
-    const group=questions.slice(start,start+batchSize);
-    const points=targets.slice(start,start+batchSize);
+    const original=questions.slice(start,start+batchSize);
+    const slots=original.flatMap((q,j)=>q && typeof q.stem==='string' &&
+      q.stem.trim() && Array.isArray(q.options) && q.options.length===4 &&
+      q.options.every(o=>typeof o==='string' && o.trim()) &&
+      Number.isInteger(q.correctIndex) && q.correctIndex>=0 &&
+      q.correctIndex<4 ? [j]:[]);
+    const approved=original.map((q,j)=>bad(start+j,
+      'Pregunta malformada o lote de generación no disponible.'));
+    if(!slots.length)return approved;
+    const group=slots.map(j=>original[j]);
+    const points=slots.map(j=>targets[start+j]);
     const schema=structuredClone(validationSchema);
     const row=schema.properties.results.items;
     row.properties.optionAssessment={type:'array',items:{type:'string',
@@ -15047,53 +15093,73 @@ async function validateLegislationSimple112(ai,questions,targets,level){
     row.required=[...row.required,'optionAssessment','levelValid','levelReason','pdfQuote'];
     schema.properties.results.minItems=group.length;
     schema.properties.results.maxItems=group.length;
-    const contents=legislationSimpleValidationPrompt111(group,points,level)+
-      '\nREFERENCIA APROBADA DE DIFICULTAD (SOLO ESTILO, NO HECHOS DEL PDF): '+
+    // Los extractos proceden del PDF indexado; se validan citas LITERALES.
+    // Si alguno es insuficiente, se conserva File Search para TODO ese lote.
+    const local133=legislationSimpleSufficientPdf112(points) &&
+      String(process.env.LEGISLACION_AUDITOR_LOCAL_133||'1')!=='0';
+    const contents=legislationSimpleValidationPrompt111(group,points,level,local133)+
+      '\nREFERENCIA APROBADA DE DIFICULTAD (SOLO ESTILO, NO HECHOS): '+
       JSON.stringify(pickLegislationExamples94(points,level,1));
+    const auditorModel=String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||
+      'gemini-3.5-flash-lite').trim();
     console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'auditar',level,
       count:group.length,batch:Math.floor(start/batchSize)+1,
-      chars:contents.length,pdfOriginal:true}));
+      chars:contents.length,pdfOriginal:!local133,pdfExtractoLocal:local133}));
     const auditStarted122=Date.now();
     const response=await ai.models.generateContent({
-      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim(),
-      contents,config:{
-        tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
+      model:auditorModel,contents,config:{
+        ...(local133?{}:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}]}),
+        // Impide aguardar 145 s para que una única auditoría arruine el test.
+        httpOptions:{timeout:Math.min(95000,
+          Math.max(20000,Number(process.env.LEGISLACION_AUDITOR_TIMEOUT_133_MS)||65000))},
         responseMimeType:'application/json',responseJsonSchema:schema
       }
     });
     recordGenerationCall122('legislacion_auditoria',auditStarted122,response,{
       questions:group.length,batch:Math.floor(start/batchSize)+1,
-      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim()});
+      model:auditorModel,pdfExtractoLocal:local133});
     let parsed;
-    try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: auditoría JSON ilegible.');}
+    try{parsed=JSON.parse(response.text||'');}catch{
+      throw new Error('112: auditoría JSON ilegible.');
+    }
     if(!Array.isArray(parsed?.results)||parsed.results.length!==group.length)
-      throw new Error('112: auditoría PDF incompleta. No se guardó test.');
+      throw new Error('112: auditoría PDF incompleta.');
     for(let j=0;j<group.length;j++){
-      const q=group[j],t=points[j],v=parsed.results[j];
-      if(v?.index!==j)throw new Error('112: auditoría con índices incorrectos.');
+      const originalSlot=slots[j],q=group[j],t=points[j],v=parsed.results[j];
+      if(v?.index!==j)continue;
       const flags=Array.isArray(v.optionAssessment)?v.optionAssessment:[];
-      const one=flags.length===4&&flags.filter(x=>x==='ANSWER').length===1&&
-        flags[Number(q.correctIndex)]==='ANSWER'&&
+      const one=flags.length===4 && flags.filter(x=>x==='ANSWER').length===1 &&
+        flags[Number(q.correctIndex)]==='ANSWER' &&
         flags.every(x=>['ANSWER','DISTRACTOR'].includes(x));
       const opts=Array.isArray(q.options)?q.options:[];
-      const norm=x=>String(x||'').normalize('NFKC').toLowerCase()
-        .replace(/\s+/g,' ').trim();
       const unique=opts.length===4&&new Set(opts.map(norm)).size===4;
-      const ownLevel=q.difficulty===level && q.questionFamily===t.questionFamily;
-      const evidence=typeof v.pdfQuote==='string'&&v.pdfQuote.trim().length>=18;
-      const valid=v.valid===true&&v.familyValid===true&&
-        v.distractorsValid===true&&v.levelValid===true&&
-        typeof v.levelReason==='string'&&v.levelReason.trim().length>5&&
-        evidence&&one&&unique&&ownLevel;
-      approved.push({...v,index:start+j,valid,
+      const ownLevel=q.difficulty===level&&q.questionFamily===t.questionFamily;
+      const quote=norm(v.pdfQuote);
+      const evidence=quote.length>=18 && (!local133||
+        [t.source_evidence,...(Array.isArray(t.distractorContext)?
+          t.distractorContext.filter(x=>String(x.source_evidence||'').trim())
+            .slice(0,2).map(x=>String(x.source_evidence).slice(0,850)):[])]
+          .map((x,k)=>norm(String(x||'').slice(0,k===0?2400:850)))
+          .some(excerpt=>excerpt.includes(quote)));
+      const valid=v.valid===true && v.familyValid===true &&
+        v.distractorsValid===true && v.levelValid===true &&
+        typeof v.levelReason==='string' && v.levelReason.trim().length>5 &&
+        evidence && one && unique && ownLevel;
+      approved[originalSlot]={...v,index:start+originalSlot,valid,
         issues:valid?(v.issues||[]):[...(v.issues||[]),
           ...(!one?['PDF: no acreditada respuesta única']:[]),
           ...(!unique?['Opciones duplicadas']:[]),
           ...(!ownLevel?['Familia o nivel incorrectos']:[]),
-          ...(!evidence?['Sin cita PDF contrastable']:[]),
-          ...(v.levelValid!==true?['Dificultad no acreditada']:[])]});
+          ...(!evidence?['Sin cita PDF literal contrastable']:[]),
+          ...(v.levelValid!==true?['Dificultad no acreditada']:[])]};
     }
     return approved;
+  },(error,from,n)=>{
+    console.warn('LEGISLACION_LOTE_133:',JSON.stringify({phase:'auditar',
+      from,n,error:String(error?.message||error).slice(0,180),
+      action:'rechazar_plazas_sin_perder_lotes_aprobados'}));
+    return Array.from({length:n},(_,j)=>bad(from+j,
+      'Auditoría no disponible; se exige sustitución validada.'));
   });
 }
 // SERVER 114: control ESTRUCTURAL acotado. No se pronuncia sobre
@@ -20080,7 +20146,8 @@ if(invalidQuestions.length){
 
 for(
   let regenerationAttempt = 1;
-  regenerationAttempt <= ((simpleLegislation112||pureGeography115)?1:3) &&
+  regenerationAttempt <= (simpleLegislation112&&difficulty==='muy alta'?0:
+    (simpleLegislation112||pureGeography115)?1:3) &&
   invalidQuestions.length > 0;
   regenerationAttempt++
 ){
@@ -20428,116 +20495,140 @@ if(invalidQuestions.length && pureGeography115){
     factualValidation,difficulty,mode,testType});
 }
 
-// SERVER 130: rescate acotado y EN LOTE de preguntas rechazadas en Legislación
-// Muy Alta, exclusivamente para test normal. Conserva Anki Alta original
-// validada, o genera preguntas Alta nuevas con UNA llamada y UNA auditoría
-// por lote; no cambia los criterios de aprobación, la cobertura ni el SRS.
+// SERVER 133: rescate sin nuevas llamadas a Gemini, primero banco ALTA
+// validado y luego ANKI original válida del MISMO TEMA. Toda pregunta de Anki
+// no enlazada recibe ficha técnica no curricular; nunca falsea cobertura/SRS.
+// No hay tope artificial de 20 %: se completa el test si hay alternativas.
 if(invalidQuestions.length && simpleLegislation112 &&
    difficulty==='muy alta' && testType==='normal' &&
    generationTargets.every(t=>
      String(t.topic_block||'').trim().toLowerCase()==='legislacion')){
-  // Límite previsible de coste: como máximo 20% del test y nunca más de 8.
-  // Si hay más rechazos, se conserva el error explícito y el checkpoint.
-  const rescueLimit130=Math.min(8,Math.max(2,Math.ceil(generationTargets.length*0.2)));
-  if(invalidQuestions.length<=rescueLimit130){
-    const norm130=s=>String(s||'').normalize('NFKC').toLowerCase()
-      .replace(/\s+/g,' ').trim();
-    const occupied130=new Set(finalQuestions.flatMap((q,i)=>
-      factualValidation[i]?.valid===true && q?.stem ? [norm130(q.stem)] : []));
-    const pending130=[];
-    const rescued130=new Map();
-    const reservedIds130=new Set(targets.map(t=>Number(t.id)));
-    // Anki ORIGINAL validada primero: cero llamadas a Gemini. No admite
-    // enunciados repetidos ni objetivos curriculares ya reservados.
-    for(const rejected of invalidQuestions){
-      const index=rejected.index;
-      const oldTarget=generationTargets[index];
-      let chosen=null;
-      try{
-        const anki=await applyLegislationAnkiQuota84(
-          [oldTarget],[Number(oldTarget.topic_id)],'alta');
-        const q=anki?.direct?.get(0),t=anki?.targets?.[0];
-        const occupiedTarget=Number(t?.id)!==Number(oldTarget.id) &&
-          reservedIds130.has(Number(t?.id));
-        if(q && t && q.ankiDirect===true &&
-           q.ankiOriginalStatus==='validated' &&
-           Array.isArray(q.options) && q.options.length===4 &&
-           Number.isInteger(q.correctIndex) &&
-           q.correctIndex>=0 && q.correctIndex<4 &&
-           !occupied130.has(norm130(q.stem)) && !occupiedTarget){
-          chosen={question:{...q,difficulty:'alta',
-            rescueFallback119:'anki_validada'},target:t,source:'ANKI_VALIDADA'};
-        }
-      }catch(e){
-        console.warn('LEGISLACION_RESCATE_130_ANKI:',
-          String(e?.message||e).slice(0,160));
-      }
-      if(chosen){
-        rescued130.set(index,chosen);
-        occupied130.add(norm130(chosen.question.stem));
-        reservedIds130.add(Number(chosen.target.id));
-      }else{
-        pending130.push({index,target:oldTarget});
-      }
+  const norm133=s=>String(s||'').normalize('NFKC').toLowerCase()
+    .replace(/\s+/g,' ').trim();
+  const occupied133=new Set(finalQuestions.flatMap((q,i)=>
+    factualValidation[i]?.valid===true && q?.stem?[norm133(q.stem)]:[]));
+  const rejectedIndexes133=invalidQuestions.map(r=>r.index);
+  const originalItems133=rejectedIndexes133.map(i=>generationTargets[i]);
+  const selected133=new Map();
+  // No repetir un ID de pregunta, ni un enunciado ya entregado en el test.
+  const usedBankIds133=new Set();
+  try{
+    const ids=[...new Set(originalItems133.map(t=>Number(t.id)))];
+    const data=await db.query(`
+      SELECT qb.* FROM question_bank qb
+      WHERE qb.coverage_item_id=ANY($1::int[]) AND qb.active=TRUE
+        AND qb.validation_version>=6 AND qb.validation_version<>113
+        AND qb.difficulty='alta' AND qb.graphic IS NULL
+        AND (qb.last_shown_at IS NULL OR qb.last_shown_at < NOW()-INTERVAL '7 days')
+      ORDER BY qb.times_shown ASC,qb.last_shown_at ASC NULLS FIRST,qb.id DESC
+      LIMIT 600`,[ids]);
+    const candidates=new Map();
+    for(const row of data.rows){
+      const id=Number(row.coverage_item_id);
+      if(!candidates.has(id))candidates.set(id,[]);
+      candidates.get(id).push(row);
     }
-    // Las plazas sin Anki adecuada se generan en un único lote PDF Alta.
-    // La auditoría es independiente, con el mismo control de opción única.
-    if(pending130.length){
-      try{
-        const accepted130=finalQuestions.filter((q,i)=>
-          factualValidation[i]?.valid===true).concat(
-            [...rescued130.values()].map(x=>x.question));
-        const batchTargets130=pending130.map(x=>x.target);
-        const response130=await generateLegislationSimple112(
-          ai,batchTargets130,'alta',mode,accepted130);
-        const generated130=JSON.parse(response130.text||'{}')?.questions;
-        if(!Array.isArray(generated130)||
-           generated130.length!==batchTargets130.length)
-          throw new Error('Lote de rescate Alta incompleto.');
-        const eligible130=[];
-        for(let j=0;j<generated130.length;j++){
-          const q=generated130[j],t=batchTargets130[j];
-          if(!q || legislationSimpleStructuralIssue114(t,q) ||
-             q.difficulty!=='alta' || q.questionFamily!==t.questionFamily ||
-             occupied130.has(norm130(q.stem)))continue;
-          occupied130.add(norm130(q.stem));
-          eligible130.push({index:pending130[j].index,target:t,question:q});
-        }
-        if(eligible130.length){
-          const audits130=await validateLegislationSimple112(ai,
-            eligible130.map(x=>x.question),eligible130.map(x=>x.target),'alta');
-          const duplicates130=await Promise.all(eligible130.map(x=>
-            isExactBankDuplicate(x.target,x.question)));
-          eligible130.forEach((entry,j)=>{
-            if(audits130[j]?.valid!==true || duplicates130[j])return;
-            rescued130.set(entry.index,{question:{...entry.question,
-              graphic:null,rescueFallback119:'alta_pdf_validada'},
-              target:entry.target,source:'ALTA_PDF_VALIDADA'});
-          });
-        }
-      }catch(e){
-        console.warn('LEGISLACION_RESCATE_130_ALTA:',
-          String(e?.message||e).slice(0,240));
+    for(const index of rejectedIndexes133){
+      const t=generationTargets[index];
+      for(const row of candidates.get(Number(t.id))||[]){
+        const key=norm133(row.stem),ci=Number(row.correct_index);
+        if(!key||occupied133.has(key)||usedBankIds133.has(Number(row.id))||
+          !Array.isArray(row.options)||row.options.length!==4||
+          !Number.isInteger(ci)||ci<0||ci>3||
+          row.question_family!==t.questionFamily||
+          row.options.some(o=>typeof o!=='string'||!o.trim()))continue;
+        const question={stem:row.stem,options:row.options,correctIndex:ci,
+          explanation:row.explanation||'',sourceEvidence:row.source_evidence||'',
+          sourcePage:row.source_page??null,manualPage:row.manual_page??null,
+          questionFamily:row.question_family,difficulty:'alta',graphic:null,
+          reused:true,questionId:Number(row.id),coverageItemId:Number(t.id),
+          rescueFallback119:'banco_alta_validado'};
+        selected133.set(index,{question,target:t,source:'BANCO_ALTA'});
+        occupied133.add(key);usedBankIds133.add(Number(row.id));break;
       }
     }
-    // Único punto de compromiso: no toca los otros ocho resultados.
-    for(const [index,recovery] of rescued130){
-      finalQuestions[index]=recovery.question;
-      generationTargets[index]=recovery.target;
-      targets[generationIndexes[index]]=recovery.target;
-      factualValidation[index]={valid:true,issues:[],recovery119:recovery.source};
-    }
-    invalidQuestions=invalidQuestions.filter(r=>!rescued130.has(r.index));
-    console.log('LEGISLACION_RESCATE_130:',JSON.stringify({
-      requested:rescued130.size+invalidQuestions.length,
-      recovered:rescued130.size,remaining:invalidQuestions.length,
-      byAnki:[...rescued130.values()].filter(x=>x.source==='ANKI_VALIDADA').length,
-      byPdfAlta:[...rescued130.values()].filter(x=>x.source==='ALTA_PDF_VALIDADA').length,
-      downgradedOnlyVerified:true,noExtraRepairRound:true}));
-  }else{
-    console.warn('LEGISLACION_RESCATE_130_PRESUPUESTO:',JSON.stringify({
-      pending:invalidQuestions.length,maxFallbacks:rescueLimit130}));
+  }catch(error){console.warn('LEGISLACION_RESCATE_133_BANCO:',
+    String(error?.message||error).slice(0,170));}
+  const pending133=rejectedIndexes133.filter(i=>!selected133.has(i));
+  if(pending133.length){
+    try{
+      const orderByTopic133=new Map();
+      for(const index of pending133){
+        const order=ankiLegislationSourceOrderForTopicName(
+          generationTargets[index].topic_name);
+        if(Number.isInteger(order))orderByTopic133.set(order,true);
+      }
+      const orders=[...orderByTopic133.keys()];
+      const cards=orders.length ? await db.query(`
+        SELECT a.id,a.anki_note_id,a.topic_order,a.stem,a.options,
+               a.correct_index,a.validation_status,a.validation_evidence
+        FROM legislation_anki_questions a
+        WHERE a.topic_order=ANY($1::int[]) AND a.option_count=4
+          AND a.direct_use_eligible=TRUE AND a.validation_status='validated'
+        ORDER BY a.times_used ASC,a.last_used_at ASC NULLS FIRST,a.id ASC
+        LIMIT 4000`,[orders]):{rows:[]};
+      const byOrder133=new Map();
+      for(const row of cards.rows){
+        const order=Number(row.topic_order);
+        if(!byOrder133.has(order))byOrder133.set(order,[]);
+        byOrder133.get(order).push(row);
+      }
+      const usedNoteIds133=new Set();
+      for(const index of pending133){
+        const old=generationTargets[index];
+        const order=ankiLegislationSourceOrderForTopicName(old.topic_name);
+        const candidate=(byOrder133.get(order)||[]).find(row=>{
+          const key=norm133(row.stem),ci=Number(row.correct_index);
+          return key && !occupied133.has(key) &&
+            !usedNoteIds133.has(Number(row.anki_note_id)) &&
+            Array.isArray(row.options)&&row.options.length===4 &&
+            Number.isInteger(ci)&&ci>=0&&ci<=3&&
+            row.options.every(x=>typeof x==='string'&&x.trim())&&
+            !legislationKnownAmbiguityIssue({stem:row.stem,options:row.options});
+        });
+        if(!candidate)continue;
+        const concept=`ANKI_ORIGINAL_NOTA_${String(candidate.anki_note_id)}`;
+        const technical=await db.query(`
+          INSERT INTO coverage_items(topic_id,section,concept,item_type,
+            evaluation_type,source_page,source_evidence,exam_relevant)
+          VALUES($1,'Anki original (repaso)',$2,'anki_independent',
+            'ANKI',NULL,NULL,FALSE)
+          ON CONFLICT(topic_id,concept,item_type,evaluation_type)
+          DO UPDATE SET exam_relevant=FALSE RETURNING *`,
+          [Number(old.topic_id),concept]);
+        const target={...technical.rows[0],topic_name:old.topic_name,
+          topic_block:'legislacion',ankiIndependent:true};
+        target.questionFamily=inferLegislationAnkiFamily(candidate.stem);
+        const question=buildDirectAnkiQuestion(candidate,target);
+        question.difficulty='alta';question.ankiIndependent=true;
+        question.ankiOriginalStatus='validated';
+        question.explanation='Pregunta original Anki validada, sin vínculo curricular verificado.';
+        question.sourceEvidence='Baraja original Anki del tema; no acredita una unidad curricular PDF.';
+        question.sourcePage=null;question.manualPage=null;
+        question.rescueFallback119='anki_validada';
+        selected133.set(index,{question,target,source:'ANKI_VALIDADA'});
+        occupied133.add(norm133(candidate.stem));
+        usedNoteIds133.add(Number(candidate.anki_note_id));
+      }
+    }catch(error){console.warn('LEGISLACION_RESCATE_133_ANKI:',
+      String(error?.message||error).slice(0,220));}
   }
+  // Commit lógico: exclusivamente las plazas sustituidas. Sin reetiquetar
+  // preguntas Alta como Muy Alta ni adjudicar cobertura PDF falsa.
+  for(const [index,recovery] of selected133){
+    finalQuestions[index]=recovery.question;
+    generationTargets[index]=recovery.target;
+    targets[generationIndexes[index]]=recovery.target;
+    factualValidation[index]={index,valid:true,issues:[],
+      recovery119:recovery.source};
+  }
+  invalidQuestions=invalidQuestions.filter(r=>!selected133.has(r.index));
+  console.log('LEGISLACION_RESCATE_133:',JSON.stringify({
+    requested:rejectedIndexes133.length,recovered:selected133.size,
+    remaining:invalidQuestions.length,
+    bank:[...selected133.values()].filter(v=>v.source==='BANCO_ALTA').length,
+    anki:[...selected133.values()].filter(v=>v.source==='ANKI_VALIDADA').length,
+    newGeminiCalls:0,difficultyNotFalsified:true}));
 }
 
 if(invalidQuestions.length > 0){
