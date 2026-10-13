@@ -381,9 +381,18 @@ async function waitForGenerationRun112(runId,launch=null){
         'pulsa Generar test para recuperarlo SIN volver a lanzar una generación pagada.');
     }
     if(state?.status==='completed')return state;
-    if(state?.status==='failed'||state?.status==='stale'){
-      localStorage.removeItem(GENERATION_PENDING_112);
-      throw new Error(state.error||'La generación no finalizó.');
+    if(state?.status==='failed'){
+      // No eliminar el runId: SERVER 140 puede recuperar las preguntas
+      // verificadas. Reintento únicamente si el usuario vuelve a pulsar.
+      const saved=Number(state.validQuestions)||0;
+      throw new Error((state.error||'La generación no finalizó.')+
+        ` Se conservan ${saved} preguntas verificadas. `+
+        'Pulsa Generar test otra vez para decidir si reanudar el MISMO test.');
+    }
+    if(state?.status==='stale'){
+      // No reiniciar a ciegas: otro proceso podría seguir trabajando.
+      throw new Error((state.error||'Estado de generación sin confirmar.')+
+        ' Se conserva el identificador. No se hará otra llamada de pago automáticamente.');
     }
     generationProgress112('Gemini está preparando y verificando el test. '+
       'No cierres esta página ni pulses varias veces; se consulta el mismo trabajo.');
@@ -408,7 +417,36 @@ async function generate(){
     if(stored?.runId && stored?.body){
       runId=stored.runId;
       body=stored.body;
-      generationProgress112('Recuperando el test anterior sin volver a generarlo...');
+      const prior=await api('/api/generation-run/'+encodeURIComponent(runId));
+      if(prior.status==='failed'){
+        const saved=Number(prior.validQuestions)||0;
+        const accepted=confirm(`El test anterior falló. Hay ${saved} preguntas verificadas. `+
+          '¿Reanudar ese MISMO test? Puede consumir nuevas llamadas a Gemini. ' +
+          'Cancelar conserva el test pendiente, sin generar otro.');
+        if(!accepted)return;
+        generationProgress112('Reanudando el test anterior con el mismo identificador...');
+        launch=api('/api/generate',{
+          method:'POST',body:JSON.stringify(body)
+        }).then(data=>({ok:true,data}),error=>({ok:false,error}));
+      }else if(prior.status==='stale'){
+        // No reactivar un trabajo de estado incierto: podría continuar en
+        // otro proceso. Solo el usuario puede abandonar el identificador LOCAL
+        // y crear otro test al pulsar de nuevo; no se modifica el histórico DB.
+        if(confirm('El test anterior lleva más de 30 minutos sin confirmar. ' +
+          '¿Abandonar su recuperación y permitir crear OTRO test? ' +
+          'Este paso NO inicia una petición a Gemini, pero el intento anterior ' +
+          'podría haber consumido créditos.')){
+          localStorage.removeItem(GENERATION_PENDING_112);
+          generationProgress112('Trabajo anterior desvinculado localmente. ' +
+            'Pulsa Generar test de nuevo para iniciar un examen diferente.');
+          return;
+        }
+        throw new Error('La generación anterior sigue pendiente de revisión. ' +
+          'No se han realizado nuevas llamadas pagadas.');
+      }else{
+        // completed o processing: consultar sin otro POST pagado.
+        generationProgress112('Consultando el test anterior sin volver a generarlo...');
+      }
     }else{
       const allScope=$('scopeAll')?.checked===true;
       if(!allScope && selectedBlocks.size===0 && selectedTopicIds.size===0)
@@ -437,8 +475,8 @@ async function generate(){
     const j=await waitForGenerationRun112(runId,launch);
     if(!j?.questions?.length)
       throw new Error('Generación confirmada sin preguntas: no se inicia el test.');
-    localStorage.removeItem(GENERATION_PENDING_112);
     showGeneratedTest112(j);
+    localStorage.removeItem(GENERATION_PENDING_112);
   }catch(e){
     generationProgress112('No se ha confirmado un test completo. '+
       'Si hubo un error de red, puedes recuperar la petición con el mismo botón.');
@@ -923,7 +961,10 @@ function review(){
           <p class="muted">
             <b>Fuente:</b>
             ${formatExamContent(q.sourceEvidence)}
-            ${q.manualPage!=null?` · pág. ${escapeHtml(q.manualPage)}`:""}
+            ${q.manualPage!=null&&String(q.manualPage).trim()
+              ?` · pág. ${escapeHtml(q.manualPage)}`
+              :q.sourcePage!=null&&String(q.sourcePage).trim()
+                ?` · pág. PDF ${escapeHtml(q.sourcePage)}`:""}
           </p>
 
         </div>
