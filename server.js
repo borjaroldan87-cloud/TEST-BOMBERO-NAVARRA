@@ -8782,13 +8782,101 @@ function geographyIntent123(target,index){
     const sameCount=same.length+(isConcejo?1:0);
     if(sameCount>=3&&other.length)available.push('MUNICIPIO_CONCEJOS_EXCLUSION');
   }else{
-    if(location&&!multiMunicipality)available.push('INSTALACION_MUNICIPIO');
-    if(park)available.push('INSTALACION_PARQUE');
-    if(!multiMunicipality&&geographyReverseOptions123(target))available.push('MUNICIPIO_INSTALACION');
+    if(location&&!multiMunicipality&&!geographyNameEcho127(target,'municipality'))
+      available.push('INSTALACION_MUNICIPIO');
+    if(park&&!geographyNameEcho127(target,'park'))available.push('INSTALACION_PARQUE');
+    if(!multiMunicipality&&!geographyNameEcho127(target,'municipality')&&
+       geographyReverseOptions123(target))available.push('MUNICIPIO_INSTALACION');
   }
   // El orden rota, pero una relación no acreditada nunca entra en el sorteo.
   return available.length?available[index%available.length]:null;
 }
+// 127: eliminar pistas SOLO cuando son datos territoriales conocidos del PDF.
+// No se alteran la respuesta, su índice, la cita ni el registro de cobertura.
+function geographyMunicipalClues127(target){
+  const values=[target?.optionPools?.correctLocation];
+  for(const item of target?.optionPools?.sameTopicRecords||[]){
+    const concept=String(item?.concept||'');
+    const m=concept.match(/\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\s+(.+?)(?:\s+con\s+(?:el|la)\s+parque|[,;]|$)/i);
+    if(m)values.push(m[1]);
+  }
+  for(const item of target?.territorialContext?.exact||[]){
+    values.push(item?.parentMunicipality,...(item?.municipalityAliases||[]));
+  }
+  const names=new Set();
+  for(const raw of values){
+    if(!raw)continue;
+    for(const item of [String(raw),...String(raw).split(/\s*\/\s*/)]){
+      const key=geographyNorm115(item.replace(/^(?:el\s+)?municipio\s+de\s+/i,''));
+      if(key.length>=4)names.add(key);
+    }
+  }
+  return names;
+}
+function geographyDisplayName127(value,names){
+  return String(value||'').replace(/\s*\(([^()]+)\)/g,(all,inside)=>
+    names.has(geographyNorm115(inside))?'':all).replace(/\s{2,}/g,' ').trim();
+}
+function geographyNameEcho127(target,kind){
+  const title=String(target?.concept||'').split(/\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\b/i)[0];
+  // Equivalencia editorial frecuente castellano/euskera, no dato inventado:
+  // Orcoyen/Orkoien. No se permite que el nombre revele el dato preguntado.
+  const fold=v=>geographyNorm115(v).replace(/c(?=[aeiou])/g,'k').replace(/y/g,'i');
+  const label=fold(geographyDisplayName127(title,geographyMunicipalClues127(target)));
+  const expected=kind==='park'?geographyOperationalLabel124(target):null;
+  const cities=kind==='park'
+    ? (expected?[expected.replace(/^Central de /,'')]:[])
+    : [target?.optionPools?.correctLocation];
+  return cities.some(city=>{
+    const parts=String(city||'').split(/\s*\/\s*/);
+    return parts.some(part=>{const key=fold(part);return key.length>=5 && label.includes(key);});
+  });
+}
+function geographyRemoveClues127(target,q){
+  if(!target?.geoIntent123||![21,22,23,24].includes(geographyTopic115(target)))return null;
+  const names=geographyMunicipalClues127(target),intent=target.geoIntent123;
+  if(typeof q?.stem!=='string'||!Array.isArray(q.options))return null;
+  if(intent==='INSTALACION_MUNICIPIO'||intent==='INSTALACION_PARQUE'){
+    q.stem=geographyDisplayName127(q.stem,names);
+    // Quitar únicamente el inciso de localización que coincide con los
+    // municipios acreditados; nunca borrar un dato territorial desconocido.
+    q.stem=q.stem.replace(/,\s*(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\s+(?:el\s+)?(?:municipio\s+de\s+|la\s+localidad\s+de\s+)?([^?.;,]{2,95})(?=[?.;,])/gi,
+      (all,place)=>names.has(geographyNorm115(place))?'':all);
+  }
+  if(intent==='MUNICIPIO_INSTALACION'){
+    q.options=q.options.map(x=>geographyDisplayName127(x,names));
+  }
+  // Evitar relaciones que se deducen del propio nombre de la instalación,
+  // incluso cuando no hay paréntesis (p. ej. «deBarasoáin»).
+  const title=String(target?.concept||'').split(/\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\b/i)[0];
+  const displayed=geographyNorm115(geographyDisplayName127(title,names));
+  if(['INSTALACION_MUNICIPIO','INSTALACION_PARQUE'].includes(intent)){
+    const stemNorm=geographyNorm115(q.stem);
+    const pos=stemNorm.indexOf(displayed);
+    if(displayed && pos>=0){
+      const remainder=stemNorm.slice(pos+displayed.length);
+      if([...names].some(city=>city.length>=5 && remainder.includes(city)))
+        return 'GEOGRAFÍA 127: el enunciado contiene la localidad como pista.';
+    }
+  }
+  const own=geographyNorm115(target?.optionPools?.correctLocation||'');
+  if(intent==='INSTALACION_MUNICIPIO' && geographyNameEcho127(target,'municipality'))
+    return 'GEOGRAFÍA 127: el nombre propio insinúa el municipio por coincidencia o alias.';
+  if(intent==='INSTALACION_PARQUE' && geographyNameEcho127(target,'park'))
+    return 'GEOGRAFÍA 127: el nombre propio revela el parque que se pregunta.';
+  if(intent==='MUNICIPIO_INSTALACION' && geographyNameEcho127(target,'municipality'))
+    return 'GEOGRAFÍA 127: el nombre propio revela la instalación correcta por topónimo.';
+  if(intent==='INSTALACION_MUNICIPIO' && own.length>=5 && displayed.includes(own))
+    return 'GEOGRAFÍA 127: el nombre oficial contiene el municipio preguntado; objetivo no apto para esta variante.';
+  if(intent==='MUNICIPIO_INSTALACION'){
+    const wanted=geographyNorm115(q.stem);
+    const answer=geographyNorm115(q.options[q.correctIndex]||'');
+    if(own.length>=5 && wanted.includes(own) && answer.includes(own))
+      return 'GEOGRAFÍA 127: la opción correcta contiene el municipio del enunciado.';
+  }
+  return null;
+}
+
 function geographyConcreteIssue123(target,q){
   const topic=geographyTopic115(target);
   if(![21,22,23,24].includes(topic))return null;
@@ -8804,7 +8892,7 @@ function geographyConcreteIssue123(target,q){
     const installation=String(target?.concept||'').match(/^(.+?)\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\b/i)?.[1];
     // En la variante inversa basta nombrar inequívocamente el municipio.
     if(intent!=='MUNICIPIO_INSTALACION' && installation &&
-       !stem.includes(geographyNorm115(installation)))
+       !stem.includes(geographyNorm115(geographyDisplayName127(installation,geographyMunicipalClues127(target)))))
       return 'GEOGRAFÍA 124: la pregunta no identifica por su nombre la instalación del PDF.';
   }
   if(intent==='LOCALIDAD_PARQUE'||intent==='INSTALACION_PARQUE'){
@@ -8820,8 +8908,9 @@ function geographyConcreteIssue123(target,q){
       return 'GEOGRAFÍA 123: identificar exclusivamente la instalación en el municipio.';
     const reverse=geographyReverseOptions123(target);
     const loc=geographyNorm115(target?.optionPools?.correctLocation);
-    if(!reverse||!stem.includes(loc)||correct!==geographyConcreteName123(reverse.correct)||
-       normalized.some((o,i)=>i!==q.correctIndex && !reverse.distractors.some(d=>geographyConcreteName123(d)===o)))
+    const names=geographyMunicipalClues127(target);
+    if(!reverse||!stem.includes(loc)||correct!==geographyConcreteName123(geographyDisplayName127(reverse.correct,names))||
+       normalized.some((o,i)=>i!==q.correctIndex && !reverse.distractors.some(d=>geographyConcreteName123(geographyDisplayName127(d,names))===o)))
       return 'GEOGRAFÍA 123: asociación inversa instalación/municipio sin tres distractores documentados.';
   }else if(intent==='CONCEJO_MUNICIPIO'){
     const parts=String(target?.concept||'').split('->').map(v=>v.trim()).filter(Boolean);
@@ -8953,9 +9042,39 @@ CRITERIOS:
 7) Dificultad ALTA: distinciones territoriales plausibles. MUY ALTA: relaciones
    sutiles de municipio/concejo/sede/instalación cuando el PDF las sostenga.
    Nunca subas dificultad inventando normativa o escenarios.
-8) Indica sourceEvidence textual comprobable, sourcePage real si consta,
+8) PROHIBIDO REVELAR LA CLAVE EN EL ENUNCIADO O EN LAS OPCIONES.
+   Si se pregunta el parque que interviene en «Polígono Rocaforte», NUNCA
+   añadas «situado en Sangüesa», pues eso revela el parque. Si se pregunta
+   municipio o pertenencia, elimina aclaraciones entre paréntesis como
+   «Aratzuri-Orcoyen (Orkoien)» o «Berriainz (Berriozar)» que revelen
+   la respuesta. Tampoco incorpores el municipio en otra opción como pista.
+   Si el nombre propiamente dicho ya contiene la respuesta, no fabriques
+   una variante trivial; usa solo relaciones examinables sin pistas.
+9) Indica sourceEvidence textual comprobable, sourcePage real si consta,
    manualPage solo si consta literalmente, graphic:null, y questionFamily real.
    No copies toda la tabla a la explicación.
+
+CALIBRACIÓN EXAMEN OFICIAL NAVARRA 2024 — SOLO ESTILO, NO FUENTE FACTUAL:
+Los formatos siguientes proceden de las preguntas visibles del examen oficial.
+No copies sus lugares, hechos ni soluciones; sustitúyelos por las relaciones
+comprobadas del objetivo seleccionado y mantén EXACTAMENTE el campo intent.
+- P. 28 (polígonos): «El polígono industrial [NOMBRE] se encuentra en la
+  localidad de:»; cuatro localidades plausibles, ninguna pista en el nombre.
+- P. 31 (polígonos): «¿Qué parque de bomberos sería movilizado en primer lugar
+  si se originase un incendio industrial en el polígono [NOMBRE]?»;
+  cuatro parques independientes, sin revelar municipio ni parque en el enunciado.
+- P. 40 (fotovoltaica): «SOS Navarra recibe el aviso de un incendio en la planta
+  FV [NOMBRE]. ¿Qué parque se movilizará en primer lugar?».
+- P. 42 (eólica): «SOS Navarra recibe un aviso de incendio en un aerogenerador
+  del parque eólico [NOMBRE]. ¿Qué parque se movilizará en primer lugar?».
+- P. 48 (municipios/concejos): «SOS Navarra recibe un aviso de desaparición
+  de una persona cerca de [LOCALIDAD]. ¿Qué parque iniciará la búsqueda?».
+- Para nivel MUY ALTA usa distractores territoriales REALES y cercanos en
+  pertinencia, pero no aumentes la dificultad revelando en el enunciado
+  el municipio o la sede. No añadas requisitos que el PDF no documenta.
+Las preguntas oficiales sobre rutas, túneles, puertos, ferroviario y
+vegetación corresponden a OTROS temas; esta ruta de generación 21–24 no
+puede sustituir el objetivo curricular por esas materias.
 
 HECHOS POR OBJETIVO (NO MEZCLAR OBJETIVOS):
 ${JSON.stringify(facts)}
@@ -8963,12 +9082,15 @@ Antes de responder, comprueba todas las alternativas contra el PDF, la
 unicidad y que las opciones no revelen la respuesta por descarte trivial.`;
 }
 function geographyStructureIssue115(target,question,requestedDifficulty){
-  const opts=question?.options;
+  let opts=question?.options;
   if(!Array.isArray(opts)||opts.length!==4 ||
     opts.some(x=>typeof x!=='string'||!x.trim()))
     return 'GEOGRAFÍA 115: cuatro opciones no vacías obligatorias.';
   if(!Number.isInteger(question.correctIndex)||question.correctIndex<0||question.correctIndex>3)
     return 'GEOGRAFÍA 115: correctIndex inválido.';
+  const leak=geographyRemoveClues127(target,question);
+  if(leak)return leak;
+  opts=question.options; // Comprobar unicidad DESPUÉS de retirar pistas editoriales.
   const canonical=v=>geographyNorm115(v)
     .replace(/^(?:(?:el|la) )?(?:parque de bomberos |parque de |sede de |sede |municipio de |concejo de )/,'')
     .replace(/^el parque central de /,'parque central de ');
@@ -9072,14 +9194,12 @@ async function geographyValidateShapeFirst123(ai,questions,targets,difficulty){
 }
 
 async function geographyValidate115(ai,questions,targets){
-  // Auditorías focales de máximo cinco; un 504 no desencadena reintentos.
-  const aggregated=[];
-  for(let begin=0;begin<questions.length;begin+=5){
+  // Auditoría independiente por lote, sin trabajo duplicado ni retries.
+  return focalBatches131(questions.length,5,async begin=>{
     const checked=await geographyValidateChunk115(
       ai,questions.slice(begin,begin+5),targets.slice(begin,begin+5));
-    aggregated.push(...checked.map(r=>({...r,index:r.index+begin})));
-  }
-  return aggregated;
+    return checked.map(r=>({...r,index:r.index+begin}));
+  });
 }
 async function geographyValidateChunk115(ai,questions,targets){
   const schema=structuredClone(validationSchema);
@@ -9134,8 +9254,7 @@ ${JSON.stringify(blindQuestions)}`;
       : (r.issues||[])}));
 }
 async function geographyGenerate115(ai,targets,difficulty,mode,defects=[]){
-  const questions=[];
-  for(let begin=0;begin<targets.length;begin+=5){
+  const questions=await focalBatches131(targets.length,5,async begin=>{
     const subset=targets.slice(begin,begin+5);
     const contents=geographyFocalPrompt115(subset,difficulty,mode,
       defects.slice(begin,begin+5));
@@ -9154,8 +9273,8 @@ async function geographyGenerate115(ai,targets,difficulty,mode,defects=[]){
     const data=JSON.parse(response.text);
     if(!Array.isArray(data.questions)||data.questions.length!==subset.length)
       throw new Error('GEOGRAFÍA 115: lote incompleto; no reintentar automáticamente.');
-    questions.push(...data.questions);
-  }
+    return data.questions;
+  });
   return {text:JSON.stringify({questions})};
 }
 async function geographyRegenerate115(ai,invalid,targets,difficulty,mode){
@@ -13160,8 +13279,8 @@ REGLAS DE COBERTURA:
 - La asignación GRAFICA nunca autoriza a inventar un dibujo cuando la fuente no sustenta una representación técnica inequívoca.
 `;
 }
-// SERVER 109 — Control de coste y circuit breaker SOLO para generación de
-// Legislación Muy alta. Todas las comprobaciones normativas siguen activas.
+// SERVER 109/132 — Control de coste proporcional a 10/20/30/40.
+// El contrato de cuotas y el circuit breaker de Legislación siguen activos.
 // Un 429 de Gemini/embeddings no equivale a dificultad insuficiente: se
 // interrumpe inmediatamente, sin repetir la misma llamada con cargo adicional.
 let legislationProviderPauseUntil109=0;
@@ -13184,7 +13303,10 @@ function budgetedLegislationAi109(ai,questionCount){
     return Number.isFinite(v)&&v>0?Math.floor(v):fallback;
   };
   const maxCalls=readPositive('LEGISLACION_MUY_ALTA_MAX_LLAMADAS',
-    Math.min(12,4+Math.ceil(count/5)*3));
+    // SERVER 132: 40 plazas requieren hasta 8 lotes de generación y 8
+    // auditorías; el techo antiguo de 12 llamadas interrumpía el test.
+    // Techo predeterminado de 24 por petición; configuración explícita prevalece.
+    Math.min(24,4+Math.ceil(count/5)*3));
   const maxChars=readPositive('LEGISLACION_MUY_ALTA_MAX_CARACTERES',
     90000+Math.ceil(count/5)*65000);
   const maxMs=readPositive('LEGISLACION_MUY_ALTA_MAX_TIEMPO_MS',
@@ -13213,7 +13335,7 @@ function budgetedLegislationAi109(ai,questionCount){
           'no se ha guardado ninguna sesión incompleta.');
         err.status=429;err.budget109=true;err.noRetry109=true;throw err;
       }
-      calls++;chars+=amount;
+      const callId=++calls;chars+=amount;
       const remaining=Math.max(1000,maxMs-(Date.now()-started));
       const originalTimeout=Number(request?.config?.httpOptions?.timeout)||145000;
       const effectiveTimeout=Math.min(originalTimeout,remaining);
@@ -13228,7 +13350,7 @@ function budgetedLegislationAi109(ai,questionCount){
         });
         const usage=response?.usageMetadata||{};
         console.log('LEGISLACION_TOKENS_111:',JSON.stringify({
-          call:calls,model:request?.model,
+          call:callId,model:request?.model,
           inputTokens:Number(usage.promptTokenCount)||null,
           outputTokens:Number(usage.candidatesTokenCount)||null,
           totalTokens:Number(usage.totalTokenCount)||null,
@@ -14823,6 +14945,21 @@ function recordGenerationCall122(phase,started,response,details={}){
   }));
 }
 
+// SERVER 131: dos lotes independientes en vuelo como máximo, sin añadir
+// llamadas ni reintentos. FOCAL_PARALLELISM=1 conserva ejecución secuencial.
+async function focalBatches131(count,size,processBatch){
+  const parallel=String(process.env.FOCAL_PARALLELISM||'2')==='1'?1:2;
+  const completed=[];
+  for(let start=0;start<count;start+=size*parallel){
+    const starts=Array.from({length:Math.min(parallel,Math.ceil((count-start)/size))},
+      (_,i)=>start+i*size);
+    const preceding=completed.flat();
+    const wave=await Promise.all(starts.map(from=>processBatch(from,preceding)));
+    completed.push(...wave);
+  }
+  return completed.flat();
+}
+
 // SERVER 112 — motor de Legislación Alta / Muy Alta con contrato pequeño.
 // Sólo se usa en test NORMAL y de un bloque legislativo puro. Ninguna regla
 // se traslada a Geografía, Específico, test de falladas, cobertura o SRS.
@@ -14839,14 +14976,14 @@ function legislationSimpleSufficientPdf112(targets){
 async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
   if(!isPureLegislation95(targets)||!['alta','muy alta'].includes(level))
     throw new Error('112: ámbito de generación inválido.');
-  const count=targets.length,batchSize=5,generated=[];
+  const count=targets.length,batchSize=5;
   // El mismo constructor competente para Alta y Muy Alta; el nivel lo fija
   // el contrato, no la capacidad reducida de un generador económico.
   const model=LEGISLACION_MUY_ALTA_MODELO_99;
-  for(let from=0;from<count;from+=batchSize){
+  const generated=await focalBatches131(count,batchSize,async(from,preceding)=>{
     const group=targets.slice(from,from+batchSize);
     const docReady=legislationSimpleSufficientPdf112(group);
-    const seen=[...previous,...generated].slice(-14).map(q=>
+    const seen=[...previous,...preceding].slice(-14).map(q=>
       String(q?.stem||'').trim().slice(0,180)).filter(Boolean);
     let contents=legislationSimplePrompt111(group,level,mode);
     if(seen.length)contents+='\nENUNCIADOS YA USADOS (NO REPRODUCIR): '+JSON.stringify(seen);
@@ -14883,19 +15020,21 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
           received:q.questionFamily,expected:group[i].questionFamily}));
       }
     }
-    generated.push(...parsed.questions);
-  }
+    return parsed.questions;
+  });
+  // Los duplicados entre lotes los marca la validación existente,
+  // que permite regenerar solo esa plaza sin perder las demás preguntas.
   if(generated.length!==count)throw new Error('112: faltan preguntas.');
   return {text:JSON.stringify({questions:generated})};
 }
 async function validateLegislationSimple112(ai,questions,targets,level){
   if(!isPureLegislation95(targets)||questions.length!==targets.length)
     throw new Error('112: auditoría no corresponde a los objetivos.');
-  const approved=[];
   // Conservar SERVER 121: auditoría jurídica en lotes de cinco.
   // Diagnóstico de consumo 122 no debe revertir esta mejora ya desplegada.
   const batchSize=5;
-  for(let start=0;start<questions.length;start+=batchSize){
+  return focalBatches131(questions.length,batchSize,async start=>{
+    const approved=[];
     const group=questions.slice(start,start+batchSize);
     const points=targets.slice(start,start+batchSize);
     const schema=structuredClone(validationSchema);
@@ -14954,8 +15093,8 @@ async function validateLegislationSimple112(ai,questions,targets,level){
           ...(!evidence?['Sin cita PDF contrastable']:[]),
           ...(v.levelValid!==true?['Dificultad no acreditada']:[])]});
     }
-  }
-  return approved;
+    return approved;
+  });
 }
 // SERVER 114: control ESTRUCTURAL acotado. No se pronuncia sobre
 // la veracidad: esa decisión pertenece a la auditoría PDF independiente.
@@ -18943,11 +19082,11 @@ const allowedTopicIds =
         const allLeg=scopeRows.every(r=>r.block==='legislacion');
         const allGeo=scopeRows.every(r=>r.block==='geografia'&&
           [21,22,23,24].includes(Number(r.topic_order)));
-        const limitLeg=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||10);
-        const limitGeo=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||10);
-        if(allLeg&&requestedCount>(Number.isInteger(limitLeg)&&limitLeg>0?limitLeg:10))
+        const limitLeg=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||40);
+        const limitGeo=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||40);
+        if(allLeg&&requestedCount>(Number.isInteger(limitLeg)&&limitLeg>0?limitLeg:40))
           throw new Error('Piloto Legislación: límite de generación nueva; no se ha iniciado ninguna llamada a Gemini.');
-        if(allGeo&&requestedCount>(Number.isInteger(limitGeo)&&limitGeo>0?limitGeo:10))
+        if(allGeo&&requestedCount>(Number.isInteger(limitGeo)&&limitGeo>0?limitGeo:40))
           throw new Error('Piloto Geografía: límite de generación nueva; no se ha iniciado ninguna llamada a Gemini.');
       }
     }
@@ -18973,31 +19112,29 @@ const allowedTopicIds =
   );
 }
 
-   // SERVER 112: guardia ANTES de cualquier preparación Anki o generación
-   // de tests jurídicos grandes, para impedir gastar en un examen que
-   // superaría el presupuesto preventivo. Es un piloto configurable.
-   const pilotLimit112=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||10);
+   // SERVER 132: permite 10/20/30/40 en Legislación, conservando la
+   // limitación explícita por entorno y la protección frente a 45/60/75.
+   // Se evalúa antes de cualquier llamada pagada de generación.
+   const pilotLimit112=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||40);
    const safePilotLimit112=Number.isInteger(pilotLimit112)&&pilotLimit112>0
-     ? pilotLimit112:10;
+     ? pilotLimit112:40;
    if(testType==='normal' && ['alta','muy alta'].includes(difficulty) &&
      targets.length>safePilotLimit112 && isPureLegislation95(targets)){
      throw new Error('Piloto de Legislación 112: máximo '+safePilotLimit112+
-       ' preguntas por test para evitar consumo de Gemini no verificado. '+
-       'La cobertura curricular no se limita. Ampliaremos el máximo '+
-       'tras una prueba real de coste y calidad. No se ha iniciado generación pagada.');
+       ' preguntas por test con el límite de seguridad actual. '+
+       'La cobertura curricular no se limita. No se ha iniciado generación pagada.');
    }
 
-   // SERVER 116: límite PILOTO de Geografía 21-24, antes de cualquier
-   // llamada pagada; 75 preguntas podrían implicar hasta 60 llamadas Gemini
-   // (generación, auditoría y una ronda de reparación). Se amplía con
-   // GEOGRAFIA_PILOTO_MAX_116 cuando el coste de cinco/diez esté medido.
-   const geographyPilotMax116=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||10);
+   // SERVER 132: 10/20/30/40 para Geografía focal 21-24;
+   // conserva techo configurable y bloqueo de 45/60/75 hasta auditar costes.
+   // No modifica las reglas especiales de municipios o instalaciones.
+   const geographyPilotMax116=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||40);
    const safeGeographyPilot116=Number.isInteger(geographyPilotMax116)&&
-     geographyPilotMax116>0?geographyPilotMax116:10;
+     geographyPilotMax116>0?geographyPilotMax116:40;
    if(geographyPure115(targets) &&
       targets.length>safeGeographyPilot116){
      throw new Error('Piloto Geografía 116: máximo '+safeGeographyPilot116+
-       ' preguntas por test hasta medir tiempo y consumo reales. '+
+       ' preguntas por test con el límite de seguridad actual. '+
        'La cobertura permanece íntegra; no se ha iniciado una llamada pagada.');
    }
 
@@ -19233,7 +19370,7 @@ for(let i = 0; i < targets.length; i++){
   generationIndexes.push(i);
 }
    if(testType === "normal"){
-  // Consultas independientes: en rutas focales (máximo 10) no se esperan
+  // Consultas independientes: en rutas focales (hasta 40) no se esperan
   // secuencialmente. El resto de bloques conserva el recorrido previo.
   if(legislationSimple112(generationTargets,difficulty,testType) ||
      geographyPure115(generationTargets)){
@@ -19486,6 +19623,36 @@ en los exámenes oficiales 2024/2026 siempre que puedan construirse
 `
     : ""
 );
+
+    // 129: patrón oficial 2026 de hidrografía, exclusivamente cuando el
+    // objetivo de GEOGRAFÍA trata de ríos o arroyos. SOLO forma, no respuestas.
+    // No cambia modelos, número de llamadas ni auditorías existentes.
+    const geographyHydrology129 = generationTargets.some(t =>
+      String(t.topic_block || '').trim().toLowerCase() === 'geografia' &&
+      /\b(?:r[ií]os?|arroyos?|afluentes?|hidrogr[aá]f\w*|cuencas?|cauces?)\b/i.test(
+        `${t.topic_name || ''} ${t.concept || ''}`
+      )
+    );
+    if (geographyHydrology129) {
+      prompt += `
+CALIBRACIÓN HIDROGRÁFICA DEL EXAMEN OFICIAL NAVARRA 2026 — SOLO ESTILO:
+- P. 45: el tribunal puede preguntar qué aguas terminarán pasando por un
+  río concreto. La conexión puede ser INDIRECTA, mediante varios afluentes
+  sucesivos: A desemboca en B, B en C y C en el río consultado.
+- P. 46: pregunta directa «¿De qué río es afluente el arroyo X?» con cuatro
+  cursos de agua plausibles. Examina la RELACIÓN exacta, no la semejanza
+  de nombres ni la proximidad supuesta.
+- Replica ambos FORMATOS solo cuando la relación completa esté EXPRESAMENTE
+  respaldada por datos del TEMARIO: para cadenas indirectas comprueba todos
+  los eslabones, uno por uno, y la unicidad de la respuesta entre 4 opciones.
+- Estos enunciados oficiales NO son fuente de datos. NO traslades sus nombres
+  ni sus soluciones a preguntas nuevas. No deduzcas afluencias desde un mapa
+  topográfico no analizado y contrastado ni desde conocimiento general.
+- No repitas el río de destino o el nombre de la respuesta como pista en
+  una aclaración del enunciado. Si la cadena no es verificable, pregunta otra
+  relación documentada del MISMO objetivo curricular.
+`;
+    }
 
     // Exigencia adicional acotada a Legislacion de generacion completamente
     // nueva. No se aplica a preguntas Anki, ni a temas mixtos o Geografia.
@@ -19751,7 +19918,7 @@ console.log('GENERACION_FASE_122:',JSON.stringify({phase:'auditoria_factual',
   route:pureGeography115?'geografia_focal':simpleLegislation112?'legislacion_simple':'motor_general'}));
 
 // La comprobación del banco es independiente para cada pregunta.
-// Solo las rutas focales (máximo piloto 10) la ejecutan concurrentemente.
+// Solo las rutas focales (hasta 40 por defecto) la ejecutan concurrentemente.
 const duplicateChecks118=(simpleLegislation112||pureGeography115)
   ? await Promise.all(finalQuestions.map((q,i)=>
       isExactBankDuplicate(generationTargets[i],q))) : null;
@@ -20261,78 +20428,115 @@ if(invalidQuestions.length && pureGeography115){
     factualValidation,difficulty,mode,testType});
 }
 
-// SERVER 119: única plaza fallida en test NORMAL exclusivamente legislativo Muy Alta.
-// Primero Anki original VALIDADA del mismo tema; si no existe, UNA pregunta Alta
-// nueva, verificada contra el PDF. No se relajan las validaciones de las otras
-// preguntas ni se realizan rondas adicionales de reparación.
-if(invalidQuestions.length===1 && simpleLegislation112 &&
+// SERVER 130: rescate acotado y EN LOTE de preguntas rechazadas en Legislación
+// Muy Alta, exclusivamente para test normal. Conserva Anki Alta original
+// validada, o genera preguntas Alta nuevas con UNA llamada y UNA auditoría
+// por lote; no cambia los criterios de aprobación, la cobertura ni el SRS.
+if(invalidQuestions.length && simpleLegislation112 &&
    difficulty==='muy alta' && testType==='normal' &&
    generationTargets.every(t=>
      String(t.topic_block||'').trim().toLowerCase()==='legislacion')){
-  const failedIndex=invalidQuestions[0].index;
-  const oldTarget=generationTargets[failedIndex];
-  const accepted=finalQuestions.filter((q,i)=>
-    i!==failedIndex && factualValidation[i]?.valid===true);
-  const norm119=s=>String(s||'').normalize('NFKC').toLowerCase()
-    .replace(/\s+/g,' ').trim();
-  const repeated119=q=>accepted.some(v=>norm119(v.stem)===norm119(q.stem));
-  let rescued119=null;
-
-  // Reutilizar el selector Anki Alta EXISTENTE: permite tarjeta independiente
-  // sin atribuir cobertura curricular falsa, y conserva su corrección original.
-  try{
-    const fromAnki119=await applyLegislationAnkiQuota84(
-      [oldTarget],[Number(oldTarget.topic_id)],'alta');
-    const q=fromAnki119?.direct?.get(0);
-    const t=fromAnki119?.targets?.[0];
-    const duplicateTarget=targets.some((v,i)=>
-      i!==generationIndexes[failedIndex] && Number(v.id)===Number(t?.id));
-    if(q && t && q.ankiDirect===true &&
-       q.ankiOriginalStatus==='validated' &&
-       Array.isArray(q.options) && q.options.length===4 &&
-       !repeated119(q) && !duplicateTarget){
-      rescued119={question:{...q,difficulty:'alta',
-        rescueFallback119:'anki_validada'},target:t,source:'ANKI_VALIDADA'};
-    }
-  }catch(e){
-    console.warn('LEGISLACION_RESCATE_119_ANKI:',String(e?.message||e).slice(0,160));
-  }
-
-  // Si el tema carece de Anki apta, intentar una sola Alta nueva:
-  // 1 generación y 1 validación contra el PDF, dentro del presupuesto vigente.
-  if(!rescued119){
-    try{
-      const response119=await generateLegislationSimple112(
-        ai,[oldTarget],'alta',mode,accepted);
-      const q=JSON.parse(response119.text||'{}')?.questions?.[0];
-      if(q && !legislationSimpleStructuralIssue114(oldTarget,q) &&
-         q.difficulty==='alta' && !repeated119(q)){
-        const v=(await validateLegislationSimple112(
-          ai,[q],[oldTarget],'alta'))[0];
-        if(v?.valid===true && !(await isExactBankDuplicate(oldTarget,q))){
-          rescued119={question:{...q,graphic:null,
-            rescueFallback119:'alta_pdf_validada'},
-            target:oldTarget,source:'ALTA_PDF_VALIDADA'};
+  // Límite previsible de coste: como máximo 20% del test y nunca más de 8.
+  // Si hay más rechazos, se conserva el error explícito y el checkpoint.
+  const rescueLimit130=Math.min(8,Math.max(2,Math.ceil(generationTargets.length*0.2)));
+  if(invalidQuestions.length<=rescueLimit130){
+    const norm130=s=>String(s||'').normalize('NFKC').toLowerCase()
+      .replace(/\s+/g,' ').trim();
+    const occupied130=new Set(finalQuestions.flatMap((q,i)=>
+      factualValidation[i]?.valid===true && q?.stem ? [norm130(q.stem)] : []));
+    const pending130=[];
+    const rescued130=new Map();
+    const reservedIds130=new Set(targets.map(t=>Number(t.id)));
+    // Anki ORIGINAL validada primero: cero llamadas a Gemini. No admite
+    // enunciados repetidos ni objetivos curriculares ya reservados.
+    for(const rejected of invalidQuestions){
+      const index=rejected.index;
+      const oldTarget=generationTargets[index];
+      let chosen=null;
+      try{
+        const anki=await applyLegislationAnkiQuota84(
+          [oldTarget],[Number(oldTarget.topic_id)],'alta');
+        const q=anki?.direct?.get(0),t=anki?.targets?.[0];
+        const occupiedTarget=Number(t?.id)!==Number(oldTarget.id) &&
+          reservedIds130.has(Number(t?.id));
+        if(q && t && q.ankiDirect===true &&
+           q.ankiOriginalStatus==='validated' &&
+           Array.isArray(q.options) && q.options.length===4 &&
+           Number.isInteger(q.correctIndex) &&
+           q.correctIndex>=0 && q.correctIndex<4 &&
+           !occupied130.has(norm130(q.stem)) && !occupiedTarget){
+          chosen={question:{...q,difficulty:'alta',
+            rescueFallback119:'anki_validada'},target:t,source:'ANKI_VALIDADA'};
         }
+      }catch(e){
+        console.warn('LEGISLACION_RESCATE_130_ANKI:',
+          String(e?.message||e).slice(0,160));
       }
-    }catch(e){
-      console.warn('LEGISLACION_RESCATE_119_ALTA:',String(e?.message||e).slice(0,160));
+      if(chosen){
+        rescued130.set(index,chosen);
+        occupied130.add(norm130(chosen.question.stem));
+        reservedIds130.add(Number(chosen.target.id));
+      }else{
+        pending130.push({index,target:oldTarget});
+      }
     }
-  }
-
-  if(rescued119){
-    finalQuestions[failedIndex]=rescued119.question;
-    generationTargets[failedIndex]=rescued119.target;
-    targets[generationIndexes[failedIndex]]=rescued119.target;
-    factualValidation[failedIndex]={valid:true,
-      issues:[],recovery119:rescued119.source};
-    invalidQuestions=[];
-    console.log('LEGISLACION_RESCATE_119:',JSON.stringify({
-      slot:generationIndexes[failedIndex]+1,source:rescued119.source,
-      originalRequested:'muy alta',deliveredDifficulty:'alta',
-      highDifficultyQuestions:finalQuestions.filter(q=>
-        q?.difficulty==='muy alta').length,
-      extraAudits:rescued119.source==='ALTA_PDF_VALIDADA'?1:0}));
+    // Las plazas sin Anki adecuada se generan en un único lote PDF Alta.
+    // La auditoría es independiente, con el mismo control de opción única.
+    if(pending130.length){
+      try{
+        const accepted130=finalQuestions.filter((q,i)=>
+          factualValidation[i]?.valid===true).concat(
+            [...rescued130.values()].map(x=>x.question));
+        const batchTargets130=pending130.map(x=>x.target);
+        const response130=await generateLegislationSimple112(
+          ai,batchTargets130,'alta',mode,accepted130);
+        const generated130=JSON.parse(response130.text||'{}')?.questions;
+        if(!Array.isArray(generated130)||
+           generated130.length!==batchTargets130.length)
+          throw new Error('Lote de rescate Alta incompleto.');
+        const eligible130=[];
+        for(let j=0;j<generated130.length;j++){
+          const q=generated130[j],t=batchTargets130[j];
+          if(!q || legislationSimpleStructuralIssue114(t,q) ||
+             q.difficulty!=='alta' || q.questionFamily!==t.questionFamily ||
+             occupied130.has(norm130(q.stem)))continue;
+          occupied130.add(norm130(q.stem));
+          eligible130.push({index:pending130[j].index,target:t,question:q});
+        }
+        if(eligible130.length){
+          const audits130=await validateLegislationSimple112(ai,
+            eligible130.map(x=>x.question),eligible130.map(x=>x.target),'alta');
+          const duplicates130=await Promise.all(eligible130.map(x=>
+            isExactBankDuplicate(x.target,x.question)));
+          eligible130.forEach((entry,j)=>{
+            if(audits130[j]?.valid!==true || duplicates130[j])return;
+            rescued130.set(entry.index,{question:{...entry.question,
+              graphic:null,rescueFallback119:'alta_pdf_validada'},
+              target:entry.target,source:'ALTA_PDF_VALIDADA'});
+          });
+        }
+      }catch(e){
+        console.warn('LEGISLACION_RESCATE_130_ALTA:',
+          String(e?.message||e).slice(0,240));
+      }
+    }
+    // Único punto de compromiso: no toca los otros ocho resultados.
+    for(const [index,recovery] of rescued130){
+      finalQuestions[index]=recovery.question;
+      generationTargets[index]=recovery.target;
+      targets[generationIndexes[index]]=recovery.target;
+      factualValidation[index]={valid:true,issues:[],recovery119:recovery.source};
+    }
+    invalidQuestions=invalidQuestions.filter(r=>!rescued130.has(r.index));
+    console.log('LEGISLACION_RESCATE_130:',JSON.stringify({
+      requested:rescued130.size+invalidQuestions.length,
+      recovered:rescued130.size,remaining:invalidQuestions.length,
+      byAnki:[...rescued130.values()].filter(x=>x.source==='ANKI_VALIDADA').length,
+      byPdfAlta:[...rescued130.values()].filter(x=>x.source==='ALTA_PDF_VALIDADA').length,
+      downgradedOnlyVerified:true,noExtraRepairRound:true}));
+  }else{
+    console.warn('LEGISLACION_RESCATE_130_PRESUPUESTO:',JSON.stringify({
+      pending:invalidQuestions.length,maxFallbacks:rescueLimit130}));
   }
 }
 
