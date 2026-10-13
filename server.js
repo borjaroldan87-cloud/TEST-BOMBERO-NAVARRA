@@ -18790,6 +18790,86 @@ app.get('/api/generation-run/:runId',async(req,res)=>{
   }
 });
 
+// SERVER 123: selección común de registros alternativos ANTES o DESPUÉS de
+// generar. Mismo tema, sin duplicados ni cambios en prioridades de BD.
+async function geographyReplacementTargets123({positions,targets,generationTargets,
+  generationIndexes,difficulty}){
+  const used=new Set(targets.map(t=>Number(t.id)));
+  const candidateByTopic=new Map(), selected=[];
+  for(const index of positions){
+    const original=generationTargets[index],tid=Number(original?.topic_id);
+    if(!candidateByTopic.has(tid)){
+      const pool=(await getAdaptiveCoverageCandidates(260,[tid],'adaptive'))
+        .filter(t=>!used.has(Number(t.id)) && t.source_evidence && geographyEligible124(t) &&
+          String(t.topic_block||'').toLowerCase()==='geografia' &&
+          geographyTopic115(t)===geographyTopic115(original));
+      // Probar primero un subconjunto acotado; no cargar toda la geografía.
+      const short=pool.slice(0,Math.max(12,positions.length*5));
+      await attachDistractorContextToTargets(short);
+      candidateByTopic.set(tid,short);
+    }
+    const chosen=candidateByTopic.get(tid).find(t=>!used.has(Number(t.id)) &&
+      (t.geoIntent123=geographyIntent123(t,generationIndexes[index])));
+    if(!chosen)continue;
+    chosen.questionFamily=chosen.geoIntent123==='MUNICIPIO_CONCEJOS_EXCLUSION'
+      ?'2026_INCORRECTA':/_PARQUE$/.test(chosen.geoIntent123)
+      ?'2026_RAZONAMIENTO':'2024_TEXTO';
+    chosen.adaptiveDifficulty=difficulty;
+    used.add(Number(chosen.id));
+    selected.push({index,target:chosen});
+  }
+  return selected;
+}
+// Solo sustituye plazas rechazadas, conservando intactas las aprobadas.
+// Límite de coste: un lote adicional (<=5) y una auditoría, sin nuevos bucles.
+async function geographyRescueRejected123({ai,invalidQuestions,targets,
+  generationTargets,generationIndexes,finalQuestions,factualValidation,
+  difficulty,mode,testType}){
+  if(testType!=='normal'||invalidQuestions.length<1||invalidQuestions.length>5)
+    return invalidQuestions;
+  const validatedStems=new Set(finalQuestions.filter((q,i)=>
+    factualValidation[i]?.valid===true).map(q=>geographyNorm115(q.stem)));
+  try{
+    const selected=await geographyReplacementTargets123({
+      positions:invalidQuestions.map(r=>r.index),targets,generationTargets,
+      generationIndexes,difficulty});
+    if(!selected.length)return invalidQuestions;
+    const replacements=selected.map(s=>s.target);
+    const generated=JSON.parse((await geographyGenerate115(
+      ai,replacements,difficulty,mode)).text).questions;
+    const checked=await geographyValidateShapeFirst123(ai,generated,replacements,difficulty);
+    const duplicate=await Promise.all(generated.map((q,i)=>
+      isExactBankDuplicate(replacements[i],q)));
+    const passed=new Set();
+    for(let i=0;i<selected.length;i++){
+      const {index,target}=selected[i],q=generated[i],v=checked[i];
+      const stem=geographyNorm115(q?.stem);
+      const invalid=geographyForbiddenQuestionIssue(target,q)||
+        geographyStructureIssue115(target,q,difficulty);
+      if(!v?.valid||invalid||duplicate[i]||!stem||validatedStems.has(stem)){
+        console.warn('GEOGRAFIA_RESCATE_123_RECHAZADO:',JSON.stringify({
+          slot:generationIndexes[index]+1,targetId:Number(target.id),
+          issue:invalid||(!v?.valid?'Auditor rechaza relación':duplicate[i]?'Duplicada en banco':'Enunciado repetido')}));
+        continue;
+      }
+      validatedStems.add(stem);
+      finalQuestions[index]=q;
+      factualValidation[index]=v;
+      generationTargets[index]=target;
+      targets[generationIndexes[index]]=target;
+      passed.add(index);
+    }
+    console.log('GEOGRAFIA_RESCATE_123:',JSON.stringify({
+      requested:invalidQuestions.length,candidates:selected.length,
+      recovered:passed.size,remaining:invalidQuestions.length-passed.size,
+      extraAudits:1}));
+    return invalidQuestions.filter(r=>!passed.has(r.index));
+  }catch(error){
+    console.warn('GEOGRAFIA_RESCATE_123_ERROR:',String(error?.message||error).slice(0,280));
+    return invalidQuestions;
+  }
+}
+
 app.post("/api/generate", async(req,res)=>{
   const requestStartedAt=Date.now();
   const suppliedRunId=req.body?.runId;
@@ -20174,85 +20254,6 @@ if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck &&
   }
 }
 
-// SERVER 123: selección común de registros alternativos ANTES o DESPUÉS de
-// generar. Mismo tema, sin duplicados ni cambios en prioridades de BD.
-async function geographyReplacementTargets123({positions,targets,generationTargets,
-  generationIndexes,difficulty}){
-  const used=new Set(targets.map(t=>Number(t.id)));
-  const candidateByTopic=new Map(), selected=[];
-  for(const index of positions){
-    const original=generationTargets[index],tid=Number(original?.topic_id);
-    if(!candidateByTopic.has(tid)){
-      const pool=(await getAdaptiveCoverageCandidates(260,[tid],'adaptive'))
-        .filter(t=>!used.has(Number(t.id)) && t.source_evidence && geographyEligible124(t) &&
-          String(t.topic_block||'').toLowerCase()==='geografia' &&
-          geographyTopic115(t)===geographyTopic115(original));
-      // Probar primero un subconjunto acotado; no cargar toda la geografía.
-      const short=pool.slice(0,Math.max(12,positions.length*5));
-      await attachDistractorContextToTargets(short);
-      candidateByTopic.set(tid,short);
-    }
-    const chosen=candidateByTopic.get(tid).find(t=>!used.has(Number(t.id)) &&
-      (t.geoIntent123=geographyIntent123(t,generationIndexes[index])));
-    if(!chosen)continue;
-    chosen.questionFamily=chosen.geoIntent123==='MUNICIPIO_CONCEJOS_EXCLUSION'
-      ?'2026_INCORRECTA':/_PARQUE$/.test(chosen.geoIntent123)
-      ?'2026_RAZONAMIENTO':'2024_TEXTO';
-    chosen.adaptiveDifficulty=difficulty;
-    used.add(Number(chosen.id));
-    selected.push({index,target:chosen});
-  }
-  return selected;
-}
-// Solo sustituye plazas rechazadas, conservando intactas las aprobadas.
-// Límite de coste: un lote adicional (<=5) y una auditoría, sin nuevos bucles.
-async function geographyRescueRejected123({ai,invalidQuestions,targets,
-  generationTargets,generationIndexes,finalQuestions,factualValidation,
-  difficulty,mode,testType}){
-  if(testType!=='normal'||invalidQuestions.length<1||invalidQuestions.length>5)
-    return invalidQuestions;
-  const validatedStems=new Set(finalQuestions.filter((q,i)=>
-    factualValidation[i]?.valid===true).map(q=>geographyNorm115(q.stem)));
-  try{
-    const selected=await geographyReplacementTargets123({
-      positions:invalidQuestions.map(r=>r.index),targets,generationTargets,
-      generationIndexes,difficulty});
-    if(!selected.length)return invalidQuestions;
-    const replacements=selected.map(s=>s.target);
-    const generated=JSON.parse((await geographyGenerate115(
-      ai,replacements,difficulty,mode)).text).questions;
-    const checked=await geographyValidateShapeFirst123(ai,generated,replacements,difficulty);
-    const duplicate=await Promise.all(generated.map((q,i)=>
-      isExactBankDuplicate(replacements[i],q)));
-    const passed=new Set();
-    for(let i=0;i<selected.length;i++){
-      const {index,target}=selected[i],q=generated[i],v=checked[i];
-      const stem=geographyNorm115(q?.stem);
-      const invalid=geographyForbiddenQuestionIssue(target,q)||
-        geographyStructureIssue115(target,q,difficulty);
-      if(!v?.valid||invalid||duplicate[i]||!stem||validatedStems.has(stem)){
-        console.warn('GEOGRAFIA_RESCATE_123_RECHAZADO:',JSON.stringify({
-          slot:generationIndexes[index]+1,targetId:Number(target.id),
-          issue:invalid||(!v?.valid?'Auditor rechaza relación':duplicate[i]?'Duplicada en banco':'Enunciado repetido')}));
-        continue;
-      }
-      validatedStems.add(stem);
-      finalQuestions[index]=q;
-      factualValidation[index]=v;
-      generationTargets[index]=target;
-      targets[generationIndexes[index]]=target;
-      passed.add(index);
-    }
-    console.log('GEOGRAFIA_RESCATE_123:',JSON.stringify({
-      requested:invalidQuestions.length,candidates:selected.length,
-      recovered:passed.size,remaining:invalidQuestions.length-passed.size,
-      extraAudits:1}));
-    return invalidQuestions.filter(r=>!passed.has(r.index));
-  }catch(error){
-    console.warn('GEOGRAFIA_RESCATE_123_ERROR:',String(error?.message||error).slice(0,280));
-    return invalidQuestions;
-  }
-}
 
 if(invalidQuestions.length && pureGeography115){
   invalidQuestions=await geographyRescueRejected123({ai,invalidQuestions,
