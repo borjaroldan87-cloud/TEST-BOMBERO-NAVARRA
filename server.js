@@ -7887,6 +7887,7 @@ JOIN question_bank qb
 WHERE
   la.is_correct = FALSE
   AND (ci.exam_relevant = TRUE OR ci.item_type='anki_independent')
+  AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
@@ -8038,6 +8039,7 @@ LEFT JOIN LATERAL (
 
 WHERE
   ci.exam_relevant = TRUE
+  AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
@@ -8230,6 +8232,7 @@ async function getNewCoverageCandidate(
       ON t.id = ci.topic_id
     WHERE
   ci.exam_relevant = TRUE
+  AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND ci.times_asked = 0
   AND (
     $1::int[] IS NULL
@@ -8649,16 +8652,207 @@ function geographyDiverseCandidates115(rows){
   const seen=new Set(output.map(r=>r.id));
   return output.concat(rows.filter(r=>!seen.has(r.id)));
 }
-function geographyAssignedFamily115(target,index){
-  const context=Array.isArray(target?.distractorContext)?target.distractorContext:[];
-  const nearby=Array.isArray(target?.territorialContext?.nearby)
-    ?target.territorialContext.nearby:[];
-  // INCORRECTA solo con al menos tres asociaciones reales adicionales.
-  if(index%5===3 && context.length>=3)return '2026_INCORRECTA';
-  if(index%5===2 && nearby.length>=2)return '2026_RAZONAMIENTO';
-  if(index%5===1 && context.length>=2)return '2026_CORRECTA';
-  return '2024_TEXTO';
+/* SERVER 123: preguntas de ubicación, intervención y pertenencia territorial.
+   Familias cerradas: nunca superficie, potencia, promotores ni deducciones de distancia.
+   Un plan de formato por OBJETIVO reduce la invención de asociaciones nuevas. */
+function geographyConcreteName123(value){
+  return geographyNorm115(String(value||'')
+    .replace(/^\s*(?:el|la)\s+/i,'')
+    .replace(/^(?:parque de bomberos|parque|sede|municipio|concejo|localidad)\s+(?:de\s+)?/i,''));
 }
+// Corrección editorial 13/10: T22 pregunta SOLO POLÍGONOS con nombre.
+// No convierte filas de ÁREA, ZONA, SECTOR o CIUDAD en objetivos de examen.
+// El filtro afecta a la selección, no elimina registros históricos de cobertura.
+// SERVER 125: la misma regla de examinabilidad para selección, historial y
+// estadísticas. No borra ni modifica los 209 registros históricos del Tema 22.
+// El filtro SQL reproduce el prefijo de geographyEligible124 (polígono con nombre).
+const GEOGRAPHY_EXAMINABLE_SQL_125 = `(
+  LOWER(BTRIM(COALESCE(t.block,''))) <> 'geografia'
+  OR t.topic_order IS DISTINCT FROM 22
+  OR BTRIM(COALESCE(ci.concept,'')) ~* '^pol[ií]gono[[:space:]]+[^[:space:]]'
+)`;
+function geographyEligible124(target){
+  if(geographyTopic115(target)!==22)return true;
+  const name=String(target?.concept||'').split(/\s+ubicad[oa]s?\s+en\b/i)[0].trim();
+  return /^pol[ií]gono\s+(?:industrial\s+)?\S.{1,}/i.test(name) &&
+    !/^pol[ií]gono\s+(?:industrial\s*)?$/i.test(name);
+}
+// En el PDF T22 aparecen varias sedes AGRUPADAS. Estas no son parques únicos.
+// Lodosa, Peralta, Alsasua, Oronoz, Navascués y Sangüesa son independientes.
+function geographyOperationalLabel124(target){
+  const exact=target?.territorialContext?.exact||[];
+  const sites=[...new Set(exact.map(r=>geographyNorm115(r.operationalArea)).filter(Boolean))];
+  if(sites.length!==1)return null;
+  const area=sites[0];
+  if(/trinitarios/.test(area))return null;
+  if(/lodosa.*peralta|peralta.*lodosa|altsasu.*auritz|alsasua.*burguete|navascues.*sanguesa/.test(area))return null;
+  const specific=[
+    [/cordovilla|parque central de pamplona|central de pamplona/, 'Central de Cordovilla'],
+    [/alsasua|altsasu/,'Alsasua'],[/oronoz/,'Oronoz'],[/burguete|auritz/,'Burguete'],
+    [/navascues|nabaskoze/,'Navascués'],[/sanguesa|zangoza/,'Sangüesa'],
+    [/estella|lizarra/,'Estella'],[/tafalla/,'Tafalla'],[/lodosa/,'Lodosa'],
+    [/peralta|azkoien/,'Peralta'],[/tudela/,'Tudela']
+  ];
+  if(/^(?:pamplona|iruna)$/.test(area))return null;
+  for(const [re,label] of specific)if(re.test(area)){
+    // La ciudad de Pamplona corresponde a Trinitarios y no entra en este reparto.
+    if(label==='Central de Cordovilla' && exact.some(x=>
+       /^(?:pamplona|iruna|pamplona\s*\/\s*iruna)$/i.test(String(x.entity||'').trim())))return null;
+    return label;
+  }
+  return null;
+}
+// Los once parques son respuestas distintas; alias bilingües sí equivalen.
+function geographyParkOption124(answer){
+  const a=geographyNorm115(answer);
+  if(/trinitarios|lodosa.*peralta|peralta.*lodosa|altsasu.*auritz|alsasua.*burguete|navascues.*sanguesa/.test(a))return null;
+  if(/\bcordovilla\b|\bparque central de pamplona\b|\bcentral de pamplona\b/.test(a))return 'Central de Cordovilla';
+  const aliases=[
+    [/\b(?:alsasua|altsasu)\b/,'Alsasua'],[/\boronoz\b/,'Oronoz'],[/\b(?:burguete|auritz)\b/,'Burguete'],
+    [/\b(?:navascues|nabaskoze)\b/,'Navascués'],[/\b(?:sanguesa|zangoza)\b/,'Sangüesa'],
+    [/\b(?:estella|lizarra)\b/,'Estella'],[/\btafalla\b/,'Tafalla'],[/\blodosa\b/,'Lodosa'],
+    [/\b(?:peralta|azkoien)\b/,'Peralta'],[/\btudela\b/,'Tudela']
+  ];
+  for(const [re,name] of aliases)if(re.test(a))return name;
+  return null;
+}
+function geographyParkAnswerValid124(target,question){
+  const expected=geographyOperationalLabel124(target);
+  const opts=question?.options||[];
+  if(!expected||opts.length!==4)return false;
+  const parks=opts.map(geographyParkOption124);
+  if(parks.some(x=>!x)||new Set(parks).size!==4)return false;
+  return parks[question.correctIndex]===expected;
+}
+function geographySiteIsSpecific123(target){
+  return Boolean(geographyOperationalLabel124(target));
+}
+// SERVER 125: '/' puede separar dos municipios o dos nombres del MISMO
+// municipio (castellano/euskera). Solo se acepta la segunda situación si
+// T21 documenta ambos alias en la misma entidad; la ambigüedad se excluye
+// ANTES de pagar una generación. Nunca deducir proximidad/distancias.
+function geographySingleMunicipality125(target,rawLocation){
+  const raw=String(rawLocation||'').trim();
+  if(!raw||/,|\s+y\s+/i.test(raw))return false;
+  if(!raw.includes('/'))return true;
+  const aliases=raw.split('/').map(geographyNorm115).filter(Boolean);
+  if(aliases.length!==2||aliases[0]===aliases[1])return false;
+  return (target?.territorialContext?.exact||[]).some(row=>{
+    const docAliases=[...(row.municipalityAliases||[]),...(row.aliases||[])]
+      .map(geographyNorm115);
+    return aliases.every(alias=>docAliases.includes(alias));
+  });
+}
+function geographyReverseOptions123(target){
+  const own=String(target?.concept||'');
+  const name=own.match(/^(.+?)\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\b/i)?.[1]?.trim();
+  const municipality=geographyNorm115(target?.optionPools?.correctLocation);
+  if(!name||!municipality||!geographySingleMunicipality125(target,target?.optionPools?.correctLocation))return null;
+  const others=[];
+  for(const row of target?.optionPools?.sameTopicRecords||[]){
+    const concept=String(row.concept||'');
+    const parsed=concept.match(/^(.+?)\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\s+(.+?)(?:\s+con\s+(?:el|la)\s+parque|,|$)/i);
+    if(!parsed)continue;
+    if(geographyTopic115(target)===22 && !/^pol[ií]gono\s+/i.test(parsed[1]))continue;
+    const wrongMunicipality=geographyNorm115(parsed[2]);
+    if(!wrongMunicipality||/[\/,]/.test(parsed[2])||/\s+y\s+/i.test(parsed[2])||
+       wrongMunicipality===municipality||wrongMunicipality.includes(municipality)||
+       municipality.includes(wrongMunicipality))continue;
+    if(geographyNorm115(parsed[1])===geographyNorm115(name))continue;
+    if(!others.some(x=>geographyNorm115(x)===geographyNorm115(parsed[1])))others.push(parsed[1].trim());
+  }
+  return others.length>=3?{correct:name,distractors:others.slice(0,5)}:null;
+}
+function geographyIntent123(target,index){
+  const topic=geographyTopic115(target);
+  if(![21,22,23,24].includes(topic)||!geographyEligible124(target))return null;
+  const location=String(target?.optionPools?.correctLocation||'').trim();
+  // Varias localidades independientes: exigir pregunta específica plural;
+  // hasta disponer de modelo verificable del conjunto, NO preguntar por una sola.
+  const multiMunicipality=!geographySingleMunicipality125(target,location);
+  const park=geographySiteIsSpecific123(target);
+  const available=[];
+  if(topic===21){
+    const parts=String(target?.concept||'').split('->').map(x=>x.trim()).filter(Boolean);
+    const isConcejo=parts.length>=3;
+    const same=target?.optionPools?.subordinatesSameMunicipality||[];
+    const other=target?.optionPools?.subordinatesOtherMunicipalitiesSameOperationalArea||[];
+    if(park)available.push('LOCALIDAD_PARQUE');
+    if(isConcejo && parts[1])available.push('CONCEJO_MUNICIPIO');
+    const sameCount=same.length+(isConcejo?1:0);
+    if(sameCount>=3&&other.length)available.push('MUNICIPIO_CONCEJOS_EXCLUSION');
+  }else{
+    if(location&&!multiMunicipality)available.push('INSTALACION_MUNICIPIO');
+    if(park)available.push('INSTALACION_PARQUE');
+    if(!multiMunicipality&&geographyReverseOptions123(target))available.push('MUNICIPIO_INSTALACION');
+  }
+  // El orden rota, pero una relación no acreditada nunca entra en el sorteo.
+  return available.length?available[index%available.length]:null;
+}
+function geographyConcreteIssue123(target,q){
+  const topic=geographyTopic115(target);
+  if(![21,22,23,24].includes(topic))return null;
+  if(!geographyEligible124(target))return 'GEOGRAFÍA 124: en T22 solo entra un polígono con nombre.';
+  const intent=target?.geoIntent123;
+  if(!intent)return 'GEOGRAFÍA 123: el objetivo no tiene una relación territorial examinable inequívoca.';
+  const stem=geographyNorm115(q?.stem),opts=q?.options||[];
+  const normalized=opts.map(geographyConcreteName123);
+  const correct=normalized[q.correctIndex];
+  const mentionsPark=/\bparque de bomberos\b|\bsede de bomberos\b|\bsede operativa\b/.test(stem);
+  const firstPark=/\bprimer(?:a|o)?\b|\bprimero\b|\binicial(?:mente)?\b/.test(stem);
+  if(topic!==21){
+    const installation=String(target?.concept||'').match(/^(.+?)\s+(?:ubicad[oa]s?|situad[oa]s?|emplazad[oa]s?|localizad[oa]s?)\s+en\b/i)?.[1];
+    // En la variante inversa basta nombrar inequívocamente el municipio.
+    if(intent!=='MUNICIPIO_INSTALACION' && installation &&
+       !stem.includes(geographyNorm115(installation)))
+      return 'GEOGRAFÍA 124: la pregunta no identifica por su nombre la instalación del PDF.';
+  }
+  if(intent==='LOCALIDAD_PARQUE'||intent==='INSTALACION_PARQUE'){
+    if(!mentionsPark||!firstPark||!/(?:accidente|incendio|aviso|emergencia|siniestro|intervencion|moviliz)/.test(stem))
+      return 'GEOGRAFÍA 123: preguntar parque de primera intervención mediante un supuesto de emergencia.';
+    if(!geographySiteIsSpecific123(target))return 'GEOGRAFÍA 123: sede inicial no documentada unívocamente.';
+    if(!geographyParkAnswerValid124(target,q))
+      return 'GEOGRAFÍA 124: respuestas deben ser cuatro parques separados y exactamente uno corresponde al ámbito.';
+  }else if(intent==='INSTALACION_MUNICIPIO'){
+    if(mentionsPark||!/(?:municipio|localidad)/.test(stem))return 'GEOGRAFÍA 123: pedir exclusivamente el municipio de la instalación.';
+  }else if(intent==='MUNICIPIO_INSTALACION'){
+    if(mentionsPark||!/(?:municipio|localidad|situad|ubicad|encuentra)/.test(stem))
+      return 'GEOGRAFÍA 123: identificar exclusivamente la instalación en el municipio.';
+    const reverse=geographyReverseOptions123(target);
+    const loc=geographyNorm115(target?.optionPools?.correctLocation);
+    if(!reverse||!stem.includes(loc)||correct!==geographyConcreteName123(reverse.correct)||
+       normalized.some((o,i)=>i!==q.correctIndex && !reverse.distractors.some(d=>geographyConcreteName123(d)===o)))
+      return 'GEOGRAFÍA 123: asociación inversa instalación/municipio sin tres distractores documentados.';
+  }else if(intent==='CONCEJO_MUNICIPIO'){
+    const parts=String(target?.concept||'').split('->').map(v=>v.trim()).filter(Boolean);
+    if(mentionsPark||!/(?:municipio)/.test(stem)||!/(?:concejo|localidad|pertenece)/.test(stem)||
+       correct!==geographyConcreteName123(parts[1]))
+      return 'GEOGRAFÍA 123: concejo debe asociarse exclusivamente a su municipio documentado.';
+  }else if(intent==='MUNICIPIO_CONCEJOS_EXCLUSION'){
+    const parts=String(target?.concept||'').split('->').map(x=>x.trim()).filter(Boolean);
+    const same=[...(target?.optionPools?.subordinatesSameMunicipality||[]).map(x=>x.entity)];
+    if(parts.length>=3)same.push(parts[0]);
+    const nearby=(target?.optionPools?.subordinatesOtherMunicipalitiesSameOperationalArea||[]).map(x=>x.entity);
+    const normSame=new Set(same.map(geographyConcreteName123));
+    const normNearby=new Set(nearby.map(geographyConcreteName123));
+    const childMunicipality=(parts.length>=3?parts[1]:parts[0]).replace(/^Municipio de\s+/i,'');
+    const containsMunicipality=geographyNorm115(childMunicipality).split('/').some(part=>
+      part.length>=3&&stem.includes(part.trim()));
+    if(mentionsPark||!/(?:concejo|localidad)/.test(stem)||!/(?:no pertenece|no forman parte|no pertenece|incorrect)/.test(stem)||
+       !containsMunicipality||opts.length!==4||
+       normalized.filter((o,i)=>i!==q.correctIndex&&normSame.has(o)).length!==3||
+       !normNearby.has(correct))
+      return 'GEOGRAFÍA 123: se exigen tres concejos del mismo municipio y uno real de otro municipio del mismo ámbito.';
+  }
+  if([22,23,24].includes(topic)){
+    const expected={22:/\bpoligono\b|\bindustrial\b|\bzona\b|\barea de\b|\bparque empresarial\b|\bsector\b|\bciudad\b/,
+      23:/\bsolar\b|\bfotovoltaic|\bfv\b|\bplanta\b/,
+      24:/\beolic/}[topic];
+    if(!expected.test(stem))return 'GEOGRAFÍA 123: nombrar la instalación concreta del tema seleccionado.';
+  }
+  return null;
+}
+
 function geographyFactText115(target,text){
   const topic=geographyTopic115(target);
   let value=geographyPromptSafeText(target,text);
@@ -8674,10 +8868,11 @@ function geographyFocalPrompt115(targets,difficulty,mode,defects=[]){
     const rows=Array.isArray(t.distractorContext)?t.distractorContext:[];
     const exact=Array.isArray(t.territorialContext?.exact)?t.territorialContext.exact:[];
     const areas=[...new Set(exact.map(x=>x.operationalArea).filter(Boolean))];
-    const noUnambiguousPark=areas.length!==1;
+    const noUnambiguousPark=areas.length!==1 || !geographySiteIsSpecific123(t);
     return {
       index:i,topic:t.topic_name,coverageId:t.id,
-      family:t.questionFamily,concept:geographyFactText115(t,t.concept).slice(0,530),
+      family:t.questionFamily,intent:t.geoIntent123||null,
+      concept:geographyFactText115(t,t.concept).slice(0,530),
       evidence:geographyFactText115(t,geographyPromptSafeEvidence(t)).slice(0,430),
       page:t.source_page??null,
       // T21 concejo -> municipio -> parque: la primera entidad es el
@@ -8693,6 +8888,7 @@ function geographyFocalPrompt115(targets,difficulty,mode,defects=[]){
       siteCandidates:(pool.alternativeOperationalAreas||[]).slice(0,5).map(r=>r.operationalArea),
       subordinateCandidates:(pool.subordinatesSameMunicipality||[]).slice(0,5).map(r=>({name:r.entity,municipality:r.parentMunicipality})),
       otherSubordinates:(pool.subordinatesOtherMunicipalitiesSameOperationalArea||[]).slice(0,4).map(r=>({name:r.entity,municipality:r.parentMunicipality})),
+      reverseInstallationOptions:geographyReverseOptions123(t),
       relatedFacts:rows.slice(0,7).map(r=>geographyFactText115(t,r.concept).slice(0,190)),
       errors:defects[i]||[]
     };
@@ -8703,16 +8899,35 @@ Usa una pregunta por registro y el mismo orden. Devuelve el JSON de questionSche
 FUENTE ÚNICA de HECHOS: PDFs del temario en File Search; las fichas de abajo
 son extractos del mismo temario y NO autorizan extrapolaciones.
 
-ESTILO APROBADO DE EXAMEN 2024/2026: breve, directo, operativo;
-- «¿En qué municipio está situado el polígono X?»
-- «SOS Navarra recibe aviso de incendio en la localidad X. ¿Qué parque
-   de bomberos se movilizaría en primer lugar?» (SOLO si T21 acredita la sede
-   de atención inicial, sin inferir recursos reales por otras condiciones).
-- «Si se originase un incendio en la planta FV X, ¿qué parque se movilizaría
-   inicialmente?» (solo con relación territorial inequívoca).
-- «¿Cuál de estas asociaciones instalación–municipio es INCORRECTA?»
-- «¿Cuál de las siguientes localidades NO pertenece al municipio X?»
-Son moldes de redacción, NO datos factuales. Distribuye la letra correcta sin patrón.
+SOLO SON EXAMINABLES ESTOS FORMATOS TERRITORIALES (el campo intent de cada
+objetivo es OBLIGATORIO y NO se sustituye por otra variante):
+- LOCALIDAD_PARQUE: «Ha ocurrido un accidente/incendio en el municipio o
+  concejo X. ¿Qué parque de bomberos intervendría PRIMERO?».
+- CONCEJO_MUNICIPIO: «¿A qué municipio pertenece el concejo X?».
+- MUNICIPIO_CONCEJOS_EXCLUSION: «¿Cuál de los siguientes concejos NO
+  pertenece al municipio X?». TRES concejos comprobados del mismo municipio y
+  UNO de otro municipio, preferentemente del mismo ámbito operativo de Navarra
+  Media o Norte; no afirmar colindancia sin prueba.
+- INSTALACION_MUNICIPIO: «¿En qué municipio está el polígono/parque solar/
+  parque eólico X?». Si el PDF lista VARIOS municipios, pregunta por el
+  conjunto completo («¿En qué municipios se encuentra X?»), no solo uno.
+- MUNICIPIO_INSTALACION: «¿Qué polígono/parque solar/parque eólico se encuentra
+  en el municipio X?». Únicamente si reverseInstallationOptions ofrece tres
+  distractores documentados de otros municipios.
+- INSTALACION_PARQUE: «Se declara un incendio/accidente en la instalación X.
+  ¿Qué parque de bomberos actúa PRIMERO?». Solo con sede T21 inequívoca.
+Prohibidas preguntas sobre datos numéricos/empresariales, pistas de respuesta,
+relaciones indirectas ambiguas y cualquier otro formato ajeno a estos seis.
+En las preguntas de primera intervención se evalúa la asignación territorial
+estudiada en T21, NO la disponibilidad real de un vehículo. Son ONCE parques
+DISTINTOS: Central de Cordovilla, Alsasua, Oronoz, Burguete, Navascués,
+Sangüesa, Estella, Tafalla, Lodosa, Peralta/Azkoien y Tudela. Excluir
+Trinitarios (ciudad de Pamplona). Aunque la TABLA de instalación T22 los agrupe,
+Lodosa y Peralta son DOS parques; Alsasua y Oronoz también SON DISTINTOS;
+si hay una sede conjunta ambigua, no preguntar qué parque interviene primero.
+Para TEMA 22 SOLO polÍGONOS con nombre: NO áreas industriales, zonas, sectores,
+ciudades industriales, parques empresariales o actividades económicas.
+Las letras correctas no deben seguir patrón.
 
 CRITERIOS:
 1) Cuatro alternativas de igual categoría y longitud comparable; exactamente
@@ -8732,9 +8947,9 @@ CRITERIOS:
    Si la instalación tiene varios municipios, no preguntes como si hubiera
    uno solo: pregunta por el conjunto exacto o por UNA pertenencia con tres
    ubicaciones realmente ajenas. No uses la falsa opción por omisión de datos.
-6) Si la familia es 2026_INCORRECTA, escribe literalmente INCORRECTA o NO
-   en el enunciado. Si falta evidencia para 3 verdades + 1 falsedad,
-   cambia a 2024_TEXTO y di la familia real; no inventes hechos.
+6) Si la familia es 2026_INCORRECTA, escribe literalmente NO o INCORRECTA
+   y demuéstralo con tres pertenencias verdaderas y una falsa documentada.
+   Nunca cambies el intent ni la familia que figura en los hechos del objetivo.
 7) Dificultad ALTA: distinciones territoriales plausibles. MUY ALTA: relaciones
    sutiles de municipio/concejo/sede/instalación cuando el PDF las sostenga.
    Nunca subas dificultad inventando normativa o escenarios.
@@ -8761,13 +8976,18 @@ function geographyStructureIssue115(target,question,requestedDifficulty){
     return 'GEOGRAFÍA 115: opciones iguales o equivalentes.';
   if(requestedDifficulty && question?.difficulty!==requestedDifficulty)
     return 'GEOGRAFÍA 115: dificultad declarada diferente de la solicitada.';
+  if(target?.questionFamily && question?.questionFamily!==target.questionFamily)
+    return 'GEOGRAFÍA 123: el formato de pregunta ha cambiado respecto al plan curricular.';
   const stem=geographyNorm115(question.stem);
-  const asksPark=/\b(?:que|cual)\s+(?:es\s+el\s+)?(?:parque|sede)\b|\b(?:parque|sede)\s+(?:corresponde|atiende|actua|moviliza)\b/.test(stem);
+  const asksPark=/\b(?:que|cual)\s+(?:es\s+el\s+)?(?:parque(?:\s+de\s+bomberos)?|sede)\b(?!\s+(?:solar|eolico|fotovoltaico|industrial))|\b(?:parque de bomberos|sede)\s+(?:corresponde|atiende|actua|moviliza)\b/.test(stem);
   const asksIncorrect=question.questionFamily==='2026_INCORRECTA' ||
     /\bincorrecta?\b|\bno\b/.test(stem);
   const areas=[...new Set((target?.territorialContext?.exact||[])
     .map(x=>canonical(x.operationalArea)).filter(Boolean))];
-  if(asksPark && !asksIncorrect){
+  if(asksPark && !asksIncorrect && /_PARQUE$/.test(target?.geoIntent123||'')){
+    if(!geographyParkAnswerValid124(target,question))
+      return 'GEOGRAFÍA 124: la respuesta o las alternativas no son once parques concretos y distintos.';
+  }else if(asksPark && !asksIncorrect){
     // El examen oficial 2024 pregunta expresamente por movilización inicial;
     // aceptarlo SOLO como correspondencia territorial unívoca del Tema 21.
     if(areas.length!==1)return 'GEOGRAFÍA 115: no consta una única sede operativa en Tema 21.';
@@ -8827,8 +9047,30 @@ function geographyStructureIssue115(target,question,requestedDifficulty){
   if(question.questionFamily==='2026_INCORRECTA' &&
     !/incorrect|\bno\b/.test(stem))
     return 'GEOGRAFÍA 115: familia INCORRECTA sin polaridad explícita.';
-  return null;
+  return geographyConcreteIssue123(target,question);
 }
+// SERVER 123: rechazos deterministas ANTES de consumir File Search.
+// El auditor documental sigue siendo obligatorio para CADA pregunta entregada.
+async function geographyValidateShapeFirst123(ai,questions,targets,difficulty){
+  const results=new Array(questions.length),indices=[];
+  for(let i=0;i<questions.length;i++){
+    const issue=geographyForbiddenQuestionIssue(targets[i],questions[i])||
+      geographyStructureIssue115(targets[i],questions[i],difficulty);
+    if(issue)results[i]={index:i,valid:false,issues:[issue],
+      familyValid:false,distractorsValid:false,graphicValid:null};
+    else indices.push(i);
+  }
+  if(indices.length){
+    const audited=await geographyValidate115(ai,
+      indices.map(i=>questions[i]),indices.map(i=>targets[i]));
+    audited.forEach((result,index)=>{results[indices[index]]={...result,index:indices[index]};});
+  }
+  if(indices.length!==questions.length)console.log('GEOGRAFIA_FILTRO_PREVIO_123:',
+    JSON.stringify({received:questions.length,audited:indices.length,
+      skipped:questions.length-indices.length}));
+  return results;
+}
+
 async function geographyValidate115(ai,questions,targets){
   // Auditorías focales de máximo cinco; un 504 no desencadena reintentos.
   const aggregated=[];
@@ -8872,11 +9114,14 @@ ${JSON.stringify(targets.map((t,i)=>({index:i,topic:t.topic_name,
   exact:(t.territorialContext?.exact||[]).map(x=>x.concept).slice(0,3)})))}
 PREGUNTAS SIN CLAVE NI EXPLICACIÓN DEL GENERADOR:
 ${JSON.stringify(blindQuestions)}`;
+  const auditStarted122=Date.now();
   const response=await ai.models.generateContent({
     model:'gemini-3.5-flash-lite',contents:prompt,
     config:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
       responseMimeType:'application/json',responseJsonSchema:schema}
   });
+  recordGenerationCall122('geografia_auditoria',auditStarted122,response,{
+    questions:questions.length,model:'gemini-3.5-flash-lite'});
   const data=JSON.parse(response.text);
   if(!Array.isArray(data.results)||data.results.length!==questions.length ||
     data.results.some((r,i)=>r.index!==i))
@@ -8896,12 +9141,16 @@ async function geographyGenerate115(ai,targets,difficulty,mode,defects=[]){
       defects.slice(begin,begin+5));
     console.log('GEOGRAFIA_FOCAL_115:',JSON.stringify({
       count:subset.length,promptChars:contents.length}));
+    const generationStarted122=Date.now();
     const response=await ai.models.generateContent({
       model:GEOGRAFIA_GENERACION_MODELO_115,
       contents,
       config:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
         responseMimeType:'application/json',responseJsonSchema:questionSchema}
     });
+    recordGenerationCall122('geografia_generacion',generationStarted122,response,{
+      questions:subset.length,batch:Math.floor(begin/5)+1,
+      model:GEOGRAFIA_GENERACION_MODELO_115});
     const data=JSON.parse(response.text);
     if(!Array.isArray(data.questions)||data.questions.length!==subset.length)
       throw new Error('GEOGRAFÍA 115: lote incompleto; no reintentar automáticamente.');
@@ -9713,6 +9962,7 @@ for(let i = 0; i < selected.length; i++){
     JOIN topics t ON t.id = ci.topic_id
     WHERE
   ci.exam_relevant = TRUE
+  AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND (
     $3::text = 'simulation'
     OR ci.worked = FALSE
@@ -10067,7 +10317,11 @@ return {
       };
     });
 
-  for(const target of targets){
+  // Las consultas del mismo lote son de solo lectura e independientes.
+  // Conservar orden e identidad de cada target; máximo 5 conexiones en vuelo.
+  const contextBatch123=geographyPure115(targets)?5:1;
+  for(let offset=0;offset<targets.length;offset+=contextBatch123){
+  await Promise.all(targets.slice(offset,offset+contextBatch123).map(async target=>{
 
     if(!target?.topic_name || !target?.id){
       target.distractorContext=[];
@@ -10075,7 +10329,7 @@ return {
         exact:[],
         nearby:[]
       };
-      continue;
+      return;
     }
 
     /*
@@ -10185,7 +10439,7 @@ return {
       topicNumber < 21 ||
       topicNumber > 26
     ){
-      continue;
+      return;
     }
 
 const conceptText=
@@ -10326,7 +10580,7 @@ const exact=
     : [];
 
     if(!exact.length){
-      continue;
+      return;
     }
 
     const exactIds=
@@ -10796,6 +11050,7 @@ target.optionPools={
           cleanTerritorialRow
         )
     };
+  }));
   }
 }
   function geographyOfficialArchetypePrompt(target,index=0){
@@ -14037,517 +14292,9 @@ async function markCoverageTargetsWorked(targets){
     [ids]
   );
 }
-async function validateDistractorCompetitiveness(ai, questions){
-  const schema = {
-    type:"object",
-    properties:{
-      results:{
-        type:"array",
-        items:{
-          type:"object",
-          properties:{
-            index:{
-              type:"integer",
-              minimum:0
-            },
-            answerStandsOut:{
-              type:"boolean"
-            },
-            answerStandoutReason:{
-              type:"string"
-            },
-            assessments:{
-              type:"array",
-              minItems:3,
-              maxItems:3,
-              items:{
-                type:"object",
-                properties:{
-  optionIndex:{
-    type:"integer",
-    minimum:0,
-    maximum:3
-  },
-  competitive:{
-    type:"boolean"
-  },
-  sameTechnicalAxis:{
-    type:"boolean"
-  },
-  confusionAnchor:{
-    type:"string"
-  },
-  reason:{
-    type:"string"
-  }
-},
-required:[
-  "optionIndex",
-  "competitive",
-  "sameTechnicalAxis",
-  "confusionAnchor",
-  "reason"
-]
-              }
-            }
-          },
-          required:[
-            "index",
-            "answerStandsOut",
-            "answerStandoutReason",
-            "assessments"
-          ]
-        }
-      }
-    },
-    required:["results"]
-  };
 
-  schema.properties.results.minItems = questions.length;
-  schema.properties.results.maxItems = questions.length;
+// SERVER 125: se ha eliminado una funcion historica sin referencias ejecutables.
 
-  const compactQuestions = questions.map((question,index)=>({
-    index,
-    stem:question.stem,
-    options:question.options,
-    correctIndex:question.correctIndex,
-    questionFamily:question.questionFamily,
-    difficulty:question.difficulty,
-    sourceEvidence:question.sourceEvidence
-  }));
-const normalizeAuditText = value =>
-  String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g,"")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g," ")
-    .replace(/\s+/g," ")
-    .trim();
-
-const auditStopWords = new Set([
-  "para","como","desde","hasta","entre","sobre","donde","cuando",
-  "cual","cuales","esta","este","estos","estas","una","uno","unos",
-  "unas","del","las","los","que","con","sin","por","sus","se","al",
-  "de","la","el","y","o","en","un"
-]);
-
-const contentTokens = value =>
-  normalizeAuditText(value)
-    .split(" ")
-    .filter(token =>
-      token.length >= 5 &&
-      !auditStopWords.has(token)
-    );
-
-const absoluteTerms = [
-  "siempre",
-  "nunca",
-  "exclusivamente",
-  "unicamente",
-  "obligatoriamente",
-  "invariablemente",
-  "instantaneamente",
-  "rigurosamente",
-  "exactamente",
-  "completamente",
-  "cualquier",
-  "por completo"
-];
-
-const unsupportedAbsoluteTerms = (optionText,sourceEvidence) => {
-  const option = normalizeAuditText(optionText);
-  const source = normalizeAuditText(sourceEvidence);
-
-  return absoluteTerms.filter(term =>
-    option.includes(term) &&
-    !source.includes(term)
-  );
-};
-
-const lexicalAxisCheck = (optionText,question) => {
-  const optionTokens =
-    [...new Set(contentTokens(optionText))];
-
-  if(optionTokens.length < 6){
-    return {
-      valid:true,
-      ratio:1
-    };
-  }
-
-  const referenceTokens = new Set(
-    contentTokens(
-      `${question.stem || ""} ${question.sourceEvidence || ""}`
-    )
-  );
-
-  const shared =
-    optionTokens.filter(token =>
-      referenceTokens.has(token)
-    ).length;
-
-  const ratio =
-    optionTokens.length
-      ? shared / optionTokens.length
-      : 1;
-
-  return {
-    valid:ratio >= 0.35,
-    ratio
-  };
-};
-  const prompt = `
-Actúa exclusivamente como AUDITOR ADVERSARIAL DE DISTRACTORES
-para preguntas tipo test de una oposición de Bomberos.
-
-NO debes comprobar si correctIndex es correcto.
-ASUME siempre que correctIndex identifica la respuesta que debe marcar
-el opositor.
-
-sourceEvidence contiene el fragmento factual del temario que respalda
-la pregunta.
-
-Tu trabajo consiste en auditar INDIVIDUALMENTE las TRES opciones cuyo
-índice sea distinto de correctIndex.
-
-Para cada una debes devolver además:
-
-sameTechnicalAxis=true únicamente cuando la alternativa evalúa el MISMO
-dato, propiedad, procedimiento, condición, relación, magnitud o concepto
-concreto que la respuesta correcta. Compartir tema general no basta.
-
-confusionAnchor debe ser una COPIA LITERAL de un fragmento concreto de
-sourceEvidence que explique por qué la alternativa podría confundirse
-razonablemente con el conocimiento correcto.
-
-REGLAS PARA confusionAnchor:
-- debe aparecer literalmente en sourceEvidence;
-- no lo parafrasees;
-- debe contener suficiente información técnica para justificar la confusión;
-- no uses títulos genéricos ni palabras aisladas;
-- si no existe un fragmento real que justifique esa confusión,
-  devuelve confusionAnchor="" y competitive=false.
-
-competitive=true:
-solo cuando esa alternativa puede competir razonablemente con la
-respuesta correcta ante un opositor preparado, sameTechnicalAxis=true
-y confusionAnchor contiene una base factual real de sourceEvidence.
-
-competitive=false:
-cuando pueda eliminarse sin recordar con precisión el conocimiento
-preguntado, cuando no pertenezca al mismo eje técnico o cuando no exista
-una base concreta en sourceEvidence que justifique la confusión.
-MARCA competitive=false si ocurre cualquiera de estas situaciones:
-
-1. La opción pertenece a otro eje conceptual.
-
-2. Introduce maquinaria, procedimientos, variables, magnitudes,
-   fenómenos o condiciones ajenos al conocimiento evaluado.
-
-3. Puede eliminarse por sentido común.
-
-4. Contiene una exageración, formulación extrema, acción manifiestamente
-   improcedente o detalle técnicamente pintoresco.
-
-5. Utiliza palabras como "exclusivamente", "únicamente", "siempre",
-   "nunca", "por completo", "instantáneamente", "rigurosamente",
-   "exactamente" u otros absolutos de manera artificial.
-
-6. En una pregunta numérica utiliza otro tipo de magnitud o un valor
-   claramente lejano en vez de un dato próximo y confundible.
-
-7. En una pregunta de fórmula contiene una expresión dimensional o
-   algebraicamente absurda.
-
-8. En una secuencia introduce pasos ajenos al procedimiento en lugar de
-   modificar plausiblemente el orden, posición o condición de pasos
-   reales próximos.
-
-9. Suena técnica, pero no constituye una confusión razonable respecto
-   al contenido de sourceEvidence.
-
-10. Un opositor podría descartarla sin necesitar recordar el dato,
-    condición, procedimiento, relación o concepto exacto del temario.
-
-Además evalúa answerStandsOut.
-
-answerStandsOut se refiere EXCLUSIVAMENTE a una pista visible de
-redacción, estructura o plausibilidad que permita localizar la opción
-correctIndex sin dominar el conocimiento preguntado.
-
-NO marques answerStandsOut=true simplemente porque la opción correctIndex:
-- coincida mejor con sourceEvidence;
-- reproduzca con mayor exactitud el dato verdadero;
-- sea factual o técnicamente correcta;
-- sea la única respaldada plenamente por el temario.
-
-Eso es normal y NO constituye una pista.
-
-Marca answerStandsOut=true únicamente cuando la opción correctIndex
-resulte identificable por su FORMA, por ejemplo:
-- lenguaje absoluto o extremo artificial;
-- afirmación manifiestamente absurda;
-- concepto perteneciente a otro eje técnico;
-- longitud o grado de detalle claramente diferente;
-- terminología impropia;
-- procedimiento evidentemente disparatado;
-- redacción artificial que la haga destacar.
-
-REGLA ESPECIAL PARA 2026_INCORRECTA:
-
-En esta familia correctIndex identifica precisamente la afirmación FALSA
-que debe marcar el opositor.
-
-Por tanto, answerStandsOut=true si esa afirmación falsa resulta demasiado
-fácil de localizar por ser extrema, absoluta, absurda, ajena al mismo eje
-conceptual o claramente menos plausible que las tres afirmaciones verdaderas.
-
-La falsedad debe ser sutil y técnicamente próxima.
-
-IMPORTANTE:
-
-- Evalúa exactamente TRES alternativas por pregunta.
-- No evalúes como distractor la opción correctIndex.
-- Devuelve sus índices reales: 0, 1, 2 o 3.
-- No seas benevolente.
-- No agrupes el juicio de las tres alternativas.
-- Cada distractor debe superar el estándar por sí mismo.
-- Que una alternativa sea falsa no significa que sea un buen distractor.
-- Que utilice vocabulario técnico tampoco significa que sea competitiva.
-- No inventes un confusionAnchor para justificar una opción débil.
-- Si dudas entre true y false, devuelve competitive=false.
-PREGUNTAS:
-${JSON.stringify(compactQuestions)}
-`;
-
-  const response = await ai.models.generateContent({
-    model:"gemini-3.5-flash-lite",
-    contents:prompt,
-    config:{
-      responseMimeType:"application/json",
-      responseJsonSchema:schema,
-      temperature:0.1
-    }
-  });
-
-  const parsed = JSON.parse(response.text);
-
-  if(
-    !Array.isArray(parsed.results) ||
-    parsed.results.length !== questions.length
-  ){
-    throw new Error(
-      "El auditor independiente de distractores devolvió un número incorrecto de resultados."
-    );
-  }
-
-  const resultsByIndex = new Map();
-
-for(const result of parsed.results){
-  const index = Number(result.index);
-
-  if(
-    !Number.isInteger(index) ||
-    index < 0 ||
-    index >= questions.length ||
-    resultsByIndex.has(index)
-  ){
-    throw new Error(
-      "El auditor independiente de distractores devolvió índices inválidos o duplicados."
-    );
-  }
-
-  resultsByIndex.set(index,result);
-}
-
-if(resultsByIndex.size !== questions.length){
-  throw new Error(
-    "El auditor independiente de distractores no devolvió todos los índices esperados."
-  );
-}
-
-const normalizedResults = [];
-
-for(let i=0;i<questions.length;i++){
-  const result = resultsByIndex.get(i);
-  const question = questions[i];
-
-  const expectedIndexes = [0,1,2,3]
-    .filter(index =>
-      index !== Number(question.correctIndex)
-    );
-
-  const assessments =
-    Array.isArray(result.assessments)
-      ? result.assessments
-      : [];
-
-  const receivedIndexes = assessments
-    .map(item => Number(item.optionIndex))
-    .sort((a,b) => a-b);
-
-  const sortedExpected = [...expectedIndexes]
-    .sort((a,b) => a-b);
-
-  if(
-    assessments.length !== 3 ||
-    JSON.stringify(receivedIndexes) !==
-      JSON.stringify(sortedExpected)
-  ){
-    throw new Error(
-      `El auditor de distractores devolvió alternativas incorrectas en la pregunta ${i + 1}.`
-    );
-  }
-
-  const sourceNormalized =
-    normalizeAuditText(question.sourceEvidence);
-
-  const auditedAssessments =
-    assessments.map(item => {
-      const optionIndex =
-        Number(item.optionIndex);
-
-      const optionText =
-        question.options?.[optionIndex] || "";
-
-      const anchorNormalized =
-        normalizeAuditText(item.confusionAnchor);
-
-      const anchorValid =
-        anchorNormalized.length >= 12 &&
-        sourceNormalized.includes(anchorNormalized);
-
-      const unsupportedAbsolutes =
-        unsupportedAbsoluteTerms(
-          optionText,
-          question.sourceEvidence
-        );
-
-      const axisCheck =
-        lexicalAxisCheck(
-          optionText,
-          question
-        );
-
-      const locallyCompetitive =
-        item.competitive === true &&
-        item.sameTechnicalAxis === true &&
-        anchorValid &&
-        unsupportedAbsolutes.length === 0 &&
-        axisCheck.valid === true;
-
-      const localIssues = [];
-
-      if(item.competitive !== true){
-        localIssues.push(item.reason);
-      }
-
-      if(item.sameTechnicalAxis !== true){
-        localIssues.push(
-          "No pertenece al mismo eje técnico concreto."
-        );
-      }
-
-      if(!anchorValid){
-        localIssues.push(
-          "No aporta un confusionAnchor literal y suficiente de sourceEvidence."
-        );
-      }
-
-      if(unsupportedAbsolutes.length){
-        localIssues.push(
-          `Usa absolutos no respaldados por sourceEvidence: ${unsupportedAbsolutes.join(", ")}.`
-        );
-      }
-
-      if(axisCheck.valid !== true){
-        localIssues.push(
-          `Se aleja léxicamente del conocimiento evaluado (ratio ${axisCheck.ratio.toFixed(2)}).`
-        );
-      }
-
-      return {
-        optionIndex,
-        locallyCompetitive,
-        localIssues
-      };
-    });
-
-  const competitiveCount =
-    auditedAssessments.filter(item =>
-      item.locallyCompetitive === true
-    ).length;
-
-  const distractorIssues =
-    auditedAssessments
-      .filter(item =>
-        item.locallyCompetitive !== true
-      )
-      .map(item =>
-        `Opción ${item.optionIndex + 1}: ${item.localIssues.join(" ")}`
-      );
-
-  if(result.answerStandsOut === true){
-    distractorIssues.push(
-      `AVISO DE REDACCIÓN: ${result.answerStandoutReason}`
-    );
-  }
-
-  let incorrectAnswerStandsOut =
-    question.questionFamily === "2026_INCORRECTA" &&
-    result.answerStandsOut === true;
-
-  if(question.questionFamily === "2026_INCORRECTA"){
-    const correctOption =
-      question.options?.[
-        Number(question.correctIndex)
-      ] || "";
-
-    const unsupportedCorrectAbsolutes =
-      unsupportedAbsoluteTerms(
-        correctOption,
-        question.sourceEvidence
-      );
-
-    const correctAxisCheck =
-      lexicalAxisCheck(
-        correctOption,
-        question
-      );
-
-    if(
-      unsupportedCorrectAbsolutes.length ||
-      correctAxisCheck.valid !== true
-    ){
-      incorrectAnswerStandsOut = true;
-
-      if(unsupportedCorrectAbsolutes.length){
-        distractorIssues.push(
-          `OPCIÓN INCORRECTA DEMASIADO EVIDENTE: absolutos no respaldados por sourceEvidence: ${unsupportedCorrectAbsolutes.join(", ")}.`
-        );
-      }
-
-      if(correctAxisCheck.valid !== true){
-        distractorIssues.push(
-          `OPCIÓN INCORRECTA DEMASIADO ALEJADA DEL EJE TÉCNICO (ratio ${correctAxisCheck.ratio.toFixed(2)}).`
-        );
-      }
-    }
-  }
-
-  normalizedResults.push({
-    index:i,
-    distractorsValid:
-      competitiveCount === 3 &&
-      !incorrectAnswerStandsOut,
-    distractorIssues
-  });
-}
-
-
-  
-return normalizedResults;
-}
 // SERVER 94 — Ejemplos pedagógicos acordados para LEGISLACIÓN, no hechos reutilizables.
 // Cada base es la única respuesta correcta; cada variante modifica un único detalle.
 // Ninguna pregunta de esta biblioteca puede constituir evidencia factual para otros temas.
@@ -15058,6 +14805,24 @@ No se adjunta respuesta correcta ni explicación para evitar sesgo.
 PREGUNTAS: ${JSON.stringify(rows)}`;
 }
 
+// Diagnostico 122: metadatos ya devueltos por Gemini. No hace llamadas
+// extra, no modifica el response y no guarda contenido de preguntas.
+function recordGenerationCall122(phase,started,response,details={}){
+  const usage=response?.usageMetadata||{};
+  const numberOrNull=value=>value==null?null:
+    (Number.isFinite(Number(value))?Number(value):null);
+  console.log('GENERACION_MEDICION_122:',JSON.stringify({
+    phase,elapsedMs:Date.now()-started,...details,
+    promptTokens:numberOrNull(usage.promptTokenCount),
+    toolUsePromptTokens:numberOrNull(usage.toolUsePromptTokenCount),
+    outputTokens:numberOrNull(usage.candidatesTokenCount),
+    thoughtsTokens:numberOrNull(usage.thoughtsTokenCount),
+    cachedTokens:numberOrNull(usage.cachedContentTokenCount),
+    totalTokens:numberOrNull(usage.totalTokenCount),
+    usageReported:Boolean(response?.usageMetadata)
+  }));
+}
+
 // SERVER 112 — motor de Legislación Alta / Muy Alta con contrato pequeño.
 // Sólo se usa en test NORMAL y de un bloque legislativo puro. Ninguna regla
 // se traslada a Geografía, Específico, test de falladas, cobertura o SRS.
@@ -15091,12 +14856,15 @@ async function generateLegislationSimple112(ai,targets,level,mode,previous=[]){
     console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'generar',level,
       count:group.length,batch:Math.floor(from/batchSize)+1,
       chars:contents.length,pdfLocal:docReady,model}));
+    const generationStarted122=Date.now();
     const response=await generateLegislationVeryHigh100(ai,{
       model,contents,config:{
         ...(docReady?{}:{tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}]}),
         responseMimeType:'application/json',responseJsonSchema:questionSchema
       }
     },'generacion_simple_113',group.length,true);
+    recordGenerationCall122('legislacion_generacion',generationStarted122,response,{
+      questions:group.length,batch:Math.floor(from/batchSize)+1,model});
     let parsed;
     try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: JSON de preguntas no válido.');}
     if(!Array.isArray(parsed?.questions)||parsed.questions.length!==group.length)
@@ -15124,9 +14892,8 @@ async function validateLegislationSimple112(ai,questions,targets,level){
   if(!isPureLegislation95(targets)||questions.length!==targets.length)
     throw new Error('112: auditoría no corresponde a los objetivos.');
   const approved=[];
-  // SERVER 121 (experimento de rendimiento): auditoría en lotes de 5
-  // en lugar de 4. La validación factual sigue siendo independiente.
-  // Dos lotes para 10 preguntas; sin cambiar la generación ni su presupuesto.
+  // Conservar SERVER 121: auditoría jurídica en lotes de cinco.
+  // Diagnóstico de consumo 122 no debe revertir esta mejora ya desplegada.
   const batchSize=5;
   for(let start=0;start<questions.length;start+=batchSize){
     const group=questions.slice(start,start+batchSize);
@@ -15147,7 +14914,7 @@ async function validateLegislationSimple112(ai,questions,targets,level){
     console.log('LEGISLACION_SIMPLE_112:',JSON.stringify({phase:'auditar',level,
       count:group.length,batch:Math.floor(start/batchSize)+1,
       chars:contents.length,pdfOriginal:true}));
-    const auditStarted121=Date.now();
+    const auditStarted122=Date.now();
     const response=await ai.models.generateContent({
       model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim(),
       contents,config:{
@@ -15155,11 +14922,9 @@ async function validateLegislationSimple112(ai,questions,targets,level){
         responseMimeType:'application/json',responseJsonSchema:schema
       }
     });
-    console.log('LEGISLACION_AUDITOR_LOTE_121:',JSON.stringify({
-      count:group.length,batch:Math.floor(start/batchSize)+1,
-      durationMs:Date.now()-auditStarted121,
-      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim()
-    }));
+    recordGenerationCall122('legislacion_auditoria',auditStarted122,response,{
+      questions:group.length,batch:Math.floor(start/batchSize)+1,
+      model:String(process.env.LEGISLACION_SIMPLE_AUDITOR_113_MODEL||'gemini-3.5-flash-lite').trim()});
     let parsed;
     try{parsed=JSON.parse(response.text||'');}catch{throw new Error('112: auditoría JSON ilegible.');}
     if(!Array.isArray(parsed?.results)||parsed.results.length!==group.length)
@@ -15224,89 +14989,9 @@ async function regenerateLegislationSimple112(ai,invalid,targets,level,mode,orig
   return {questions:JSON.parse(result.text).questions};
 }
 
-function legislationVeryHighPrompt104(targets,mode,officialStyle){
-  if(!isPureLegislation95(targets))return '';
-  const objects=targets.map((t,i)=>({
-    slot:i+1,topic:t.topic_name,section:t.section,
-    concept:t.concept,contentType:t.item_type,
-    evaluationType:t.evaluation_type,
-    family:t.questionFamily,sourcePage:t.source_page,
-    evidence:String(t.source_evidence||'').slice(0,3200),
-    nearbyEvidence:(Array.isArray(t.distractorContext)?t.distractorContext:[])
-      .filter(x=>String(x.source_evidence||'').trim()).slice(0,4)
-      .map(x=>({concept:String(x.concept||'').slice(0,230),
-        evidence:String(x.source_evidence||'').slice(0,950)})),
-    previousQuestion:t.failedQuestion?{
-      stem:t.failedQuestion.stem,options:t.failedQuestion.options}:null,
-    priorBank:t.previousBankQuestion?{
-      stem:t.previousBankQuestion.stem,
-      options:t.previousBankQuestion.options}:null,
-    adaptivePriority:Number(t.adaptive_priority||0)
-  }));
-  return `CONSTRUCTOR DE EXAMEN: BOMBERO DE NAVARRA — LEGISLACIÓN MUY ALTA.
-Devuelve EXACTAMENTE ${targets.length} preguntas en formato JSON del schema suministrado,
-una por objetivo y en el MISMO ORDEN. Modalidad: ${mode}.
 
-JERARQUÍA DE REGLAS:
-1. ÚNICA autoridad factual: PDF del temario recuperado con File Search.
-   El ejemplo de estilo, el Anki y el examen oficial JAMÁS son prueba factual.
-   Comprueba todos los requisitos, remisiones, excepciones y condiciones,
-   incluida cualquier SALVEDAD aplicable antes de afirmar «en ningún caso».
-   Una opción aparentemente verdadera que omite una excepción relevante NO
-   puede marcarse como íntegramente CORRECTA.
-2. Un objetivo implica UNA pregunta del conocimiento exacto. Conserva
-   tema, familia obligatoria y prioridad curricular/SRS. No sustituyas
-   objetivos en la generación inicial. No reproduzcas la pregunta previa,
-   sino una discriminación auténtica y verificable. Las preguntas son
-   100 % NUEVAS desde PDF: NO derives de tarjetas Anki.
-3. IDENTIFICA primero la regla central y una condición, límite, excepción,
-   autoridad, consecuencia o aplicación ESTRECHAMENTE vinculada al
-   conocimiento asignado, siempre que el PDF respalde ambos elementos.
-   Para Muy alta prioriza combinaciones normativas demostrables con 4
-   opciones casi gemelas y UN cambio decisivo en cada distractor;
-   si el objetivo es simple, intenta contraste de alcance o excepción
-   del propio PDF, sin inventar contenido. La longitud NO demuestra nivel.
-4. Para familia 2026_CORRECTA o 2026_RAZONAMIENTO: una sola opción
-   íntegramente VERDADERA; tres FALSAS con un único cambio pequeño,
-   diferente en cada distractor, frente a la misma base técnica.
-   Para 2026_INCORRECTA: una FALSA extremadamente sutil y tres afirmaciones
-   VERDADERAS completas. No conviertas verdades parciales en falsedades.
-   Para 2024_TEXTO: exactitud literal fina, al menos tres opciones
-   competitivas, no una frase exacta frente a tres disparates.
-   En familias NUMERICA o CALCULO, exige y resuelve el dato/cálculo real
-   del objetivo; no introduzcas cifras inventadas ni cambies la familia.
-5. Las cuatro respuestas serán PARALELAS en sintaxis, extensión, unidades,
-   sujeto y contexto. Cambia solo el punto jurídicamente decisivo; que
-   ninguna pueda descartarse por tono, obviedad o absoluto gratuito.
-   Verifica mediante File Search la falsedad o veracidad de CADA alternativa.
-6. Prohibido basarse en tarjetas Anki u originales de exámenes como
-   plantillas de respuesta. Para la dificultad Muy alta construye una
-   discriminación jurídica SUSTANCIAL desde el PDF: sujeto, condición,
-   salvedad, límite, competencia o aplicación. No bastan paráfrasis ni
-   cambios cosméticos. 2024_TEXTO no es una cuota obligatoria.
-7. Datos de salida por pregunta: stem; options (4 textos no vacíos);
-   correctIndex (0-3); explanation jurídica exacta; sourceEvidence
-   con citas textuales suficientes de PDF; sourcePage; manualPage;
-   difficulty='muy alta'; questionFamily exacta; graphic=null.
-   No uses datos de normativa externa no presente en el PDF. Mantén
-   estrictamente UNA respuesta correcta y evita duplicados entre preguntas.
-8. Si la evidencia de un objetivo no permite alto nivel, NO fabriques
-   complejidad ni hechos; devuelve la mejor pregunta factual y el auditor
-   decidirá si requiere sustitución curricular. No rebajes la veracidad.
+// SERVER 125: se ha eliminado una funcion historica sin referencias ejecutables.
 
-PATRONES VALIDADOS POR EL OPOSITOR (SOLO ESTILO, NUNCA HECHOS):
-${legislationCalibrationPrompt94(targets,'muy alta',false)}
-
-OBJETIVOS Y CONTEXTO FACTUAL DEL PDF (CONTROL OBLIGATORIO):
-${JSON.stringify(objects)}
-
-REFERENCIA DE EXÁMENES OFICIALES, ÚNICAMENTE ESTILO:
-${String(officialStyle||'').slice(0,1800)}
-
-ANTES DE DEVOLVER JSON: comprueba polaridad, índice de respuesta, las
-cuatro alternativas, condiciones, remisiones, excepciones, y la fuente
-literal de cada afirmación. No generes comentarios fuera del JSON.`;
-}
 
 function legislationQualityRepairPrompt95(targets,invalidResults,originalQuestions,round){
   if(!isPureLegislation95(targets))return '';
@@ -16207,6 +15892,11 @@ function geographyForbiddenQuestionIssue(target,question){
   return null;
 }
 function geographyOperationalParkIssue(target,question){
+  if([21,22,23,24].includes(geographyTopic115(target)) && target?.geoIntent123){
+    if(!/_PARQUE$/.test(target.geoIntent123))return null;
+    return geographyParkAnswerValid124(target,question)?null:
+      'GEOGRAFÍA 124: sede operativa incorrecta, agrupada o fuera de los once parques.';
+  }
   const exact =
     Array.isArray(
       target?.territorialContext?.exact
@@ -16303,6 +15993,11 @@ function geographyOperationalParkIssue(target,question){
   return null;
 }
 function geographyOptionPoolIssue(target,question){
+  if([21,22,23,24].includes(geographyTopic115(target)) && target?.geoIntent123 &&
+    /_PARQUE$/.test(target.geoIntent123)){
+    return geographyParkAnswerValid124(target,question)?null:
+      'GEOGRAFÍA 124: la clave o las alternativas no corresponden a los once parques diferenciados.';
+  }
 
   const topicNumber=
     coverageTopicNumber(
@@ -16405,6 +16100,7 @@ function geographyOptionPoolIssue(target,question){
 
   const asksOperationalPark=
     !complexQuestion &&
+    !(target?.geoIntent123 && [21,22,23,24].includes(topicNumber)) &&
     (
       /\bque parque(?: de bomberos)?\b/.test(stem) ||
       /\bcual es el parque(?: de bomberos)?\b/.test(stem) ||
@@ -16429,7 +16125,9 @@ function geographyOptionPoolIssue(target,question){
   if(asksMunicipality){
 
     const correctLocation=
-      pools.correctLocation;
+      target?.geoIntent123==='CONCEJO_MUNICIPIO'
+        ? String(target.concept||'').split('->')[1]?.trim()
+        : pools.correctLocation;
 
     if(!correctLocation){
       return null;
@@ -17358,22 +17056,9 @@ console.log("VALIDATOR RAW RESPONSE:", response.text);
 }
 // SERVER 111: un solo reintento compacto por los objetivos rechazados.
 // Nunca se usan las reparaciones individuales ni cambio especulativo de tema.
-async function regenerateLegislationSimple111(ai,invalidResults,targets,mode){
-  const subset=invalidResults.map(v=>targets[v.index]);
-  if(!isPureLegislation95(subset))throw new Error('111: objetivos no legislativos.');
-  const model=legislationVeryHighModel99(subset,'muy alta');
-  const request={model,contents:'',config:{
-    tools:[{fileSearch:{fileSearchStoreNames:[STORE]}}],
-    responseMimeType:'application/json',responseJsonSchema:questionSchema
-  }};
-  const answer=await generateLegislationBatches108(ai,request,subset,mode,'');
-  const questions=JSON.parse(answer.text).questions;
-  if(!Array.isArray(questions)||questions.length!==subset.length)
-    throw new Error('111: cantidad incorrecta de preguntas del reintento.');
-  console.log('LEGISLACION_REINTENTO_SIMPLE_111:',JSON.stringify({
-    rejected:subset.length,returned:questions.length,maxRounds:1}));
-  return {questions};
-}
+
+// SERVER 125: se ha eliminado una funcion historica sin referencias ejecutables.
+
 
 async function regenerateInvalidQuestions(
   ai,
@@ -17652,6 +17337,7 @@ app.get("/api/statistics", async(req,res)=>{
       LEFT JOIN coverage_items ci
         ON ci.topic_id = t.id
        AND ci.exam_relevant = TRUE
+       AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
 
       GROUP BY
   t.id,
@@ -17876,6 +17562,7 @@ COALESCE(SUM(ci.times_blank),0)::int
       JOIN coverage_items ci
         ON ci.topic_id = t.id
        AND ci.exam_relevant = TRUE
+       AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
 
       GROUP BY
         t.id,
@@ -18019,6 +17706,7 @@ app.get("/api/statistics/knowledge", async(req,res)=>{
         ON crs.coverage_item_id = ci.id
 
       WHERE (ci.exam_relevant = TRUE OR ci.item_type='anki_independent')
+        AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
 
       ORDER BY
         t.id,
@@ -18342,7 +18030,7 @@ app.post("/api/finish-test", async(req,res)=>{
 async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,requestedDifficulty="alta"){
   // SERVER 93G: este selector se llama SOLO en Alta; conserva
   // el 80 % de tarjetas originales validadas y el 20 % nuevas.
-  const originalShare = 0.80; // Exclusivo de Alta; Muy alta usa planVeryHighLegislation93G.
+  const originalShare = 0.80; // Exclusivo de Alta; Muy alta genera desde PDF.
   const topicGroups=new Map();
   originalTargets.forEach((item,index)=>{
     if(String(item?.topic_block||'').trim().toLowerCase()!=='legislacion')return;
@@ -18505,167 +18193,9 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
  * la plaza vuelve al PDF y se informa del déficit; NUNCA se inventa enlace.
  * Alta utiliza, sin cambios, applyLegislationAnkiQuota84 (80 % originales).
  */
-async function planVeryHighLegislation93G(originalTargets,allowedTopicIds){
-  const targets=[...originalTargets];
-  const groups=new Map();
-  for(let index=0;index<targets.length;index++){
-    const target=targets[index];
-    if(String(target?.topic_block||'').trim().toLowerCase()!=='legislacion')continue;
-    const order=ankiLegislationSourceOrderForTopicName(target.topic_name);
-    if(!Number.isInteger(order))continue;
-    const topicId=Number(target.topic_id);
-    if(!groups.has(topicId))groups.set(topicId,{order,indices:[]});
-    groups.get(topicId).indices.push(index);
-  }
-  if(!groups.size)return null;
-  const eligibleByTopic=new Map();
-  for(const [topicId,group] of groups){
-    // Primero priorización curricular real (SRS vencido, fallos, nuevo).
-    // Las semillas solamente se contemplan para una cobertura de ese tema.
-    const adaptive=await getAdaptiveCoverageCandidates(1400,[topicId],'adaptive');
-    const curricular=new Map(adaptive.map(t=>[Number(t.id),t]));
-    if(!curricular.size)continue;
-    const linked=await db.query(`
-      SELECT a.id,a.anki_note_id,a.topic_order,a.stem,a.options,
-        a.correct_index,a.correct_answer,a.validation_status,
-        a.validation_evidence,a.validated_coverage_item_id,
-        a.times_used,a.last_used_at
-      FROM legislation_anki_questions a
-      JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
-      WHERE a.topic_order=$1 AND ci.topic_id=$2
-        AND ci.exam_relevant=TRUE AND ci.item_type<>'anki_independent'
-        AND a.validation_status='validated' AND a.direct_use_eligible=TRUE
-        AND a.option_count IN (3,4)
-      ORDER BY a.times_used ASC,a.last_used_at ASC NULLS FIRST,a.id ASC
-      LIMIT 1200`,[group.order,topicId]);
-    const safe=[];
-    const covered=new Set();
-    for(const row of linked.rows){
-      const item=curricular.get(Number(row.validated_coverage_item_id));
-      const options=Array.isArray(row.options)?row.options:[];
-      const correct=Number(row.correct_index);
-      if(!item || covered.has(Number(item.id)) ||
-        ![3,4].includes(options.length) ||
-        !options.every(x=>typeof x==='string'&&x.trim()) ||
-        !Number.isInteger(correct)||correct<0||correct>=options.length ||
-        !String(row.stem||'').trim() ||
-        legislationKnownAmbiguityIssue(row) ||
-        legislationConflictingArticles(item,row) ||
-        !legislationExactCoverageLink(item,row))continue;
-      safe.push({item,row});
-      covered.add(Number(item.id));
-    }
-    if(safe.length)eligibleByTopic.set(topicId,safe);
-  }
-  const usable=[...groups]; // Contabilizar déficit aunque un tema no tenga vínculos seguros.
-  const derivedRequested=Math.ceil(usable.reduce((sum,[,g])=>sum+g.indices.length,0)*0.5);
-  const quotas=new Map(usable.map(([id,g])=>[id,Math.floor(g.indices.length*0.5)]));
-  const remainder=usable.map(([id,g])=>({id,frac:g.indices.length*0.5-Math.floor(g.indices.length*0.5)}))
-    .sort((a,b)=>b.frac-a.frac||a.id-b.id);
-  for(let i=0;i<derivedRequested-[...quotas.values()].reduce((a,b)=>a+b,0);i++){
-    quotas.set(remainder[i].id,(quotas.get(remainder[i].id)||0)+1);
-  }
-  const usedCoverage=new Set(targets.map(t=>Number(t.id)));
-  const derivedIndices=[];
-  const seenNotes=new Set();
-  for(const [topicId,group] of usable){
-    const choices=eligibleByTopic.get(topicId)||[];
-    let taken=0;
-    // 1) conservar conocimientos seleccionados originalmente que ya tienen
-    //    semilla válida; prioridad curricular y SRS quedan intactas.
-    for(const index of group.indices){
-      if(taken>=(quotas.get(topicId)||0))break;
-      const target=targets[index];
-      if(['GRAFICA','CALCULO_FORMULACION','2024_NUMERICA'].includes(String(target.questionFamily||'')))continue;
-      const hit=choices.find(x=>Number(x.item.id)===Number(target.id) &&
-        !seenNotes.has(String(x.row.anki_note_id)));
-      if(!hit)continue;
-      target.veryHighAnkiSeed={noteId:Number(hit.row.anki_note_id),
-        stem:String(hit.row.stem).slice(0,500),
-        options:hit.row.options.map(v=>String(v).slice(0,300)),
-        correctIndex:Number(hit.row.correct_index)};
-      target.veryHighDerivation93G=true;
-      derivedIndices.push(index);
-      seenNotes.add(String(hit.row.anki_note_id));
-      taken++;
-    }
-    // 2) si faltan, sustituir solamente objetivos de la MISMA prioridad
-    //    SRS/errores/nuevo/mantenimiento. Nunca desplazar un repaso vencido
-    //    por una semilla disponible de otra prioridad ni duplicar cobertura.
-    for(const index of group.indices){
-      if(taken>=(quotas.get(topicId)||0))break;
-      if(targets[index].veryHighDerivation93G)continue;
-      // Un objetivo de cálculo o gráfico requiere evidencias especiales:
-      // nunca sustituirlo por una tarjeta textual ajena a esa familia.
-      const requiredFamily=String(targets[index].questionFamily||'');
-      if(['GRAFICA','CALCULO_FORMULACION','2024_NUMERICA'].includes(requiredFamily))continue;
-      const prior=Number(targets[index].adaptive_priority);
-      const candidate=choices.find(x=>
-        !seenNotes.has(String(x.row.anki_note_id)) &&
-        !usedCoverage.has(Number(x.item.id)) &&
-        Number(x.item.adaptive_priority)===prior &&
-        legislationAnkiFamilyCompatible(requiredFamily,x.row.stem));
-      if(!candidate)continue;
-      const replacement={...candidate.item,
-        questionFamily:targets[index].questionFamily,
-        adaptiveDifficulty:'muy alta',
-        veryHighDerivation93G:true,
-        veryHighAnkiSeed:{
-          noteId:Number(candidate.row.anki_note_id),
-          stem:String(candidate.row.stem).slice(0,500),
-          options:candidate.row.options.map(v=>String(v).slice(0,300)),
-          correctIndex:Number(candidate.row.correct_index)
-        }};
-      usedCoverage.delete(Number(targets[index].id));
-      usedCoverage.add(Number(replacement.id));
-      targets[index]=replacement;
-      derivedIndices.push(index);
-      seenNotes.add(String(candidate.row.anki_note_id));
-      taken++;
-    }
-  }
-  derivedIndices.sort((a,b)=>a-b);
-  // SERVER 97: distinguir tarjetas ausentes, no validadas, no enlazadas y
-  // enlaces realmente utilizables en los temas solicitados. Solo telemetría.
-  if(derivedIndices.length<derivedRequested){
-    for(const [topicId,group] of usable){
-      try{
-        const report=await db.query(`
-          SELECT COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE a.validation_status='validated')::int AS validated,
-            COUNT(*) FILTER (WHERE a.validation_status='validated'
-              AND a.direct_use_eligible=TRUE)::int AS validated_eligible,
-            COUNT(*) FILTER (WHERE ci.topic_id=$2)::int AS linked_topic,
-            COUNT(*) FILTER (WHERE ci.topic_id=$2 AND a.validation_status='validated'
-              AND a.direct_use_eligible=TRUE AND ci.exam_relevant=TRUE
-              AND ci.item_type<>'anki_independent')::int AS linked_eligible
-          FROM legislation_anki_questions a
-          LEFT JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
-          WHERE a.topic_order=$1`,[group.order,topicId]);
-        console.log('LEGISLACION_ANKI_FILTROS_97:',JSON.stringify({
-          topicId,sourceOrder:group.order,
-          targets:group.indices.length,
-          safePairs:(eligibleByTopic.get(topicId)||[]).length,
-          ...report.rows[0]
-        }));
-      }catch(e){
-        console.warn('LEGISLACION_ANKI_FILTROS_ERROR_97:',
-          String(e?.message||e).slice(0,240));
-      }
-    }
-  }
-  console.log('LEGISLACION_DERIVACION_MUY_ALTA_93G:',JSON.stringify({
-    requested:derivedRequested,verifiedSeeds:derivedIndices.length,
-    fallbackPdf:derivedRequested-derivedIndices.length,
-    sourceOriginalAnki:0,newPdf:targets.length-derivedIndices.length,
-    usedSeedNoteIds:[...seenNotes],targetIds:derivedIndices.map(i=>Number(targets[i].id))
-  }));
-  // Map vacío: TODAS las preguntas pasan por la generación y validación PDF.
-  // required 0 hace imposible confundir variantes con Anki originales.
-  return {targets,direct:new Map(),required:0,
-    derivedMode:true,derivedRequested,derivedIndices,
-    derivedQuotaByTopic:Object.fromEntries(quotas)};
-}
+
+// SERVER 125: se ha eliminado una funcion historica sin referencias ejecutables.
+
 
 /* Si no hay cinco enlaces persistidos, reutilizar EL COMPROBADOR SEMÁNTICO
  * PREEXISTENTE (una tanda): selección de FDF ya validada y equivalencia
@@ -19320,6 +18850,27 @@ const examMode=
 let ai=aiClient();
 const allowedTopicIds =
   await resolveGenerationTopicScope(req.body);
+    // SERVER 125: comprobar el piloto ANTES de preparar coverage/gráficos.
+    // Solo cuando todos los temas están identificados inequívocamente.
+    // Mantener también las defensas posteriores para solicitudes mixtas.
+    if(testType==='normal' && requestedCount>10 &&
+       Array.isArray(allowedTopicIds) && allowedTopicIds.length){
+      const scopeRows=(await db.query(`
+        SELECT DISTINCT id, LOWER(BTRIM(COALESCE(block,''))) AS block,
+          topic_order FROM topics WHERE id = ANY($1::int[])
+      `,[allowedTopicIds])).rows;
+      if(scopeRows.length===new Set(allowedTopicIds.map(Number)).size){
+        const allLeg=scopeRows.every(r=>r.block==='legislacion');
+        const allGeo=scopeRows.every(r=>r.block==='geografia'&&
+          [21,22,23,24].includes(Number(r.topic_order)));
+        const limitLeg=Number(process.env.LEGISLACION_SIMPLE_MAX_NUEVAS_112||10);
+        const limitGeo=Number(process.env.GEOGRAFIA_PILOTO_MAX_116||10);
+        if(allLeg&&requestedCount>(Number.isInteger(limitLeg)&&limitLeg>0?limitLeg:10))
+          throw new Error('Piloto Legislación: límite de generación nueva; no se ha iniciado ninguna llamada a Gemini.');
+        if(allGeo&&requestedCount>(Number.isInteger(limitGeo)&&limitGeo>0?limitGeo:10))
+          throw new Error('Piloto Geografía: límite de generación nueva; no se ha iniciado ninguna llamada a Gemini.');
+      }
+    }
     let targets=
   testType==="failed"
     ? await getFailedCoverageTargets(
@@ -19663,8 +19214,25 @@ await attachDistractorContextToTargets(
 const pureGeography115=geographyPure115(generationTargets);
 if(pureGeography115){
   generationTargets.forEach((target,index)=>{
-    target.questionFamily=geographyAssignedFamily115(target,index);
+    target.geoIntent123=geographyIntent123(target,index);
+    target.questionFamily=target.geoIntent123==='MUNICIPIO_CONCEJOS_EXCLUSION'
+      ? '2026_INCORRECTA'
+      : /_PARQUE$/.test(target.geoIntent123||'')
+      ? '2026_RAZONAMIENTO' : '2024_TEXTO';
   });
+  const noIntent123=generationTargets.flatMap((t,index)=>!t.geoIntent123?[index]:[]);
+  if(noIntent123.length){
+    if(testType!=='normal')
+      throw new Error('Geografía 123: no se sustituye un objetivo de repaso de fallos por otro distinto.');
+    const alternatives=await geographyReplacementTargets123({positions:noIntent123,
+      targets,generationTargets,generationIndexes,difficulty});
+    if(alternatives.length!==noIntent123.length)
+      throw new Error('Geografía 123: no hay suficientes registros con relaciones examinables. No se consume Gemini.');
+    for(const {index,target} of alternatives){
+      generationTargets[index]=target;
+      targets[generationIndexes[index]]=target;
+    }
+  }
 }
 console.log(
   "GENERACIÓN NUEVA:",
@@ -19948,6 +19516,7 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
     };
     // Una sola llamada factual directa para Geografía focal:
     // no pasar por los retries/budgets especializados en Legislación.
+    const globalGenerationStarted122=Date.now();
     const response=pureGeography115
       ? await geographyGenerate115(ai,generationTargets,difficulty,mode)
       : simpleLegislation112
@@ -19957,6 +19526,9 @@ COMPROBACIÓN CONJUNTA DEL EXAMEN (OBLIGATORIA):
             generationTargets,mode,officialStyle)
         : await generateLegislationVeryHigh100(ai,initialRequest108,
             'generacion',newGenerationCount,false));
+console.log('GENERACION_FASE_122:',JSON.stringify({phase:'generacion_total',
+  elapsedMs:Date.now()-globalGenerationStarted122,questions:newGenerationCount,
+  route:pureGeography115?'geografia_focal':simpleLegislation112?'legislacion_simple':'motor_general'}));
 console.log(
   "TARGETS GRAFICOS:",
   generationTargets.map((t, i) => ({
@@ -20085,13 +19657,18 @@ finalQuestions = [...parsed.questions];
 // SERVER 93C: la cuota Anki solo decide el origen de cada pregunta.
 // TODA pregunta NUEVA de un lote exclusivamente legislativo merece la
 // verificación independiente del PDF, aunque haya Anki en otras posiciones.
+const globalValidationStarted122=Date.now();
 let factualValidation = pureGeography115
-  ? await geographyValidate115(ai,finalQuestions,generationTargets)
+  ? await geographyValidateShapeFirst123(ai,finalQuestions,generationTargets,difficulty)
   : simpleLegislation112
   ? await validateLegislationSimple112(ai,finalQuestions,generationTargets,difficulty)
   : await validateGeneratedQuestions(ai, finalQuestions,
       {independentPdfCheck,targets:generationTargets,
        requireVeryHigh111:difficulty==='muy alta' && isPureLegislation95(generationTargets)});
+
+console.log('GENERACION_FASE_122:',JSON.stringify({phase:'auditoria_factual',
+  elapsedMs:Date.now()-globalValidationStarted122,questions:finalQuestions.length,
+  route:pureGeography115?'geografia_focal':simpleLegislation112?'legislacion_simple':'motor_general'}));
 
 // La comprobación del banco es independiente para cada pregunta.
 // Solo las rutas focales (máximo piloto 10) la ejecutan concurrentemente.
@@ -20239,6 +19816,20 @@ if(difficulty==='muy alta' && isPureLegislation95(generationTargets)){
 }
 let invalidQuestions =
   factualValidation.filter(result => !result.valid);
+if(invalidQuestions.length){
+  console.log('GENERACION_RECHAZOS_INICIALES_122:',JSON.stringify({
+    total:invalidQuestions.length,generated:finalQuestions.length,
+    rejected:invalidQuestions.map(r=>({
+      slot:Number(r.index)+1,
+      coverageId:Number(generationTargets[r.index]?.id)||null,
+      flags:{family:r.familyValid===true,distractors:r.distractorsValid===true,
+        level:r.levelValid===true},
+      issues:[...(r.issues||[]),...(r.familyIssues||[]),
+        ...(r.distractorIssues||[])].slice(0,5).map(v=>String(v).slice(0,160)),
+      levelReason:String(r.levelReason||'').slice(0,160)
+    }))
+  }));
+}
 
 for(
   let regenerationAttempt = 1;
@@ -20264,7 +19855,7 @@ for(
           difficulty,mode,officialStyle);
     replacementTargets=invalidQuestions.map(result=>generationTargets[result.index]);
     replacementValidation=pureGeography115
-      ? await geographyValidate115(ai,regenerated.questions,replacementTargets)
+      ? await geographyValidateShapeFirst123(ai,regenerated.questions,replacementTargets,difficulty)
       : simpleLegislation112
       ? await validateLegislationSimple112(ai,regenerated.questions,
           replacementTargets,difficulty)
@@ -20581,6 +20172,92 @@ if(invalidQuestions.length>0 && testType==='normal' && independentPdfCheck &&
   }catch(lookupError){
     console.error('LEGISLACION_RESCATE_CONSULTA_ERROR:',String(lookupError?.message||lookupError));
   }
+}
+
+// SERVER 123: selección común de registros alternativos ANTES o DESPUÉS de
+// generar. Mismo tema, sin duplicados ni cambios en prioridades de BD.
+async function geographyReplacementTargets123({positions,targets,generationTargets,
+  generationIndexes,difficulty}){
+  const used=new Set(targets.map(t=>Number(t.id)));
+  const candidateByTopic=new Map(), selected=[];
+  for(const index of positions){
+    const original=generationTargets[index],tid=Number(original?.topic_id);
+    if(!candidateByTopic.has(tid)){
+      const pool=(await getAdaptiveCoverageCandidates(260,[tid],'adaptive'))
+        .filter(t=>!used.has(Number(t.id)) && t.source_evidence && geographyEligible124(t) &&
+          String(t.topic_block||'').toLowerCase()==='geografia' &&
+          geographyTopic115(t)===geographyTopic115(original));
+      // Probar primero un subconjunto acotado; no cargar toda la geografía.
+      const short=pool.slice(0,Math.max(12,positions.length*5));
+      await attachDistractorContextToTargets(short);
+      candidateByTopic.set(tid,short);
+    }
+    const chosen=candidateByTopic.get(tid).find(t=>!used.has(Number(t.id)) &&
+      (t.geoIntent123=geographyIntent123(t,generationIndexes[index])));
+    if(!chosen)continue;
+    chosen.questionFamily=chosen.geoIntent123==='MUNICIPIO_CONCEJOS_EXCLUSION'
+      ?'2026_INCORRECTA':/_PARQUE$/.test(chosen.geoIntent123)
+      ?'2026_RAZONAMIENTO':'2024_TEXTO';
+    chosen.adaptiveDifficulty=difficulty;
+    used.add(Number(chosen.id));
+    selected.push({index,target:chosen});
+  }
+  return selected;
+}
+// Solo sustituye plazas rechazadas, conservando intactas las aprobadas.
+// Límite de coste: un lote adicional (<=5) y una auditoría, sin nuevos bucles.
+async function geographyRescueRejected123({ai,invalidQuestions,targets,
+  generationTargets,generationIndexes,finalQuestions,factualValidation,
+  difficulty,mode,testType}){
+  if(testType!=='normal'||invalidQuestions.length<1||invalidQuestions.length>5)
+    return invalidQuestions;
+  const validatedStems=new Set(finalQuestions.filter((q,i)=>
+    factualValidation[i]?.valid===true).map(q=>geographyNorm115(q.stem)));
+  try{
+    const selected=await geographyReplacementTargets123({
+      positions:invalidQuestions.map(r=>r.index),targets,generationTargets,
+      generationIndexes,difficulty});
+    if(!selected.length)return invalidQuestions;
+    const replacements=selected.map(s=>s.target);
+    const generated=JSON.parse((await geographyGenerate115(
+      ai,replacements,difficulty,mode)).text).questions;
+    const checked=await geographyValidateShapeFirst123(ai,generated,replacements,difficulty);
+    const duplicate=await Promise.all(generated.map((q,i)=>
+      isExactBankDuplicate(replacements[i],q)));
+    const passed=new Set();
+    for(let i=0;i<selected.length;i++){
+      const {index,target}=selected[i],q=generated[i],v=checked[i];
+      const stem=geographyNorm115(q?.stem);
+      const invalid=geographyForbiddenQuestionIssue(target,q)||
+        geographyStructureIssue115(target,q,difficulty);
+      if(!v?.valid||invalid||duplicate[i]||!stem||validatedStems.has(stem)){
+        console.warn('GEOGRAFIA_RESCATE_123_RECHAZADO:',JSON.stringify({
+          slot:generationIndexes[index]+1,targetId:Number(target.id),
+          issue:invalid||(!v?.valid?'Auditor rechaza relación':duplicate[i]?'Duplicada en banco':'Enunciado repetido')}));
+        continue;
+      }
+      validatedStems.add(stem);
+      finalQuestions[index]=q;
+      factualValidation[index]=v;
+      generationTargets[index]=target;
+      targets[generationIndexes[index]]=target;
+      passed.add(index);
+    }
+    console.log('GEOGRAFIA_RESCATE_123:',JSON.stringify({
+      requested:invalidQuestions.length,candidates:selected.length,
+      recovered:passed.size,remaining:invalidQuestions.length-passed.size,
+      extraAudits:1}));
+    return invalidQuestions.filter(r=>!passed.has(r.index));
+  }catch(error){
+    console.warn('GEOGRAFIA_RESCATE_123_ERROR:',String(error?.message||error).slice(0,280));
+    return invalidQuestions;
+  }
+}
+
+if(invalidQuestions.length && pureGeography115){
+  invalidQuestions=await geographyRescueRejected123({ai,invalidQuestions,
+    targets,generationTargets,generationIndexes,finalQuestions,
+    factualValidation,difficulty,mode,testType});
 }
 
 // SERVER 119: única plaza fallida en test NORMAL exclusivamente legislativo Muy Alta.
