@@ -6,6 +6,7 @@ import path from "path";
 import { PDFDocument } from "pdf-lib";
 import pg from "pg";
 import { createHash } from "node:crypto";
+import { inflateSync } from "node:zlib";
 const { Pool } = pg;
 
 
@@ -143,11 +144,12 @@ await db.query(`
     ALTER TABLE topics
     ADD COLUMN IF NOT EXISTS file_search_indexed BOOLEAN NOT NULL DEFAULT FALSE
   `);
-    await db.query(`
-    UPDATE topics
-    SET file_search_indexed = TRUE
-    WHERE total_items > 0
-      AND file_search_indexed = FALSE
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS topic_source_documents (
+      topic_id INTEGER PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
+      document_name TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `);
   await db.query(`
     CREATE TABLE IF NOT EXISTS coverage_items (
@@ -2336,106 +2338,77 @@ async function getOrCreateTopic(name, sourceFile=null){
   return created.rows[0];
 }
 
-async function saveCoverageItems(topicId, items){
+// Sustitución por identidad del conocimiento, sin borrar preguntas ni sesiones históricas.
+// La referencia al nuevo documento se confirma en la MISMA transacción que la cobertura.
+async function saveCoverageItems(topicId, items, documentName){
   const client=await db.connect();
-
   try{
     await client.query("BEGIN");
-
-    const stateResult=await client.query(
-      `SELECT
-         EXISTS (
-           SELECT 1
-           FROM coverage_items
-           WHERE topic_id = $1
-             AND (
-               worked = TRUE OR
-               times_asked > 0 OR
-               times_correct > 0 OR
-               times_wrong > 0 OR
-               times_blank > 0
-             )
-         ) AS has_history,
-         EXISTS (
-           SELECT 1
-           FROM question_bank qb
-           JOIN coverage_items ci
-             ON ci.id = qb.coverage_item_id
-           WHERE ci.topic_id = $1
-         ) AS has_questions,
-         EXISTS (
-           SELECT 1
-           FROM coverage_items
-           WHERE topic_id = $1
-         ) AS has_existing`,
-      [topicId]
-    );
-
-    const state=stateResult.rows[0];
-
-    if(
-      state?.has_existing === true &&
-      (
-        state?.has_history === true ||
-        state?.has_questions === true
-      )
-    ){
-      throw new Error(
-        "COVERAGE: no se puede reemplazar automáticamente un tema que ya tiene historial de estudio o preguntas generadas."
-      );
-    }
-
-    if(state?.has_existing === true){
-      await client.query(
-        `DELETE FROM coverage_items
-         WHERE topic_id = $1`,
-        [topicId]
-      );
-    }
-
+    await client.query("SELECT id FROM topics WHERE id=$1 FOR UPDATE",[topicId]);
+    const unique=new Map();
     for(const item of items){
-      await client.query(
-        `INSERT INTO coverage_items
-          (topic_id, section, concept, item_type, evaluation_type,
-           source_page, manual_page, source_evidence)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         ON CONFLICT (topic_id, concept, item_type, evaluation_type)
-         DO NOTHING`,
-        [
-          topicId,
-          item.section || null,
-          item.concept,
-          item.itemType,
-          item.evaluationType,
-          item.sourcePage ?? null,
-          item.manualPage ?? null,
-          item.sourceEvidence || null
-        ]
-      );
+      unique.set(JSON.stringify([item.concept,item.itemType,item.evaluationType]),item);
     }
-
-    await client.query(
-      `UPDATE topics
-       SET
-         total_items = (
-           SELECT COUNT(*)
-           FROM coverage_items
-           WHERE topic_id = $1
-         ),
-         worked_items = 0
-       WHERE id = $1`,
-      [topicId]
-    );
-
+    const oldRows=await client.query(`SELECT id,concept,item_type,evaluation_type,source_evidence
+      FROM coverage_items WHERE topic_id=$1`,[topicId]);
+    const priorByKey=new Map(oldRows.rows.map(row=>[
+      JSON.stringify([row.concept,row.item_type,row.evaluation_type]),row]));
+    const changed=[];
+    const keep=[];
+    for(const item of unique.values()){
+      const previous=priorByKey.get(JSON.stringify([item.concept,item.itemType,item.evaluationType]));
+      if(previous && String(previous.source_evidence||"")!==String(item.sourceEvidence||""))
+        changed.push(previous.id);
+      const row=await client.query(`
+        INSERT INTO coverage_items
+          (topic_id,section,concept,item_type,evaluation_type,
+           source_page,manual_page,source_evidence,exam_relevant)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,TRUE)
+        ON CONFLICT (topic_id,concept,item_type,evaluation_type)
+        DO UPDATE SET section=EXCLUDED.section,
+          source_page=EXCLUDED.source_page,
+          manual_page=EXCLUDED.manual_page,
+          source_evidence=EXCLUDED.source_evidence,
+          exam_relevant=TRUE
+        RETURNING id`,[topicId,item.section||null,item.concept,
+          item.itemType,item.evaluationType,item.sourcePage??null,
+          item.manualPage??null,item.sourceEvidence||null]);
+      keep.push(row.rows[0].id);
+    }
+    // Los elementos eliminados del PDF dejan de ser seleccionables. Se conservan
+    // físicamente si hay preguntas o estadísticas referenciándolos.
+    const retired=await client.query(`UPDATE coverage_items SET exam_relevant=FALSE
+      WHERE topic_id=$1 AND exam_relevant=TRUE
+        AND item_type<>'anki_independent'
+        AND NOT(id=ANY($2::int[])) RETURNING id`,[topicId,keep]);
+    const deactivate=[...new Set([...changed,...retired.rows.map(row=>row.id)])];
+    if(deactivate.length){
+      await client.query(`UPDATE question_bank SET active=FALSE
+        WHERE coverage_item_id=ANY($1::int[])`,[deactivate]);
+    }
+    await client.query(`DELETE FROM coverage_items ci
+      WHERE ci.topic_id=$1 AND ci.exam_relevant=FALSE
+        AND ci.item_type<>'anki_independent' 
+        AND ci.worked=FALSE AND ci.times_asked=0
+        AND ci.times_correct=0 AND ci.times_wrong=0 AND ci.times_blank=0
+        AND NOT EXISTS(SELECT 1 FROM question_bank qb WHERE qb.coverage_item_id=ci.id)
+        AND NOT EXISTS(SELECT 1 FROM test_session_questions sq WHERE sq.coverage_item_id=ci.id)
+        AND NOT EXISTS(SELECT 1 FROM coverage_review_state rs WHERE rs.coverage_item_id=ci.id)
+        AND NOT EXISTS(SELECT 1 FROM legislation_anki_questions aq WHERE aq.validated_coverage_item_id=ci.id)`,[topicId]);
+    await client.query(`UPDATE topics SET file_search_indexed=TRUE,
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE),
+      worked_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
+      WHERE id=$1`,[topicId]);
+    await client.query(`INSERT INTO topic_source_documents(topic_id,document_name)
+      VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE
+      SET document_name=EXCLUDED.document_name,updated_at=NOW()`,[topicId,documentName]);
     await client.query("COMMIT");
-
   }catch(error){
     await client.query("ROLLBACK");
     throw error;
-
-  }finally{
-    client.release();
-  }
+  }finally{client.release();}
 }
 function normalizeCoverageItem(item){
   const clean = value =>
@@ -4305,7 +4278,15 @@ Antes de finalizar, realiza una segunda revisión mental del documento buscando 
 - contenido de apartados que haya quedado sin representar.
 
 CAMPOS:
-- section: apartado o contexto del documento al que pertenece.
+- section: utiliza el encabezado real del APARTADO que agrupa los datos, respetando
+  su jerarquía. No inventes secciones y NO conviertas cada ficha, entidad o fila
+  (por ejemplo, el nombre de un monte) en una sección independiente.
+  Si la fuente agrupa fichas bajo un parque, capítulo o bloque, todas las fichas
+  de ese grupo deben conservar ese mismo encabezado.
+- Si el PDF contiene registros identificados con códigos únicos (por ejemplo,
+  ABC-0001), genera exactamente UN elemento por cada registro numerado y copia
+  su identificador literal al INICIO de sourceEvidence. No omitas registros
+  por parecer repetitivos; no mezcles dos identificadores en un elemento.
 - concept: descripción precisa y autosuficiente del conocimiento que se evaluará.
 - itemType: tipo de contenido según el esquema proporcionado.
 - evaluationType: forma concreta de evaluación.
@@ -4402,6 +4383,163 @@ async function setCoverageRunState(runId,state){
     ]
   );
 }
+// Verificador genérico de códigos secuenciales que están escritos literalmente
+// en flujos de texto PDF (sin conversión OCR y sin llamadas adicionales a IA).
+// Si el PDF no permite leerlos con seguridad, no impone este control.
+function decodePdfAscii85(data){
+  const input=data.toString("latin1").replace(/\s+/g,"")
+    .replace(/^<~/,"").replace(/~>.*$/s,"");
+  const output=[];let tuple=[];
+  const emit=(group,count)=>{
+    let value=0;
+    for(const digit of group)value=value*85+(digit-33);
+    if(value>0xffffffff)throw new Error("ASCII85 fuera de rango");
+    output.push(...[(value>>>24)&255,(value>>>16)&255,
+      (value>>>8)&255,value&255].slice(0,count));
+  };
+  for(const ch of input){
+    if(ch==="z"&&!tuple.length){output.push(0,0,0,0);continue;}
+    const digit=ch.charCodeAt(0);
+    if(digit<33||digit>117)throw new Error("ASCII85 inválido");
+    tuple.push(digit);
+    if(tuple.length===5){emit(tuple,4);tuple=[];}
+  }
+  if(tuple.length>1){
+    const count=tuple.length;
+    while(tuple.length<5)tuple.push(117);
+    emit(tuple,count-1);
+  }
+  return Buffer.from(output);
+}
+function sequentialPdfRecordIds(filePath){
+  const bytes=fs.readFileSync(filePath);
+  const latin=bytes.toString("latin1");
+  const groups=new Map();
+  const sectionByCode=new Map();
+  const parsedRecords=new Map();
+  let recordPage=0;
+  const cmapByObject=new Map();
+  const fontUnicodeRef=new Map();
+  for(const obj of latin.matchAll(/\b(\d+)\s+0\s+obj\b([\s\S]*?)endobj/g)){
+    const name=obj[2].match(/\/Name\s+\/([A-Za-z0-9+]+)/);
+    const cmap=obj[2].match(/\/ToUnicode\s+(\d+)\s+0\s+R/);
+    if(name&&cmap)fontUnicodeRef.set(name[1],Number(cmap[1]));
+  }
+  let heading=null;
+  const stream=/\bstream\r?\n/g;
+  let match;
+  while((match=stream.exec(latin))!==null){
+    const start=match.index+match[0].length;
+    const end=latin.indexOf("endstream",start);
+    if(end<0)break;
+    stream.lastIndex=end+9;
+    let contents=bytes.subarray(start,end);
+    try{
+      const header=latin.slice(Math.max(0,match.index-300),match.index);
+      if(/\/ASCII85Decode\b/.test(header))contents=decodePdfAscii85(contents);
+      if(/\/FlateDecode\b/.test(header))contents=inflateSync(contents);
+      const txt=contents.toString("latin1");
+      if(txt.includes("beginbfchar")){
+        const before=latin.slice(Math.max(0,match.index-600),match.index);
+        const objectNo=[...before.matchAll(/\b(\d+)\s+0\s+obj\b/g)].pop()?.[1];
+        if(objectNo){
+          const mapping=new Map();
+          for(const ch of txt.matchAll(/<([0-9A-F]{2})>\s+<([0-9A-F]{4})>/gi)){
+            const scalar=parseInt(ch[2],16);
+            if(scalar>0)mapping.set(parseInt(ch[1],16),String.fromCodePoint(scalar));
+          }
+          cmapByObject.set(Number(objectNo),mapping);
+        }
+      }
+      // Leer las fichas literalmente cuando el PDF ya contiene una unidad
+      // examinable numerada por línea. Sin rehacer datos mediante IA.
+      const pageHasRecords=/\b[A-Z][A-Z0-9]{1,12}[-_]\d{3,6}\b/.test(txt);
+      if(pageHasRecords)recordPage++;
+      let currentRecord=null;
+      let printedPage=null;
+      const finishRecord=()=>{
+        if(!currentRecord)return;
+        const r=currentRecord;
+        r.text=r.text.replace(/\s+/g," ").trim();
+        if(r.text.length>=10){
+          const category=r.kind.toUpperCase();
+          const numeric=/ALTITUD|LONGITUD|DISTANCIA|ALTURA|PESO|TEMPERATURA|PRESI[ÓO]N|VELOCIDAD|PORCENTAJE/.test(category);
+          const statement=`${r.kind}: ${r.text}`;
+          parsedRecords.set(`${r.prefix}:${r.digits}`,{
+            section:r.section||null,
+            concept:statement,
+            itemType:numeric?"dato_numerico":"relacion",
+            evaluationType:numeric?"identificacion":"relacion_variables",
+            sourcePage:r.page,
+            manualPage:r.manual,
+            sourceEvidence:`${r.prefix}${r.digits} · ${statement}`
+          });
+        }
+        currentRecord=null;
+      };
+      let activeFont=null;
+      for(const token of txt.matchAll(/\/([A-Za-z0-9+]+)\s+[0-9.]+\s+Tf|\((?:\\.|[^\)])*\)\s*Tj/g)){
+        if(token[1]){activeFont=token[1];continue;}
+        const unicode=cmapByObject.get(fontUnicodeRef.get(activeFont));
+        const label=token[0].slice(1,token[0].lastIndexOf(")"))
+          .replace(/\\([0-7]{1,3})/g,(_match,octal)=>
+            unicode?.get(parseInt(octal,8))||" ")
+          .replace(/\\([()])/g,"$1").trim();
+        const value=label.trim();
+        if(printedPage===null && /^\d{1,4}$/.test(value))printedPage=value;
+        const parsed=value.match(/^([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\s*[·•]\s*([^:]{2,55}):\s*(.*)$/);
+        if(parsed){
+          finishRecord();
+          currentRecord={prefix:parsed[1].toUpperCase(),digits:parsed[2],
+            kind:parsed[3].trim(),text:parsed[4],page:recordPage,
+            manual:printedPage,section:heading};
+        }else if(currentRecord){
+          if(/^PARQUE DE\b/.test(value) || /^Monte.+·\s*\d+\s*m$/.test(value)){
+            finishRecord();
+          }else if(value && !/^\d{1,4}$/.test(value)){
+            currentRecord.text+=" "+value;
+          }
+        }
+        if(label.length>=6 && label.length<=90 &&
+          /^[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ \/().-]+$/.test(label) &&
+          /[A-Z]{3}/.test(label) && !/\bTEMA\b/.test(label)){
+          heading=label;
+        }
+        const code=label.match(/\b([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\b/);
+        if(code && heading){
+          sectionByCode.set(`${code[1].toUpperCase()}:${code[2]}`,heading);
+        }
+      }
+      finishRecord();
+      for(const item of txt.matchAll(/\b([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\b/g)){
+        const prefix=item[1].toUpperCase(),digits=item[2].length;
+        const key=`${prefix}:${digits}`;
+        if(!groups.has(key))groups.set(key,new Set());
+        groups.get(key).add(Number(item[2]));
+      }
+    }catch(_error){/* Flujos no textuales o filtros PDF distintos: ignorar. */}
+  }
+  for(const [key,ids] of [...groups].sort((a,b)=>b[1].size-a[1].size)){
+    const max=Math.max(...ids);
+    if(ids.size>=30 && ids.has(1) && max<=Math.ceil(ids.size*1.03)){
+      const [prefix,digits]=key.split(":");
+      const sections=new Map();
+      for(const id of ids){
+        const section=sectionByCode.get(`${prefix}:${String(id).padStart(Number(digits),"0")}`);
+        if(section)sections.set(id,section);
+      }
+      const records=[...ids].sort((a,b)=>a-b).map(id=>
+        parsedRecords.get(`${prefix}:${String(id).padStart(Number(digits),"0")}`));
+      const literalItems=records.length===ids.size && records.every(item=>
+        item && item.section && item.sourceEvidence.length>=25 &&
+        item.sourcePage>=1 && item.manualPage!==null)
+        ? records : null;
+      return {prefix,digits:Number(digits),ids,sections,recordPages:recordPage,
+        literalItems};
+    }
+  }
+  return null;
+}
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
@@ -4486,41 +4624,31 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
-        if(topic.file_search_indexed !== true){
-      console.log(
-        `COVERAGE: indexando en File Search ${topic.name}`
-      );
-
-      await ingest(
-        pdfPath,
-        topic.name
-      );
-
-      const indexedResult=
-        await db.query(
-          `UPDATE topics
-           SET file_search_indexed = TRUE
-           WHERE id = $1
-           RETURNING *`,
-          [Number(topic.id)]
-        );
-
-      topic=indexedResult.rows[0];
-
-      console.log(
-        `COVERAGE: File Search listo para ${topic.name}`
-      );
+    const structuredSource=sequentialPdfRecordIds(pdfPath);
+    if(structuredSource){
+      console.log(`[coverage] Fuente numerada: ${structuredSource.ids.size} IDs `+
+        `con prefijo ${structuredSource.prefix}; extracción por bloques cortos.`);
     }
+
+    // No modificar File Search hasta que el análisis nuevo esté validado.
+    // El PDF antiguo sigue activo si el procesamiento fracasa.
 const coverageChunkPages=
-  coverageTopicNumber(topic.name)===22
-    ? 1
-    : 5;
+  coverageTopicNumber(topic.name)===22 ? 1 :
+  structuredSource ? 2 : 5;
 
 const {totalPages,chunks}=
   await splitPdfIntoChunks(
     pdfPath,
     coverageChunkPages
   );
+const literalItems=structuredSource?.literalItems &&
+  structuredSource.recordPages===totalPages
+    ? structuredSource.literalItems : null;
+if(literalItems){
+  console.log(`[coverage] Extracción literal PDF: ${literalItems.length} registros, `+
+    `${new Set(literalItems.map(x=>x.section)).size} secciones; sin llamadas a Gemini.`);
+}
+
 
 console.log(
   `COVERAGE: ${totalPages} páginas divididas en ${chunks.length} bloques`
@@ -4574,9 +4702,9 @@ const normalizeChunkSourcePages=(items,chunk)=>{
     return item;
   });
 };
-const allItems=[];
+const allItems=literalItems?[...literalItems]:[];
 
-for(const chunk of chunks){
+for(const chunk of (literalItems?[]:chunks)){
   console.log(
     `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
   );
@@ -4681,7 +4809,7 @@ if(coverageTopicNumber(topic.name)===21){
 
 const auditItems=[];
 
-for(const chunk of auditChunks){
+for(const chunk of (literalItems?[]:auditChunks)){
   const existingChunkItems=allItems.filter(item=>
     Number(item.sourcePage)>=chunk.startPage &&
     Number(item.sourcePage)<=chunk.endPage
@@ -4772,7 +4900,40 @@ const parsed={
     if(validItems.length===0){
       throw new Error("El análisis no contiene elementos de cobertura válidos.");
     }
+    // La aceptación exige coincidencia exacta con todos los códigos leídos del PDF.
+    // No depende del tema; si no hay códigos consecutivos, sigue la vía normal.
+    if(structuredSource){
+      const found=new Map();
+      for(const item of validItems){
+        const m=String(item.sourceEvidence||"").match(
+          /^\s*([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\b/i);
+        if(!m || m[1].toUpperCase()!==structuredSource.prefix ||
+           m[2].length!==structuredSource.digits)continue;
+        const id=Number(m[2]);
+        if(found.has(id))throw new Error(`COVERAGE: identificador `+
+          `${structuredSource.prefix}${m[2]} repetido. No se sustituye el tema.`);
+        found.set(id,item);
+      }
+      const missing=[...structuredSource.ids].filter(id=>!found.has(id));
+      const extra=[...found.keys()].filter(id=>!structuredSource.ids.has(id));
+      if(missing.length || extra.length || found.size!==validItems.length){
+        const code=id=>structuredSource.prefix+String(id).padStart(structuredSource.digits,"0");
+        throw new Error(`COVERAGE INCOMPLETA: PDF=${structuredSource.ids.size}, `+
+          `extraídos=${found.size}, faltan=${missing.length}, extras=${extra.length}. `+
+          `Primeros ausentes: ${missing.slice(0,12).map(code).join(", ")}. `+
+          `El tema y su PDF anterior permanecen intactos.`);
+      }
+      // Se conserva el orden documental de los identificadores, NO el orden
+      // alfabético arbitrario que devolviera Gemini.
+      validItems.splice(0,validItems.length,
+        ...[...structuredSource.ids].sort((a,b)=>a-b).map(id=>{
+          const item=found.get(id);
+          const section=structuredSource.sections.get(id);
+          return section ? {...item,section} : item;
+        }));
+    }
     
+
 if(coverageTopicNumber(topic.name)===22){
   const normalizeTema22Text=value=>
     String(value || "")
@@ -4922,10 +5083,70 @@ if(coverageTopicNumber(topic.name)===22){
         `COVERAGE TEMA 27 incompleta: ${validItems.length} elementos válidos; mínimo estructural esperado: 86.`
       );
     }
-await saveCoverageItems(
-      topic.id,
-      validItems
-    );
+    // Reemplazo efectivo: carga nueva -> cobertura y puntero en una transacción
+    // -> eliminación de la fuente anterior. Nunca duplicar deliberadamente.
+    const aiForSource=aiClient();
+    const store=await ensureStore();
+    const known=await db.query(
+      "SELECT document_name FROM topic_source_documents WHERE topic_id=$1",
+      [topic.id]);
+    const listed=[];
+    let pageToken;
+    do{
+      const page=await aiForSource.fileSearchStores.documents.list({
+        parent:store,config:{pageSize:100,pageToken}
+      });
+      listed.push(...(page.documents||[]));
+      pageToken=page.nextPageToken;
+    }while(pageToken);
+    const previousName=known.rows[0]?.document_name;
+    const candidates=listed.filter(doc=>
+      doc.displayName===topic.name || doc.displayName===topic.source_file);
+    const oldDoc=previousName
+      ? listed.find(doc=>doc.name===previousName)
+      : (candidates.length===1?candidates[0]:null);
+    if(previousName && !oldDoc){
+      throw new Error("No se localizó el documento registrado de este tema; no se sustituye.");
+    }
+    if(!previousName && (candidates.length>1 ||
+       (topic.file_search_indexed && candidates.length!==1))){
+      throw new Error(`Sustitución cancelada: ${candidates.length} documentos antiguos `+
+        `coinciden con el tema. No se creará un duplicado.`);
+    }
+    const displayName=`tema-${topic.id}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    let newDoc=null;
+    try{
+      await ingest(pdfPath,displayName);
+      let updated=[];
+      // Algunos índices tardan en mostrar el archivo recién incorporado.
+      for(let attempt=0;attempt<4;attempt++){
+        const pages=[];let next;
+        do{
+          const page=await aiForSource.fileSearchStores.documents.list({
+            parent:store,config:{pageSize:100,pageToken:next}
+          });
+          pages.push(...(page.documents||[]));next=page.nextPageToken;
+        }while(next);
+        updated=pages;
+        newDoc=updated.find(doc=>doc.displayName===displayName);
+        if(newDoc?.name)break;
+        await sleep(2000);
+      }
+      if(!newDoc?.name)throw new Error("El PDF nuevo se indexó pero no se puede verificar su identificador; no se alteró la cobertura.");
+      await saveCoverageItems(topic.id,validItems,newDoc.name);
+    }catch(error){
+      if(newDoc?.name){
+        try{await aiForSource.fileSearchStores.documents.delete({name:newDoc.name,config:{force:true}});}
+        catch(cleanupError){console.error("[coverage] Documento nuevo pendiente de limpieza",cleanupError);}
+      }
+      throw error;
+    }
+    if(oldDoc && oldDoc.name!==newDoc.name){
+      try{await aiForSource.fileSearchStores.documents.delete({name:oldDoc.name,config:{force:true}});}
+      catch(error){
+        throw new Error("La nueva cobertura ya está guardada, pero la fuente antigua sigue en File Search. No generes preguntas hasta limpiar el documento anterior: "+oldDoc.name);
+      }
+    }
 
     const result=await db.query(
       `SELECT
@@ -4935,7 +5156,7 @@ await saveCoverageItems(
          COUNT(c.id) FILTER (WHERE c.worked = TRUE)::int AS worked_items,
          COUNT(c.id) FILTER (WHERE c.worked = FALSE)::int AS pending_items
        FROM topics t
-       LEFT JOIN coverage_items c ON c.topic_id = t.id
+       LEFT JOIN coverage_items c ON c.topic_id = t.id AND c.exam_relevant=TRUE
        WHERE t.id = $1
        GROUP BY t.id`,
       [topic.id]
@@ -5119,7 +5340,7 @@ app.get("/api/geography-coverage-audit", async(req,res)=>{
     const countResult=await db.query(
       `SELECT COUNT(*)::int AS total
        FROM coverage_items
-       WHERE topic_id = $1
+       WHERE topic_id = $1 AND exam_relevant=TRUE
          AND (
            $2 = '' OR
            COALESCE(section,'') ILIKE '%' || $2 || '%' OR
@@ -5140,7 +5361,7 @@ app.get("/api/geography-coverage-audit", async(req,res)=>{
          manual_page,
          source_evidence
        FROM coverage_items
-       WHERE topic_id = $1
+       WHERE topic_id = $1 AND exam_relevant=TRUE
          AND (
            $2 = '' OR
            COALESCE(section,'') ILIKE '%' || $2 || '%' OR
@@ -5470,13 +5691,10 @@ function buildQuestionFamilyPlan(targets){
       "2024_TEXTO"
     ],
 
-    geografia:[
-      "2026_CORRECTA",
-      "2024_TEXTO",
-      "2026_CORRECTA",
-      "2026_INCORRECTA",
-      "2024_TEXTO"
-    ],
+    // Solo estilo: en Geografía 2026 predominan preguntas directas
+    // sobre ubicaciones, recorridos, relaciones y actuaciones operativas.
+    // No se impone una cuota CORRECTA/INCORRECTA.
+    geografia:["2024_TEXTO"],
 
     especifico:[
       "2026_CORRECTA",
@@ -7511,12 +7729,7 @@ for(let index = 0; index < selected.length; index++){
       item.questionFamily === "CALCULO_FORMULACION"
     )
   ){
-    const geographyFamilies = [
-      "2026_CORRECTA",
-      "2026_INCORRECTA",
-      "2026_RAZONAMIENTO",
-      "2024_TEXTO"
-    ];
+    const geographyFamilies = ["2024_TEXTO"];
 
     item.questionFamily =
       geographyFamilies[
@@ -9051,6 +9264,7 @@ app.get("/api/statistics/sections", async(req,res)=>{
         ) AS section,
 
         COUNT(ci.id)::int AS total_items,
+        MIN(ci.source_page) AS first_source_page,
 
         COUNT(ci.id) FILTER (
           WHERE ci.worked = TRUE
@@ -9085,6 +9299,7 @@ COALESCE(SUM(ci.times_blank),0)::int
 
       ORDER BY
         t.id,
+        first_source_page ASC NULLS LAST,
         section
     `);
 
@@ -9840,7 +10055,7 @@ app.get('/api/generation-run/:runId',async(req,res)=>{
     const state=await readGenerationRun(runId);
     if(!state)return res.status(404).json({ok:false,error:'No existe esa generación.'});
     if(state.status==='completed')return res.json({ok:true,status:'completed',
-      sessionId:state.sessionId,questions:state.questions,coverage:state.coverage});
+      sessionId:state.sessionId,questions:publicManualPageQuestions(state.questions),coverage:state.coverage});
     if(state.status==='failed')return res.json({ok:true,status:'failed',
       resumable:Boolean(state.draft?.questions?.some(Boolean)),
       validQuestions:state.draft?.questions?.filter(Boolean).length||0,
@@ -9969,9 +10184,48 @@ async function resetPool136(tasks,worker,limit=R136_CONCURRENCY){
   }));
   return out;
 }
+// GEOGRAFÍA 2026: modelos sintácticos elaborados a partir de las preguntas
+// oficiales 26-50 mostradas por el usuario. NO son transcripciones literales,
+// ni contienen respuestas o datos para validar hechos del temario.
+// La selección es exclusivamente de ESTILO: no modifica dificultad, cobertura,
+// familia factual, distractores, fuentes, auditoría ni selección de objetivos.
+const GEOGRAFIA_PATRONES_ESTILO_2026=Object.freeze([
+  {tema:/embalse|balsa|laguna|agua|helicopter|incendio forestal/,modelo:'Ante un incendio en [ubicación documentada], ¿qué punto de agua corresponde según el temario?'},
+  {tema:/localidad|municipio|concejo|valle|termino|bardenas/,modelo:'¿Cuál de las siguientes localidades pertenece a [ámbito territorial]? (También cabe preguntar cuál NO pertenece, si hay evidencia para las cuatro opciones.)'},
+  {tema:/barrio|parque de bomberos|moviliza|localidad|sima/,modelo:'SOS Navarra recibe un aviso de [incidente] en [lugar]. ¿Qué parque de bomberos se movilizará?'},
+  {tema:/poligono|industrial|carretera|ruta|acceso/,modelo:'Ante un aviso en [instalación o polígono], ¿por qué carretera accedería [parque indicado]?'},
+  {tema:/puerto|collado|sender|recorrido|travesia|gr-/,modelo:'Durante una travesía desde [origen] hacia [destino], ¿qué puerto o collado se atraviesa según la ruta documentada?'},
+  {tema:/monte|sierra|cima|orientacion|cardinal|norte|sur|este|oeste/,modelo:'Desde [monte o alto], ¿qué [río/localidad] se encuentra en la dirección cardinal indicada?'},
+  {tema:/camino|itinerario|carretera|poblacion|nucleo/,modelo:'Al seguir [ruta documentada] desde [origen], ¿qué localidad o vía se encuentra a continuación?'},
+  {tema:/tunel|galeria|cercan/,modelo:'Desde [parque de bomberos], ¿cuál de los siguientes túneles es el más cercano según el temario?'},
+  {tema:/precipitacion|climat|meteorolog/,modelo:'Según los datos de climatología del temario, ¿qué estación registra [magnitud consultada]?'},
+  {tema:/afluente|hidrograf|rio|arroyo|cuenca/,modelo:'¿De qué río es afluente [curso de agua] según la relación directa documentada?'},
+  {tema:/afluente|hidrograf|rio|arroyo|cuenca/,modelo:'¿Por qué río pasarán las aguas de [curso de agua], siguiendo una cadena de afluentes documentada?'},
+  {tema:/ferroviari|apeadero|apartadero|linea ferrea|estacion de tren/,modelo:'En [línea o tramo ferroviario], ¿qué estación, apeadero o apartadero corresponde a [localidad o relación documentada]?'},
+  {tema:/eolic|solar|parque eolico|na-/,modelo:'¿Dónde se sitúa [instalación] respecto a [carretera o referencia territorial]?'},
+  {tema:/helisuperficie|helipuerto|aerodromo|evacua/,modelo:'¿Qué localidad aparece vinculada a [instalación aérea], según la relación específica del temario?'},
+  {tema:/voluntario|parque|intervencion|accident/,modelo:'¿Qué parque de bomberos atendería [punto documentado], según la asignación territorial?'},
+]);
+function pickGeografiaExamples73(targets,count=3){
+  const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const list=Array.isArray(targets)?targets:[];
+  const topics=norm(list.map(t=>t?.topic_name||'').join(' '));
+  const source=norm(list.map(t=>`${t?.section||''} ${t?.concept||''}`).join(' '));
+  // Primero los modelos del tema seleccionado, luego los del concepto.
+  // El resto sólo sirve de recurso cuando no existen tres afines.
+  const related=GEOGRAFIA_PATRONES_ESTILO_2026.map((e,i)=>({e,i,
+    score:(e.tema.test(topics)?2:0)+(e.tema.test(source)?1:0)}))
+    .filter(x=>x.score>0).sort((a,b)=>b.score-a.score||a.i-b.i).map(x=>x.e);
+  const selected=related.length?related.slice(0,count):[
+    {modelo:'¿Qué [entidad] corresponde a [relación geográfica documentada]?' }
+  ];
+  return selected.map(e=>e.modelo);
+}
 function resetPrompt136(targets,difficulty,mode){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
-  const examples=leg ? pickLegislationExamples94(targets,difficulty,2) : [
+  const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
+  const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
+    geo ? pickGeografiaExamples73(targets,3) : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
     'Ríos: afluente directo o cadena indirecta sólo si todos los eslabones constan en el PDF.',
@@ -9980,13 +10234,18 @@ function resetPrompt136(targets,difficulty,mode){
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO'}));
+  const styleTitle=geo
+    ? 'MODELOS DE REDACCIÓN BASADOS EN LAS PREGUNTAS 26-50 DE GEOGRAFÍA 2026 (SOLO ESTILO, NO FUENTE FACTUAL)'
+    : 'REFERENCIAS DE CALIBRACIÓN (SOLO ESTILO)';
   return `Eres examinador de Bombero de Navarra, oposición nivel C. Redacta ${targets.length} preguntas NUEVAS, nivel ${difficulty}, modalidad ${mode}.
 NUNCA utilices conocimientos externos ni hechos de ejemplos de exámenes. La ÚNICA fuente factual son los fragmentos del PDF proporcionados en OBJETIVOS; si falta el dato, recupera exclusivamente del PDF del temario mediante File Search cuando se te habilite.
 Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una correcta. Distractores plausibles pero falsos a la luz del texto. No inventes normas, cifras o excepciones.
-No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado. En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.
+No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado. ${geo?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
-EJEMPLOS OFICIALES APROBADOS (SOLO ESTILO): ${JSON.stringify(examples).slice(0,3600)}
+${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
+${styleTitle}: ${JSON.stringify(examples).slice(0,4400)}
+${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
 }
 // Esquema mínimo del motor nuevo: la procedencia y familia las asigna el
@@ -10075,7 +10334,8 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
     JOIN topics t ON t.id=ci.topic_id
     LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
-    WHERE qb.active=TRUE AND qb.validation_version>=6
+    WHERE qb.active=TRUE AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
+      AND qb.validation_version>=6
       AND qb.validation_version NOT IN (107,113)
       AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
       AND qb.difficulty=$2
@@ -10105,6 +10365,10 @@ async function resetBank136(allowedTopicIds,count,difficulty){
   if(pairs.length!==count)throw Error(`Banco insuficiente para ${count} preguntas ${difficulty}; hay ${pairs.length} aptas en esta selección.`);
   return pairs;
 }
+function publicManualPageQuestions(questions){
+  return (questions||[]).map(q=>({...q,sourcePage:null,
+    manualPage:q.manualPage??null}));
+}
 app.post('/api/generate',async(req,res)=>{
   const started=Date.now();const supplied=req.body?.runId;
   const runId=normalizeGenerationRunId(supplied);const signature=runId?generationRunSignature(req.body):null;
@@ -10118,7 +10382,7 @@ app.post('/api/generate',async(req,res)=>{
       if(!prior)ownsRun140=true;
       if(prior){if(prior.signature!==signature)return res.status(409).json({ok:false,error:'Configuración de runId distinta.'});
         if(prior.status==='completed')return res.json({ok:true,sessionId:prior.sessionId,
-          questions:prior.questions,coverage:prior.coverage});
+          questions:publicManualPageQuestions(prior.questions),coverage:prior.coverage});
         if(prior.status==='failed') {
           // Una sola pestaña debe reclamar el reintento. El segundo POST
           // obtiene «pending» y NO duplica llamadas a Gemini.
@@ -10292,7 +10556,7 @@ app.post('/api/generate',async(req,res)=>{
       difficulty,mode,testType,runId,runSignature:signature});
     console.log('RESET_136_COMPLETO:',JSON.stringify({count,sessionId:persisted.sessionId,
       ms:Date.now()-started,local:questions.filter(q=>q.resetLocal136).length}));
-    return res.json({ok:true,sessionId:persisted.sessionId,questions:persisted.questions,
+    return res.json({ok:true,sessionId:persisted.sessionId,questions:publicManualPageQuestions(persisted.questions),
       coverage:{targeted:targets.length,markedWorked:0}});
   }catch(e){
     if(runId&&ownsRun140){try{await writeGenerationRun(runId,{status:'failed',signature,
@@ -10355,7 +10619,7 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     res.json({
   ok:true,
   completed:true,
-  questions:parsed.questions
+  questions:publicManualPageQuestions(parsed.questions)
 });
 
   }catch(e){
