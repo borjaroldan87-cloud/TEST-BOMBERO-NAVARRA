@@ -5094,7 +5094,7 @@ if(coverageTopicNumber(topic.name)===22){
     let pageToken;
     do{
       const page=await aiForSource.fileSearchStores.documents.list({
-        parent:store,config:{pageSize:100,pageToken}
+        parent:store,config:{pageSize:20,pageToken}
       });
       listed.push(...(page.documents||[]));
       pageToken=page.nextPageToken;
@@ -5123,7 +5123,7 @@ if(coverageTopicNumber(topic.name)===22){
         const pages=[];let next;
         do{
           const page=await aiForSource.fileSearchStores.documents.list({
-            parent:store,config:{pageSize:100,pageToken:next}
+            parent:store,config:{pageSize:20,pageToken:next}
           });
           pages.push(...(page.documents||[]));next=page.nextPageToken;
         }while(next);
