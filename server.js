@@ -6768,8 +6768,21 @@ const geographyTopic115 = target =>
   Number(coverageTopicNumber(target?.topic_name));
 const geographyPure115 = targets => Array.isArray(targets) && targets.length>0 &&
   targets.every(t=>String(t?.topic_block||'').toLowerCase()==='geografia' &&
-    [21,22,23,24].includes(geographyTopic115(t)));
+    [21,22,23,24,28].includes(geographyTopic115(t)));
 function geographyAreaGroup115(item){
+  // Tema 28: repartir los objetivos entre fichas de ríos R01, R02, etc.
+  // Se usan exclusivamente los identificadores del propio temario.
+  if(geographyTopic115(item)===28){
+    const section=String(item?.section||'');
+    const concept=String(item?.concept||'');
+    const evidence=String(item?.source_evidence||'');
+    const ficha=section.match(/\bR(\d{2})(?:-\d{2})?\b/i) ||
+      concept.match(/\bR(\d{2})-\d{2}\b/i) ||
+      evidence.match(/\bR(\d{2})-\d{2}\b/i);
+    if(ficha)return `${item?.topic_id||0}:rio:R${ficha[1]}`;
+    // Si el identificador no aparece, conservar el apartado real.
+    return `${item?.topic_id||0}:rio:${geographyNorm115(item?.section)||'sin_ficha'}`;
+  }
   const concept=String(item?.concept||'');
   const arrow=concept.split('->').map(s=>s.trim()).filter(Boolean);
   const area=arrow.length>=2 ? arrow[arrow.length-1] :
@@ -6780,39 +6793,36 @@ function geographyAreaGroup115(item){
 }
 function geographyDiverseCandidates115(rows){
   if(!geographyPure115(rows))return rows;
-  // Respetar la prelación SRS/errores (prioridades 1 a 3 intactas).
-  // Solo repartir las candidaturas no urgentes 4–5 por ámbitos reales.
-  const urgent=rows.filter(r=>Number(r.adaptive_priority)<4);
-  const output=[...urgent];
-  for(const priority of [4,5]){
+  // Una sola pasada, sin consultas adicionales: distribuir fichas DENTRO de
+  // cada prioridad adaptativa. Nunca adelantar mantenimiento a un SRS vencido.
+  const result=[];
+  const priorities=[...new Set(rows.map(r=>Number(r.adaptive_priority)))].sort((a,b)=>a-b);
+  for(const priority of priorities){
     const candidates=rows.filter(r=>Number(r.adaptive_priority)===priority);
-    const byTimes=new Map();
+    const byAsked=new Map();
     for(const row of candidates){
       const asked=Number(row.times_asked||0);
-      if(!byTimes.has(asked))byTimes.set(asked,[]);
-      byTimes.get(asked).push(row);
+      if(!byAsked.has(asked))byAsked.set(asked,[]);
+      byAsked.get(asked).push(row);
     }
-    for(const asked of [...byTimes.keys()].sort((a,b)=>a-b)){
+    for(const asked of [...byAsked.keys()].sort((a,b)=>a-b)){
       const byArea=new Map();
-      for(const row of byTimes.get(asked)){
+      for(const row of byAsked.get(asked)){
         const key=geographyAreaGroup115(row);
         if(!byArea.has(key))byArea.set(key,[]);
         byArea.get(key).push(row);
       }
-      // Intercalar grupos, en lugar de recorrer el PDF desde su primera fila.
       const bins=[...byArea.values()];
       let remaining=true;
       while(remaining){
         remaining=false;
         for(const bin of bins){
-          if(bin.length){output.push(bin.shift());remaining=true;}
+          if(bin.length){result.push(bin.shift());remaining=true;}
         }
       }
     }
   }
-  // Candidaturas futuras/desconocidas sin perder registros.
-  const seen=new Set(output.map(r=>r.id));
-  return output.concat(rows.filter(r=>!seen.has(r.id)));
+  return result;
 }
 /* SERVER 123: preguntas de ubicación, intervención y pertenencia territorial.
    Familias cerradas: nunca superficie, potencia, promotores ni deducciones de distancia.
