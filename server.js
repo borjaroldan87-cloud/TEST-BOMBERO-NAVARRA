@@ -7,6 +7,7 @@ import { PDFDocument } from "pdf-lib";
 import pg from "pg";
 import { createHash } from "node:crypto";
 import { inflateSync } from "node:zlib";
+import { spawnSync } from "node:child_process";
 const { Pool } = pg;
 
 
@@ -4535,7 +4536,57 @@ function decodePdfAscii85(data){
   }
   return Buffer.from(output);
 }
+function structuredPdfFromText(filePath){
+  // Extraction is deterministic; no LLM may reassign a record to another park.
+  const proc=spawnSync("pdftotext",["-layout","-enc","UTF-8",filePath,"-"],
+    {encoding:"utf8",maxBuffer:32*1024*1024,timeout:45000});
+  if(proc.error || proc.status!==0) return null;
+  const pages=proc.stdout.split("\f").filter(x=>x.trim());
+  const groups=new Map(),records=new Map(),sections=new Map();
+  let park=null, record=null, page=0;
+  const flush=()=>{
+    if(!record)return;
+    record.concept=record.concept.replace(/\s+/g," ").trim();
+    if(!record.section || !record.concept)throw Error(`Ficha ${record.code} sin parque o contenido`);
+    if(records.has(record.id))throw Error(`Ficha duplicada: ${record.code}`);
+    records.set(record.id,{section:record.section,concept:record.concept,
+      itemType:/ALTITUD|LONGITUD|DISTANCIA|ALTURA|TEMPERATURA|PRESI[ÓO]N|VELOCIDAD/.test(record.kind)?"dato_numerico":"relacion",
+      evaluationType:"identificacion",sourcePage:record.page,
+      sourceEvidence:`${record.code} · ${record.concept}`});
+    sections.set(record.id,record.section);record=null;
+  };
+  let prefix=null,digits=0;
+  for(const content of pages){
+    page++;
+    for(const raw of content.split(/\r?\n/)){
+      const line=raw.trim();
+      const heading=line.match(/^PARQUE DE\s+(.+)$/i);
+      if(heading){flush();park=`PARQUE DE ${heading[1].trim()}`;continue;}
+      const match=line.match(/^([A-Z][A-Z0-9]{0,12}[-_]?)((?:\d{3,6}))\s*[|·•]\s*(.*)$/);
+      if(match){
+        flush();const code=match[1]+match[2];
+        if(!prefix){prefix=match[1];digits=match[2].length;}
+        if(match[1]!==prefix||match[2].length!==digits)return null;
+        const remainder=match[3].trim();
+        record={id:Number(match[2]),code,section:park,page,
+          kind:remainder.split(":")[0].toUpperCase(),concept:remainder};
+      }else if(record && line && !/^Origen:|^Monte .+ · \d+ m$/.test(line)){
+        // Continue wrapped values; do not absorb another section's headings.
+        if(!/^(?:TEMA |Geografía de Navarra|Fichas estructuradas|Reglas de lectura)/i.test(line))
+          record.concept+=' '+line;
+      }
+    }
+  }
+  flush();
+  if(records.size<20)return null;
+  const ids=new Set(records.keys()),max=Math.max(...ids);
+  if(!ids.has(1)||max!==ids.size)throw Error(`Secuencia documental incompleta: ${ids.size} de ${max}`);
+  return {prefix,digits,ids,sections,recordPages:pages.length,
+    literalItems:[...records.keys()].sort((a,b)=>a-b).map(id=>records.get(id))};
+}
 function sequentialPdfRecordIds(filePath){
+  const deterministic=structuredPdfFromText(filePath);
+  if(deterministic)return deterministic;
   const bytes=fs.readFileSync(filePath);
   const latin=bytes.toString("latin1");
   const groups=new Map();
@@ -4782,9 +4833,7 @@ const {totalPages,chunks}=
     pdfPath,
     coverageChunkPages
   );
-const literalItems=structuredSource?.literalItems &&
-  structuredSource.recordPages===totalPages
-    ? structuredSource.literalItems : null;
+const literalItems=structuredSource?.literalItems || null;
 if(literalItems){
   console.log(`[coverage] Extracción literal PDF: ${literalItems.length} registros, `+
     `${new Set(literalItems.map(x=>x.section)).size} secciones; sin llamadas a Gemini.`);
