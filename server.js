@@ -2410,6 +2410,124 @@ async function saveCoverageItems(topicId, items, documentName){
     throw error;
   }finally{client.release();}
 }
+// Los servidores anteriores identificaban las fuentes por nombre de tema;
+// los actuales también utilizan "tema-ID-...". Reconocer ambas formas evita
+// volver a indexar un tema ignorando una fuente antigua.
+function normalizeTopicDocumentName(value){
+  return String(value||"").normalize("NFD")
+    .replace(/[\u0300-\u036f]/g,"")
+    .toLowerCase().replace(/\.pdf$/i,"")
+    .replace(/[^a-z0-9]+/g," ").trim();
+}
+function documentsBelongingToTopic(documents,topic,previousName){
+  const aliases=new Set([topic.name,topic.source_file]
+    .map(normalizeTopicDocumentName).filter(Boolean));
+  const prefix=`tema-${Number(topic.id)}-`;
+  const found=new Map();
+  for(const doc of documents){
+    if(!doc?.name)continue;
+    const label=String(doc.displayName||"");
+    if(doc.name===previousName || label.startsWith(prefix) ||
+       aliases.has(normalizeTopicDocumentName(label))){
+      found.set(doc.name,doc);
+    }
+  }
+  return [...found.values()];
+}
+async function listFactualDocuments(ai,store){
+  const docs=[];
+  const tokens=new Set();
+  let pageToken;
+  do{
+    const page=await ai.fileSearchStores.documents.list({
+      parent:store,config:{pageSize:20,...(pageToken?{pageToken}:{})}
+    });
+    docs.push(...(page.documents||[]));
+    pageToken=page.nextPageToken;
+    if(pageToken){
+      if(tokens.has(pageToken))throw new Error(
+        "Paginación repetida al enumerar documentos en File Search.");
+      tokens.add(pageToken);
+    }
+  }while(pageToken);
+  return docs;
+}
+async function replaceTopicDocument(topic,pdfPath,items){
+  const ai=aiClient();
+  const store=await ensureStore();
+  const known=await db.query(
+    "SELECT document_name FROM topic_source_documents WHERE topic_id=$1",
+    [topic.id]);
+  const previousName=known.rows[0]?.document_name||null;
+  const documents=await listFactualDocuments(ai,store);
+  const oldDocs=documentsBelongingToTopic(documents,topic,previousName);
+  if(!oldDocs.length && topic.file_search_indexed){
+    // En instalaciones antiguas el indicador se activaba aun sin conservar
+    // un ID de documento. Un cero en la lista no justifica cancelar la carga.
+    console.warn(`[coverage] ${topic.name}: indicador antiguo de indexación `+
+      `sin documento localizable; se sustituirá la cobertura validada.`);
+  }
+  if(previousName && !documents.some(d=>d.name===previousName)){
+    console.warn(`[coverage] ${topic.name}: puntero antiguo sin documento `+
+      `en File Search: ${previousName}`);
+  }
+  const displayName=`tema-${topic.id}-${Date.now()}-`+
+    Math.random().toString(36).slice(2,8);
+  let newDoc=null;
+  let saved=false;
+  try{
+    await ingest(pdfPath,displayName);
+    // El alta puede tardar unos segundos en aparecer en documents.list.
+    for(let attempt=0;attempt<4;attempt++){
+      const updated=await listFactualDocuments(ai,store);
+      newDoc=updated.find(doc=>doc.displayName===displayName);
+      if(newDoc?.name)break;
+      await sleep(2000);
+    }
+    if(!newDoc?.name)throw new Error(
+      "Gemini no ha devuelto el identificador del PDF nuevo; "+
+      "no se ha cambiado la cobertura.");
+    await saveCoverageItems(topic.id,items,newDoc.name);
+    saved=true;
+  }catch(error){
+    if(!saved){
+      // Si se indexó pero la consulta de documentos falló, buscar por el
+      // nombre ÚNICO de esta operación antes de abandonar el intento.
+      try{
+        const candidates=newDoc?.name?[newDoc]:
+          (await listFactualDocuments(ai,store)).filter(d=>
+            d.displayName===displayName);
+        for(const doc of candidates){
+          await ai.fileSearchStores.documents.delete({
+            name:doc.name,config:{force:true}
+          });
+        }
+      }catch(cleanupError){
+        console.error("[coverage] Fuente nueva pendiente de limpieza",cleanupError);
+      }
+    }
+    throw error;
+  }
+  // El registro nuevo y su cobertura ya se guardaron conjuntamente en PG.
+  // Solo ahora eliminar las fuentes anteriores del MISMO tema.
+  const errors=[];
+  for(const doc of oldDocs){
+    if(doc.name===newDoc.name)continue;
+    try{
+      await ai.fileSearchStores.documents.delete({
+        name:doc.name,config:{force:true}
+      });
+    }catch(error){
+      errors.push(doc.name);
+      console.error(`[coverage] No se ha podido eliminar ${doc.name}`,error);
+    }
+  }
+  if(errors.length){
+    throw new Error("La cobertura nueva ya está guardada, pero no se pudieron "+
+      "retirar estas fuentes antiguas de File Search: "+errors.join(", ")+
+      ". No generes tests de este tema hasta resolverlo.");
+  }
+}
 function normalizeCoverageItem(item){
   const clean = value =>
     typeof value === "string"
@@ -4026,7 +4144,8 @@ if(!pdfHeader.includes("%PDF-")){
       await db.query(
         `UPDATE topics
          SET
-           source_file = $2,
+           source_file = CASE WHEN total_items > 0
+             THEN COALESCE(source_file,$2) ELSE $2 END,
            block = COALESCE($3, block),
            topic_order = COALESCE($4, topic_order)
          WHERE id = $1
@@ -4543,6 +4662,7 @@ function sequentialPdfRecordIds(filePath){
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
+  let coverageLock=null;
   const coverageRunId=
     String(req.body?.runId || "")
       .trim()
@@ -4615,6 +4735,15 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       throw new Error(
         "No se encuentra el PDF para analizar."
       );
+    }
+    // Excluir dos reindexaciones simultáneas del mismo tema incluso con
+    // varias instancias de Node. La sesión PG libera el bloqueo al terminar.
+    coverageLock=await db.connect();
+    const locked=await coverageLock.query(
+      "SELECT pg_try_advisory_lock($1::bigint) AS ok",
+      [900000000000+Number(topic.id)]);
+    if(locked.rows[0]?.ok!==true){
+      throw new Error("Este tema ya está siendo procesado; espera a que termine.");
     }
     await setCoverageRunState(
       coverageRunId,
@@ -5083,70 +5212,9 @@ if(coverageTopicNumber(topic.name)===22){
         `COVERAGE TEMA 27 incompleta: ${validItems.length} elementos válidos; mínimo estructural esperado: 86.`
       );
     }
-    // Reemplazo efectivo: carga nueva -> cobertura y puntero en una transacción
-    // -> eliminación de la fuente anterior. Nunca duplicar deliberadamente.
-    const aiForSource=aiClient();
-    const store=await ensureStore();
-    const known=await db.query(
-      "SELECT document_name FROM topic_source_documents WHERE topic_id=$1",
-      [topic.id]);
-    const listed=[];
-    let pageToken;
-    do{
-      const page=await aiForSource.fileSearchStores.documents.list({
-        parent:store,config:{pageSize:20,pageToken}
-      });
-      listed.push(...(page.documents||[]));
-      pageToken=page.nextPageToken;
-    }while(pageToken);
-    const previousName=known.rows[0]?.document_name;
-    const candidates=listed.filter(doc=>
-      doc.displayName===topic.name || doc.displayName===topic.source_file);
-    const oldDoc=previousName
-      ? listed.find(doc=>doc.name===previousName)
-      : (candidates.length===1?candidates[0]:null);
-    if(previousName && !oldDoc){
-      throw new Error("No se localizó el documento registrado de este tema; no se sustituye.");
-    }
-    if(!previousName && (candidates.length>1 ||
-       (topic.file_search_indexed && candidates.length!==1))){
-      throw new Error(`Sustitución cancelada: ${candidates.length} documentos antiguos `+
-        `coinciden con el tema. No se creará un duplicado.`);
-    }
-    const displayName=`tema-${topic.id}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-    let newDoc=null;
-    try{
-      await ingest(pdfPath,displayName);
-      let updated=[];
-      // Algunos índices tardan en mostrar el archivo recién incorporado.
-      for(let attempt=0;attempt<4;attempt++){
-        const pages=[];let next;
-        do{
-          const page=await aiForSource.fileSearchStores.documents.list({
-            parent:store,config:{pageSize:20,pageToken:next}
-          });
-          pages.push(...(page.documents||[]));next=page.nextPageToken;
-        }while(next);
-        updated=pages;
-        newDoc=updated.find(doc=>doc.displayName===displayName);
-        if(newDoc?.name)break;
-        await sleep(2000);
-      }
-      if(!newDoc?.name)throw new Error("El PDF nuevo se indexó pero no se puede verificar su identificador; no se alteró la cobertura.");
-      await saveCoverageItems(topic.id,validItems,newDoc.name);
-    }catch(error){
-      if(newDoc?.name){
-        try{await aiForSource.fileSearchStores.documents.delete({name:newDoc.name,config:{force:true}});}
-        catch(cleanupError){console.error("[coverage] Documento nuevo pendiente de limpieza",cleanupError);}
-      }
-      throw error;
-    }
-    if(oldDoc && oldDoc.name!==newDoc.name){
-      try{await aiForSource.fileSearchStores.documents.delete({name:oldDoc.name,config:{force:true}});}
-      catch(error){
-        throw new Error("La nueva cobertura ya está guardada, pero la fuente antigua sigue en File Search. No generes preguntas hasta limpiar el documento anterior: "+oldDoc.name);
-      }
-    }
+    // Un único procedimiento compartido por TODOS los temas. No utiliza
+    // file_search_indexed como prueba de que exista una fuente antigua.
+    await replaceTopicDocument(topic,pdfPath,validItems);
 
     const result=await db.query(
       `SELECT
@@ -5227,6 +5295,13 @@ if(coverageTopicNumber(topic.name)===22){
     }
 
   }finally{
+    if(coverageLock){
+      try{
+        await coverageLock.query("SELECT pg_advisory_unlock($1::bigint)",
+          [900000000000+Number(topic.id)]);
+      }catch(error){console.error("[coverage] Liberación de bloqueo",error);}
+      coverageLock.release();
+    }
     if(uploadedPdfPath){
       fs.unlink(
         uploadedPdfPath,
