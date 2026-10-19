@@ -4624,9 +4624,14 @@ function sequentialPdfRecordIds(filePath){
             currentRecord.text+=" "+value;
           }
         }
-        if(label.length>=6 && label.length<=90 &&
+        // Los registros nunca son encabezados. Cuando el PDF está agrupado
+        // por parques, únicamente un encabezado PARQUE DE ... cambia el grupo.
+        const isParkHeading=/^PARQUE DE [A-ZÁÉÍÓÚÜÑ \/().-]{3,}$/i.test(label);
+        const isOtherHeading=label.length>=6 && label.length<=90 &&
           /^[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ \/().-]+$/.test(label) &&
-          /[A-Z]{3}/.test(label) && !/\bTEMA\b/.test(label)){
+          /[A-Z]{3}/.test(label) && !/\bTEMA\b/.test(label) &&
+          !/^[A-Z][A-Z0-9]{1,12}[-_]\d{3,6}\b/.test(label);
+        if(isParkHeading || (isOtherHeading && !/^PARQUE DE /i.test(heading||""))){
           heading=label;
         }
         const code=label.match(/\b([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\b/);
@@ -5065,7 +5070,12 @@ const parsed={
         ...[...structuredSource.ids].sort((a,b)=>a-b).map(id=>{
           const item=found.get(id);
           const section=structuredSource.sections.get(id);
-          return section ? {...item,section} : item;
+          if(!section){
+            throw new Error(`COVERAGE: no se pudo identificar el encabezado original `+
+              `del registro ${structuredSource.prefix}${String(id).padStart(structuredSource.digits,"0")}. `+
+              `No se sustituye el tema.`);
+          }
+          return {...item,section};
         }));
     }
     
