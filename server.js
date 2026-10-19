@@ -4537,56 +4537,104 @@ function decodePdfAscii85(data){
   return Buffer.from(output);
 }
 function structuredPdfFromText(filePath){
-  // Extraction is deterministic; no LLM may reassign a record to another park.
   const proc=spawnSync("pdftotext",["-layout","-enc","UTF-8",filePath,"-"],
     {encoding:"utf8",maxBuffer:32*1024*1024,timeout:45000});
-  if(proc.error || proc.status!==0) return null;
-  const pages=proc.stdout.split("\f").filter(x=>x.trim());
-  const groups=new Map(),records=new Map(),sections=new Map();
-  let park=null, record=null, page=0;
-  const flush=()=>{
-    if(!record)return;
-    record.concept=record.concept.replace(/\s+/g," ").trim();
-    if(!record.section || !record.concept)throw Error(`Ficha ${record.code} sin parque o contenido`);
-    if(records.has(record.id))throw Error(`Ficha duplicada: ${record.code}`);
-    records.set(record.id,{section:record.section,concept:record.concept,
-      itemType:/ALTITUD|LONGITUD|DISTANCIA|ALTURA|TEMPERATURA|PRESI[ÓO]N|VELOCIDAD/.test(record.kind)?"dato_numerico":"relacion",
-      evaluationType:"identificacion",sourcePage:record.page,
-      sourceEvidence:`${record.code} · ${record.concept}`});
-    sections.set(record.id,record.section);record=null;
-  };
-  let prefix=null,digits=0;
-  for(const content of pages){
-    page++;
-    for(const raw of content.split(/\r?\n/)){
+  if(proc.error || proc.status!==0 || !proc.stdout?.trim())return null;
+  const pages=proc.stdout.split("\f").filter(p=>p.trim());
+  const all=pages.flatMap((p,i)=>p.split(/\r?\n/).map(line=>({line:line.trim(),page:i+1})));
+  const numbered=all.filter(x=>/^[EH]\d{3}\s*\|\s*\S/.test(x.line));
+  // Only enter the strict fiche parser for an actual sequential E/H document.
+  if(numbered.length>=20){
+    const prefix=numbered[0].line[0];
+    if(numbered.some(x=>x.line[0]!==prefix))throw Error('PDF: prefijos de fichas mezclados');
+    const ids=new Set(),sections=new Map(),literalItems=[];
+    let section=null,record=null;
+    const flush=()=>{
+      if(!record)return;
+      if(!record.section)throw Error(`Ficha ${record.code} sin encabezado de parque`);
+      if(ids.has(record.id))throw Error(`Ficha ${record.code} repetida`);
+      if(record.lines.length<2)throw Error(`Ficha ${record.code} sin contenido`);
+      ids.add(record.id);sections.set(record.id,record.section);
+      literalItems.push({section:record.section,
+        concept:record.lines.join(' ').replace(/\s+/g,' ').trim(),
+        itemType:'relacion',evaluationType:'identificacion',sourcePage:record.page,
+        sourceEvidence:`${record.code} · ${record.lines.join(' ').replace(/\s+/g,' ').trim()}`});
+      record=null;
+    };
+    for(const {line,page} of all){
+      if(/^PARQUE DE\s+\S/i.test(line)){flush();section=line.replace(/\s+/g,' ').trim();continue;}
+      const m=line.match(/^([EH])(\d{3})\s*\|\s*(.+)$/);
+      if(m){flush();if(m[1]!==prefix)throw Error(`Prefijo inesperado ${m[1]}`);
+        record={id:Number(m[2]),code:m[1]+m[2],section,page,lines:[m[3].trim()]};continue;}
+      if(/^Orientaciones directas e inversas/i.test(line) || /^Embalses, balsas, lagunas y barrancos$/i.test(line)){flush();break;}
+      if(!record || !line || /^Origen:\s*IMG_/i.test(line) ||
+        /^(?:Geografía de Navarra|TEMA NUEVO|Fichas estructuradas por parque|Reglas de lectura)/i.test(line))continue;
+      // Ignore footer and pagination; preserve the original data and field names.
+      if(!/^Página\s+\d+\b/i.test(line))record.lines.push(line);
+    }
+    flush();
+    const max=Math.max(...ids);
+    if(!ids.has(1)||max!==ids.size||ids.size!==numbered.length)
+      throw Error(`Fichas incompletas: ${ids.size} distintas, máximo ${max}, ${numbered.length} encabezados`);
+    return {prefix,digits:3,ids,sections,recordPages:pages.length,literalItems};
+  }
+  if(/CARRETERAS DE NAVARRA/i.test(proc.stdout.slice(0,500))){
+    const sectionsNames=new Set(['AUTOVÍAS','AUTOPISTAS','CARRETERAS DE ALTAS PRESTACIONES',
+      'CARRETERAS DE INTERÉS GENERAL','VÍAS DESDOBLADAS','CARRETERAS DE INTERÉS DE LA COMUNIDAD FORAL']);
+    let section=null,record=null;const items=[];
+    const flush=()=>{if(!record)return;
+      if(!record.section||record.lines.length<2)throw Error(`Ficha de vía incompleta: ${record.lines[0]}`);
+      const id=items.length+1,code='V'+String(id).padStart(3,'0');
+      const concept=record.lines.join(' ').replace(/\s+/g,' ').trim();
+      items.push({section:record.section,concept,itemType:'relacion',evaluationType:'identificacion',
+        sourcePage:record.page,sourceEvidence:`${code} · ${concept}`});record=null;};
+    for(const {line,page} of all){
+      if(sectionsNames.has(line)){flush();section=line;continue;}
+      const head=/^(?:A|AP|N|NA|PA)-\d+[A-Z0-9-]*(?:\s+R)?(?:\s+[—-]\s+tramo\s+\d+|\s+[—-]\s+Ronda\s+Oeste)?\s*[·]\s*\S/i;
+      if(head.test(line)){flush();record={section,page,lines:[line]};continue;}
+      if(/^Control de consistencia de longitudes$/i.test(line)){flush();break;}
+      if(!record||!line||/^Fuente:\s*IMG_/i.test(line)||
+        /^Carreteras Navarra\s*·\s*Fuente del usuario/i.test(line)||
+        /^\d+\s*$/.test(line))continue;
+      record.lines.push(line);
+    }
+    flush();
+    if(items.length<35)throw Error(`Extracción de carreteras insuficiente: ${items.length}`);
+    // The PDF begins with category and network totals. Keep those facts as
+    // independent records rather than silently dropping the opening table.
+    const totals=[];
+    const firstPage=pages[0].split(/\r?\n/);
+    let inTotals=false;
+    for(const raw of firstPage){
       const line=raw.trim();
-      const heading=line.match(/^PARQUE DE\s+(.+)$/i);
-      if(heading){flush();park=`PARQUE DE ${heading[1].trim()}`;continue;}
-      const match=line.match(/^([A-Z][A-Z0-9]{0,12}[-_]?)((?:\d{3,6}))\s*[|·•]\s*(.*)$/);
-      if(match){
-        flush();const code=match[1]+match[2];
-        if(!prefix){prefix=match[1];digits=match[2].length;}
-        if(match[1]!==prefix||match[2].length!==digits)return null;
-        const remainder=match[3].trim();
-        record={id:Number(match[2]),code,section:park,page,
-          kind:remainder.split(":")[0].toUpperCase(),concept:remainder};
-      }else if(record && line && !/^Origen:|^Monte .+ · \d+ m$/.test(line)){
-        // Continue wrapped values; do not absorb another section's headings.
-        if(!/^(?:TEMA |Geografía de Navarra|Fichas estructuradas|Reglas de lectura)/i.test(line))
-          record.concept+=' '+line;
+      if(/^Categoría \/ total\s+Km$/i.test(line)){inTotals=true;continue;}
+      if(inTotals && /^Los 2\.253 km/i.test(line))break;
+      if(inTotals){
+        const m=line.match(/^(.+?)\s{2,}([\d.,]+)\s*$/);
+        if(m)totals.push({label:m[1].trim(),value:m[2]});
       }
     }
+    const totalItems=totals.map(t=>({section:'Totales anotados en el material',
+      concept:`${t.label}: ${t.value} km`,itemType:'dato_numerico',
+      evaluationType:'identificacion',sourcePage:1,sourceEvidence:''}));
+    items.unshift(...totalItems);
+    for(let i=0;i<items.length;i++){
+      const code='V'+String(i+1).padStart(3,'0');
+      items[i].sourceEvidence=code+' · '+items[i].concept;
+    }
+    const ids=new Set(items.map((_,i)=>i+1));
+    const sections=new Map(items.map((x,i)=>[i+1,x.section]));
+    return {prefix:'V',digits:3,ids,sections,recordPages:pages.length,literalItems:items};
   }
-  flush();
-  if(records.size<20)return null;
-  const ids=new Set(records.keys()),max=Math.max(...ids);
-  if(!ids.has(1)||max!==ids.size)throw Error(`Secuencia documental incompleta: ${ids.size} de ${max}`);
-  return {prefix,digits,ids,sections,recordPages:pages.length,
-    literalItems:[...records.keys()].sort((a,b)=>a-b).map(id=>records.get(id))};
+  // Road codes such as N-111 are not fiche identifiers and must never
+  // be treated as a numbered sequence requiring a park.
+  if(/CARRETERAS DE NAVARRA/i.test(proc.stdout.slice(0,500)))return null;
+  return null;
 }
 function sequentialPdfRecordIds(filePath){
   const deterministic=structuredPdfFromText(filePath);
   if(deterministic)return deterministic;
+  if(/(?:^|[\/])34_CARRETERAS\.pdf$/i.test(filePath))return null;
   const bytes=fs.readFileSync(filePath);
   const latin=bytes.toString("latin1");
   const groups=new Map();
@@ -5096,7 +5144,7 @@ const parsed={
       const found=new Map();
       for(const item of validItems){
         const m=String(item.sourceEvidence||"").match(
-          /^\s*([A-Z][A-Z0-9]{1,12}[-_])(\d{3,6})\b/i);
+          /^\s*([A-Z][A-Z0-9]{0,12}[-_]?)(\d{3,6})\b/i);
         if(!m || m[1].toUpperCase()!==structuredSource.prefix ||
            m[2].length!==structuredSource.digits)continue;
         const id=Number(m[2]);
