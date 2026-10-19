@@ -2435,21 +2435,15 @@ function documentsBelongingToTopic(documents,topic,previousName){
   return [...found.values()];
 }
 async function listFactualDocuments(ai,store){
+  // @google/genai devuelve un Pager<Document>, no {documents,nextPageToken}.
+  // El iterador realiza automáticamente la paginación de 20 en 20.
+  const pager=await ai.fileSearchStores.documents.list({
+    parent:store,config:{pageSize:20}
+  });
   const docs=[];
-  const tokens=new Set();
-  let pageToken;
-  do{
-    const page=await ai.fileSearchStores.documents.list({
-      parent:store,config:{pageSize:20,...(pageToken?{pageToken}:{})}
-    });
-    docs.push(...(page.documents||[]));
-    pageToken=page.nextPageToken;
-    if(pageToken){
-      if(tokens.has(pageToken))throw new Error(
-        "Paginación repetida al enumerar documentos en File Search.");
-      tokens.add(pageToken);
-    }
-  }while(pageToken);
+  for await(const document of pager){
+    if(document?.name)docs.push(document);
+  }
   return docs;
 }
 async function replaceTopicDocument(topic,pdfPath,items){
@@ -2476,17 +2470,22 @@ async function replaceTopicDocument(topic,pdfPath,items){
   let newDoc=null;
   let saved=false;
   try{
-    await ingest(pdfPath,displayName);
-    // El alta puede tardar unos segundos en aparecer en documents.list.
-    for(let attempt=0;attempt<4;attempt++){
-      const updated=await listFactualDocuments(ai,store);
-      newDoc=updated.find(doc=>doc.displayName===displayName);
-      if(newDoc?.name)break;
-      await sleep(2000);
+    const uploaded=await ingest(pdfPath,displayName,true);
+    // La respuesta de la operación de subida es la fuente primaria del ID.
+    // Evita depender de la visibilidad inmediata del listado de documentos.
+    if(uploaded.documentName){
+      newDoc={name:uploaded.documentName,displayName};
+    }else{
+      for(let attempt=0;attempt<4;attempt++){
+        const updated=await listFactualDocuments(ai,store);
+        newDoc=updated.find(doc=>doc.displayName===displayName);
+        if(newDoc?.name)break;
+        await sleep(2000);
+      }
     }
     if(!newDoc?.name)throw new Error(
-      "Gemini no ha devuelto el identificador del PDF nuevo; "+
-      "no se ha cambiado la cobertura.");
+      "La operación de subida no devolvió documentName y la fuente no "+
+      "figura en el listado; se conserva la cobertura anterior.");
     await saveCoverageItems(topic.id,items,newDoc.name);
     saved=true;
   }catch(error){
@@ -3968,14 +3967,20 @@ async function ingestExamStyle(filePath, displayName){
 
   return store;
 }
-async function ingest(filePath, displayName){
+async function ingest(filePath, displayName, returnDocumentName=false){
   const ai=aiClient(); const store=await ensureStore();
   let op=await ai.fileSearchStores.uploadToFileSearchStore({
     file:filePath, fileSearchStoreName:store,
     config:{displayName,mimeType:"application/pdf"}
   });
-  await waitOp(ai,op);
-  return store;
+  op=await waitOp(ai,op);
+  if(op?.error){
+    throw new Error("Error de subida a File Search: "+JSON.stringify(op.error));
+  }
+  // La API devuelve el recurso exacto en response.documentName.
+  return returnDocumentName
+    ? {store,documentName:op?.response?.documentName||null}
+    : store;
 }
 
 app.get("/api/status",(req,res)=>res.json({ok:true,keyConfigured:!!process.env.GEMINI_API_KEY,store:STORE}));
