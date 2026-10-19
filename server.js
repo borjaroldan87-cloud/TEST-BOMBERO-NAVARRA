@@ -4668,6 +4668,7 @@ app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
   let coverageLock=null;
+  let ownsCoverageLock=false;
   const coverageRunId=
     String(req.body?.runId || "")
       .trim()
@@ -4750,6 +4751,7 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     if(locked.rows[0]?.ok!==true){
       throw new Error("Este tema ya está siendo procesado; espera a que termine.");
     }
+    ownsCoverageLock=true;
     await setCoverageRunState(
       coverageRunId,
       {
@@ -5302,16 +5304,16 @@ if(coverageTopicNumber(topic.name)===22){
   }finally{
     if(coverageLock){
       try{
-        await coverageLock.query("SELECT pg_advisory_unlock($1::bigint)",
+        if(ownsCoverageLock) await coverageLock.query("SELECT pg_advisory_unlock($1::bigint)",
           [900000000000+Number(topic.id)]);
       }catch(error){console.error("[coverage] Liberación de bloqueo",error);}
       coverageLock.release();
     }
-    if(uploadedPdfPath){
-      fs.unlink(
-        uploadedPdfPath,
-        ()=>{}
-      );
+    // Solo la solicitud que adquirió el bloqueo puede retirar el PDF.
+    // Una petición duplicada rechazada NO debe borrar el archivo que
+    // la solicitud activa todavía necesita para subirlo a File Search.
+    if(uploadedPdfPath && ownsCoverageLock){
+      fs.unlink(uploadedPdfPath,()=>{});
     }
   }
 });
