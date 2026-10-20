@@ -6809,50 +6809,42 @@ function geographyAreaGroup115(item){
     String(item?.section||'');
   return `${item?.topic_id||0}:${geographyNorm115(area)||'sin_area'}`;
 }
-// SERVER 79: distribución transversal de objetivos dentro de cada prioridad.
-// Legislación conserva su selector especializado de núcleos, páginas y Anki.
-// No altera consultas, cuotas, persistencia ni generación.
+// SERVER 81: única política transversal de rotación entre objetivos.
+// Opera ANTES de elegir plazas, dentro de cada prioridad SRS; no altera la BD.
+// Legislación mantiene su selector 83 especializado y sus enlaces Anki.
 function geographyDiverseCandidates115(rows){
   if(!Array.isArray(rows)||rows.length<2)return rows;
   if(rows.every(r=>String(r?.topic_block||'').trim().toLowerCase()==='legislacion'))return rows;
-  const groupOf = item => {
-    const topic=String(item?.topic_id??'0');
-    const block=String(item?.topic_block||'').trim().toLowerCase();
-    if(block==='geografia' && [21,22,23,24,28,30].includes(geographyTopic115(item)))
-      return geographyAreaGroup115(item);
-    const section=geographyNorm115(item?.section);
-    // No inferir núcleos a partir de la página ni del contenido textual.
-    // Si no hay sección, usar la ficha explícita o el propio conocimiento.
-    return `${topic}:seccion:${section||`item:${item?.id??''}`}`;
-  };
-  const output=[], usedTopics=new Map(),usedGroups=new Map();
+  const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  const sectionOf=row=>`${row.topic_id}:seccion:${norm(row.section)||'sin seccion'}`;
+  // La relación factual se define por el conocimiento, no por el texto generado.
+  const factOf=row=>`${row.topic_id}:${norm(row.concept)||`item ${row.id}`}`;
+  const usedTopics=new Map(),usedSections=new Map(),usedFacts=new Map();
+  const result=[];
   const priorities=[...new Set(rows.map(r=>Number(r.adaptive_priority)||0))].sort((a,b)=>a-b);
   for(const priority of priorities){
-    const bins=new Map();
-    for(const row of rows){
-      if((Number(row.adaptive_priority)||0)!==priority)continue;
-      const key=groupOf(row);
-      if(!bins.has(key))bins.set(key,[]);
-      bins.get(key).push(row);
-    }
-    while(bins.size){
-      let chosen=null, bestTopic=Infinity,bestGroup=Infinity;
-      for(const [key,queue] of bins){
-        const topic=String(queue[0]?.topic_id??'0');
-        const t=usedTopics.get(topic)||0,g=usedGroups.get(key)||0;
-        if(t<bestTopic || (t===bestTopic && g<bestGroup)){
-          chosen=key;bestTopic=t;bestGroup=g;
+    const pending=rows.filter(r=>(Number(r.adaptive_priority)||0)===priority);
+    // Primera vuelta: alternar temas, secciones y hechos, sin sacrificar SRS.
+    while(pending.length){
+      let best=0,bestScore=null;
+      for(let i=0;i<pending.length;i++){
+        const row=pending[i],topic=String(row.topic_id),section=sectionOf(row),fact=factOf(row);
+        const score=[usedFacts.get(fact)||0,usedSections.get(section)||0,
+          usedTopics.get(topic)||0,i];
+        if(!bestScore||score.some((v,j)=>v!==bestScore[j]&&score.slice(0,j).every((x,k)=>x===bestScore[k])&&v<bestScore[j])){
+          best=i;bestScore=score;
         }
       }
-      const queue=bins.get(chosen),row=queue.shift();
-      output.push(row);
-      const topic=String(row?.topic_id??'0');
+      const row=pending.splice(best,1)[0];
+      result.push(row);
+      const topic=String(row.topic_id),section=sectionOf(row),fact=factOf(row);
       usedTopics.set(topic,(usedTopics.get(topic)||0)+1);
-      usedGroups.set(chosen,(usedGroups.get(chosen)||0)+1);
-      if(!queue.length)bins.delete(chosen);
+      usedSections.set(section,(usedSections.get(section)||0)+1);
+      usedFacts.set(fact,(usedFacts.get(fact)||0)+1);
     }
   }
-  return output;
+  return result;
 }
 
 /* SERVER 123: preguntas de ubicación, intervención y pertenencia territorial.
@@ -7012,9 +7004,12 @@ if(selectionStrategy !== "simulation"){
 // de ordenar subíndices según el historial; no por el menor id de BD.
 const legislationScope82 = adaptiveCandidates.length > 0 &&
   adaptiveCandidates.every(item => String(item?.topic_block || '').trim().toLowerCase() === 'legislacion');
+// SERVER 81: conservar la plaza de cobertura nueva del selector original.
+// La lista ya está equilibrada dentro de su prioridad por el plan transversal.
 if(newCandidate && !legislationScope82){
   selectedAdaptive.push(newCandidate);
 }
+
 const deferredGeographyCandidates = [];
 const usedGeographyMunicipalities = new Set();
 
@@ -10451,28 +10446,6 @@ function pickGeografiaExamples73(targets,count=3){
   ];
   return selected.map(e=>e.modelo);
 }
-// Diversidad de ENFOQUE, independiente de la diversidad de conocimientos.
-// Sólo se permite cada enfoque cuando el fragmento individual lo acredita.
-// Sin llamadas adicionales, cambios de banco ni deducciones cartográficas.
-function resetGeoApproach80(t,ordinal){
-  const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  const topic=norm(t.topic_name), evidence=norm(`${t.section||''} ${t.concept||''} ${t.source_evidence||''}`);
-  if(!/tunel/.test(topic))return null;
-  const options=[
-    ['parque de primera salida en una emergencia hipotética','parque'],
-    ['carretera o vía a la que pertenece el túnel','via'],
-    ['identificación del túnel a partir de su vía','via'],
-    ['posición en el orden explícito de la vía','posicion'],
-    ['anterior o siguiente en la secuencia documentada','secuencia'],
-    ['extremo geográfico norte, sur, este u oeste de Navarra','extremo']
-  ];
-  const supported=options.filter(([,kind])=>kind==='parque'?/parque/.test(evidence):
-    kind==='via'?/\b(a-\d+|n-\d+|na-\d+|via|carretera|autovia)\b/.test(evidence):
-    kind==='posicion'?/posicion|orden|secuencia/.test(evidence):
-    kind==='secuencia'?/secuencia|orden|antes|despues/.test(evidence):
-    /mas al norte|mas al sur|mas al este|mas al oeste|extremo geografico/.test(evidence));
-  return supported.length?supported[ordinal%supported.length][0]:null;
-}
 function resetPrompt136(targets,difficulty,mode){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
@@ -10486,7 +10459,7 @@ function resetPrompt136(targets,difficulty,mode){
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO',
-    ...(geo?{enfoque_sugerido:resetGeoApproach80(t,i)}:{})}));
+    }));
   const styleTitle=geo
     ? 'MODELOS DE REDACCIÓN BASADOS EN LAS PREGUNTAS 26-50 DE GEOGRAFÍA 2026 (SOLO ESTILO, NO FUENTE FACTUAL)'
     : 'REFERENCIAS DE CALIBRACIÓN (SOLO ESTILO)';
@@ -10496,9 +10469,10 @@ Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una
 No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado. ${geo?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
+DIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,4400)}
-${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para túneles, alterna enfoques y NO conviertas todas las preguntas en posiciones. Usa el enfoque_sugerido sólo si el fragmento individual demuestra la respuesta; si no, usa otro enfoque respaldado. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
+${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
 }
 // Esquema mínimo del motor nuevo: la procedencia y familia las asigna el
