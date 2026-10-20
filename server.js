@@ -10427,7 +10427,7 @@ const GEOGRAFIA_PATRONES_ESTILO_2026=Object.freeze([
   {tema:/puerto|collado|sender|recorrido|travesia|gr-/,modelo:'Durante una travesía desde [origen] hacia [destino], ¿qué puerto o collado se atraviesa según la ruta documentada?'},
   {tema:/monte|sierra|cima|orientacion|cardinal|norte|sur|este|oeste/,modelo:'Desde [monte o alto], ¿qué [río/localidad] se encuentra en la dirección cardinal indicada?'},
   {tema:/camino|itinerario|carretera|poblacion|nucleo/,modelo:'Al seguir [ruta documentada] desde [origen], ¿qué localidad o vía se encuentra a continuación?'},
-  {tema:/tunel|galeria|cercan/,modelo:'Desde [parque de bomberos], ¿cuál de los siguientes túneles es el más cercano según el temario?'},
+  {tema:/tunel|galeria|cercan/,modelo:'Se registra un accidente en [túnel documentado]. ¿Qué parque figura asignado a ese túnel en el temario?'},
   {tema:/precipitacion|climat|meteorolog/,modelo:'Según los datos de climatología del temario, ¿qué estación registra [magnitud consultada]?'},
   {tema:/afluente|hidrograf|rio|arroyo|cuenca/,modelo:'¿De qué río es afluente [curso de agua] según la relación directa documentada?'},
   {tema:/afluente|hidrograf|rio|arroyo|cuenca/,modelo:'¿Por qué río pasarán las aguas de [curso de agua], siguiendo una cadena de afluentes documentada?'},
@@ -10451,6 +10451,28 @@ function pickGeografiaExamples73(targets,count=3){
   ];
   return selected.map(e=>e.modelo);
 }
+// Diversidad de ENFOQUE, independiente de la diversidad de conocimientos.
+// Sólo se permite cada enfoque cuando el fragmento individual lo acredita.
+// Sin llamadas adicionales, cambios de banco ni deducciones cartográficas.
+function resetGeoApproach80(t,ordinal){
+  const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const topic=norm(t.topic_name), evidence=norm(`${t.section||''} ${t.concept||''} ${t.source_evidence||''}`);
+  if(!/tunel/.test(topic))return null;
+  const options=[
+    ['parque de primera salida en una emergencia hipotética','parque'],
+    ['carretera o vía a la que pertenece el túnel','via'],
+    ['identificación del túnel a partir de su vía','via'],
+    ['posición en el orden explícito de la vía','posicion'],
+    ['anterior o siguiente en la secuencia documentada','secuencia'],
+    ['extremo geográfico norte, sur, este u oeste de Navarra','extremo']
+  ];
+  const supported=options.filter(([,kind])=>kind==='parque'?/parque/.test(evidence):
+    kind==='via'?/\b(a-\d+|n-\d+|na-\d+|via|carretera|autovia)\b/.test(evidence):
+    kind==='posicion'?/posicion|orden|secuencia/.test(evidence):
+    kind==='secuencia'?/secuencia|orden|antes|despues/.test(evidence):
+    /mas al norte|mas al sur|mas al este|mas al oeste|extremo geografico/.test(evidence));
+  return supported.length?supported[ordinal%supported.length][0]:null;
+}
 function resetPrompt136(targets,difficulty,mode){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
@@ -10463,7 +10485,8 @@ function resetPrompt136(targets,difficulty,mode){
   ];
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
-    familia:t.questionFamily||'2024_TEXTO'}));
+    familia:t.questionFamily||'2024_TEXTO',
+    ...(geo?{enfoque_sugerido:resetGeoApproach80(t,i)}:{})}));
   const styleTitle=geo
     ? 'MODELOS DE REDACCIÓN BASADOS EN LAS PREGUNTAS 26-50 DE GEOGRAFÍA 2026 (SOLO ESTILO, NO FUENTE FACTUAL)'
     : 'REFERENCIAS DE CALIBRACIÓN (SOLO ESTILO)';
@@ -10475,7 +10498,7 @@ La auditoría independiente aportará la cita textual del PDF. Devuelve únicame
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,4400)}
-${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados.':''}
+${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para túneles, alterna enfoques y NO conviertas todas las preguntas en posiciones. Usa el enfoque_sugerido sólo si el fragmento individual demuestra la respuesta; si no, usa otro enfoque respaldado. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
 }
 // Esquema mínimo del motor nuevo: la procedencia y familia las asigna el
