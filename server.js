@@ -4018,7 +4018,7 @@ app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{
     <h1>Administrar temas</h1><p>El borrado definitivo solo se permite si el tema no tiene preguntas, sesiones ni progreso. Escribe el nombre exacto para confirmar.</p>
     ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p><button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button></article>`).join('')}
     <script>document.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
-      const name=b.dataset.name;const typed=prompt('Para eliminar DEFINITIVAMENTE el tema, escribe su nombre exacto:\n'+name);
+      const name=b.dataset.name;const typed=prompt('Para eliminar DEFINITIVAMENTE el tema, escribe su nombre exacto:\\n'+name);
       if(typed!==name)return alert('Cancelado: el nombre no coincide.');
       if(!confirm('¿Eliminar '+name+' y sus conocimientos? Esta acción no se puede deshacer.'))return;
       b.disabled=true;
