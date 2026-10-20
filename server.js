@@ -6764,12 +6764,30 @@ const legislationSectionKey = candidate => {
 const geographyNorm115 = value => String(value ?? '')
   .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
   .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
-const geographyTopic115 = target =>
-  Number(coverageTopicNumber(target?.topic_name));
+const geographyTopic115 = target => {
+  const named=coverageTopicNumber(target?.topic_name);
+  if(named!=null)return Number(named);
+  // Los títulos subidos son también «30 TUNELES», «28 RIOS...».
+  // No alterar el analizador global usado por otros bloques.
+  const leading=String(target?.topic_name||'').trim().match(/^(\d{1,2})(?:\s|[.·:_-])/);
+  return leading ? Number(leading[1]) : 0;
+};
 const geographyPure115 = targets => Array.isArray(targets) && targets.length>0 &&
   targets.every(t=>String(t?.topic_block||'').toLowerCase()==='geografia' &&
-    [21,22,23,24,28].includes(geographyTopic115(t)));
+    [21,22,23,24,28,30].includes(geographyTopic115(t)));
+function geographyTunnelRoad78(item){
+  // Sólo identificadores explícitos del PDF, sin inferir parques ni carreteras.
+  const source=[item?.section,item?.concept,item?.source_evidence].filter(Boolean).join(' ');
+  const road=source.match(/\b(?:N\s*[-–]\s*121\s*[-–]\s*A|A\s*[-–]\s*15|AP\s*[-–]\s*15|A\s*[-–]\s*21|N\s*[-–]\s*\d{2,4}|NA\s*[-–]\s*\d{2,4}(?:\s*[-–]\s*\d+)?|A\s*[-–]\s*\d{1,3})\b/i);
+  return road ? geographyNorm115(road[0]) : null;
+}
 function geographyAreaGroup115(item){
+  if(geographyTopic115(item)===30){
+    const road=geographyTunnelRoad78(item);
+    if(road)return `${item?.topic_id||0}:via:${road}`;
+    // Sin vía explícita: no inventar una; conservar apartado real.
+    return `${item?.topic_id||0}:tunel:${geographyNorm115(item?.section)||'sin_via'}`;
+  }
   // Tema 28: repartir los objetivos entre fichas de ríos R01, R02, etc.
   // Se usan exclusivamente los identificadores del propio temario.
   if(geographyTopic115(item)===28){
@@ -6791,39 +6809,52 @@ function geographyAreaGroup115(item){
     String(item?.section||'');
   return `${item?.topic_id||0}:${geographyNorm115(area)||'sin_area'}`;
 }
+// SERVER 79: distribución transversal de objetivos dentro de cada prioridad.
+// Legislación conserva su selector especializado de núcleos, páginas y Anki.
+// No altera consultas, cuotas, persistencia ni generación.
 function geographyDiverseCandidates115(rows){
-  if(!geographyPure115(rows))return rows;
-  // Una sola pasada, sin consultas adicionales: distribuir fichas DENTRO de
-  // cada prioridad adaptativa. Nunca adelantar mantenimiento a un SRS vencido.
-  const result=[];
-  const priorities=[...new Set(rows.map(r=>Number(r.adaptive_priority)))].sort((a,b)=>a-b);
+  if(!Array.isArray(rows)||rows.length<2)return rows;
+  if(rows.every(r=>String(r?.topic_block||'').trim().toLowerCase()==='legislacion'))return rows;
+  const groupOf = item => {
+    const topic=String(item?.topic_id??'0');
+    const block=String(item?.topic_block||'').trim().toLowerCase();
+    if(block==='geografia' && [21,22,23,24,28,30].includes(geographyTopic115(item)))
+      return geographyAreaGroup115(item);
+    const section=geographyNorm115(item?.section);
+    // No inferir núcleos a partir de la página ni del contenido textual.
+    // Si no hay sección, usar la ficha explícita o el propio conocimiento.
+    return `${topic}:seccion:${section||`item:${item?.id??''}`}`;
+  };
+  const output=[], usedTopics=new Map(),usedGroups=new Map();
+  const priorities=[...new Set(rows.map(r=>Number(r.adaptive_priority)||0))].sort((a,b)=>a-b);
   for(const priority of priorities){
-    const candidates=rows.filter(r=>Number(r.adaptive_priority)===priority);
-    const byAsked=new Map();
-    for(const row of candidates){
-      const asked=Number(row.times_asked||0);
-      if(!byAsked.has(asked))byAsked.set(asked,[]);
-      byAsked.get(asked).push(row);
+    const bins=new Map();
+    for(const row of rows){
+      if((Number(row.adaptive_priority)||0)!==priority)continue;
+      const key=groupOf(row);
+      if(!bins.has(key))bins.set(key,[]);
+      bins.get(key).push(row);
     }
-    for(const asked of [...byAsked.keys()].sort((a,b)=>a-b)){
-      const byArea=new Map();
-      for(const row of byAsked.get(asked)){
-        const key=geographyAreaGroup115(row);
-        if(!byArea.has(key))byArea.set(key,[]);
-        byArea.get(key).push(row);
-      }
-      const bins=[...byArea.values()];
-      let remaining=true;
-      while(remaining){
-        remaining=false;
-        for(const bin of bins){
-          if(bin.length){result.push(bin.shift());remaining=true;}
+    while(bins.size){
+      let chosen=null, bestTopic=Infinity,bestGroup=Infinity;
+      for(const [key,queue] of bins){
+        const topic=String(queue[0]?.topic_id??'0');
+        const t=usedTopics.get(topic)||0,g=usedGroups.get(key)||0;
+        if(t<bestTopic || (t===bestTopic && g<bestGroup)){
+          chosen=key;bestTopic=t;bestGroup=g;
         }
       }
+      const queue=bins.get(chosen),row=queue.shift();
+      output.push(row);
+      const topic=String(row?.topic_id??'0');
+      usedTopics.set(topic,(usedTopics.get(topic)||0)+1);
+      usedGroups.set(chosen,(usedGroups.get(chosen)||0)+1);
+      if(!queue.length)bins.delete(chosen);
     }
   }
-  return result;
+  return output;
 }
+
 /* SERVER 123: preguntas de ubicación, intervención y pertenencia territorial.
    Familias cerradas: nunca superficie, potencia, promotores ni deducciones de distancia.
    Un plan de formato por OBJETIVO reduce la invención de asociaciones nuevas. */
