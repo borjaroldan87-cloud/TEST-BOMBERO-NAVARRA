@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import { PDFDocument } from "pdf-lib";
 import pg from "pg";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { inflateSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 const { Pool } = pg;
@@ -3983,6 +3983,90 @@ async function ingest(filePath, displayName, returnDocumentName=false){
     ? {store,documentName:op?.response?.documentName||null}
     : store;
 }
+
+
+// SERVER 82: gestión de temas cargados por error. Operación restringida con contraseña
+// independiente, comprobación transaccional y borrado de la fuente de File Search.
+function topicAdminAuth(req,res,next){
+  const password=process.env.TOPIC_ADMIN_PASSWORD;
+  if(!password || password.length<12){
+    return res.status(503).send('Configura TOPIC_ADMIN_PASSWORD (mínimo 12 caracteres) en Render.');
+  }
+  const auth=req.get('authorization')||'';
+  let supplied='';
+  if(auth.startsWith('Basic ')){
+    try{ supplied=Buffer.from(auth.slice(6),'base64').toString('utf8').split(':').slice(1).join(':'); }catch{}
+  }
+  const a=Buffer.from(supplied),b=Buffer.from(password);
+  if(a.length!==b.length || !requireSafeCompare82(a,b)){
+    res.set('WWW-Authenticate','Basic realm="Administrar temas"');
+    return res.status(401).send('Contraseña requerida');
+  }
+  next();
+}
+function requireSafeCompare82(a,b){return timingSafeEqual(a,b);}
+
+function escapeTopicHtml82(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{
+  try{
+    const rows=(await db.query(`SELECT t.id,t.name,t.total_items,
+      (SELECT COUNT(*)::int FROM coverage_items ci WHERE ci.topic_id=t.id) AS actual_items
+      FROM topics t ORDER BY t.name,t.id`)).rows;
+    res.set('Cache-Control','no-store');
+    res.type('html').send(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrar temas</title>
+    <style>body{font:16px system-ui;max-width:800px;margin:30px auto;padding:12px}article{border:1px solid #ccc;padding:14px;margin:10px 0;border-radius:8px}button{padding:9px;cursor:pointer}input{padding:9px;width:95%}small{color:#555}</style>
+    <h1>Administrar temas</h1><p>El borrado definitivo solo se permite si el tema no tiene preguntas, sesiones ni progreso. Escribe el nombre exacto para confirmar.</p>
+    ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p><button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button></article>`).join('')}
+    <script>document.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
+      const name=b.dataset.name;const typed=prompt('Para eliminar DEFINITIVAMENTE el tema, escribe su nombre exacto:\n'+name);
+      if(typed!==name)return alert('Cancelado: el nombre no coincide.');
+      if(!confirm('¿Eliminar '+name+' y sus conocimientos? Esta acción no se puede deshacer.'))return;
+      b.disabled=true;
+      try{const r=await fetch('/api/admin/topics/'+b.dataset.id,{method:'DELETE',headers:{'Content-Type':'application/json','X-Topic-Admin':'delete'},body:JSON.stringify({confirmName:typed})});const x=await r.json();alert(x.message||x.error||'Error');if(x.ok)location.reload();}catch(e){alert('Error de conexión: '+e.message);}finally{b.disabled=false;}
+    });</script></html>`);
+  }catch(e){res.status(500).send('No se pudieron listar los temas: '+escapeTopicHtml82(e.message));}
+});
+app.delete('/api/admin/topics/:id',topicAdminAuth,async(req,res)=>{
+  if(req.get('X-Topic-Admin')!=='delete')return res.status(403).json({error:'Solicitud no autorizada'});
+  const id=Number(req.params.id);
+  if(!Number.isSafeInteger(id)||id<1)return res.status(400).json({error:'ID incorrecto'});
+  const client=await db.connect();let sourceName=null,deletedName=null;
+  try{
+    await client.query('BEGIN');
+    const found=await client.query('SELECT id,name FROM topics WHERE id=$1 FOR UPDATE',[id]);
+    if(!found.rowCount)throw Object.assign(new Error('El tema ya no existe.'),{status:404});
+    deletedName=found.rows[0].name;
+    if(req.body?.confirmName!==deletedName)throw Object.assign(new Error('El nombre de confirmación no coincide.'),{status:400});
+    const state=await client.query(`SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER(WHERE ci.worked OR ci.times_asked>0 OR ci.times_correct>0 OR ci.times_wrong>0 OR ci.times_blank>0)::int AS progress,
+      (SELECT COUNT(*)::int FROM question_bank qb JOIN coverage_items c ON c.id=qb.coverage_item_id WHERE c.topic_id=$1) AS questions,
+      (SELECT COUNT(*)::int FROM test_session_questions sq JOIN coverage_items c ON c.id=sq.coverage_item_id WHERE c.topic_id=$1) AS sessions,
+      (SELECT COUNT(*)::int FROM coverage_review_state rs JOIN coverage_items c ON c.id=rs.coverage_item_id WHERE c.topic_id=$1) AS reviews
+      FROM coverage_items ci WHERE ci.topic_id=$1`,[id]);
+    const st=state.rows[0];
+    if(st.progress||st.questions||st.sessions||st.reviews){
+      throw Object.assign(new Error('No se ha eliminado: este tema tiene preguntas, sesiones o progreso. Consulta antes de borrarlo.'),{status:409});
+    }
+    const doc=await client.query('SELECT document_name FROM topic_source_documents WHERE topic_id=$1',[id]);
+    sourceName=doc.rows[0]?.document_name||null;
+    await client.query('DELETE FROM topics WHERE id=$1',[id]);
+    await client.query('COMMIT');
+  }catch(e){await client.query('ROLLBACK');return res.status(e.status||500).json({ok:false,error:e.message});}
+  finally{client.release();}
+  // La fuente factual se retira también del almacén Gemini para evitar contaminación futura.
+  // Un fallo remoto no revierte el borrado local; se informa explícitamente.
+  if(sourceName){
+    try{
+      const ai=aiClient();
+      await ai.fileSearchStores.documents.delete({name:sourceName,config:{force:true}});
+    }catch(e){
+      console.error('[admin] Tema eliminado, documento remoto pendiente:',sourceName,e);
+      return res.json({ok:true,message:`Tema «${deletedName}» eliminado de PostgreSQL. ATENCIÓN: no se pudo eliminar su documento de Gemini File Search; requiere limpieza del documento ${sourceName}.`});
+    }
+  }
+  res.json({ok:true,message:`Tema «${deletedName}» eliminado definitivamente, junto con su cobertura${sourceName?' y documento de Gemini':''}.`});
+});
 
 app.get("/api/status",(req,res)=>res.json({ok:true,keyConfigured:!!process.env.GEMINI_API_KEY,store:STORE}));
 
