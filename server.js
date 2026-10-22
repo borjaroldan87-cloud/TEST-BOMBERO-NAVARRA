@@ -3486,20 +3486,16 @@ REGLAS ESPECÍFICAS DEL TEMA 23 — PARQUES SOLARES:
 
 Cada fila representa un parque solar concreto.
 
-Conserva de forma vinculada y sin mezclar filas:
-- nombre del parque solar;
-- promotor;
-- municipio o municipios asociados;
-- parque de bomberos asociado;
-- potencia;
-- año de puesta en servicio.
+Conserva de forma vinculada, sin mezclar instalaciones:
+- denominación exacta y fase I/II/III cuando conste;
+- municipio o concejo, únicamente si figura literalmente;
+- orientación, carreteras y referencias geográficas completas;
+- parque de bomberos según el epígrafe de la ficha.
 
-La relación PARQUE SOLAR -> MUNICIPIO -> PARQUE DE BOMBEROS
-debe quedar representada expresamente.
-
-Promotor, potencia y año deben conservarse para mantener
-íntegra la información de la fila, pero NO deben convertirse
-por sí mismos en objetivos de pregunta automática.
+La relación INSTALACIÓN -> UBICACIÓN DOCUMENTADA -> PARQUE DE BOMBEROS
+se mantiene explícita; no atribuyas un parque por proximidad.
+No preguntes por potencia, promotor ni año de puesta en servicio,
+que no forman parte del documento manuscrito definitivo.
 
 La prioridad examinable es:
 
@@ -7065,28 +7061,10 @@ const GEOGRAPHY_EXAMINABLE_SQL_125 = `(
 // Solo se emplean tres columnas examinables: instalación, municipios y parque.
 // No se alteran los coverage_items ni la fuente factual; se restaura su lectura
 // estructurada cuando el texto generado en cobertura no expresa «ubicado en».
-const GEOGRAPHY_TABLE_FACTS_135 = {"23":[["CABANILLAS - CORRALIZA DEL VECINO","Cabanillas","Tudela"],["FUSTIÑANA - CORRALIZA VECINAL","Fustiñana","Tudela"],["LA OLIVERA","Fontellas","Tudela"],["TUDELA","Tudela","Tudela"],["TUDELA I","Tudela","Tudela"],["MONTES DE CIERZO","Tudela","Tudela"],["MONTES DE CIERZO II","Tudela","Tudela"],["ABLITAS","Ablitas","Tudela"],["FONTELLAS","Fontellas","Tudela"],["BARDENAS - HONDO ESPARTOSA","Bardenas Reales","Tudela"],["OJO DE VALDELAFUENTE","Tudela","Tudela"],["EBRO I","Tudela","Tudela"],["VILLAFRANCA - CORRALIZA DE BARRENO","Villafranca","Lodosa / Peralta-Azkoien"],["MILAGRO - MONTE ALTO","Milagro","Lodosa / Peralta-Azkoien"],["FUNES SOLAR","Funes","Lodosa / Peralta-Azkoien"],["CASTEJÓN - LA SARDA","Castejón","Tudela"],["LA NAVA","Tudela y Castejón","Tudela"],["CIERZO","Corella","Tudela"],["ARGUEDAS","Arguedas","Tudela"],["VALTIERRA","Valtierra","Tudela"],["CASTEJÓN - CORRALIZA DEL POZO","Castejón","Tudela"],["ARGUEDAS I - EL COMÚN","Arguedas","Tudela"],["ARGUEDAS II - MOLINAZ","Arguedas","Tudela"],["CORELLA - LA SARDA","Corella","Tudela"],["LA TORRE - MARTINIEGA","Murchante","Tudela"],["CINTRUÉNIGO - CORRALIZA DE DON MARIANO","Cintruénigo","Tudela"],["CASCANTE","Cascante","Tudela"],["CINTRUÉNIGO - LAS ALEGAS","Cintruénigo","Tudela"],["EL VINAGRE","Fitero","Tudela"],["GUARDIAN","Corella","Tudela"],["RIBAFORADA - LA DEHESA","Ribaforada","Tudela"],["EL MONTECILLO","Ablitas","Tudela"],["ATALAYA","Cortes","Tudela"],["LA ATALAYA","Cortes","Tudela"],["LA PEDRERA III","Olite / Erriberri","Tafalla"],["RADA I Y II","Murillo el Cuende / Rada","Tafalla"],["MENDAVIA - EL ENCIMERO","Mendavia","Lodosa / Peralta-Azkoien"],["LOS ARCOS - EL SALOBRAL DE LA COJA","Los Arcos","Estella-Lizarra"],["LA PEDRERA I Y II","Olite / Erriberri","Tafalla"],["ABUSIERRA","Falces","Lodosa / Peralta-Azkoien"],["RADA","Murillo el Cuende / Rada","Tafalla"],["GIRASOL - CARCAR","Cárcar","Lodosa / Peralta-Azkoien"],["VALDERROBLES","Viana","Lodosa / Peralta-Azkoien"],["VALDEGON","Torres del Río","Estella-Lizarra"],["SESMA - EL SALOBRE","Sesma","Lodosa / Peralta-Azkoien"],["ARBANTA","Viana","Lodosa / Peralta-Azkoien"],["MONTE PLANO - OLITE","Olite / Erriberri","Tafalla"],["MURILLO EL FRUTO - GANAZO","Murillo el Fruto","Tafalla"],["ALTO MOMPLANETE","Olite / Erriberri","Tafalla"],["LA FALCONERA","Olite / Erriberri","Tafalla"],["CÁSEDA 1","Cáseda","Sangüesa / Zangoza"],["CÁSEDA 2","Cáseda","Sangüesa / Zangoza"],["ARAIZ","Olite / Erriberri","Tafalla"]],"24":[["ABLITAS","Ablitas","Tudela"],["AIBAR","Aibar, Lumbier, Urraúl Bajo","Sangüesa/Zangoza"],["AIZKIBEL","Leitza / zona Leitza-Beruete","Pamplona/Iruña"],["ALAIZ","Olóriz, Unzué","Tafalla"],["ARIZ 1ª FASE (LEITZA)","Leitza","Pamplona/Iruña"],["ARIZ 2ª FASE (BERUETE)","Basaburua / Beruete","Pamplona/Iruña"],["BARASOAIN","Barásoain","Tafalla"],["CABANILLAS II","Cabanillas","Tudela"],["CALUENGO","Peralta, Funes","Peralta/Azkoien"],["CAPARROSO","Caparroso","Peralta/Azkoien"],["CASCANTE II","Cascante","Tudela"],["CAVAR","Valtierra, Cadreita, Arguedas","Tudela"],["CORRAL DEL MOLINO I","Tudela / Montes de Cierzo","Tudela"],["CORRAL DEL MOLINO II","Tudela / Montes de Cierzo","Tudela"],["ECHAGÜE","Olóriz","Tafalla"],["EL MONTECILLO","Tudela / Montes de Cierzo","Tudela"],["EL OLIADO","Sesma","Lodosa"],["EL PERDÓN","Cendea de Cizur / Astráin-Zariquiegui","Pamplona/Iruña"],["EL VALLE-VALDENAVARRO","Cortes","Tudela"],["EXPERIMENTAL BARASOAIN","Barásoain","Tafalla"],["EXPERIMENTAL SIERRA DE ALAIZ","Olóriz, Unzué","Tafalla"],["EXPERIMENTAL VEDADILLO","Tudela","Tudela"],["IBARGOITI","Ibargoiti","Pamplona/Iruña"],["IZCO","Lumbier, Aibar, Ezprogui","Sangüesa/Zangoza"],["JENÁRIZ","Larraga, Berbinzana, Miranda de Arga","Tafalla"],["LA BANDERA","Caparroso","Peralta/Azkoien"],["LA CALERA","Lodosa / Sesma","Lodosa"],["LA CAMPAÑA","Lodosa / Sesma","Lodosa"],["LA CAYA","Lodosa / Sesma","Lodosa"],["LA FRAILA","Lodosa / Sesma","Lodosa"],["LA LOMBA","Lodosa / Sesma","Lodosa"],["LA SORDA","Lodosa / Sesma","Lodosa"],["LAS LLANAS DE CODÉS 1ª FASE - AGUILAR","Aguilar de Codés","Estella-Lizarra"],["LAS LLANAS DE CODÉS 1ª FASE - AZUELO","Azuelo","Estella-Lizarra"],["LAS LLANAS DE CODÉS 2ª FASE - ARAS","Aras","Estella-Lizarra"],["LEOZ (GUERINDA 2ª FASE)","Leoz","Tafalla"],["LERGA (GUERINDA 3ª FASE)","Lerga","Tafalla"],["LINTE FASE I","Larraga, Berbinzana, Miranda de Arga","Tafalla"],["LINTE FASE II","Larraga, Berbinzana, Miranda de Arga","Tafalla"],["LOS CERROS","Carrascal/Untzue","Pamplona/Iruña"],["MONCAYUELO","Tudela / zona sur de Navarra","Tudela"],["MONREAL","Monreal / Elo","Pamplona/Iruña"],["MONTES DE CIERZO I","Tudela","Tudela"],["MONTES DE CIERZO II","Tudela","Tudela"],["PEÑABLANCA 1ª FASE","Leoz, Tafalla","Tafalla"],["PEÑABLANCA 2ª FASE","Leoz, Tafalla","Tafalla"],["PESTRIZ","Ablitas / Ribera sur","Tudela"],["SALAJONES","Aibar, Lumbier","Sangüesa/Zangoza"],["SAN ESTEBAN","Añorbe, Tirapu","Pamplona/Iruña - Tafalla"],["SAN GREGORIO","Cabanillas, Tudela","Tudela"],["SAN MARCOS II","Larraga","Tafalla"],["SAN MARTÍN DE UNX (GUERINDA 1ª FASE)","San Martín de Unx","Tafalla"],["SERRALTA","Cabanillas, Tudela","Tudela"],["SIERRA DE SELVA","Uncastillo / límite Navarra-Aragón","Tafalla"],["SOS DEL REY CATÓLICO","Sos del Rey Católico / límite Navarra-Aragón","Tafalla"],["TIRAPU","Tirapu","Tafalla"],["TXUTXU","Baztan / zona norte de Navarra","Oronoz"],["UZKITA","Leoz / Sierra de Guerinda","Tafalla"],["VEDADILLO","Tudela","Tudela"],["VILLANUEVA","Puente la Reina / Gares, Arraiza","Estella-Lizarra"],["VOLANDÍN","Tudela / Montes de Cierzo","Tudela"]]};
-function geographyTableRecord135(target){
-  const topic=geographyTopic115(target);
-  const rows=GEOGRAPHY_TABLE_FACTS_135[topic];
-  if(!rows)return null;
-  const norm=s=>geographyNorm115(s);
-  const concept=String(target?.concept||'').trim()
-    .replace(/^(?:parque\s+(?:solar|e[oó]lico)|planta\s+(?:solar|fotovoltaica)|instalaci[oó]n\s+(?:solar|e[oó]lica))\s*[:\-]?\s*/i,'')
-    .replace(/^\s*[«“"']+\s*/, '');
-  const source=norm(concept);
-  const matched=rows.filter(row=>{
-    const name=norm(row[0]);
-    return name.length>2 && (source===name || source.startsWith(name+' ') ||
-      source.startsWith(name+' :'));
-  }).sort((a,b)=>norm(b[0]).length-norm(a[0]).length);
-  if(!matched.length)return null;
-  // Prohibir asociaciones múltiples que no identifiquen una instalación única.
-  const longest=norm(matched[0][0]).length;
-  if(matched.filter(row=>norm(row[0]).length===longest).length!==1)return null;
-  const [name,municipality,park]=matched[0];
-  return {topic,name,municipality,park};
-}
+// SERVER 80: tablas territoriales 135 retiradas. Mezclaban fuentes antiguas con
+// la cobertura GEOFACT1 definitiva (p.ej. Rada -> Tafalla, hoy Peralta).
+// No se usa ninguna tabla de hechos adicional al PDF/coverage_items.
+function geographyTableRecord135(){ return null; }
 
 // SERVER 125: '/' puede separar dos municipios o dos nombres del MISMO
 // municipio (castellano/euskera). Solo se acepta la segunda situación si
@@ -10523,6 +10501,11 @@ function resetShape136(q){
   if(!Array.isArray(q.options)||!allowed.includes(q.options.length)||
      q.options.some(x=>typeof x!=='string'||!x.trim()))return 'Opciones inválidas';
   if(new Set(q.options.map(R136_NORM)).size!==q.options.length)return 'Opciones duplicadas';
+  // Igualdad visible: guiones, signos y espacios no diferencian respuestas.
+  const shown=q.options.map(x=>String(x).normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase()
+    .replace(/[–—-]/g,' ').replace(/[^a-z0-9]+/g,' ').trim());
+  if(new Set(shown).size!==q.options.length)return 'Opciones equivalentes';
   if(!Number.isInteger(q.correctIndex)||q.correctIndex<0||
      q.correctIndex>=q.options.length)return 'Índice incorrecto';
   return null;
@@ -10531,46 +10514,9 @@ function resetQuote136(quote, excerpt){
   const norm=R136_NORM(quote),text=R136_NORM(excerpt);
   return norm.length>=18 && text.includes(norm);
 }
-function resetGeoTableQuestion136(target,ordinal=0,difficulty="alta"){
-  const rec=geographyTableRecord135(target);
-  if(!rec || ![23,24].includes(rec.topic))return null;
-  const table=GEOGRAPHY_TABLE_FACTS_135[rec.topic];
-  const combined=difficulty==='muy alta';
-  const byLocation=(ordinal+Number(target.id||0))%2===0;
-  // Muy Alta exige relacionar las DOS columnas, no etiquetar como difícil
-  // una pregunta básica. Las parejas proceden exclusivamente de la tabla.
-  const pair=r=>`${String(r[1]).trim()} — ${String(r[2]).trim()}`;
-  const answer=String(combined?pair([rec.name,rec.municipality,rec.park]):
-    (byLocation?rec.municipality:rec.park)).trim();
-  const rawPool=table.map(r=>String(combined?pair(r):(byLocation?r[1]:r[2])).trim());
-  const exact=R136_NORM(answer);
-  const unique=[...new Map(rawPool.map(x=>[R136_NORM(x),x])).values()]
-    .filter(x=>{const other=R136_NORM(x);return other!==exact &&
-      !(other.length>4&&exact.length>4&&(other.includes(exact)||exact.includes(other)));});
-  // Conservamos agrupaciones EXACTAS del PDF: nunca inferimos el parque
-  // de primera salida para un municipio representado conjuntamente.
-  if(unique.length<3)return null;
-  const step=Math.max(1,Number(target.id)||1);
-  const wrong=[];
-  for(let i=0;i<unique.length && wrong.length<3;i++){
-    const item=unique[(i+step)%unique.length];
-    if(!wrong.some(x=>R136_NORM(x)===R136_NORM(item)))wrong.push(item);
-  }
-  if(wrong.length!==3)return null;
-  const correctIndex=(step+ordinal)%4;
-  const options=[...wrong];options.splice(correctIndex,0,answer);
-  const type=rec.topic===23?'parque solar':'parque eólico';
-  const stem=combined
-    ?`Según la tabla del temario, ¿qué combinación de ubicación y parque de bomberos corresponde al ${type} ${rec.name}?`
-    :byLocation
-    ?`Según la tabla del temario, ¿qué municipio o ámbito territorial figura para el ${type} ${rec.name}?`
-    :`Según la tabla del temario, ¿qué asignación de parque de bomberos figura para el ${type} ${rec.name}?`;
-  return {stem,options,correctIndex,explanation:`Tabla del tema ${rec.topic}, ${rec.name}: ${answer}.`,
-    sourceEvidence:`${rec.name} — ${rec.municipality} — ${rec.park}`,
-    sourcePage:target.source_page??null,manualPage:target.manual_page??null,
-    questionFamily:combined?'2026_RAZONAMIENTO':(byLocation?'2024_TEXTO':'2026_RAZONAMIENTO'),
-    difficulty,graphic:null,resetLocal136:true};
-}
+// No crear preguntas locales para parques solares/eólicos a partir de tablas
+// antiguas: ambas materias pasan por la generación + auditoría documental.
+function resetGeoTableQuestion136(){ return null; }
 // Une objetivos contiguos del mismo bloque SIN perder su posición global.
 // Un lote se limita por número de preguntas Y tamaño de evidencia, para evitar
 // que una petición enorme convierta menos llamadas en más latencia y 504.
@@ -10652,9 +10598,9 @@ function esTemaConexiones2026(target){
 // Referencias de estilo exclusivas del tema Parques eólicos (Tema 2).
 // No constituyen evidencia factual: cada respuesta se verifica en el temario.
 const EOLICOS_ESTILO_EJEMPLOS_2026=Object.freeze([
-  'TIPO 1 (parque eólico → parque de bomberos): «¿En el ámbito de actuación de qué parque de bomberos se encuentra el parque eólico Moncayuelo?» A) Tafalla; B) Lodosa; C) Peralta [correcta]; D) Tudela.',
-  'TIPO 2 (parque eólico → ubicación): «¿Dónde se encuentra situado el parque eólico La Caya?» A) Al oeste de Miranda de Arga, al sur de Berbinzana y al oeste de la NA-6140; B) Al suroeste de Olite, dentro de su municipio, junto a la AP-15 y la NA-115, al norte de La Fraila [correcta]; C) Al oeste de Tafalla, paralelo a la NA-132 por su lado norte; D) Al suroeste de Larraga, al oeste de la NA-601, tramo 3.',
-  'TIPO 3 (ubicación → parque eólico): «¿Qué parque eólico se encuentra al sur de Sesma, al este de la NA-129 y al norte de la NA-134?» A) El Oliado; B) Caluengo; C) La Lomba [correcta]; D) Vedadillo.'
+  'TIPO 1 (instalación → parque): «Se declara un incendio en [PARQUE EÓLICO documentado]. ¿Qué parque de bomberos interviene en primera salida?» A-D cuatro parques operativos de la misma región, con una sola asignación demostrada en el epígrafe del PDF.',
+  'TIPO 2 (instalación → ubicación): «¿Dónde se encuentra [PARQUE EÓLICO documentado]?» A-D cuatro ubicaciones detalladas de similar longitud que combinan municipio, orientación y carretera; tres incorrectas, una correcta según el registro.',
+  'TIPO 3 (ubicación → instalación): «¿Qué parque eólico se sitúa [ORIENTACIÓN + MUNICIPIO + CARRETERA documentados]?» A-D cuatro nombres reales y comparables procedentes exclusivamente del PDF; no usar una instalación alternativa que comparta todos los atributos.'
 ]);
 // TEMA 23 — PLANTAS SOLARES: 12 modelos aprobados, SOLO estilo.
 // No son fuente factual ni preguntas pregrabadas; el PDF de cada objetivo manda.
@@ -10677,7 +10623,22 @@ function esTemaSolares2026(target){
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
   return /parques? solares?|plantas? solares?|instalaciones? (?:solares?|fotovoltaicas?)|parques? fotovoltaicos?/.test(nombre);
 }
-const SOLARES_REGLAS_2026=`PLANTAS SOLARES: Alterna naturalmente instalación → parque de primera salida, instalación → ubicación y ubicación → instalación, incluyendo incidentes solo cuando proceda. Los 12 modelos son SOLO estilo: no copies sus hechos ni sus respuestas. Cada pregunta se fundamenta exclusivamente en el fragmento del PDF factual del objetivo y su evidencia comprobable; no uses los ejemplos como banco de datos. Distractores reales y próximos solo si el documento permite comprobarlos, sin inventar carreteras, posiciones, distancias, tiempos de respuesta o adscripciones. Conserva exactamente los nombres de plantas y sus variantes I/II. No preguntes potencia, superficie, promotor ni fecha de puesta en servicio. No impongas cuotas de modalidades ni agregues llamadas al modelo; no alteres dificultad, selección, cobertura, SRS ni persistencia.`;
+const SOLARES_REGLAS_2026=`TEMA 23 — PLANTAS SOLARES, ESTILO OPOSICIÓN BOMBEROS DE NAVARRA:
+- Imita la naturalidad, precisión y distractores de los 12 ejemplos aprobados, pero NUNCA uses sus nombres, alternativas o respuestas como fuente factual.
+- Alterna cuando esté documentado: instalación → parque de primera salida; instalación → ubicación (municipio, carreteras y orientación); descripción geográfica → instalación; supuesto breve de incendio/accidente → parque expresamente asignado.
+- MUY ALTA: prioriza discriminar DOS referencias próximas comprobables del mismo registro (por ejemplo nombre + carretera + orientación, o ubicación + parque) y opciones que cambian solo un dato relevante. No es dificultad sumar datos inconexos ni usar lenguaje artificioso.
+- Distractores: cuatro alternativas de la misma clase y extensión similar, con municipios, parques, vías o instalaciones geográficamente comparables. Usa preferentemente otros hechos del PDF aportados en OBJETIVOS; nunca inventes un nombre, ruta, parque o situación ni confundas cercanía con adscripción.
+- Las instalaciones Rada I/Rada II, Cáseda 1/2/3, La Pedrera I/II/III y Montes del Cierzo/Montes del Cierzo II comparten sus descripciones documentadas; NO hagas una pregunta de identificación geográfica cuya respuesta pudiera ser cualquiera de esas instalaciones. Tampoco incluyas entre las alternativas otra instalación que cumpla exactamente el mismo enunciado.
+- Para determinar el parque en primera salida, el epígrafe PARQUE [nombre] del OBJETIVO es dato factual de la fuente. No sustituyas su asignación por deducciones a partir del municipio. El parque válido es el del epígrafe de cada ficha, aunque otros registros del mismo municipio pertenezcan a otro parque.
+- Reproduce los nombres EXACTAMENTE como estén en el PDF más reciente, incluso I/II y tildes. Nunca emplees «según la tabla», números GEO, número de hoja, preguntas sobre promotor, potencia, superficie o puesta en servicio.
+- Preguntas variadas, cuatro opciones realmente diferentes, una sola correcta demostrable y explicación breve; los fragmentos de OBJETIVOS son la única evidencia.`;
+const EOLICOS_REGLAS_EXAMEN_80=`TEMA 24 — PARQUES EÓLICOS, ESTILO OPOSICIÓN BOMBEROS DE NAVARRA:
+- Reproduce los TRES modelos aprobados: instalación → parque de bomberos; instalación → ubicación detallada; descripción de emplazamiento → instalación. Introduce supuestos breves de intervención solo si el parque consta en el objetivo.
+- Dificultad MUY ALTA: dos o más relaciones territoriales documentadas, sin pistas en el enunciado y distractores del MISMO tipo y dificultad, preferentemente de parques cercanos, fases próximas, carreteras similares o municipios limítrofes.
+- Cuando una instalación atraviesa varios municipios o ámbitos operativos, NO la reduzcas a un único parque; plantea una pregunta que refleje la relación completa si está respaldada.
+- No inventes municipios, vías, parque de salida, carreteras o límites a partir de nombres de los parques. No copies literalmente la respuesta de ningún ejemplo de estilo.
+- Si varios parques comparten exactamente los atributos con que se pregunta, reformula a otro atributo o rechaza el ítem; cuatro respuestas deben ser distintas y solo una compatible con el enunciado.
+- Evita «según la tabla del temario», «qué combinación figura», opciones burdas y cambios de categorías que delaten la solución.`;
 function esTemaEolicos2026(target){
   const nombre=String(target?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -10726,6 +10687,26 @@ const CAMINO_REGLAS_2026=`CAMINO DE SANTIAGO (SOLO SI EL OBJETIVO PERTENECE A ES
 - Alterna sin cuotas rígidas: accidente o incendio y parque, concejo y casco urbano, orden de localidades, municipio, confluencia, secuencia y relaciones combinadas. Dos o tres ejemplos de un patrón bastan; no repitas su enunciado ni sus nombres.
 - No inventes bifurcaciones, pasos por núcleos, adscripciones o exclusiones. Una pregunta combinada requiere evidencia documental de TODOS sus componentes y distractores. Si falta, formula una relación más simple sustentada en el objetivo.
 - Los ejemplos de estilo NO son fuente factual ni preguntas para reproducir; prevalece siempre el PDF factual del tema.`;
+// SERVER 81 — criterio editorial transversal para todas las materias.
+// Solo modifica el texto enviado a Gemini: ninguna ruta, modelo, llamada,
+// dificultad, cuota Anki, cobertura, banco o validador cambia.
+function reglasCalidadTransversal81(difficulty,leg,geo){
+  const nivel=String(difficulty||'').toLowerCase()==='muy alta'
+    ? 'MUY ALTA: distractores muy próximos; combina dos condiciones SOLO si ambas constan en el mismo objetivo. Si solo consta una, no inventes la segunda.'
+    : 'ALTA: exige precisión y comprensión, no mera eliminación de respuestas absurdas.';
+  const materia=leg
+    ? 'LEGISLACIÓN: diferencias literales de competencia, sujeto, plazo o excepción SOLO si constan; respetar polaridad y cuota Anki.'
+    :geo
+      ? 'GEOGRAFÍA: distinguir municipio, concejo, casco urbano, parque asignado, vía y sentido; no deducir por proximidad ni fundir variantes.'
+      : 'ESPECÍFICO: contrastar componentes, magnitudes, unidades o procedimientos documentados; no inventar límites.';
+  return `CALIDAD TRANSVERSAL DE OPOSICIÓN:
+- Enunciado natural y directo, sin pistas, fórmulas vacías ni preguntas sobre tablas o páginas.
+- Cuatro alternativas distintas de la MISMA categoría, extensión y precisión similares. Distractores cercanos: variar una propiedad significativa y comprobable, no añadir nombres ni hechos externos. Prohibidas pistas gramaticales y una opción desproporcionadamente detallada.
+- Exactamente UNA alternativa compatible con el enunciado completo. Si dos comparten la respuesta o la evidencia no discrimina, reformular usando otro atributo demostrado del mismo objetivo.
+- Explicación breve que justifique la solución. Ejemplos oficiales y de calibración: SOLO estilo; PDF: ÚNICA fuente factual.
+${nivel}
+${materia}`;
+}
 function resetPrompt136(targets,difficulty,mode){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
@@ -10756,16 +10737,16 @@ function resetPrompt136(targets,difficulty,mode){
   return `Eres examinador de Bombero de Navarra, oposición nivel C. Redacta ${targets.length} preguntas NUEVAS, nivel ${difficulty}, modalidad ${mode}.
 NUNCA utilices conocimientos externos ni hechos de ejemplos de exámenes. La ÚNICA fuente factual son los fragmentos del PDF proporcionados en OBJETIVOS; si falta el dato, recupera exclusivamente del PDF del temario mediante File Search cuando se te habilite.
 Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una correcta. Distractores plausibles pero falsos a la luz del texto. No inventes normas, cifras o excepciones.
-No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado. ${geo?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
+${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
-DIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
+${reglasCalidadTransversal81(difficulty,leg,geo)}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
 ${soloSolares?SOLARES_REGLAS_2026:''}
-${soloEolicos?'PARQUES EÓLICOS: Alterna las tres modalidades cuando los datos del objetivo lo permitan: instalación a parque de bomberos asignado, instalación a ubicación literal y ubicación literal a instalación. Distractores geográficamente plausibles, pero con una única respuesta demostrable en el temario. Conserva nombres y fases exactos. No inventes relaciones, distancias, coordenadas, carreteras, potencias ni ubicaciones; no deduzcas asignaciones por proximidad. Los ejemplos son SOLO estilo, nunca evidencia factual.':''}
+${soloEolicos?EOLICOS_REGLAS_EXAMEN_80:''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
 ${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado. Nunca preguntes por códigos GEO-xxxx, números de hoja entre corchetes ([hoja N]), páginas del PDF ni índices editoriales: no son materia examinable.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
@@ -10812,11 +10793,13 @@ async function resetGenerateGroup136(ai, group,difficulty,mode){
   // Reduce la posibilidad de lotes incompletos sin agregar llamadas ni auditorías.
   const fixedCountSchema=(schema,key,count)=>({ ...schema,properties:{...schema.properties,
     [key]:{...schema.properties[key],minItems:count,maxItems:count}}});
+  const geoHighChallenge=difficulty==='muy alta' && group.length>0 &&
+    group.every(t=>esTemaSolares2026(t)||esTemaEolicos2026(t));
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:resetPrompt136(group,difficulty,mode),config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
-      ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:'low'}}:{}),
+      ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(RESET_GENERATE_SCHEMA_137,'questions',group.length)}});
   const parsed=JSON.parse(String(response?.text||'{}'));
@@ -10824,12 +10807,18 @@ async function resetGenerateGroup136(ai, group,difficulty,mode){
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
   // Auditor independiente: una llamada por lote, no múltiples auditores
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
-  const blind=questions.flatMap((q,i)=>resetShape136(q)?[]:[{index:i,tema:group[i].topic_name,
-    concepto:group[i].concept,fragmento:String(group[i].source_evidence||'').slice(0,3500),
-    stem:q.stem,options:q.options}]);
+  const blind=questions.flatMap((q,i)=>{
+    if(resetShape136(q))return [];
+    if((esTemaSolares2026(group[i])||esTemaEolicos2026(group[i])) &&
+       /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
+    return [{index:i,tema:group[i].topic_name,
+      epigrafe:group[i].section,concepto:group[i].concept,
+      fragmento:String(group[i].source_evidence||'').slice(0,3500),
+      stem:q.stem,options:q.options}];
+  });
   if(!blind.length)return questions.map(()=>null);
   const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
-    contents:`Audita un test de oposición comparando EXCLUSIVAMENTE los fragmentos PDF con las opciones; sin usar memoria externa. Para cada fila, indica answer=0..3 sólo si es inequívoca la respuesta de acuerdo con el PDF; si no, answer=-1. quote: transcribe un fragmento LITERAL del PDF aportado que sustente la respuesta (18+ caracteres). No puedes aceptar respuestas con información insuficiente. Fila index conserva el índice original. FILAS: ${JSON.stringify(blind)}`,
+    contents:`Audita un test de oposición comparando EXCLUSIVAMENTE los datos del PDF entregados por fila, incluido su EPÍGRAFE como asignación expresa de parque; sin memoria externa, sin copiar hechos de modelos de estilo. answer=0..3 SOLO cuando existe una única respuesta sustentada por esa fila; si dos opciones son iguales/equivalentes, o dos satisfacen el mismo enunciado, o la respuesta exige deducir un municipio o parque ausente, answer=-1. quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres) que justifique la respuesta; puedes usar el EPÍGRAFE para validar la asignación del parque, pero no como sustituto de quote. Si falta evidencia, answer=-1. Fila index conserva índice original. FILAS: ${JSON.stringify(blind)}`,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(RESET_AUDIT_SCHEMA_136,'results',blind.length)}});
   const audits=JSON.parse(String(auditing?.text||'{}'))?.results;
@@ -10933,6 +10922,9 @@ app.post('/api/generate',async(req,res)=>{
       ?await getFailedCoverageTargets(count,topicIds)
       :await getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
         aiClient().models.generateContent(...args)}},topicIds,examMode)));
+    if(Array.isArray(topicIds) && topicIds.length===1 &&
+       targets.some(t=>Number(t.topic_id)!==Number(topicIds[0])))
+      throw Error('Los conocimientos obtenidos no corresponden al tema seleccionado. No se genera el test.');
     if(count<=40&&!targets.length)throw Error('No hay conocimientos disponibles en ese ámbito.');
     if(count<=40&&targets.length!==count && testType==='normal')throw Error(`Cobertura insuficiente: ${targets.length}/${count}.`);
     const direct=new Map();
@@ -11276,6 +11268,23 @@ async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
   console.log("STARTUP 1/4 OK");
+  // SERVER 80: desactivar SOLO preguntas locales antiguas de tablas de
+  // solares/eólicos. Sus territorios estaban desactualizados. No borra tests,
+  // respuestas, estadísticas, cobertura ni preguntas de otros temas.
+  try{
+    const oldGeo=await db.query(`UPDATE question_bank qb
+       SET active=FALSE,updated_at=NOW()
+       FROM coverage_items ci JOIN topics t ON t.id=ci.topic_id
+       WHERE qb.coverage_item_id=ci.id AND qb.active=TRUE
+         AND t.block='geografia'
+         AND t.name ~* '^TEMA[[:space:]]*(23|24)[^0-9]'
+         AND qb.stem ~* '^seg[uú]n la tabla del temario'`);
+    console.log('SERVER 80: preguntas obsoletas desactivadas:',oldGeo.rowCount);
+  }catch(error){
+    console.warn('SERVER 80: no se pudieron desactivar preguntas antiguas:',
+      String(error?.message||error));
+  }
+
   const cleanup83=await db.query(`
     UPDATE coverage_items SET worked=FALSE
     WHERE worked=TRUE AND COALESCE(times_asked,0)=0
