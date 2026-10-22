@@ -4262,11 +4262,14 @@ if(!pdfHeader.includes("%PDF-")){
     const rawOrder=
       Number(req.body?.topicOrder);
 
+    // El frontend puede no enviar topicOrder; recuperar el número escrito
+    // al principio del nombre evita que se muestre como 0 (sin orden).
+    const writtenOrder=topicName.match(/^\s*TEMA\s*([0-9]{1,3})\b/i);
+    const inferredOrder=writtenOrder?Number(writtenOrder[1]):null;
     const topicOrder=
-      Number.isInteger(rawOrder) &&
-      rawOrder > 0
+      Number.isInteger(rawOrder) && rawOrder>0
         ? rawOrder
-        : null;
+        : inferredOrder;
 
     let topic=
       await getOrCreateTopic(
@@ -4759,6 +4762,58 @@ function structuredPdfFromText(filePath){
   if(/CARRETERAS DE NAVARRA/i.test(proc.stdout.slice(0,500)))return null;
   return null;
 }
+// Cobertura factual cerrada de los cinco temas corregidos.
+// Inventario integrado EN el PDF, visible y con firma SHA-256, sin llamadas
+// a Gemini para extraer fichas. No modifica la generación de preguntas.
+async function geoCoverageMetadataRecords(pdfPath, topicName){
+  const topicNumber=coverageTopicNumber(topicName);
+  if(![23,24,26,27,36].includes(topicNumber))return null;
+  const bytes=fs.readFileSync(pdfPath);
+  const pdf=await PDFDocument.load(bytes,{updateMetadata:false});
+  const subject=String(pdf.getSubject()||"");
+  if(!subject.startsWith("GEOFACT1|")){
+    throw new Error(`El TEMA ${topicNumber} necesita su PDF definitivo con fichas GEO numeradas. `+
+      `No se sustituye la cobertura actual por una extracción parcial.`);
+  }
+  const parts=subject.split("|");
+  if(parts.length!==3 || !/^[a-f0-9]{64}$/i.test(parts[1]) ||
+      !/^[A-Za-z0-9+/=]+$/.test(parts[2])){
+    throw new Error("Cobertura GEO: metadatos del PDF inválidos. No se guarda nada.");
+  }
+  const data=inflateSync(Buffer.from(parts[2],"base64"));
+  if(createHash("sha256").update(data).digest("hex")!==parts[1].toLowerCase()){
+    throw new Error("Cobertura GEO: firma del inventario no coincide con el PDF.");
+  }
+  const manifest=JSON.parse(data.toString("utf8"));
+  if(manifest.format!=="GEOFACT1" || Number(manifest.topic)!==topicNumber ||
+      !Array.isArray(manifest.items) || manifest.items.length<30 ||
+      manifest.items.length>2000){
+    throw new Error("Cobertura GEO: tema o número de fichas incorrecto.");
+  }
+  const sections=new Map(),ids=new Set(),literalItems=[];
+  for(let i=0;i<manifest.items.length;i++){
+    const r=manifest.items[i];
+    const id=i+1,code=`GEO-${String(id).padStart(4,"0")}`;
+    if(r.id!==code || !r.section || !r.concept ||
+        r.sourceEvidence!==`${code} · ${r.concept}` ||
+        !Number.isInteger(r.sourcePage) || r.sourcePage<1 ||
+        r.sourcePage>pdf.getPageCount()){
+      throw new Error(`Cobertura GEO incompleta o inválida: registro ${code}.`);
+    }
+    if(!["relacion","dato_numerico","concepto","enumeracion"].includes(r.itemType) ||
+        !["identificacion","secuencia","relacion_variables","literal"].includes(r.evaluationType)){
+      throw new Error(`Cobertura GEO: clasificación inválida ${code}.`);
+    }
+    ids.add(id);sections.set(id,r.section);
+    literalItems.push({section:r.section,concept:r.concept,itemType:r.itemType,
+      evaluationType:r.evaluationType,sourcePage:r.sourcePage,
+      manualPage:null,sourceEvidence:r.sourceEvidence});
+  }
+  console.log(`[coverage] TEMA ${topicNumber}: ${literalItems.length} fichas literales `+
+    `validadas dentro del PDF. 0 llamadas Gemini para cobertura.`);
+  return {prefix:"GEO-",digits:4,ids,sections,recordPages:pdf.getPageCount(),literalItems};
+}
+
 function sequentialPdfRecordIds(filePath){
   const deterministic=structuredPdfFromText(filePath);
   if(deterministic)return deterministic;
@@ -4992,7 +5047,8 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
-    const structuredSource=sequentialPdfRecordIds(pdfPath);
+    const structuredSource=(await geoCoverageMetadataRecords(pdfPath,topic.name)) ||
+      sequentialPdfRecordIds(pdfPath);
     if(structuredSource){
       console.log(`[coverage] Fuente numerada: ${structuredSource.ids.size} IDs `+
         `con prefijo ${structuredSource.prefix}; extracción por bloques cortos.`);
@@ -5004,12 +5060,12 @@ const coverageChunkPages=
   coverageTopicNumber(topic.name)===22 ? 1 :
   structuredSource ? 2 : 5;
 
-const {totalPages,chunks}=
-  await splitPdfIntoChunks(
-    pdfPath,
-    coverageChunkPages
-  );
 const literalItems=structuredSource?.literalItems || null;
+// Para estos cinco temas la fuente completa ya está verificada dentro del PDF.
+// Evitar dividir páginas y llamar dos veces a Gemini sin necesidad.
+const {totalPages,chunks}=literalItems
+  ? {totalPages:structuredSource.recordPages,chunks:[]}
+  : await splitPdfIntoChunks(pdfPath,coverageChunkPages);
 if(literalItems){
   console.log(`[coverage] Extracción literal PDF: ${literalItems.length} registros, `+
     `${new Set(literalItems.map(x=>x.section)).size} secciones; sin llamadas a Gemini.`);
@@ -9399,7 +9455,7 @@ app.get("/api/statistics", async(req,res)=>{
   t.id AS topic_id,
   t.name AS topic_name,
   t.block AS block,
-  t.topic_order AS topic_order,
+  COALESCE(t.topic_order, (regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer) AS topic_order,
 
   COUNT(ci.id)::int AS total_items,
 
@@ -9432,7 +9488,7 @@ ORDER BY
     WHEN 'especifico' THEN 3
     ELSE 4
   END,
-  t.topic_order NULLS LAST,
+  COALESCE(t.topic_order, (regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer) NULLS LAST,
   t.id
     `);
 
