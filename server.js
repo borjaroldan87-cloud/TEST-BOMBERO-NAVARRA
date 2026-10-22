@@ -4266,10 +4266,13 @@ if(!pdfHeader.includes("%PDF-")){
     // al principio del nombre evita que se muestre como 0 (sin orden).
     const writtenOrder=topicName.match(/^\s*TEMA\s*([0-9]{1,3})\b/i);
     const inferredOrder=writtenOrder?Number(writtenOrder[1]):null;
+    // Si el nombre incluye TEMA 23 / 24 / 26 / 27 / 36, su número
+    // tiene prioridad sobre el orden enviado por el formulario.
+    // El frontend anterior enviaba 1 al cargar un PDF "TEMA_23_...".
     const topicOrder=
-      Number.isInteger(rawOrder) && rawOrder>0
-        ? rawOrder
-        : inferredOrder;
+      inferredOrder !== null
+        ? inferredOrder
+        : (Number.isInteger(rawOrder) && rawOrder>0 ? rawOrder : null);
 
     let topic=
       await getOrCreateTopic(
@@ -9455,7 +9458,7 @@ app.get("/api/statistics", async(req,res)=>{
   t.id AS topic_id,
   t.name AS topic_name,
   t.block AS block,
-  COALESCE(t.topic_order, (regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer) AS topic_order,
+  COALESCE((regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer, t.topic_order) AS topic_order,
 
   COUNT(ci.id)::int AS total_items,
 
@@ -9488,7 +9491,7 @@ ORDER BY
     WHEN 'especifico' THEN 3
     ELSE 4
   END,
-  COALESCE(t.topic_order, (regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer) NULLS LAST,
+  COALESCE((regexp_match(t.name,'^\\s*TEMA\\s*([0-9]{1,3})','i'))[1]::integer, t.topic_order) NULLS LAST,
   t.id
     `);
 
@@ -10759,12 +10762,12 @@ Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la 
 DIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
-${soloCamino?CAMINO_REGLAS_2026:''}
+${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
 ${soloSolares?SOLARES_REGLAS_2026:''}
 ${soloEolicos?'PARQUES EÓLICOS: Alterna las tres modalidades cuando los datos del objetivo lo permitan: instalación a parque de bomberos asignado, instalación a ubicación literal y ubicación literal a instalación. Distractores geográficamente plausibles, pero con una única respuesta demostrable en el temario. Conserva nombres y fases exactos. No inventes relaciones, distancias, coordenadas, carreteras, potencias ni ubicaciones; no deduzcas asignaciones por proximidad. Los ejemplos son SOLO estilo, nunca evidencia factual.':''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
-${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
+${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado. Nunca preguntes por códigos GEO-xxxx, números de hoja entre corchetes ([hoja N]), páginas del PDF ni índices editoriales: no son materia examinable.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
 }
 // Esquema mínimo del motor nuevo: la procedencia y familia las asigna el
