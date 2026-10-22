@@ -4016,13 +4016,21 @@ app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{
     res.type('html').send(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrar temas</title>
     <style>body{font:16px system-ui;max-width:800px;margin:30px auto;padding:12px}article{border:1px solid #ccc;padding:14px;margin:10px 0;border-radius:8px}button{padding:9px;cursor:pointer}input{padding:9px;width:95%}small{color:#555}</style>
     <h1>Administrar temas</h1><p>El borrado definitivo solo se permite si el tema no tiene preguntas, sesiones ni progreso. Escribe el nombre exacto para confirmar.</p>
-    ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p><button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button></article>`).join('')}
+    ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p><button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button>${/plantas\s+solares/i.test(t.name)?` <button data-solar-id="${t.id}" data-solar-name="${escapeTopicHtml82(t.name)}">Eliminar plantas solares y sus pruebas</button>`:''}</article>`).join('')}
     <script>document.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
       const name=b.dataset.name;const typed=prompt('Para eliminar DEFINITIVAMENTE el tema, escribe su nombre exacto:\\n'+name);
       if(typed!==name)return alert('Cancelado: el nombre no coincide.');
       if(!confirm('¿Eliminar '+name+' y sus conocimientos? Esta acción no se puede deshacer.'))return;
       b.disabled=true;
       try{const r=await fetch('/api/admin/topics/'+b.dataset.id,{method:'DELETE',headers:{'Content-Type':'application/json','X-Topic-Admin':'delete'},body:JSON.stringify({confirmName:typed})});const x=await r.json();alert(x.message||x.error||'Error');if(x.ok)location.reload();}catch(e){alert('Error de conexión: '+e.message);}finally{b.disabled=false;}
+    });
+    document.querySelectorAll('button[data-solar-id]').forEach(b=>b.onclick=async()=>{
+      const name=b.dataset.solarName;
+      if(prompt('Escribe exactamente el nombre del tema que deseas sustituir:\\n'+name)!==name)return alert('Cancelado.');
+      if(prompt('Se borrarán las preguntas, repasos y respuestas de prueba de ESTE tema.\\nPara continuar escribe BORRAR PRUEBAS SOLARES')!=='BORRAR PRUEBAS SOLARES')return alert('Cancelado.');
+      if(!confirm('¿Confirmas borrar definitivamente Plantas solares y sus pruebas, sin eliminar datos de otros temas?'))return;
+      b.disabled=true;
+      try{const r=await fetch('/api/admin/topics/'+b.dataset.solarId,{method:'DELETE',headers:{'Content-Type':'application/json','X-Topic-Admin':'delete'},body:JSON.stringify({confirmName:name,deleteSolarTrialData:true,confirmDeleteTrialData:'BORRAR PRUEBAS SOLARES'})});const x=await r.json();alert(x.message||x.error||'Error');if(x.ok)location.reload();}catch(e){alert('Error de conexión: '+e.message);}finally{b.disabled=false;}
     });</script></html>`);
   }catch(e){res.status(500).send('No se pudieron listar los temas: '+escapeTopicHtml82(e.message));}
 });
@@ -4045,8 +4053,44 @@ app.delete('/api/admin/topics/:id',topicAdminAuth,async(req,res)=>{
       (SELECT COUNT(*)::int FROM coverage_review_state rs JOIN coverage_items c ON c.id=rs.coverage_item_id WHERE c.topic_id=$1) AS reviews
       FROM coverage_items ci WHERE ci.topic_id=$1`,[id]);
     const st=state.rows[0];
+    // Excepción controlada: SOLO Plantas solares y SOLO con confirmación adicional.
+    // No afecta a preguntas ni a repasos de ningún otro tema.
+    const solarPurgeAuthorized=/plantas\s+solares/i.test(deletedName) &&
+      req.body?.deleteSolarTrialData===true &&
+      req.body?.confirmDeleteTrialData==='BORRAR PRUEBAS SOLARES';
     if(st.progress||st.questions||st.sessions||st.reviews){
-      throw Object.assign(new Error('No se ha eliminado: este tema tiene preguntas, sesiones o progreso. Consulta antes de borrarlo.'),{status:409});
+      if(!solarPurgeAuthorized){
+        throw Object.assign(new Error('No se ha eliminado: este tema tiene preguntas, sesiones o progreso. Consulta antes de borrarlo.'),{status:409});
+      }
+      // Las filas de sesión referencian preguntas y cobertura mediante ON DELETE RESTRICT.
+      // Retirarlas primero permite eliminar el tema sin tocar datos de otros temas.
+      const removed=await client.query(`
+        DELETE FROM test_session_questions sq USING coverage_items ci
+        WHERE sq.coverage_item_id=ci.id AND ci.topic_id=$1
+        RETURNING sq.session_id`,[id]);
+      const affectedIds=[...new Set(removed.rows.map(row=>String(row.session_id)))];
+      if(affectedIds.length){
+        // Sesiones exclusivamente solares: sin preguntas restantes, se eliminan.
+        await client.query(`
+          DELETE FROM test_sessions ts WHERE ts.id=ANY($1::bigint[])
+          AND NOT EXISTS(SELECT 1 FROM test_session_questions sq WHERE sq.session_id=ts.id)`,[affectedIds]);
+        // Sesiones mixtas: conservar sus preguntas de otros temas y ajustar resultados.
+        await client.query(`
+          UPDATE test_sessions ts SET
+            total_questions=r.total,
+            correct_answers=r.correct,
+            wrong_answers=r.wrong,
+            blank_answers=r.blank
+          FROM (SELECT sq.session_id,
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER(WHERE sq.is_correct=TRUE)::int AS correct,
+            COUNT(*) FILTER(WHERE sq.is_correct=FALSE AND sq.is_blank=FALSE)::int AS wrong,
+            COUNT(*) FILTER(WHERE sq.is_blank=TRUE)::int AS blank
+            FROM test_session_questions sq
+            WHERE sq.session_id=ANY($1::bigint[])
+            GROUP BY sq.session_id) r
+          WHERE ts.id=r.session_id`,[affectedIds]);
+      }
     }
     const doc=await client.query('SELECT document_name FROM topic_source_documents WHERE topic_id=$1',[id]);
     sourceName=doc.rows[0]?.document_name||null;
