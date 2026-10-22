@@ -10553,6 +10553,28 @@ const EOLICOS_ESTILO_EJEMPLOS_2026=Object.freeze([
   'TIPO 2 (parque eólico → ubicación): «¿Dónde se encuentra situado el parque eólico La Caya?» A) Al oeste de Miranda de Arga, al sur de Berbinzana y al oeste de la NA-6140; B) Al suroeste de Olite, dentro de su municipio, junto a la AP-15 y la NA-115, al norte de La Fraila [correcta]; C) Al oeste de Tafalla, paralelo a la NA-132 por su lado norte; D) Al suroeste de Larraga, al oeste de la NA-601, tramo 3.',
   'TIPO 3 (ubicación → parque eólico): «¿Qué parque eólico se encuentra al sur de Sesma, al este de la NA-129 y al norte de la NA-134?» A) El Oliado; B) Caluengo; C) La Lomba [correcta]; D) Vedadillo.'
 ]);
+// TEMA 23 — PLANTAS SOLARES: 12 modelos aprobados, SOLO estilo.
+// No son fuente factual ni preguntas pregrabadas; el PDF de cada objetivo manda.
+const SOLARES_ESTILO_EJEMPLOS_2026=Object.freeze([
+  'PRIMERA SALIDA: «Se declara un incendio en la planta solar Valdegón. ¿Qué parque interviene en primera salida?» A) Lodosa; B) Estella [correcta]; C) Peralta; D) Tafalla.',
+  'UBICACIÓN: «¿Dónde se encuentra Alto Monplanete?» A) Noreste de Olite, NA-5300; B) Suroeste de Olite, entre NA-115 y N-121 [correcta]; C) Sur de Olite, entre Beire y Pitillas; D) Suroeste de Tafalla, NA-132.',
+  'IDENTIFICACIÓN: «¿Qué planta se encuentra al este de Corella, entre AP-15 y AP-15-R?» A) Cierzo; B) Guardián; C) La Sarda [correcta]; D) Cierzo N.',
+  'PRIMERA SALIDA: «En caso de incendio en Ganazo, ¿qué parque interviene en primera salida?» A) Sangüesa; B) Peralta; C) Tafalla [correcta]; D) Lodosa.',
+  'UBICACIÓN: «¿Dónde se encuentra Corraliza del Vecino?» A) Norte de Cabanillas, entre NA-126, NA-134 y NA-125 [correcta]; B) Norte de Fustiñana, NA-126; C) Este de Villafranca; D) Noroeste de Bardenas, N-121.',
+  'IDENTIFICACIÓN: «¿Qué planta está al sur de Sesma, junto a NA-129?» A) El Salobral de la Coja; B) El Salobre [correcta]; C) El Encimero; D) Valdegón.',
+  'PRIMERA SALIDA: «¿Qué parque interviene en primera salida en Cáseda 2?» A) Central de Pamplona; B) Tafalla; C) Sangüesa [correcta]; D) Peralta.',
+  'IDENTIFICACIÓN: «¿Qué planta está al noroeste de Cortes, en el límite con Buñuel, paralela a A-68?» A) La Dehesa; B) Atalaya [correcta]; C) La Olivera; D) Ablitas.',
+  'PRIMERA SALIDA: «¿Qué parque tiene asignada Arbanta?» A) Estella; B) Peralta; C) Lodosa [correcta]; D) Tudela.',
+  'IDENTIFICACIÓN: «¿Qué instalación está al suroeste de Fontellas, junto a AP-68?» A) Fontellas; B) La Olivera [correcta]; C) Ablitas; D) La Torre Martiniega.',
+  'UBICACIÓN: «¿Qué planta se encuentra al norte de Valtierra, paralela a NA-134?» A) Arguedas; B) Valtierra [correcta]; C) Arguedas I El Común; D) Arguedas II Molinaz.',
+  'IDENTIFICACIÓN: «¿Qué planta está al oeste de Corella y de NA-161?» A) La Sarda; B) Cierzo; C) Guardián [correcta]; D) El Vinagre.'
+]);
+function esTemaSolares2026(target){
+  const nombre=String(target?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /parques? solares?|plantas? solares?|instalaciones? (?:solares?|fotovoltaicas?)|parques? fotovoltaicos?/.test(nombre);
+}
+const SOLARES_REGLAS_2026=`PLANTAS SOLARES: Alterna naturalmente instalación → parque de primera salida, instalación → ubicación y ubicación → instalación, incluyendo incidentes solo cuando proceda. Los 12 modelos son SOLO estilo: no copies sus hechos ni sus respuestas. Cada pregunta se fundamenta exclusivamente en el fragmento del PDF factual del objetivo y su evidencia comprobable; no uses los ejemplos como banco de datos. Distractores reales y próximos solo si el documento permite comprobarlos, sin inventar carreteras, posiciones, distancias, tiempos de respuesta o adscripciones. Conserva exactamente los nombres de plantas y sus variantes I/II. No preguntes potencia, superficie, promotor ni fecha de puesta en servicio. No impongas cuotas de modalidades ni agregues llamadas al modelo; no alteres dificultad, selección, cobertura, SRS ni persistencia.`;
 function esTemaEolicos2026(target){
   const nombre=String(target?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -10606,11 +10628,13 @@ function resetPrompt136(targets,difficulty,mode){
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
   const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
   const soloEolicos=geo && targets.length>0 && targets.every(esTemaEolicos2026);
+  const soloSolares=geo && targets.length>0 && targets.every(esTemaSolares2026);
   const soloFerrocarril=geo && targets.length>0 && targets.every(esTemaFerrocarril2026);
   const soloCamino=geo && targets.length>0 && targets.every(esTemaCamino2026);
   const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
     soloConexiones ? CONEXIONES_ESTILO_EJEMPLOS_2026 :
     soloEolicos ? EOLICOS_ESTILO_EJEMPLOS_2026 :
+    soloSolares ? SOLARES_ESTILO_EJEMPLOS_2026 :
     soloFerrocarril ? FERROCARRIL_ESTILO_EJEMPLOS_2026 :
     soloCamino ? CAMINO_ESTILO_EJEMPLOS_2026 :
     geo ? pickGeografiaExamples73(targets,3) : [
@@ -10634,9 +10658,10 @@ La auditoría independiente aportará la cita textual del PDF. Devuelve únicame
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 DIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
-${styleTitle}: ${JSON.stringify(examples).slice(0,4400)}
+${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026:''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
+${soloSolares?SOLARES_REGLAS_2026:''}
 ${soloEolicos?'PARQUES EÓLICOS: Alterna las tres modalidades cuando los datos del objetivo lo permitan: instalación a parque de bomberos asignado, instalación a ubicación literal y ubicación literal a instalación. Distractores geográficamente plausibles, pero con una única respuesta demostrable en el temario. Conserva nombres y fases exactos. No inventes relaciones, distancias, coordenadas, carreteras, potencias ni ubicaciones; no deduzcas asignaciones por proximidad. Los ejemplos son SOLO estilo, nunca evidencia factual.':''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
 ${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
