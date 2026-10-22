@@ -6902,9 +6902,10 @@ function geographyDiverseCandidates115(rows){
   const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
   const sectionOf=row=>`${row.topic_id}:seccion:${norm(row.section)||'sin seccion'}`;
+  const pageOf=row=>{const page=row.manual_page??row.source_page;return page==null||String(page).trim()===''?null:`${row.topic_id}:pagina:${String(page).trim()}`;};
   // La relación factual se define por el conocimiento, no por el texto generado.
   const factOf=row=>`${row.topic_id}:${norm(row.concept)||`item ${row.id}`}`;
-  const usedTopics=new Map(),usedSections=new Map(),usedFacts=new Map();
+  const usedTopics=new Map(),usedSections=new Map(),usedFacts=new Map(),usedPages=new Map();
   const result=[];
   const priorities=[...new Set(rows.map(r=>Number(r.adaptive_priority)||0))].sort((a,b)=>a-b);
   for(const priority of priorities){
@@ -6914,8 +6915,9 @@ function geographyDiverseCandidates115(rows){
       let best=0,bestScore=null;
       for(let i=0;i<pending.length;i++){
         const row=pending[i],topic=String(row.topic_id),section=sectionOf(row),fact=factOf(row);
+        const page=pageOf(row);
         const score=[usedFacts.get(fact)||0,usedSections.get(section)||0,
-          usedTopics.get(topic)||0,i];
+          page?(usedPages.get(page)||0):0,usedTopics.get(topic)||0,i];
         if(!bestScore||score.some((v,j)=>v!==bestScore[j]&&score.slice(0,j).every((x,k)=>x===bestScore[k])&&v<bestScore[j])){
           best=i;bestScore=score;
         }
@@ -6926,6 +6928,7 @@ function geographyDiverseCandidates115(rows){
       usedTopics.set(topic,(usedTopics.get(topic)||0)+1);
       usedSections.set(section,(usedSections.get(section)||0)+1);
       usedFacts.set(fact,(usedFacts.get(fact)||0)+1);
+      const page=pageOf(row);if(page)usedPages.set(page,(usedPages.get(page)||0)+1);
     }
   }
   return result;
@@ -10530,10 +10533,86 @@ function pickGeografiaExamples73(targets,count=3){
   ];
   return selected.map(e=>e.modelo);
 }
+// Estilo exclusivo del tema «Conexiones por carretera desde parques de bomberos».
+// Los tres ejemplos son demostraciones de FORMATO, no evidencia factual:
+// las respuestas reales siempre se auditan contra el temario cargado.
+const CONEXIONES_ESTILO_EJEMPLOS_2026=Object.freeze([
+  'TIPO 1 (localidad → secuencia): «Desde el Parque Central de Pamplona, ¿qué secuencia de carreteras corresponde al recorrido hacia Muskitz?» A) PA-31 → A-15 → AP-15 → N-240-A → Red local [correcta]; B) PA-31 → A-15 → N-240-A → AP-15 → Red local; C) PA-31 → AP-15 → A-15 → N-240-A → Red local; D) PA-31 → A-15 → AP-15 → NA-240-A → Red local.',
+  'TIPO 2 (secuencia → localidad): «¿A qué localidad se accede desde el Parque de Lodosa mediante NA-123 → NA-134 → NA-122 → NA-601?» A) Larraga; B) Lerín [correcta]; C) Garínoain; D) Lantz.',
+  'TIPO 3 (alternativas documentadas): «Desde el Parque de Tafalla, ¿qué afirmación sobre el recorrido hacia Garínoain es correcta?» A) Únicamente por AP-15; B) N-121 y después NA-601; C) N-121 exclusivamente o N-121 → AP-15 → N-121 [correcta]; D) Obligatoriamente AP-15 antes de N-121.'
+]);
+function esTemaConexiones2026(target){
+  const nombre=String(target?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /conexiones.*(?:carretera|parque)|(?:carretera|parque).*conexiones|recorridos? por carretera.*parque/.test(nombre);
+}
+// Referencias de estilo exclusivas del tema Parques eólicos (Tema 2).
+// No constituyen evidencia factual: cada respuesta se verifica en el temario.
+const EOLICOS_ESTILO_EJEMPLOS_2026=Object.freeze([
+  'TIPO 1 (parque eólico → parque de bomberos): «¿En el ámbito de actuación de qué parque de bomberos se encuentra el parque eólico Moncayuelo?» A) Tafalla; B) Lodosa; C) Peralta [correcta]; D) Tudela.',
+  'TIPO 2 (parque eólico → ubicación): «¿Dónde se encuentra situado el parque eólico La Caya?» A) Al oeste de Miranda de Arga, al sur de Berbinzana y al oeste de la NA-6140; B) Al suroeste de Olite, dentro de su municipio, junto a la AP-15 y la NA-115, al norte de La Fraila [correcta]; C) Al oeste de Tafalla, paralelo a la NA-132 por su lado norte; D) Al suroeste de Larraga, al oeste de la NA-601, tramo 3.',
+  'TIPO 3 (ubicación → parque eólico): «¿Qué parque eólico se encuentra al sur de Sesma, al este de la NA-129 y al norte de la NA-134?» A) El Oliado; B) Caluengo; C) La Lomba [correcta]; D) Vedadillo.'
+]);
+function esTemaEolicos2026(target){
+  const nombre=String(target?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /parques? eolicos?|instalaciones eolicas?/.test(nombre);
+}
+// Tema 3 — ferrocarril. Ejemplos aprobados: SOLO estilo; los datos de cada
+// pregunta nueva deben estar demostrados en la evidencia curricular del objetivo.
+const FERROCARRIL_ESTILO_EJEMPLOS_2026=Object.freeze([
+  'TIPO 1 (incidente → parque de primera salida): «En caso de accidente ferroviario en el apartadero de Marcilla, ¿qué parque de bomberos actuaría en primera salida?» A) Tudela; B) Tafalla; C) Peralta [correcta]; D) Lodosa.',
+  'TIPO 2 (instalación → clasificación): «¿Cómo está clasificada la instalación ferroviaria de Cizur Mayor?» A) Apartadero-cargadero; B) Apeadero-cargadero [correcta]; C) Apeadero; D) Apartadero.',
+  'TIPO 3 (pasos con semibarreras): «¿En cuáles de los siguientes puntos de la línea Zaragoza–Alsasua existen pasos con semibarreras?» A) Noáin y Pamplona; B) Esquíroz y Berrioplano [correcta]; C) Cizur Mayor y Landaben; D) Zuasti e Irurzun.',
+  'TIPO 4 (línea → trazado documentado): «¿Qué carretera sigue la línea Soria–Castejón, cruzándose con ella?» A) A-1; B) NA-660; C) N-113 [correcta]; D) NA-134-2.',
+  'TIPO 5 (recuento por línea): «¿Cuántos apeaderos aparecen en la línea Madrid–Irún?» A) Uno; B) Dos [correcta]; C) Tres; D) Cuatro.'
+]);
+function esTemaFerrocarril2026(target){
+  const nombre=String(target?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /ferrocarril|red ferroviaria|lineas ferroviarias|infraestructura ferroviaria/.test(nombre);
+}
+// TEMA 27 CAMINO DE SANTIAGO: referencias exclusivamente de estilo.
+// No se insertan en el banco ni sustituyen la evidencia factual del PDF.
+const CAMINO_ESTILO_EJEMPLOS_2026=Object.freeze([
+  'PRIMERA SALIDA: «Un peregrino sufre un accidente en Pekotxeta. ¿Qué parque de bomberos intervendrá en primera salida?» A) Oronoz; B) Burguete [correcta]; C) Central de Pamplona; D) Sangüesa.',
+  'CASCO URBANO: «¿Por cuál de los siguientes concejos no atraviesa el Camino de Santiago su casco urbano?» A) Aurizberri/Espinal; B) Bizkarreta-Gerendiain; C) Lintzoain; D) Mezkiritz [correcta].',
+  'DOBLE RELACIÓN: «¿Por cuál de los siguientes concejos no atraviesa el Camino de Santiago su casco urbano y qué parque intervendría en primera salida en dicha localidad?» A) Aurizberri/Espinal — Burguete; B) Bizkarreta-Gerendiain — Burguete; C) Lintzoain — Burguete; D) Mezkiritz — Burguete [correcta]. Todas las parejas localidad-parque son verdaderas: solo cambia la condición del casco urbano.',
+  'ORDEN: «En dirección a Pamplona, ¿en qué orden se encuentran estas localidades del Camino de Baztan?» A) Arizkun – Elizondo – Elbete – Irurita; B) Arizkun – Elbete – Elizondo – Irurita [correcta]; C) Elbete – Arizkun – Irurita – Elizondo; D) Arizkun – Elbete – Irurita – Elizondo.',
+  'INCIDENTE: «Se produce un incendio en una vivienda de Abínzano. ¿Qué parque de bomberos interviene en primera salida?» A) Sangüesa; B) Burguete; C) Estella; D) Central de Pamplona [correcta].',
+  'MUNICIPIO: «¿A qué municipio pertenecen Izco, Abínzano y Salinas de Ibargoiti?» A) Urraúl Bajo; B) Ibargoiti [correcta]; C) Unciti; D) Noáin (Valle de Elorz).',
+  'DISTINCIÓN TERRITORIAL: «¿Por cuál de las siguientes localidades no atraviesa el Camino de Santiago su casco urbano?» A) Akerreta; B) Irotz; C) Larrasoaña [correcta]; D) Zabaldika.',
+  'CONFLUENCIA: «¿En qué localidad confluyen el Camino Francés procedente de Valcarlos y el Camino de Baztan?» A) Arre; B) Villava [correcta]; C) Burlada; D) Pamplona.',
+  'CONCEJOS PRÓXIMOS: «¿Cuál de estas localidades atraviesa el Camino de Santiago por su casco urbano?» A) Arizala; B) Murugarren; C) Lorca [correcta]; D) Lácar.',
+  'CONCEJOS DE UN MUNICIPIO: «¿Cuál de estas localidades atraviesa el Camino de Santiago por su casco urbano?» A) Erratzu; B) Gartzain; C) Berroeta [correcta]; D) Lekaroz.'
+]);
+function esTemaCamino2026(target){
+  const nombre=String(target?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return /camino de santiago/.test(nombre);
+}
+const CAMINO_REGLAS_2026=`CAMINO DE SANTIAGO (SOLO SI EL OBJETIVO PERTENECE A ESTE TEMA):
+- Redacción natural de oposición: no escribas «no figura en la relación», «según la lista» ni menciones municipio, variante o parque cuando eso facilite la respuesta.
+- Diferencia rigurosamente término municipal atravesado, territorio de concejo, localidad del itinerario y casco urbano físicamente atravesado. No deduzcas unos de otros.
+- Si preguntas por una localidad NO atravesada por su casco urbano, la evidencia debe demostrar expresamente ese extremo. No basta su ausencia en una lista parcial.
+- Distractores prioritarios: concejos del mismo municipio, luego misma demarcación de parque y finalmente localidades próximas; las cuatro opciones deben ser verosímiles y una sola correcta.
+- En preguntas combinadas casco urbano + primera salida, todas las parejas localidad-parque deben ser correctas; la respuesta se distingue únicamente por la condición del trazado.
+- Para primera salida usa exclusivamente la asignación documentada; no infieras proximidad ni tiempo de llegada. Pamplona ciudad/Trinitarios no equivale a Central Cordovilla.
+- Alterna sin cuotas rígidas: accidente o incendio y parque, concejo y casco urbano, orden de localidades, municipio, confluencia, secuencia y relaciones combinadas. Dos o tres ejemplos de un patrón bastan; no repitas su enunciado ni sus nombres.
+- No inventes bifurcaciones, pasos por núcleos, adscripciones o exclusiones. Una pregunta combinada requiere evidencia documental de TODOS sus componentes y distractores. Si falta, formula una relación más simple sustentada en el objetivo.
+- Los ejemplos de estilo NO son fuente factual ni preguntas para reproducir; prevalece siempre el PDF factual del tema.`;
 function resetPrompt136(targets,difficulty,mode){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
+  const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
+  const soloEolicos=geo && targets.length>0 && targets.every(esTemaEolicos2026);
+  const soloFerrocarril=geo && targets.length>0 && targets.every(esTemaFerrocarril2026);
+  const soloCamino=geo && targets.length>0 && targets.every(esTemaCamino2026);
   const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
+    soloConexiones ? CONEXIONES_ESTILO_EJEMPLOS_2026 :
+    soloEolicos ? EOLICOS_ESTILO_EJEMPLOS_2026 :
+    soloFerrocarril ? FERROCARRIL_ESTILO_EJEMPLOS_2026 :
+    soloCamino ? CAMINO_ESTILO_EJEMPLOS_2026 :
     geo ? pickGeografiaExamples73(targets,3) : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
@@ -10556,6 +10635,10 @@ Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la 
 DIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,4400)}
+${soloCamino?CAMINO_REGLAS_2026:''}
+${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
+${soloEolicos?'PARQUES EÓLICOS: Alterna las tres modalidades cuando los datos del objetivo lo permitan: instalación a parque de bomberos asignado, instalación a ubicación literal y ubicación literal a instalación. Distractores geográficamente plausibles, pero con una única respuesta demostrable en el temario. Conserva nombres y fases exactos. No inventes relaciones, distancias, coordenadas, carreteras, potencias ni ubicaciones; no deduzcas asignaciones por proximidad. Los ejemplos son SOLO estilo, nunca evidencia factual.':''}
+${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
 ${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado.':''}
 OBJETIVOS: ${JSON.stringify(items)}`;
 }
