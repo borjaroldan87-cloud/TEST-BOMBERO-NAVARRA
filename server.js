@@ -10641,14 +10641,16 @@ const SOLARES_REGLAS_2026=`TEMA 23 — PLANTAS SOLARES, ESTILO OPOSICIÓN BOMBER
 - Las instalaciones Rada I/Rada II, Cáseda 1/2/3, La Pedrera I/II/III y Montes del Cierzo/Montes del Cierzo II comparten sus descripciones documentadas; NO hagas una pregunta de identificación geográfica cuya respuesta pudiera ser cualquiera de esas instalaciones. Tampoco incluyas entre las alternativas otra instalación que cumpla exactamente el mismo enunciado.
 - Para determinar el parque en primera salida, el epígrafe PARQUE [nombre] del OBJETIVO es dato factual de la fuente. No sustituyas su asignación por deducciones a partir del municipio. El parque válido es el del epígrafe de cada ficha, aunque otros registros del mismo municipio pertenezcan a otro parque.
 - Reproduce los nombres EXACTAMENTE como estén en el PDF más reciente, incluso I/II y tildes. Nunca emplees «según la tabla», números GEO, número de hoja, preguntas sobre promotor, potencia, superficie o puesta en servicio.
-- Preguntas variadas, cuatro opciones realmente diferentes, una sola correcta demostrable y explicación breve; los fragmentos de OBJETIVOS son la única evidencia.`;
+- Preguntas variadas, cuatro opciones realmente diferentes, una sola correcta demostrable y explicación breve; los fragmentos de OBJETIVOS son la única evidencia.
+- TERMINOLOGÍA: no inventes registros ni autoridades («registro territorial de emergencias»). Ubicación geográfica se pregunta como ubicación; cuando consultes asignación operativa di «radio de actuación de los parques de bomberos» si el epígrafe del PDF documenta ese parque.`;
 const EOLICOS_REGLAS_EXAMEN_80=`TEMA 24 — PARQUES EÓLICOS, ESTILO OPOSICIÓN BOMBEROS DE NAVARRA:
 - Reproduce los TRES modelos aprobados: instalación → parque de bomberos; instalación → ubicación detallada; descripción de emplazamiento → instalación. Introduce supuestos breves de intervención solo si el parque consta en el objetivo.
 - Dificultad MUY ALTA: dos o más relaciones territoriales documentadas, sin pistas en el enunciado y distractores del MISMO tipo y dificultad, preferentemente de parques cercanos, fases próximas, carreteras similares o municipios limítrofes.
 - Cuando una instalación atraviesa varios municipios o ámbitos operativos, NO la reduzcas a un único parque; plantea una pregunta que refleje la relación completa si está respaldada.
 - No inventes municipios, vías, parque de salida, carreteras o límites a partir de nombres de los parques. No copies literalmente la respuesta de ningún ejemplo de estilo.
 - Si varios parques comparten exactamente los atributos con que se pregunta, reformula a otro atributo o rechaza el ítem; cuatro respuestas deben ser distintas y solo una compatible con el enunciado.
-- Evita «según la tabla del temario», «qué combinación figura», opciones burdas y cambios de categorías que delaten la solución.`;
+- Evita «según la tabla del temario», «qué combinación figura», opciones burdas y cambios de categorías que delaten la solución.
+- TERMINOLOGÍA: no atribuyas información a un supuesto «registro territorial de emergencias» o «registro de emergencias». Para una ubicación geográfica, pregunta directamente dónde se encuentra la instalación. Si preguntas qué parque atiende un sector, usa «según el radio de actuación de los parques de bomberos» únicamente cuando el epígrafe del PDF sustente expresamente esa asignación.`;
 function esTemaEolicos2026(target){
   const nombre=String(target?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -10919,6 +10921,54 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
       questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:null};
   });
 }
+// SERVER 83 — barajado de PRESENTACIÓN ANTES de persistir la pregunta nueva.
+// Conserva la respuesta literal y todas las alternativas ya auditadas contra PDF.
+// Equilibra las letras contando las preguntas originales que no deben tocarse.
+function resetBalanceNewAnswers83(questions){
+  const counts=[0,0,0,0];
+  const fresh=[];
+  for(let i=0;i<questions.length;i++){
+    const q=questions[i];
+    const mutable=q && q.reused!==true && q.ankiDirect!==true &&
+      q.ankiOriginalBank!==true && q.ankiQuestionId==null &&
+      Array.isArray(q.options) && q.options.length===4;
+    if(mutable)fresh.push(i);
+    else if(q && Number.isInteger(q.correctIndex) && q.correctIndex>=0 && q.correctIndex<4)
+      counts[q.correctIndex]++;
+  }
+  // El orden de tratamiento y los empates son aleatorios: no introducir
+  // un patrón A-B-C-D visible entre exámenes ni entre preguntas contiguas.
+  const shuffledIndexes=[...fresh];
+  for(let i=shuffledIndexes.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [shuffledIndexes[i],shuffledIndexes[j]]=[shuffledIndexes[j],shuffledIndexes[i]];
+  }
+  const result=[...questions];
+  for(const index of shuffledIndexes){
+    const q=questions[index];
+    const right=q.options[q.correctIndex];
+    const distractors=q.options.filter((_,i)=>i!==q.correctIndex);
+    if(distractors.length!==3 || right===undefined)
+      throw Error('No se pueden redistribuir las opciones de esta pregunta.');
+    for(let i=distractors.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [distractors[i],distractors[j]]=[distractors[j],distractors[i]];
+    }
+    const least=Math.min(...counts);
+    const candidateIndexes=[0,1,2,3].filter(i=>counts[i]===least);
+    const target=candidateIndexes[Math.floor(Math.random()*candidateIndexes.length)];
+    counts[target]++;
+    const options=new Array(4),other=[...distractors];
+    options[target]=right;
+    for(let i=0;i<4;i++)if(i!==target)options[i]=other.shift();
+    if(options[target]!==right ||
+      [...options].sort().join('\u0000')!==[...q.options].sort().join('\u0000'))
+      throw Error('Las opciones no se han conservado en el barajado.');
+    result[index]={...q,options,correctIndex:target};
+  }
+  return result;
+}
+
 async function resetBank136(allowedTopicIds,count,difficulty){
   // Tests >40: el banco dicta QUÉ conocimientos existen, no una selección
   // previa de cobertura que pudiera no tener preguntas almacenadas.
@@ -11155,6 +11205,13 @@ app.post('/api/generate',async(req,res)=>{
     }
     const unique=new Set(questions.map(q=>R136_NORM(q.stem)));
     if(unique.size!==questions.length)throw Error('Preguntas duplicadas; no se guardó test.');
+    // SERVER 83: equilibrado mecánico de letras. NUNCA confiar la posición
+    // correcta a Gemini. Solo se modifican preguntas NUEVAS de Gemini;
+    // tarjetas Anki ORIGINALES y preguntas reutilizadas conservan su orden.
+    // Cada alternativa conserva su texto; el índice correcto se remapea.
+    questions=resetBalanceNewAnswers83(questions);
+    if(questions.some(q=>resetShape136(q)))
+      throw Error('Redistribución de opciones inválida: no se guardó el test.');
     const persisted=await persistGeneratedTest({questions,targets,requestedCount:count,
       difficulty,mode,testType,runId,runSignature:signature});
     console.log('RESET_136_COMPLETO:',JSON.stringify({count,sessionId:persisted.sessionId,
