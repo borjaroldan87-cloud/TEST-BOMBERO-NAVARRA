@@ -10618,6 +10618,16 @@ const SOLARES_ESTILO_EJEMPLOS_2026=Object.freeze([
   'UBICACIÓN: «¿Qué planta se encuentra al norte de Valtierra, paralela a NA-134?» A) Arguedas; B) Valtierra [correcta]; C) Arguedas I El Común; D) Arguedas II Molinaz.',
   'IDENTIFICACIÓN: «¿Qué planta está al oeste de Corella y de NA-161?» A) La Sarda; B) Cierzo; C) Guardián [correcta]; D) El Vinagre.'
 ]);
+// SERVER 82 — El catálogo mantiene los 12 ejemplos aprobados. Gemini recibe
+// solo tres por lote (uno de cada operación) para evitar sobreadaptación a los
+// modelos directos y acotar tokens. Rotación determinista, sin azar ni llamadas.
+function resetSolarExamples82(targets){
+  const seed=targets.reduce((sum,t)=>sum+(Number(t?.id)||0),0);
+  const families=[[0,3,6,8],[1,4],[2,5,7,9,10,11]];
+  return families.map((family,i)=>SOLARES_ESTILO_EJEMPLOS_2026[
+    family[(seed+i)%family.length]
+  ]);
+}
 function esTemaSolares2026(target){
   const nombre=String(target?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase();
@@ -10707,7 +10717,70 @@ function reglasCalidadTransversal81(difficulty,leg,geo){
 ${nivel}
 ${materia}`;
 }
-function resetPrompt136(targets,difficulty,mode){
+// SERVER 82 — Comparaciones SOLO en 23/24 Muy alta. Siempre salen de
+// coverage_items vigente del MISMO tema, nunca de los ejemplos de estilo.
+// Un SELECT por test (NO una llamada adicional a Gemini). Si falla, el motor
+// continúa sin comparadores. No altera selección adaptativa ni cobertura.
+function resetGeoCompareTargets82(targets,difficulty){
+  return String(difficulty)==='muy alta' && targets.some(t=>
+    esTemaSolares2026(t)||esTemaEolicos2026(t));
+}
+async function resetGeoComparePool82(targets,difficulty){
+  if(!resetGeoCompareTargets82(targets,difficulty))return [];
+  const ids=[...new Set(targets.filter(t=>esTemaSolares2026(t)||esTemaEolicos2026(t))
+    .map(t=>Number(t.topic_id)).filter(Number.isInteger))];
+  if(!ids.length)return [];
+  try{
+    const result=await db.query(`SELECT ci.id,ci.topic_id,ci.section,ci.concept,
+             left(ci.source_evidence,500) AS source_evidence
+      FROM coverage_items ci JOIN topics tp ON tp.id=ci.topic_id
+      WHERE ci.topic_id=ANY($1::int[]) AND ci.exam_relevant=TRUE
+        AND length(trim(COALESCE(ci.source_evidence,'')))>=55
+        AND tp.block='geografia'
+      ORDER BY ci.id LIMIT 300`,[ids]);
+    return result.rows;
+  }catch(error){
+    console.warn('RESET_82_COMPARADORES_NO_DISPONIBLES:',String(error?.message||error).slice(0,100));
+    return [];
+  }
+}
+function resetGeoCompareRoads82(text){
+  return new Set((String(text||'').toUpperCase().match(/\b(?:AP|NA|PA|A|N)-\d+(?:-[A-Z0-9]+)*/g)||[]));
+}
+function resetGeoComparisons82(targets,pool,difficulty){
+  if(!resetGeoCompareTargets82(targets,difficulty)||!pool.length)return [];
+  const selected=new Set(targets.map(t=>Number(t.id)));
+  const result=[],already=new Set();
+  let budget=4600;
+  for(let i=0;i<targets.length;i++){
+    const t=targets[i];
+    if(!(esTemaSolares2026(t)||esTemaEolicos2026(t)))continue;
+    const section=R136_NORM(t.section),road=resetGeoCompareRoads82(t.source_evidence);
+    const ranked=pool.filter(c=>Number(c.topic_id)===Number(t.topic_id)&&
+        !selected.has(Number(c.id))&&!already.has(Number(c.id)))
+      .map(c=>{
+        const otherRoads=resetGeoCompareRoads82(c.source_evidence);
+        const common=[...road].filter(x=>otherRoads.has(x)).length;
+        return {c,score:(R136_NORM(c.section)===section?5:0)+8*common};
+      })
+      .sort((a,b)=>b.score-a.score||Number(a.c.id)-Number(b.c.id));
+    // Prefer same documented area/roads; absent comparison is safer than
+    // inferring adjacency from names or geography we have not verified.
+    for(const {c,score} of ranked.slice(0,12)){
+      if(score<=0||budget<150)break;
+      const evidence=String(c.source_evidence||'').slice(0,240);
+      const item={slot:i+1,epigrafe:String(c.section||'').slice(0,90),
+        concepto:String(c.concept||'').slice(0,135),fragmento:evidence};
+      const length=JSON.stringify(item).length;
+      if(length>budget)continue;
+      result.push(item);budget-=length;already.add(Number(c.id));
+      // Un comparador por objetivo limita ruido, tokens y latencia.
+      break;
+    }
+  }
+  return result;
+}
+function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
   const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
@@ -10718,7 +10791,7 @@ function resetPrompt136(targets,difficulty,mode){
   const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
     soloConexiones ? CONEXIONES_ESTILO_EJEMPLOS_2026 :
     soloEolicos ? EOLICOS_ESTILO_EJEMPLOS_2026 :
-    soloSolares ? SOLARES_ESTILO_EJEMPLOS_2026 :
+    soloSolares ? resetSolarExamples82(targets) :
     soloFerrocarril ? FERROCARRIL_ESTILO_EJEMPLOS_2026 :
     soloCamino ? CAMINO_ESTILO_EJEMPLOS_2026 :
     geo ? pickGeografiaExamples73(targets,3) : [
@@ -10749,7 +10822,8 @@ ${soloSolares?SOLARES_REGLAS_2026:''}
 ${soloEolicos?EOLICOS_REGLAS_EXAMEN_80:''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
 ${geo?'Los modelos son solo plantillas de enunciado: sustituye los corchetes por hechos verificables del PDF. No copies nombres, respuestas ni supuestos no documentados. Para cualquier tema, no concentres todas las preguntas en una misma operación si los fragmentos sustentan otras. Los supuestos de incendio/accidente sólo preguntan por el parque ASIGNADO en el temario, nunca por tiempos o proximidad inferidos. Los extremos cardinales sólo se preguntan si el fragmento identifica literalmente el extremo y el túnel; no los deduzcas del orden de una carretera. No reveles la respuesta en el enunciado. Nunca preguntes por códigos GEO-xxxx, números de hoja entre corchetes ([hoja N]), páginas del PDF ni índices editoriales: no son materia examinable.':''}
-OBJETIVOS: ${JSON.stringify(items)}`;
+${(soloSolares||soloEolicos)&&comparisons.length&&difficulty==='muy alta'?`COMPARADORES REALES (mismo PDF, otras fichas): ${JSON.stringify(comparisons)}
+Utiliza los COMPARADORES para elegir distractores del mismo tipo, con carreteras, municipios o parques efectivamente documentados. NO transformes un comparador en la respuesta de otro OBJETIVO; NO afirmes proximidad no documentada. Antes de cerrar cada pregunta verifica mentalmente que ningún comparador satisfaga también el enunciado. Si varias fichas comparten descripción, pregunta por otro atributo demostrable o usa otra operación.\n`:''}OBJETIVOS: ${JSON.stringify(items)}`;
 }
 // Esquema mínimo del motor nuevo: la procedencia y familia las asigna el
 // servidor desde coverage_items, nunca el generador. Menos tokens, menos fallos.
@@ -10786,7 +10860,7 @@ async function resetGeminiCall139(ai,phase,opts){
     throw error;
   }
 }
-async function resetGenerateGroup136(ai, group,difficulty,mode){
+async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]){
   const requiresSearch=group.some(t=>String(t.source_evidence||'').trim().length<55);
   if(requiresSearch)throw Error('Objetivo sin extracto PDF suficiente. No se realizan llamadas pagadas para adivinar hechos.');
   // El número exigido en JSON debe coincidir con los objetivos del lote.
@@ -10795,8 +10869,11 @@ async function resetGenerateGroup136(ai, group,difficulty,mode){
     [key]:{...schema.properties[key],minItems:count,maxItems:count}}});
   const geoHighChallenge=difficulty==='muy alta' && group.length>0 &&
     group.every(t=>esTemaSolares2026(t)||esTemaEolicos2026(t));
+  const comparisons=resetGeoComparisons82(group,comparisonPool,difficulty);
+  if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
+    objetivos:group.length,comparadores:comparisons.length}));
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode),config:{
+    contents:resetPrompt136(group,difficulty,mode,comparisons),config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
@@ -10817,8 +10894,17 @@ async function resetGenerateGroup136(ai, group,difficulty,mode){
       stem:q.stem,options:q.options}];
   });
   if(!blind.length)return questions.map(()=>null);
+  // El texto de auditoría es IDÉNTICO al SERVER 81 para todas las materias
+  // sin comparadores. El refuerzo contextual solo afecta a solares/eólicos
+  // Muy alta y no añade otra llamada de validación.
+  const baselineAuditPrompt82=`Audita un test de oposición comparando EXCLUSIVAMENTE los datos del PDF entregados por fila, incluido su EPÍGRAFE como asignación expresa de parque; sin memoria externa, sin copiar hechos de modelos de estilo. answer=0..3 SOLO cuando existe una única respuesta sustentada por esa fila; si dos opciones son iguales/equivalentes, o dos satisfacen el mismo enunciado, o la respuesta exige deducir un municipio o parque ausente, answer=-1. quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres) que justifique la respuesta; puedes usar el EPÍGRAFE para validar la asignación del parque, pero no como sustituto de quote. Si falta evidencia, answer=-1. Fila index conserva índice original. FILAS: ${JSON.stringify(blind)}`;
+  const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
+    ' quote: transcribe',
+    ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
+  ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
+    :baselineAuditPrompt82;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
-    contents:`Audita un test de oposición comparando EXCLUSIVAMENTE los datos del PDF entregados por fila, incluido su EPÍGRAFE como asignación expresa de parque; sin memoria externa, sin copiar hechos de modelos de estilo. answer=0..3 SOLO cuando existe una única respuesta sustentada por esa fila; si dos opciones son iguales/equivalentes, o dos satisfacen el mismo enunciado, o la respuesta exige deducir un municipio o parque ausente, answer=-1. quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres) que justifique la respuesta; puedes usar el EPÍGRAFE para validar la asignación del parque, pero no como sustituto de quote. Si falta evidencia, answer=-1. Fila index conserva índice original. FILAS: ${JSON.stringify(blind)}`,
+    contents:auditPrompt82,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(RESET_AUDIT_SCHEMA_136,'results',blind.length)}});
   const audits=JSON.parse(String(auditing?.text||'{}'))?.results;
@@ -10973,13 +11059,16 @@ app.post('/api/generate',async(req,res)=>{
         }
       }
       let remaining=todo.filter(x=>!questions[x.index]);
+      // SERVER 82: carga acotada de fichas comparables, una sola consulta.
+      // No cambia objetivos, sesiones ni la política de la selección.
+      const comparisonPool82=await resetGeoComparePool82(targets,difficulty);
       // Lotes dinámicos: 10 como máximo, o menos si el PDF es extenso.
       // Cada pregunta conserva su objetivo individual aunque cambie el tema.
       const groups=resetGroups139(remaining);
       const ai=groups.length?aiClient():null;
       const run=await resetPool136(groups,async group=>{
         const items=group.map(x=>x.t);
-        return resetGenerateGroup136(ai,items,difficulty,mode);
+        return resetGenerateGroup136(ai,items,difficulty,mode,comparisonPool82);
       });
       const failures=[];
       for(let i=0;i<groups.length;i++){
@@ -11039,7 +11128,7 @@ app.post('/api/generate',async(req,res)=>{
           const repairGroups=resetGroups139(holes);
           if(repairGroups.length){
             const repaired=await resetPool136(repairGroups,async group=>
-              resetGenerateGroup136(ai,group.map(x=>x.t),difficulty,mode),2);
+              resetGenerateGroup136(ai,group.map(x=>x.t),difficulty,mode,comparisonPool82),2);
             repaired.forEach((result,g)=>{
               if(!result.ok){failures.push({batch:g,reason:result.error});return;}
               repairGroups[g].forEach((item,j)=>{
