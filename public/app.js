@@ -49,19 +49,23 @@ async function readBatchResponse(response){
         ? JSON.parse(raw)
         : {};
   }catch{
-    throw new Error(
+    const error=new Error(
       `Respuesta no válida del servidor (${response.status}).`
     );
+    error.httpStatus=response.status;
+    throw error;
   }
 
   if(
     !response.ok ||
     data.ok === false
   ){
-    throw new Error(
+    const error=new Error(
       data.error ||
       `Error HTTP ${response.status}`
     );
+    error.httpStatus=response.status;
+    throw error;
   }
 
   return data;
@@ -70,9 +74,23 @@ async function waitForCoverageRun(runId,timeoutMs=1800000){
   const startedAt=Date.now();
 
   while(Date.now()-startedAt < timeoutMs){
-    const state=await api(
-      `/api/coverage-run/${encodeURIComponent(runId)}`
-    );
+    let state;
+    try{
+      state=await api(
+        `/api/coverage-run/${encodeURIComponent(runId)}`
+      );
+    }catch(error){
+      // El sondeo no debe fallar definitivamente por un 502 temporal.
+      // No genera otro análisis ni envía peticiones pagadas a Gemini.
+      if(
+        ![502,503,504].includes(Number(error?.httpStatus)) &&
+        !/Failed to fetch|NetworkError|Network request failed/i.test(
+          String(error?.message || error)
+        )
+      )throw error;
+      await wait(5000);
+      continue;
+    }
 
     if(state.status === "completed"){
       return state;
@@ -248,9 +266,13 @@ async function uploadTopicBatch(){
             );
 
         }catch(error){
+          // FRONT 21: Render puede responder 502/503/504 aunque el
+          // análisis continúe. Consultar el MISMO runId sin repetir POST.
           if(
-            String(error?.message || error)
-              .includes("Failed to fetch")
+            [502,503,504].includes(Number(error?.httpStatus)) ||
+            /Failed to fetch|NetworkError|Network request failed/i.test(
+              String(error?.message || error)
+            )
           ){
             statusBox.textContent=
               `${position}/${entries.length} · ` +
