@@ -4270,9 +4270,12 @@ if(!pdfHeader.includes("%PDF-")){
         ? inferredOrder
         : (Number.isInteger(rawOrder) && rawOrder>0 ? rawOrder : null);
 
+    // SERVER 86: una descarga móvil "Manual de IIFF de Navarra 2026 (1).pdf"
+    // es el mismo tema, no debe crear una segunda ficha curricular.
+    const canonicalTopicName86=normalizeIiffTopicName86(topicName,block);
     let topic=
       await getOrCreateTopic(
-        topicName,
+        canonicalTopicName86,
         req.file.originalname
       );
 
@@ -4319,6 +4322,26 @@ if(!pdfHeader.includes("%PDF-")){
     });
   }
 });
+// SERVER 86: SOLO el manual IIF; los demás temas y sus nombres no cambian.
+function normalizeIiffTopicName86(name,block){
+  const value=String(name||"").trim();
+  return String(block||"").toLowerCase()==="especifico" &&
+    /^Manual de IIFF de Navarra 2026(?:(?:\s*\(\d+\))|(?:\s*\[\d+\]))*$/i.test(value)
+    ? "Manual de IIFF de Navarra 2026" : value;
+}
+function isIiffManual86(topic){
+  return String(topic?.block||"").toLowerCase()==="especifico" &&
+    normalizeIiffTopicName86(topic?.name,"especifico")==="Manual de IIFF de Navarra 2026";
+}
+function coverageImageRulesIiff86(topic){
+  return isIiffManual86(topic) ? `
+REGLA EXCLUSIVA DEL MANUAL DE IIFF:
+- Las preguntas de este manual son solamente textuales.
+- No incluyas fichas que obliguen a reconocer o interpretar fotos, dibujos, mapas, gráficas o figuras.
+- Conserva todo el contenido examinable escrito, incluso tablas y fórmulas legibles.
+- No deduzcas información técnica a partir de ilustraciones.
+` : "";
+}
 const coverageSchema={
   type:"object",
   properties:{
@@ -4950,6 +4973,135 @@ function sequentialPdfRecordIds(filePath){
   }
   return null;
 }
+// SERVER 86 — SOLO MANUAL IIFF. Los checkpoints se guardan en app_state,
+// por documento SHA-256/tema/bloque. Nunca son cobertura publicada a medias.
+function iiffChunkKey86(topic,sha,stage,chunk){
+  return `iiff_coverage86:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
+}
+async function readIiffChunk86(topic,sha,stage,chunk){
+  if(!sha)return null;
+  const r=await db.query("SELECT value FROM app_state WHERE key=$1 LIMIT 1",
+    [iiffChunkKey86(topic,sha,stage,chunk)]);
+  if(!r.rows.length)return null;
+  try{
+    const saved=JSON.parse(r.rows[0].value);
+    // Un checkpoint sin referencia a la página física NO es seguro para
+    // la segunda auditoría, que selecciona los elementos por sourcePage.
+    return Array.isArray(saved.items) && saved.items.every(x =>
+      x && typeof x.concept==="string" && x.concept.trim() &&
+      typeof x.sourceEvidence==="string" && x.sourceEvidence.trim() &&
+      typeof x.itemType==="string" && typeof x.evaluationType==="string" &&
+      Number.isInteger(x.sourcePage) &&
+      x.sourcePage>=chunk.startPage && x.sourcePage<=chunk.endPage)
+      ? saved.items : null;
+  }catch{return null;}
+}
+async function saveIiffChunk86(topic,sha,stage,chunk,items){
+  if(!sha)return;
+  await db.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,[
+      iiffChunkKey86(topic,sha,stage,chunk),
+      JSON.stringify({items})
+    ]);
+}
+async function deleteIiffChunks86(topic,sha){
+  if(!sha)return;
+  // No borrar el checkpoint salvo DESPUÉS de sustituir con éxito el tema.
+  const prefix=`iiff_coverage86:${Number(topic.id)}:${sha}:`;
+  try{
+    await db.query("DELETE FROM app_state WHERE key LIKE $1",[prefix+"%"]);
+  }catch(e){console.warn("COVERAGE IIFF: limpieza de checkpoints diferida",e?.message);}
+}
+async function bisectPdfChunk86(chunk){
+  const src=await PDFDocument.load(Buffer.from(chunk.data,"base64"));
+  const n=src.getPageCount(),mid=Math.ceil(n/2);
+  if(n<2) return null;
+  const output=[];
+  for(const [start,end] of [[0,mid],[mid,n]]){
+    const target=await PDFDocument.create();
+    const copies=await target.copyPages(src,Array.from({length:end-start},(_,i)=>start+i));
+    copies.forEach(p=>target.addPage(p));
+    output.push({startPage:chunk.startPage+start,endPage:chunk.startPage+end-1,
+      data:Buffer.from(await target.save()).toString("base64")});
+  }
+  return output;
+}
+function decodeCoverageResponse86(response,chunk){
+  const reason=response?.candidates?.[0]?.finishReason||"desconocido";
+  const block=response?.promptFeedback?.blockReason||"ninguno";
+  // El SDK puede entregar texto vacío o incluso JSON aparente después
+  // de una finalización no normal. No aceptar cobertura incompleta.
+  const blocked=/SAFETY|PROHIBITED|BLOCKLIST|RECITATION|SPII/i.test(reason+" "+block);
+  const normalEnd=reason==="STOP" || reason==="desconocido";
+  if(blocked || !normalEnd){
+    const e=new Error(`Fin no confirmado para páginas ${chunk.startPage}-${chunk.endPage}: `+
+      `finishReason=${reason}; blockReason=${block}`);
+    e.coverageResponse86=true;
+    e.nonSplittable86=blocked || !/MAX_TOKENS/i.test(reason);
+    throw e;
+  }
+  let raw;
+  try{raw=response?.text;}catch(e){raw=null;}
+  if(typeof raw!=="string" || !raw.trim()){
+    const e=new Error(`Gemini no devolvió JSON para páginas ${chunk.startPage}-${chunk.endPage}. `+
+      `finishReason=${reason}; blockReason=${block}`);
+    e.coverageResponse86=true;e.nonSplittable86=/SAFETY|PROHIBITED|BLOCKLIST|RECITATION/i.test(reason+" "+block);
+    throw e;
+  }
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch{
+    const e=new Error(`JSON incompleto para páginas ${chunk.startPage}-${chunk.endPage}; `+
+      `finishReason=${reason}; longitud=${raw.length}`);
+    e.coverageResponse86=true;throw e;
+  }
+  if(!Array.isArray(parsed?.items) || parsed.items.some(x=>
+    !x || typeof x.concept!=="string" || !x.concept.trim() ||
+    typeof x.sourceEvidence!=="string" || !x.sourceEvidence.trim() ||
+    typeof x.itemType!=="string" || typeof x.evaluationType!=="string")){
+    const e=new Error(`Respuesta con items incompletos en páginas ${chunk.startPage}-${chunk.endPage}`);
+    e.coverageResponse86=true;throw e;
+  }
+  return parsed.items;
+}
+// Si un bloque produce JSON vacío/truncado, dividir SOLO ESE bloque por
+// páginas, sin descartar conocimientos ni modificar el número original.
+async function analyzeIiffChunk86(ai,chunk,buildRequest,normalizePages,depth=0){
+  try{
+    const response=await generateCoverageWithRetry(ai,buildRequest(chunk));
+    const items=normalizePages(decodeCoverageResponse86(response,chunk),chunk);
+    // Aceptar números de página devueltos como cadena decimal inequívoca.
+    for(const item of items){
+      if(typeof item.sourcePage==="string" && /^\d{1,5}$/.test(item.sourcePage))
+        item.sourcePage=Number(item.sourcePage);
+    }
+    // El PDF de entrada contiene únicamente UNA página física en el caso
+    // de hoja individual; su procedencia se conoce con exactitud aunque
+    // el modelo omita sourcePage. No inferir nunca manualPage impresa.
+    if(chunk.startPage===chunk.endPage){
+      for(const item of items){
+        if(item.sourcePage==null)item.sourcePage=chunk.startPage;
+      }
+    }
+    if(items.some(item=>!Number.isInteger(item?.sourcePage) ||
+        item.sourcePage<chunk.startPage ||
+        item.sourcePage>chunk.endPage)){
+      const e=new Error(`sourcePage ausente o fuera de ${chunk.startPage}-${chunk.endPage}`);
+      e.coverageResponse86=true;throw e;
+    }
+    return items;
+  }catch(e){
+    if(!e.coverageResponse86 || e.nonSplittable86 ||
+       chunk.endPage<=chunk.startPage || depth>=4)throw e;
+    console.warn(`COVERAGE IIFF: ${e.message}. Dividiendo SOLO ese bloque.`);
+    const children=await bisectPdfChunk86(chunk);
+    const joined=[];
+    for(const child of children){
+      const items=await analyzeIiffChunk86(ai,child,buildRequest,normalizePages,depth+1);
+      joined.push(...items);
+    }
+    return joined;
+  }
+}
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
@@ -5046,6 +5198,11 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+    const iiffManual86=isIiffManual86(topic);
+    const iiffPdfHash86=iiffManual86
+      ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
+      : null;
+    if(iiffManual86)console.log("COVERAGE IIFF: checkpoints reanudables activos");
     // SERVER 85: omitir el lector auxiliar de fichas SOLO en Específico.
     // Los manuales extensos pueden bloquearse al inspeccionar flujos de fuentes
     // antes del análisis por páginas. Geografía y Legislación quedan intactas.
@@ -5135,6 +5292,34 @@ for(const chunk of (literalItems?[]:chunks)){
     `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
+  if(iiffManual86){
+    const buildAnalysisRequest86=part=>({
+      model:"gemini-3.5-flash-lite",
+      contents:[
+        {text:coverageAnalysisPrompt(topic.name,allItems)+
+          coverageImageRulesIiff86(topic)+`
+IMPORTANTE: analiza exhaustivamente sólo las páginas físicas
+${part.startPage} a ${part.endPage} del PDF original.
+No omitas cifras, tablas, fórmulas, excepciones, clasificaciones o
+procedimientos escritos. No prepares preguntas con imágenes.
+sourcePage debe estar dentro de ${part.startPage}-${part.endPage}.
+manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
+`},
+        {inlineData:{mimeType:"application/pdf",data:part.data}}
+      ],
+      config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
+    });
+    let items=await readIiffChunk86(topic,iiffPdfHash86,"primary",chunk);
+    if(items){
+      console.log(`COVERAGE IIFF: reutilizadas páginas ${chunk.startPage}-${chunk.endPage}; `+
+        `${items.length} elementos, sin llamada Gemini`);
+    }else{
+      items=await analyzeIiffChunk86(ai,chunk,buildAnalysisRequest86,normalizeChunkSourcePages);
+      await saveIiffChunk86(topic,iiffPdfHash86,"primary",chunk,items);
+    }
+    allItems.push(...items);
+    console.log(`COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${items.length} elementos`);
+  }else{
   const response=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -5193,6 +5378,7 @@ allItems.push(
   console.log(
     `COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${parsedChunk.items.length} elementos`
   );
+  }
 }
 
 console.log(
@@ -5245,6 +5431,34 @@ for(const chunk of (literalItems?[]:auditChunks)){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
+  if(iiffManual86){
+    const buildAuditRequest86=part=>({
+      model:"gemini-3.5-flash-lite",
+      contents:[
+        {text:coverageGapPrompt(
+          allItems.filter(item=>Number(item.sourcePage)>=part.startPage &&
+            Number(item.sourcePage)<=part.endPage),
+          part.startPage,part.endPage,topic.name,
+          allItems.filter(item=>{
+            const p=Number(item.sourcePage);
+            return Number.isFinite(p) && p>=1 && p<part.startPage;
+          })
+        )+coverageImageRulesIiff86(topic)},
+        {inlineData:{mimeType:"application/pdf",data:part.data}}
+      ],
+      config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
+    });
+    let items=await readIiffChunk86(topic,iiffPdfHash86,"audit",chunk);
+    if(items){
+      console.log(`COVERAGE IIFF: auditoría reutilizada ${chunk.startPage}-${chunk.endPage}`);
+    }else{
+      items=await analyzeIiffChunk86(ai,chunk,buildAuditRequest86,normalizeChunkSourcePages);
+      await saveIiffChunk86(topic,iiffPdfHash86,"audit",chunk,items);
+    }
+    auditItems.push(...items);
+    console.log(`COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: `+
+      `${items.length} omisiones detectadas`);
+  }else{
     const auditResponse=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -5291,6 +5505,7 @@ auditItems.push(
     console.log(
       `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
     );
+  }
   }
 }
 
@@ -5517,6 +5732,7 @@ if(coverageTopicNumber(topic.name)===22){
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
     await replaceTopicDocument(topic,pdfPath,validItems);
+    if(iiffManual86)await deleteIiffChunks86(topic,iiffPdfHash86);
 
     const result=await db.query(
       `SELECT
