@@ -5046,8 +5046,13 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
-    const structuredSource=(await geoCoverageMetadataRecords(pdfPath,topic.name)) ||
-      sequentialPdfRecordIds(pdfPath);
+    // SERVER 85: omitir el lector auxiliar de fichas SOLO en Específico.
+    // Los manuales extensos pueden bloquearse al inspeccionar flujos de fuentes
+    // antes del análisis por páginas. Geografía y Legislación quedan intactas.
+    const structuredSource=String(topic.block || "").trim().toLowerCase()==="especifico"
+      ? null
+      : ((await geoCoverageMetadataRecords(pdfPath,topic.name)) ||
+          sequentialPdfRecordIds(pdfPath));
     if(structuredSource){
       console.log(`[coverage] Fuente numerada: ${structuredSource.ids.size} IDs `+
         `con prefijo ${structuredSource.prefix}; extracción por bloques cortos.`);
