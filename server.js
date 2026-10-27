@@ -6944,14 +6944,14 @@ ORDER BY
     LIMIT $1
     `,
   [
-  Number(count),
+  Number(count)*4,
   Array.isArray(allowedTopicIds)
     ? allowedTopicIds
     : null
 ]
   );
 
-  return result.rows.map(row=>({
+  return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||iiff91UnsafeQuestion({stem:row.failed_stem})))).slice(0,count).map(row=>({
   ...row,
 
 questionFamily:
@@ -7607,6 +7607,116 @@ function geographyTableRecord135(){ return null; }
 
 
 
+
+// SERVER 91 (solo Manual IIFF 2026): selector factual sobre la cobertura ya persistida.
+// No toca legislación, geografía, otros temas de específico, la SRS ni el banco.
+// Las páginas 1..10 son preliminares e índice en el PDF aportado (231 páginas).
+const IIFF91_FIRST_CONTENT_PAGE = 11;
+const IIFF91_LAST_PAGE = 231;
+const IIFF91_STRATA = 10;
+const iiff91Norm = value => String(value ?? '').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+function iiff91Topic(item){
+  return String(item?.topic_block||'').toLowerCase()==='especifico' &&
+    /^manual de iiff de navarra 2026$/i.test(String(item?.topic_name||'').trim());
+}
+function iiff91Scope(rows){
+  return Array.isArray(rows) && rows.length>0 && rows.every(iiff91Topic);
+}
+function iiff91Editorial(item){
+  const concept = iiff91Norm(item?.concept), section=iiff91Norm(item?.section);
+  const page = Number(item?.source_page);
+  if(!Number.isInteger(page) || page<IIFF91_FIRST_CONTENT_PAGE || page>IIFF91_LAST_PAGE)return true;
+  if(/\b(indice|sumario|tabla de contenidos)\b/.test(section))return true;
+  // No descartar conceptos técnicos del cuerpo solo por mencionar capítulos.
+  if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del temario|estructura del indice)\b/.test(concept))return true;
+  if(/\b(pagina|apartado|epigrafe|seccion|capitulo)\b.*\b(manual|indice|temario)\b/.test(concept))return true;
+  if(String(item?.source_evidence||'').trim().length<55)return true;
+  return false;
+}
+function iiff91UnsafeQuestion(q){
+  const stem=iiff91Norm(q?.stem);
+  // En ausencia del documento completo en la auditoría, la negación no es
+  // demostrable por la mera ausencia de un dato en el fragmento seleccionado.
+  if(/\b(incorrect[ao]s?|errone[ao]s?|fals[ao]s?|excepto|salvo|no)\b/.test(stem))return true;
+  if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del indice)\b/.test(stem))return true;
+  if(/\b(segun|conforme a)\b.{0,70}\b(apartado|indice|epigrafe|capitulo)\b/.test(stem))return true;
+  if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
+  return false;
+}
+function iiff91Band(item){
+  const page=Number(item?.source_page);
+  return Math.min(IIFF91_STRATA-1,Math.floor((page-IIFF91_FIRST_CONTENT_PAGE)*IIFF91_STRATA/
+    (IIFF91_LAST_PAGE-IIFF91_FIRST_CONTENT_PAGE+1)));
+}
+function iiff91Section(item){
+  return `${Number(item.topic_id)}:${iiff91Norm(item.section)||'sin epigrafe'}`;
+}
+// Selector puro y auditable: prioridades SRS (1..3) antes de nuevos (4),
+// y dentro de cada prioridad rota franjas, secciones y páginas del PDF.
+// El orden de los ids SQL nunca desempata la elección de conocimientos nuevos.
+function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random}={}){
+  const valid=(candidates||[]).filter(i=>iiff91Topic(i)&&!iiff91Editorial(i));
+  const selected=[], usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
+  const pools=new Map();
+  for(const item of valid){
+    const priority=simulation?4:Math.min(5,Math.max(1,Number(item.adaptive_priority)||4));
+    if(!pools.has(priority))pools.set(priority,[]);
+    pools.get(priority).push(item);
+  }
+  const weightedPick = pool => {
+    const available=pool.filter(c=>!usedIds.has(Number(c.id)));
+    if(!available.length)return false;
+    let best=null,bestScore=-Infinity;
+    for(const c of available){
+      const band=iiff91Band(c),section=iiff91Section(c),page=Number(c.source_page);
+      const concept=iiff91Norm(c.concept);
+      const score=-(bandHits.get(band)||0)*1000-
+        (sectionHits.get(section)||0)*110-
+        (pageHits.get(page)||0)*180-
+        (conceptHits.get(concept)||0)*400-
+        Math.min(10,Number(c.times_asked)||0)*4+
+        (Number(c.adaptive_priority)===1 ? 5 : 0)+rng();
+      if(score>bestScore){best=c;bestScore=score;}
+    }
+    if(!best)return false;
+    const band=iiff91Band(best),section=iiff91Section(best),page=Number(best.source_page);
+    selected.push(best);usedIds.add(Number(best.id));
+    bandHits.set(band,(bandHits.get(band)||0)+1);
+    sectionHits.set(section,(sectionHits.get(section)||0)+1);
+    pageHits.set(page,(pageHits.get(page)||0)+1);
+    const concept=iiff91Norm(best.concept);
+    conceptHits.set(concept,(conceptHits.get(concept)||0)+1);
+    return true;
+  };
+  // Una plaza nueva cuando hay nuevos disponibles, salvo simulacro.
+  const hasNew=(pools.get(4)||[]).length>0;
+  const reserved=simulation?0:(hasNew?1:0);
+  for(const priority of [1,2,3]){
+    while(selected.length<count-reserved&&weightedPick(pools.get(priority)||[])){}
+  }
+  // Si la cobertura nueva está disponible, se usa antes del mantenimiento.
+  while(selected.length<count&&weightedPick(pools.get(4)||[])){}
+  for(const priority of [1,2,3,5]){
+    while(selected.length<count&&weightedPick(pools.get(priority)||[])){}
+  }
+  if(selected.length<count)throw Error(`IIFF: objetivos examinables insuficientes: ${selected.length}/${count}.`);
+  return selected;
+}
+async function getIiffTargets91(count,topicIds,simulation=false){
+  const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
+  if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
+  const targets=chooseIiffCoverage91(candidates,count,{simulation});
+  // Solamente formato TEXTO/NUMERICA, sin preguntas de interpretación gráfica.
+  const assigned=targets.map(t=>({...t,
+    questionFamily: (t.item_type==='formula'||t.evaluation_type==='calculo')?'2024_NUMERICA':'2024_TEXTO'}));
+  console.log('IIFF_91_SELECCION:',JSON.stringify({count,
+    pages:assigned.map(t=>Number(t.source_page)),
+    bands:[...new Set(assigned.map(iiff91Band))].sort((a,b)=>a-b),
+    sections:new Set(assigned.map(iiff91Section)).size,
+    priorities:assigned.map(t=>Number(t.adaptive_priority)||4)}));
+  return assigned;
+}
 
 async function getCoverageTargetsForGeneration(
   count,
@@ -11388,8 +11498,21 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   const comparisons=resetGeoComparisons82(group,comparisonPool,difficulty);
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
+  const iiffScope=group.some(iiff91Topic);
+  const iiffGenerationRules=iiffScope?`
+REGLAS OBLIGATORIAS PARA CADA OBJETIVO DEL MANUAL IIFF 2026:
+- Pregunta por HECHOS OPERATIVOS verificables del fragmento, NO por el índice,
+  títulos, apartados, páginas, capítulos ni organización editorial.
+- Prohibidas las preguntas negativas (INCORRECTA, EXCEPTO, cuál NO) porque
+  un fragmento parcial no prueba la ausencia de una materia en todo el manual.
+- Preferir procedimientos, secuencias, condiciones, magnitudes, unidades y
+  clasificaciones técnicas; dificultad ${difficulty}: distractores del MISMO TIPO
+  distinguidos por un dato expreso. Una sola respuesta inequívoca.
+- Evitar reconocimiento o interpretación de imágenes, fotos y gráficos.
+- No inventar datos de otros capítulos para crear distractores.
+` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons),config:{
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
@@ -11402,6 +11525,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
     if(resetShape136(q))return [];
+    if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q))return [];
     if((esTemaSolares2026(group[i])||esTemaEolicos2026(group[i])) &&
        /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
     return [{index:i,tema:group[i].topic_name,
@@ -11414,13 +11538,22 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // sin comparadores. El refuerzo contextual solo afecta a solares/eólicos
   // Muy alta y no añade otra llamada de validación.
   const baselineAuditPrompt82=`Audita un test de oposición comparando EXCLUSIVAMENTE los datos del PDF entregados por fila, incluido su EPÍGRAFE como asignación expresa de parque; sin memoria externa, sin copiar hechos de modelos de estilo. answer=0..3 SOLO cuando existe una única respuesta sustentada por la FILA evaluada. Antes de elegir, contrasta LAS CUATRO alternativas con el enunciado COMPLETO y con la evidencia de esta fila. Para detectar una segunda respuesta válida, examina también las OTRAS FILAS DEL MISMO TEMA presentes en este lote como posibles contraejemplos, incluso si corresponden a otro índice; NO las utilices para justificar la respuesta principal ni mezcles objetivos. Si otro registro demuestra explícitamente que una segunda opción satisface TODAS las condiciones del enunciado, answer=-1, aunque la opción prevista sea más cercana, frecuente, concentrada o encaje mejor. No rechaces por simples semejanzas parciales: exige coincidencia documental con el enunciado completo. Si dos opciones son iguales/equivalentes, o dos satisfacen el mismo enunciado, o la respuesta exige deducir un municipio o parque ausente, answer=-1. quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres) que justifique la respuesta; puedes usar el EPÍGRAFE para validar la asignación del parque, pero no como sustituto de quote. Si falta evidencia, answer=-1. Fila index conserva índice original. FILAS: ${JSON.stringify(blind)}`;
+  const iiffAuditRules=iiffScope?`
+ADICIONAL MANUAL IIFF: El índice NO es evidencia suficiente para hechos técnicos.
+Para una pregunta del manual, answer=-1 si una opción podría ser también
+verdadera con la evidencia disponible, si una afirmación exige demostrar
+que algo NO está en otra sección, o si cualquier distractor parece compatible
+con el fragmento. Comprueba la polaridad del enunciado y el dato que distingue
+las cuatro opciones; NO aceptes un distractor solo por no estar mencionado.
+No examines imágenes. No uses conocimiento externo.
+` : '';
   const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
     ' quote: transcribe',
     ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
     :baselineAuditPrompt82;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
-    contents:auditPrompt82,
+    contents:auditPrompt82+iiffAuditRules,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(RESET_AUDIT_SCHEMA_136,'results',blind.length)}});
   const audits=JSON.parse(String(auditing?.text||'{}'))?.results;
@@ -11428,6 +11561,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   return questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||!a||a.answer!==q.correctIndex ||
+      (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
     return {...q,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
@@ -11508,6 +11642,7 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
+      (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r)))||
       resetShape136({stem:r.stem,options:r.options,correctIndex:ci,ankiOriginalBank}))continue;
     usedQuestions.add(stem);usedCoverage.add(id);
     const target={id,topic_id:Number(r.topic_id),topic_name:r.topic_name,
@@ -11530,6 +11665,30 @@ function publicManualPageQuestions(questions){
   return (questions||[]).map(q=>({...q,sourcePage:null,
     manualPage:q.manualPage??null}));
 }
+// SERVER 91: previsualización READ-ONLY del reparto IIFF, cero llamadas Gemini.
+app.get('/api/iiff-selection-preview',async(req,res)=>{
+  try{
+    const count=Number(req.query?.count ?? 10);
+    if(![5,10,20,30,40].includes(count))
+      return res.status(400).json({ok:false,error:'count debe ser 5, 10, 20, 30 o 40'});
+    const found=await db.query(`SELECT id FROM topics
+      WHERE block='especifico' AND lower(btrim(name))='manual de iiff de navarra 2026'
+      ORDER BY id ASC LIMIT 1`);
+    if(!found.rows.length)return res.status(404).json({ok:false,error:'Tema canónico no encontrado.'});
+    const id=Number(found.rows[0].id);
+    const all=await getAdaptiveCoverageCandidates(3000,[id],'adaptive');
+    const chosen=chooseIiffCoverage91(all,count);
+    res.json({ok:true,readonly:true,geminiCalls:0,topicId:id,
+      requested:count,eligible:all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)).length,
+      skipped:all.filter(x=>iiff91Topic(x)&&iiff91Editorial(x)).length,
+      pages:chosen.map(x=>Number(x.source_page)),
+      uniqueBands:new Set(chosen.map(iiff91Band)).size,
+      uniqueSections:new Set(chosen.map(iiff91Section)).size,
+      includesIndex:chosen.some(x=>Number(x.source_page)<IIFF91_FIRST_CONTENT_PAGE),
+      priorityCounts:Object.fromEntries([1,2,3,4,5].map(p=>[p,chosen.filter(x=>Number(x.adaptive_priority)===p).length]))});
+  }catch(e){console.error('IIFF_91_PREVIEW_ERROR:',String(e?.message||e));
+    res.status(500).json({ok:false,error:'No se pudo consultar la selección del manual.'});}
+});
 app.post('/api/generate',async(req,res)=>{
   const started=Date.now();const supplied=req.body?.runId;
   const runId=normalizeGenerationRunId(supplied);const signature=runId?generationRunSignature(req.body):null;
@@ -11570,8 +11729,16 @@ app.post('/api/generate',async(req,res)=>{
     const topicIds=await resolveGenerationTopicScope(req.body);
     let targets=resume136?.targets || (count>40?[]:(testType==='failed'
       ?await getFailedCoverageTargets(count,topicIds)
-      :await getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
-        aiClient().models.generateContent(...args)}},topicIds,examMode)));
+      :(await (async()=>{
+        // Solo el tema canónico del manual: no toca selección mixta ni otras materias.
+        if(Array.isArray(topicIds)&&topicIds.length===1){
+          const check=await db.query('SELECT name,block FROM topics WHERE id=$1',[topicIds[0]]);
+          if(iiff91Topic({topic_name:check.rows[0]?.name,topic_block:check.rows[0]?.block}))
+            return getIiffTargets91(count,topicIds,examMode==='simulation');
+        }
+        return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
+          aiClient().models.generateContent(...args)}},topicIds,examMode);
+      })())));
     if(Array.isArray(topicIds) && topicIds.length===1 &&
        targets.some(t=>Number(t.topic_id)!==Number(topicIds[0])))
       throw Error('Los conocimientos obtenidos no corresponden al tema seleccionado. No se genera el test.');
@@ -11598,6 +11765,7 @@ app.post('/api/generate',async(req,res)=>{
         for(const {t,i} of missing){
           const substitute=alternates.find(a=>Number(a.topic_id)===Number(t.topic_id)&&
             !occupied.has(Number(a.id))&&
+            (!iiff91Topic(a)||!iiff91Editorial(a))&&
             (String(a.source_evidence||'').trim().length>=55||geographyTableRecord135(a)));
           if(substitute){targets[i]=substitute;occupied.add(Number(substitute.id));}
         }
@@ -11673,6 +11841,7 @@ app.post('/api/generate',async(req,res)=>{
               const other=alternatives.find(candidate=>
                 Number(candidate.topic_id)===Number(slot.t.topic_id) &&
                 !occupied.has(Number(candidate.id)) &&
+                (!iiff91Topic(candidate)||!iiff91Editorial(candidate)) &&
                 (String(candidate.source_evidence||'').trim().length>=55 ||
                   geographyTableRecord135(candidate)));
               if(!other)continue;
