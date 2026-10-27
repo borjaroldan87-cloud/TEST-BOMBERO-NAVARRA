@@ -2528,6 +2528,104 @@ async function replaceTopicDocument(topic,pdfPath,items){
       ". No generes tests de este tema hasta resolverlo.");
   }
 }
+// SERVER 87 CANDIDATO: cierre de cobertura IIFF con observabilidad y sin
+// enumerar todo File Search ANTES de guardar lo ya extraído. No se usa en
+// Legislación, Geografía ni en otros temas del bloque Específico.
+async function replaceIiffDocument87(topic,pdfPath,items){
+  const ai=aiClient();
+  const store=await ensureStore();
+  const known=await db.query(
+    "SELECT document_name FROM topic_source_documents WHERE topic_id=$1",
+    [topic.id]);
+  const previousName=known.rows[0]?.document_name||null;
+  const displayName=`tema-${Number(topic.id)}-${Date.now()}-`+
+    Math.random().toString(36).slice(2,8);
+
+  console.log(`COVERAGE IIFF FINAL: comenzando subida a File Search; `+
+    `${items.length} elementos ya extraídos y checkpoints conservados`);
+
+  // La importación es una operación asíncrona según la API oficial de Gemini.
+  // El ID real del documento procede de su respuesta, no de un listado previo.
+  let operation=await ai.fileSearchStores.uploadToFileSearchStore({
+    file:pdfPath,fileSearchStoreName:store,
+    config:{displayName,mimeType:"application/pdf",
+      httpOptions:{timeout:120000}}
+  });
+  const startedAt=Date.now();
+  let lastMessageAt=0;
+  while(!operation.done){
+    if(Date.now()-startedAt>30*60*1000){
+      throw new Error("File Search no ha confirmado la indexación tras 30 minutos. "+
+        "Los checkpoints IIFF permanecen guardados; no repitas la carga automáticamente.");
+    }
+    await sleep(5000);
+    operation=await ai.operations.get({
+      operation,config:{httpOptions:{timeout:60000}}
+    });
+    if(Date.now()-lastMessageAt>=20000){
+      console.log(`COVERAGE IIFF FINAL: indexación en progreso; `+
+        `operación ${operation?.name||"sin identificador"}`);
+      lastMessageAt=Date.now();
+    }
+  }
+  if(operation?.error){
+    throw new Error("File Search terminó con error: "+JSON.stringify(operation.error));
+  }
+  console.log("COVERAGE IIFF FINAL: indexación Google completada");
+
+  let newName=operation?.response?.documentName||null;
+  if(!newName){
+    console.log("COVERAGE IIFF FINAL: buscando ID del documento indexado");
+    const docs=await listFactualDocuments(ai,store);
+    newName=docs.find(d=>d.displayName===displayName)?.name||null;
+  }
+  if(!newName){
+    throw new Error("Google terminó la indexación sin devolver el ID del documento. "+
+      "Los checkpoints se conservan y NO se modifica la cobertura anterior.");
+  }
+
+  // Guardar primero; la consulta de todos los documentos del store no puede
+  // impedir esta transacción. saveCoverageItems preserva banco/SRS/revisiones.
+  console.log(`COVERAGE IIFF FINAL: guardando ${items.length} elementos en PostgreSQL`);
+  try{
+    await saveCoverageItems(topic.id,items,newName);
+  }catch(error){
+    // Si PostgreSQL rechaza la sustitución, no dejar una fuente recién
+    // indexada activa y sin un tema confirmado que la identifique.
+    try{
+      await ai.fileSearchStores.documents.delete({
+        name:newName,config:{force:true,httpOptions:{timeout:60000}}
+      });
+    }catch(cleanupError){
+      console.error("COVERAGE IIFF FINAL: documento pendiente de limpieza",cleanupError);
+    }
+    throw error;
+  }
+  console.log("COVERAGE IIFF FINAL: cobertura y documento guardados en PostgreSQL");
+
+  // Solo después de guardar, identificar fuentes antiguas del MISMO tema.
+  console.log("COVERAGE IIFF FINAL: comprobando documentos antiguos del tema");
+  const docs=await listFactualDocuments(ai,store);
+  const oldDocs=documentsBelongingToTopic(docs,topic,previousName);
+  const errors=[];
+  for(const old of oldDocs){
+    if(old.name===newName)continue;
+    try{
+      await ai.fileSearchStores.documents.delete({
+        name:old.name,config:{force:true,httpOptions:{timeout:60000}}
+      });
+    }catch(error){
+      errors.push(old.name);
+      console.error(`COVERAGE IIFF FINAL: no se retiró ${old.name}`,error);
+    }
+  }
+  if(errors.length){
+    throw new Error("Cobertura nueva guardada, pero quedaron documentos antiguos: "+
+      errors.join(", ")+". No generes tests de este tema hasta limpiarlos.");
+  }
+  console.log("COVERAGE IIFF FINAL: sustitución completa");
+}
+
 function normalizeCoverageItem(item){
   const clean = value =>
     typeof value === "string"
@@ -5731,7 +5829,8 @@ if(coverageTopicNumber(topic.name)===22){
     }
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
-    await replaceTopicDocument(topic,pdfPath,validItems);
+    if(iiffManual86) await replaceIiffDocument87(topic,pdfPath,validItems);
+    else await replaceTopicDocument(topic,pdfPath,validItems);
     if(iiffManual86)await deleteIiffChunks86(topic,iiffPdfHash86);
 
     const result=await db.query(
