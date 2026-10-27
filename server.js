@@ -2544,13 +2544,34 @@ async function replaceIiffDocument87(topic,pdfPath,items){
   console.log(`COVERAGE IIFF FINAL: comenzando subida a File Search; `+
     `${items.length} elementos ya extraídos y checkpoints conservados`);
 
-  // La importación es una operación asíncrona según la API oficial de Gemini.
-  // El ID real del documento procede de su respuesta, no de un listado previo.
-  let operation=await ai.fileSearchStores.uploadToFileSearchStore({
-    file:pdfPath,fileSearchStoreName:store,
+  // SERVER 89: usar la otra vía OFICIAL de Google Files API -> File Search.
+  // La ruta uploadToFileSearchStore devuelve 404 al iniciar la subida aunque
+  // GET del store funcione (reproducido en Render con SERVER 87/88).
+  // NO recrear el store, NO regenerar cobertura y NO reintentar indefinidamente.
+  // Al fallar la importación, los 1.189 elementos siguen en checkpoints de PG.
+  console.log("COVERAGE IIFF FILES89: subiendo PDF a Files API (sin reanalizar)");
+  const tempFile=await ai.files.upload({
+    file:pdfPath,
     config:{displayName,mimeType:"application/pdf",
       httpOptions:{timeout:120000}}
   });
+  if(!tempFile?.name || !/^files\/[a-z0-9-]+$/i.test(tempFile.name)){
+    throw new Error("Files API no devolvió un identificador de archivo válido. "+
+      "No se inicia la importación ni se modifica la cobertura.");
+  }
+  console.log("COVERAGE IIFF FILES89: archivo temporal creado; importando al store existente");
+  let operation;
+  try{
+    operation=await ai.fileSearchStores.importFile({
+      fileSearchStoreName:store,
+      fileName:tempFile.name,
+      config:{httpOptions:{timeout:120000}}
+    });
+  }catch(error){
+    console.error("COVERAGE IIFF FILES89: importFile falló. "+
+      "Los checkpoints permanecen guardados. No se intentará otra subida automática.");
+    throw error;
+  }
   const startedAt=Date.now();
   let lastMessageAt=0;
   while(!operation.done){
