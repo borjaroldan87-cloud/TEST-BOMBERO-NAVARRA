@@ -6916,7 +6916,8 @@ qb.difficulty AS failed_difficulty,
 
 qb.question_family AS question_family,
 qb.stem AS failed_stem,
-qb.options AS failed_options
+qb.options AS failed_options,
+qb.validation_version AS failed_validation_version
 
     FROM latest_answer la
 
@@ -6951,7 +6952,8 @@ ORDER BY
 ]
   );
 
-  return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||iiff91UnsafeQuestion({stem:row.failed_stem})))).slice(0,count).map(row=>({
+  return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
+  Number(row.failed_validation_version)===114})))).slice(0,count).map(row=>({
   ...row,
 
 questionFamily:
@@ -7634,11 +7636,26 @@ function iiff91Editorial(item){
   if(String(item?.source_evidence||'').trim().length<55)return true;
   return false;
 }
-function iiff91UnsafeQuestion(q){
+// SERVER 92T: activar la polaridad INCORRECTA solo con prueba documental
+// explícita. Las preguntas antiguas no pasan esta excepción: una pregunta
+// de versiones anteriores puede contener errores y carece de 4 pruebas.
+function iiff92IsNegativeStem(q){
+  return /\b(incorrect[ao]s?|errone[ao]s?|fals[ao]s?)\b/.test(iiff91Norm(q?.stem));
+}
+function iiff92EvidenceCanSupportNegative(source){
+  const text=String(source||'').trim().slice(0,3000);
+  if(text.length<190)return false;
+  // Indicador conservador de múltiples afirmaciones explícitas. No intenta
+  // inferir hechos; el auditor debe acreditar cada opción literalmente.
+  const clauses=text.split(/[;.!?\n]+/u).map(x=>x.trim()).filter(x=>x.length>=25);
+  return clauses.length>=3;
+}
+function iiff91UnsafeQuestion(q,{allowProvenNegative=false}={}){
   const stem=iiff91Norm(q?.stem);
-  // En ausencia del documento completo en la auditoría, la negación no es
-  // demostrable por la mera ausencia de un dato en el fragmento seleccionado.
-  if(/\b(incorrect[ao]s?|errone[ao]s?|fals[ao]s?|excepto|salvo|no)\b/.test(stem))return true;
+  // Solo se admite la negativa cuando fue validada con cuatro pruebas.
+  // La negación de ausencia ("no figura en el índice") sigue prohibida.
+  if(/\b(incorrect[ao]s?|errone[ao]s?|fals[ao]s?|excepto|salvo|no)\b/.test(stem) &&
+     !(allowProvenNegative && iiff92IsNegativeStem(q)))return true;
   if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del indice)\b/.test(stem))return true;
   if(/\b(segun|conforme a)\b.{0,70}\b(apartado|indice|epigrafe|capitulo)\b/.test(stem))return true;
   if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
@@ -7647,48 +7664,79 @@ function iiff91UnsafeQuestion(q){
 // SERVER 92 — calibración psicométrica SOLO para el Manual IIFF.
 // Basado en buenas prácticas de MCQ de Waterloo/CMU y NBME; la fuente factual
 // sigue siendo exclusivamente el PDF de este tema, nunca esas guías.
-function iiff92GenerationRules(difficulty){
+function iiff92GenerationRules(difficulty,group=[]){
+  const allowed=(group||[]).flatMap((t,i)=>
+    iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)?[i+1]:[]);
   const muyAlta=String(difficulty).toLowerCase()==='muy alta';
+  // SERVER 92S: formatos abstraídos de exámenes oficiales de Bomberos de
+  // Navarra 2024 y 2026. Nunca aportan conocimientos ni respuestas al test.
+  // Un objetivo documentado puede justificar alta dificultad sin dos hechos.
   const nivel=muyAlta
-    ? `MUY ALTA: pide discriminar un requisito, orden, parámetro o consecuencia
-  entre cuatro alternativas muy próximas. Cuando UN MISMO fragmento demuestre
-  dos condiciones técnicas, utilízalas para exigir aplicación o discriminación
-  (por ejemplo condición operativa + acción, fase + consecuencia, paso + caudal).
-  NO combines hechos de otros fragmentos, NO inventes un supuesto operativo y
-  NO fuerces una doble condición cuando la evidencia solo contenga un hecho.
-  Si el objetivo no permite una Muy Alta factual, no la simules con redacción
-  más retorcida, excepciones imaginadas o negaciones.`
-    : `ALTA: pide comprensión, relación directa o aplicación literal de un hecho
-  operativo claro. No basta distinguir una alternativa obvia de tres absurdas.
-  Se admite un dato único (valor, composición o clasificación) si los distractores
-  pueden ser razonablemente confundidos por quien conoce el temario a medias.`;
+    ? `MUY ALTA DE OPOSICIÓN: el objetivo es que un opositor bien preparado
+  distinga cuatro alternativas verosímiles y cercanas, como en los exámenes
+  oficiales. Prioriza condiciones precisas de aplicación, parámetros próximos,
+  secuencias técnicas y diferencias conceptuales con fundamento en el FRAGMENTO.
+  Si el fragmento solo contiene un dato, exige su recuerdo preciso con cuatro
+  opciones cercanas; no inventes una segunda condición. No son obligatorios ni
+  casos ficticios, ni cálculos, ni razonamientos compuestos en cada pregunta.`
+    : `ALTA DE OPOSICIÓN: recuperación rigurosa y comprensión de un hecho
+  técnico documentado. Mantén cuatro distractores plausibles y cercanos,
+  sin exigir deducciones o aplicaciones no contenidas en el fragmento.`;
   return `
-CALIBRACIÓN EXCLUSIVA MANUAL IIFF 2026 — NIVEL ${muyAlta?'MUY ALTA':'ALTA'}:
-- El OBJETIVO y su fragmento aportan TODOS los hechos verdaderos. La pregunta
-  evalúa ese conocimiento, no el índice, la organización editorial, fotografías,
-  diagramas, ni referencias a números de página.
-- ${nivel}
-- Cuatro alternativas de la MISMA categoría, unidad y precisión; vocabulario
-  profesional natural, extensión comparable, construcciones paralelas.
-- Distractores cercanos por un cambio MATERIAL y concreto: condición,
-  orden de un paso, magnitud con la MISMA unidad, componente o consecuencia.
-  No utilices afirmaciones ridículas (extinción instantánea, anulación total
-  de procesos físicos, cantidades desproporcionadas) ni absolutos delatores
-  para hacer falsas las opciones. Evita alternativas que se descartan por
-  cultura general sin estudiar el PDF.
-- En cantidades, los cuatro valores tendrán la misma unidad y orden de
-  magnitud razonablemente comparable. No cambies unidades como trampa.
-  Los números incorrectos son distractores hipotéticos, nunca hechos del manual.
-- Un único problema preciso en el enunciado; no emparejar datos inconexos ni
-  exigir conocimientos externos. Preferir formulación POSITIVA. No INCORRECTA,
-  EXCEPTO, NI NO, por insuficiencia de evidencia negativa global.
-- Verifica que la respuesta sea la ÚNICA demostrada en el fragmento y que
-  los tres distractores sean falsos para esa pregunta. Si no puedes demostrarlo,
-  no inventes una norma o excepción para construir la pregunta.
-- La clave NO puede ser la opción manifiestamente más larga, específica o
-  formulada en lenguaje técnico frente a tres opciones caricaturescas.
-- 4 opciones con 1 sola correcta; cada una plausible a primera lectura;
-  explicación breve y basada únicamente en el fragmento.
+CALIBRACIÓN MANUAL IIFF 2026 CON REFERENCIA DE ESTILO EN EXÁMENES OFICIALES
+DE BOMBEROS NAVARRA 2024 Y 2026. EXCLUSIVAMENTE ESTILO, NUNCA FUENTE FACTUAL.
+${nivel}
+PERMITIDOS_NEGATIVA (slot 1-based): ${JSON.stringify(allowed)}.
+Si la lista está vacía, TODAS las preguntas deben ser POSITIVAS.
+PATRONES DE PREGUNTA REALISTA (elige SOLO los que la evidencia permita):
+A. DATO TÉCNICO EXACTO: pregunta por el valor, magnitud, clasificación o
+   característica documentada; cuatro opciones de igual unidad y escala
+   razonablemente próxima. El enunciado no debe contener la solución.
+B. PROCEDIMIENTO: identifica el paso, secuencia, componente o especificación
+   de una maniobra descrita, sin añadir pasos ni requisitos inexistentes.
+C. CONDICIÓN DE APLICACIÓN: distingue cuándo corresponde un equipo, método
+   o medida, únicamente si el fragmento expresa la condición.
+D. DISTINCIÓN CONCEPTUAL: discrimina entre definiciones, componentes,
+   consecuencias o fenómenos técnicos de la misma categoría, si el fragmento
+   aporta suficiente evidencia para una respuesta única.
+E. CASO OPERATIVO BREVE: solo si todas las condiciones, acciones y parámetros
+   del caso están expresamente documentados; en caso contrario, NO lo uses.
+F. INCORRECTA DOCUMENTADA: solo en slot PERMITIDOS_NEGATIVA y solo cuando
+   existen tres afirmaciones explícitas verdaderas y una afirmación
+   contradicha directamente por el MISMO fragmento técnico (nunca por
+   ausencia en un índice, epígrafe parcial o extracto truncado).
+EJEMPLOS FORMALES SIN HECHOS NI RESPUESTAS:
+- «Respecto a [concepto técnico], ¿qué [magnitud/característica] se establece?»
+- «En la [maniobra documentada], ¿qué [paso/parámetro] corresponde a [fase]?»
+- «¿En qué condición documentada se indica el uso de [medio o procedimiento]?»
+- «En relación con [proceso], ¿qué [efecto/elemento] lo caracteriza?»
+- «Sobre [procedimiento descrito], señale la afirmación INCORRECTA»
+  (solo con cuatro afirmaciones respaldadas/contradichas expresamente).
+Son plantillas de redacción, NO copias de preguntas oficiales ni datos del temario.
+REGLAS QUE NO SE PUEDEN RELAJAR:
+- Usa únicamente el OBJETIVO y su fragmento como verdad factual. El tribunal
+  oficial es referencia de estilo; no trasladar sus números, escenarios o datos.
+- Cuatro respuestas, una única válida. Mismo tipo de opción, misma unidad
+  si procede y longitud comparable; modifica un dato MATERIAL en las falsas.
+- Prohibidos distractores grotescos, pistas por absolutos, lenguaje rebuscado,
+  dobles negaciones y afirmaciones falsas que sean obvias por cultura general.
+- No inventar magnitudes ni condiciones fuera de la evidencia para endurecer.
+  Los números falsos son distractores, no datos afirmados del manual.
+- No preguntar por índice, estructura editorial, fotografías ni dibujos.
+- Las preguntas POSITIVAS son el formato predeterminado.
+- INCORRECTA/FALSA es una opción de estilo oficial, NO una cuota. Solo
+  cuando el slot esté en PERMITIDOS_NEGATIVA y las CUATRO opciones puedan
+  probarse con el MISMO fragmento: tres verdaderas literalmente y una
+  contradicha EXPLÍCITAMENTE por un dato del fragmento. La ausencia de
+  mención en una enumeración o en el índice NO demuestra falsedad.
+- Si no puedes obtener las cuatro pruebas del fragmento, redacta una
+  pregunta POSITIVA. Nunca añadas citas inventadas ni hechos ajenos.
+- No uses EXCEPTO, SALVO o interrogantes ambiguos con NO como alternativa.
+- Si el fragmento es sencillo, formula una pregunta sólida de estilo oficial:
+  la dificultad no debe subir a costa de inventar, complicar o diluir la verdad.
+- Para que la pregunta sea válida, la alternativa correcta debe justificarse
+  literalmente y los distractores no pueden ser también correctos en el contexto.
+- Sin cuotas de patrones; alterna cuando lo permitan los objetivos del lote.
 `;
 }
 
@@ -7708,8 +7756,23 @@ function iiff92AuditSchema(base){
   const original=base.properties.results.items;
   return {...base,properties:{...base.properties,results:{...base.properties.results,
     items:{...original,properties:{...original.properties,
-      calidad:{type:'integer',minimum:0,maximum:2}},
+      calidad:{type:'integer',minimum:0,maximum:2},
+      // Opcional en positivas. Obligatorio y revisado EN SERVIDOR en negativas.
+      optionProofs:{type:'array',minItems:4,maxItems:4,items:{type:'object',
+        properties:{trueAccordingToPDF:{type:'boolean'},quote:{type:'string'}},
+        required:['trueAccordingToPDF','quote']}}},
       required:[...original.required,'calidad']}}}};
+}
+function iiff92FourOptionProofs(q,a,fragment){
+  if(!Array.isArray(a?.optionProofs)||a.optionProofs.length!==4)return false;
+  if(!Number.isInteger(q?.correctIndex)||q.correctIndex<0||q.correctIndex>3)return false;
+  for(let i=0;i<4;i++){
+    const p=a.optionProofs[i];
+    if(typeof p?.trueAccordingToPDF!=='boolean'||!resetQuote136(p.quote,fragment))return false;
+    // INCORRECTA: la respuesta elegida debe ser la ÚNICA falsa.
+    if(p.trueAccordingToPDF!==(i!==q.correctIndex))return false;
+  }
+  return true;
 }
 
 function iiff91Band(item){
@@ -9488,7 +9551,8 @@ validation_version,
 last_shown_at
 )
 VALUES (
-  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,6,NOW()
+  $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
+  CASE WHEN $12::boolean THEN 114 ELSE 6 END,NOW()
 )
     RETURNING id`,
     [
@@ -9506,7 +9570,8 @@ VALUES (
       question.difficulty || difficulty,
       question.graphic
         ? JSON.stringify(question.graphic)
-        : null
+        : null,
+      Boolean(iiff91Topic(target)&&question.iiffNegativeVerified===true)
     ]
   );
 
@@ -11598,7 +11663,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
-  const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty):'';
+  const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
@@ -11614,7 +11679,8 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
     if(resetShape136(q))return [];
-    if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q))return [];
+    if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
+      iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))return [];
     if((esTemaSolares2026(group[i])||esTemaEolicos2026(group[i])) &&
        /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
     return [{index:i,tema:group[i].topic_name,
@@ -11635,15 +11701,26 @@ que algo NO está en otra sección, o si cualquier distractor parece compatible
 con el fragmento. Comprueba el dato que distingue las cuatro opciones.
 No examines imágenes. No uses conocimiento externo.
 Asigna también calidad=0, 1 o 2 independientemente de la respuesta:
-0: trivial: dos o más distractores absurdos, unidades dispares, pistas de
-   longitud/absolutos, o puede resolverse sin conocer el contenido técnico;
-1: dificultad ALTA razonable: alternativas homogéneas, distractores
-   verosímiles que requieren distinguir un hecho técnico concreto;
-2: dificultad MUY ALTA real: distractores muy próximos, exige discriminar
-   condiciones, magnitudes, procedimiento o relación operativa sustentados
-   íntegramente por la evidencia; nunca basta una redacción más compleja.
-No atribuyas calidad=2 a preguntas que se resuelven descartando disparates.
-No inventes circunstancias o segundos datos para aumentar calidad.
+0: por debajo de una oposición real: al menos dos distractores evidentes,
+   pista formal que regala la solución o resolución sin conocer el contenido;
+1: pregunta exigente y válida de estilo OPOSICIÓN, con cuatro alternativas
+   homogéneas y plausibles, que exige recuerdo técnico preciso o distinción
+   acreditada por el fragmento. Un dato único y cuatro valores cercanos
+   pueden ser plenamente válidos incluso para MUY ALTA solicitada;
+2: especialmente discriminante en una oposición real: diferencias técnicas
+   muy próximas, condiciones, secuencias o parámetros documentados.
+Los niveles 1 y 2 son aptos para un examen oficial exigente; 2 es una meta
+preferida en MUY ALTA, pero NO una condición necesaria de validez factual.
+La dificultad NO se mide por longitud, dificultad de redacción o multiplicar
+hechos. Las cuatro opciones deben superar la auditoría factual igual que antes.
+Para preguntas INCORRECTA/FALSA aporta optionProofs EN EL ORDEN A,B,C,D:
+cuatro objetos {trueAccordingToPDF:boolean,quote:string}. Tres valores true
+con citas LITERALES que prueben expresamente cada afirmación y un solo false
+con cita LITERAL que CONTRADIGA la afirmación falsa. No basta que no figure
+el dato: ni un índice, ni una lista parcial, ni un apartado omitido prueban
+una ausencia. Si falta cualquiera de las cuatro pruebas, answer=-1 y NO
+inventes quote ni optionProofs. Para preguntas positivas omite optionProofs.
+No añadas escenarios, parámetros ni condiciones no documentados.
 ` : '';
   const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
     ' quote: transcribe',
@@ -11660,19 +11737,31 @@ No inventes circunstancias o segundos datos para aumentar calidad.
   if(!Array.isArray(audits))throw Error('Auditoría sin resultados');
   if(iiffScope)console.log('IIFF_92_CALIDAD_AUDITOR:',JSON.stringify({
     nivel:difficulty,calidades:audits.map(x=>Number(x.calidad)),
-    minAceptada:difficulty==='muy alta'?2:1}));
-  return questions.map((q,i)=>{
+    minAceptada:1,objetivoPreferido:difficulty==='muy alta'?2:1}));
+  const validated=questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||!a||a.answer!==q.correctIndex ||
-      (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q))||
+      (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
+        iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
+      (iiff91Topic(group[i])&&iiff92IsNegativeStem(q)&&
+        !iiff92FourOptionProofs(q,a,group[i].source_evidence))||
       (iiffScope&&(!Number.isInteger(a.calidad)||
-        a.calidad<(difficulty==='muy alta'?2:1)))||
+        a.calidad<1))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
     return {...q,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
       manualPage:group[i].manual_page??null,
+      iiffNegativeVerified:iiff91Topic(group[i])&&iiff92IsNegativeStem(q),
       questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:null};
   });
+  if(iiffScope){
+    const negativeIndices=questions.map((q,i)=>iiff92IsNegativeStem(q)?i:-1).filter(i=>i>=0);
+    if(negativeIndices.length)console.log('IIFF_92T_NEGATIVAS:',JSON.stringify({
+      generadas:negativeIndices.length,
+      aceptadas:negativeIndices.filter(i=>validated[i]?.iiffNegativeVerified===true).length,
+      rechazadas:negativeIndices.filter(i=>!validated[i]).length}));
+  }
+  return validated;
 }
 // SERVER 83 — barajado de PRESENTACIÓN ANTES de persistir la pregunta nueva.
 // Conserva la respuesta literal y todas las alternativas ya auditadas contra PDF.
@@ -11747,7 +11836,8 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
-      (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r)))||
+      (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
+        Number(r.validation_version)===114})))||
       resetShape136({stem:r.stem,options:r.options,correctIndex:ci,ankiOriginalBank}))continue;
     usedQuestions.add(stem);usedCoverage.add(id);
     const target={id,topic_id:Number(r.topic_id),topic_name:r.topic_name,
@@ -11926,7 +12016,7 @@ app.post('/api/generate',async(req,res)=>{
         if(!run[i].ok){failures.push({batch:i,reason:run[i].error});continue;}
         for(let j=0;j<groups[i].length;j++){
           const slot=groups[i][j].index,q=run[i].value[j];
-          if(q)questions[slot]=q;else failures.push({slot,reason:'no verificable con PDF'});
+          if(q)questions[slot]=q;else failures.push({slot,reason:iiff91Topic(groups[i][j].t)?'rechazada por auditoría: factual, formato o calidad insuficiente':'no verificable con PDF'});
         }
       }
       // Depuración determinista ANTES del rescate: una pregunta con enunciado
@@ -11999,7 +12089,7 @@ app.post('/api/generate',async(req,res)=>{
         const valid=questions.filter(Boolean).length;
         console.warn('RESET_136_INCOMPLETO:',JSON.stringify({count,valid,
           failed:count-valid,failures:failures.slice(0,8),ms:Date.now()-started}));
-        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron verificación PDF. No se guardó un examen incompleto.`);
+        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':'verificación PDF'}. No se guardó un examen incompleto.`);
       }
     }
     if(questions.some((q,i)=>!q||resetShape136(q))){
