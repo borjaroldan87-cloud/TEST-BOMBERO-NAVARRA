@@ -117,6 +117,20 @@ async function initDatabase(){
 await db.query(`
   ALTER TABLE topics ADD COLUMN IF NOT EXISTS block TEXT
 `);
+// SERVER 90: un PDF fuente del manual IIFF conservado en PostgreSQL.
+// Render Free tiene un sistema de ficheros efímero; nunca usar uploads/
+// como almacenamiento persistente. La fuente no se expone por HTTP.
+await db.query(`
+  CREATE TABLE IF NOT EXISTS topic_local_pdfs (
+    topic_id INTEGER PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
+    pdf_sha256 CHAR(64) NOT NULL,
+    page_count INTEGER NOT NULL CHECK(page_count > 0),
+    size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
+    pdf_bytes BYTEA NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`);
+
 await db.query(`
   UPDATE topics
   SET block = 'especifico'
@@ -2341,7 +2355,7 @@ async function getOrCreateTopic(name, sourceFile=null){
 
 // Sustitución por identidad del conocimiento, sin borrar preguntas ni sesiones históricas.
 // La referencia al nuevo documento se confirma en la MISMA transacción que la cobertura.
-async function saveCoverageItems(topicId, items, documentName){
+async function saveCoverageItems(topicId, items, documentName, localPdf=null){
   const client=await db.connect();
   try{
     await client.query("BEGIN");
@@ -2396,15 +2410,47 @@ async function saveCoverageItems(topicId, items, documentName){
         AND NOT EXISTS(SELECT 1 FROM test_session_questions sq WHERE sq.coverage_item_id=ci.id)
         AND NOT EXISTS(SELECT 1 FROM coverage_review_state rs WHERE rs.coverage_item_id=ci.id)
         AND NOT EXISTS(SELECT 1 FROM legislation_anki_questions aq WHERE aq.validated_coverage_item_id=ci.id)`,[topicId]);
-    await client.query(`UPDATE topics SET file_search_indexed=TRUE,
+    await client.query(`UPDATE topics SET file_search_indexed=$2,
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE),
       worked_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
-      WHERE id=$1`,[topicId]);
+      WHERE id=$1`,[topicId,!localPdf]);
     await client.query(`INSERT INTO topic_source_documents(topic_id,document_name)
       VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE
       SET document_name=EXCLUDED.document_name,updated_at=NOW()`,[topicId,documentName]);
+    if(localPdf){
+      // El PDF y los conocimientos se confirman o revierten juntos.
+      await client.query(`INSERT INTO topic_local_pdfs
+        (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+        VALUES($1,$2,$3,$4,$5)
+        ON CONFLICT(topic_id) DO UPDATE SET
+          pdf_sha256=EXCLUDED.pdf_sha256,
+          page_count=EXCLUDED.page_count,
+          size_bytes=EXCLUDED.size_bytes,
+          pdf_bytes=EXCLUDED.pdf_bytes,updated_at=NOW()`,
+        [topicId,localPdf.sha,localPdf.pages,localPdf.bytes.length,localPdf.bytes]);
+      // Recuento de filas distintas, PDF intacto y marcador de indexación local.
+      const verified=await client.query(`
+        SELECT t.total_items AS total, t.file_search_indexed AS indexed,
+          p.page_count AS pages, p.size_bytes AS size,
+          octet_length(p.pdf_bytes) AS stored_size,
+          p.pdf_sha256 AS sha,
+          encode(sha256(p.pdf_bytes),'hex') AS stored_sha,
+          (SELECT COUNT(*)::int FROM coverage_items
+             WHERE topic_id=$1 AND exam_relevant=TRUE) AS actual
+        FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id
+        WHERE t.id=$1`,[topicId]);
+      const v=verified.rows[0];
+      if(!v || Number(v.total)!==keep.length || Number(v.actual)!==keep.length ||
+         Number(v.pages)!==localPdf.pages ||
+         Number(v.size)!==localPdf.bytes.length ||
+         Number(v.stored_size)!==localPdf.bytes.length ||
+         String(v.sha).trim()!==localPdf.sha ||
+         String(v.stored_sha).trim()!==localPdf.sha || v.indexed!==false){
+        throw new Error('IIFF: comprobación transaccional de PDF/cobertura fallida; ROLLBACK.');
+      }
+    }
     await client.query("COMMIT");
   }catch(error){
     await client.query("ROLLBACK");
@@ -2645,6 +2691,36 @@ async function replaceIiffDocument87(topic,pdfPath,items){
       errors.join(", ")+". No generes tests de este tema hasta limpiarlos.");
   }
   console.log("COVERAGE IIFF FINAL: sustitución completa");
+}
+
+// SERVER 90: guardar localmente sin File Search SOLO el Manual IIFF 2026.
+// No renombra ni modifica el store ni la ingestión de otros temas.
+async function replaceIiffDocument90(topic,pdfPath,items){
+  const bytes=fs.readFileSync(pdfPath);
+  if(!bytes.length || bytes.length>50*1024*1024 ||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-'){
+    throw new Error('IIFF: origen PDF ausente, inválido o demasiado grande.');
+  }
+  const document=await PDFDocument.load(bytes);
+  const pages=document.getPageCount();
+  if(pages!==231){
+    throw new Error(`IIFF: se esperaban 231 páginas físicas; recibidas ${pages}. No se guarda.`);
+  }
+  const invalid=items.find(item=>
+    !Number.isInteger(item?.sourcePage) || item.sourcePage<1 ||
+    item.sourcePage>pages || !String(item?.sourceEvidence||'').trim() ||
+    !String(item?.concept||'').trim());
+  if(invalid){
+    throw new Error('IIFF: un conocimiento carece de referencia a página física o evidencia.');
+  }
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  console.log(`COVERAGE IIFF LOCAL90: PDF verificado, ${pages} páginas, `+
+    `${bytes.length} bytes, ${items.length} conocimientos; no se llama a Google File Search`);
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages,bytes});
+  console.log(`COVERAGE IIFF LOCAL90: TRANSACCIÓN CONFIRMADA. `+
+    `PDF y ${new Set(items.map(item=>JSON.stringify([item.concept,item.itemType,item.evaluationType]))).size} `+
+    `conocimientos guardados en PostgreSQL. File Search sin cambios.`);
 }
 
 function normalizeCoverageItem(item){
@@ -5369,6 +5445,32 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
       : null;
     if(iiffManual86)console.log("COVERAGE IIFF: checkpoints reanudables activos");
+    if(iiffManual86){
+      const found=await db.query(`SELECT t.total_items AS total,
+        p.page_count AS pages, p.size_bytes AS size,
+        octet_length(p.pdf_bytes) AS stored_size,
+        encode(sha256(p.pdf_bytes),'hex') AS stored_sha
+        FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id
+        WHERE t.id=$1 AND p.pdf_sha256=$2 AND t.file_search_indexed=FALSE`,
+        [topic.id,iiffPdfHash86]);
+      const v=found.rows[0];
+      if(v && Number(v.pages)===231 && Number(v.size)===Number(v.stored_size) &&
+          String(v.stored_sha)===iiffPdfHash86 && Number(v.total)>0){
+        const total=Number(v.total);
+        console.log(`COVERAGE IIFF LOCAL90: PDF idéntico ya guardado (${total} elementos). `+
+          'Sin llamadas a Gemini.');
+        await setCoverageRunState(coverageRunId,{
+          status:'completed',topicId:Number(topic.id),topic:topic.name,
+          totalItems:total,reused:true
+        });
+        return res.json({ok:true,topicId:Number(topic.id),topic:topic.name,
+          totalItems:total,workedItems:Number(topic.worked_items||0),
+          pendingItems:total-Number(topic.worked_items||0),
+          coveragePercentage:total?Number((100*Number(topic.worked_items||0)/total).toFixed(1)):0,
+          reused:true,source:'postgresql_pdf'});
+      }
+    }
+
     // SERVER 85: omitir el lector auxiliar de fichas SOLO en Específico.
     // Los manuales extensos pueden bloquearse al inspeccionar flujos de fuentes
     // antes del análisis por páginas. Geografía y Legislación quedan intactas.
@@ -5897,9 +5999,10 @@ if(coverageTopicNumber(topic.name)===22){
     }
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
-    if(iiffManual86) await replaceIiffDocument87(topic,pdfPath,validItems);
+    if(iiffManual86) await replaceIiffDocument90(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
-    if(iiffManual86)await deleteIiffChunks86(topic,iiffPdfHash86);
+    // Los checkpoints IIFF se conservan incluso tras el guardado para no
+    // pagar otra extracción hasta validar generación y fidelidad del tema.
 
     const result=await db.query(
       `SELECT
@@ -5994,6 +6097,29 @@ if(coverageTopicNumber(topic.name)===22){
       fs.unlink(uploadedPdfPath,()=>{});
     }
   }
+});
+// SERVER 90: diagnóstico sin indexación ni llamadas pagadas ni descarga pública
+// del manual interno. Las páginas completas se conservan como BYTEA en PG.
+app.get('/api/iiff-local-status',async(req,res)=>{
+  try{
+    const r=await db.query(`SELECT t.id AS topic_id,t.name,t.total_items,
+       t.file_search_indexed,p.page_count,p.size_bytes,
+       octet_length(p.pdf_bytes) AS stored_size,
+       p.pdf_sha256, encode(sha256(p.pdf_bytes),'hex') AS stored_sha,
+       (SELECT COUNT(*)::int FROM coverage_items ci
+         WHERE ci.topic_id=t.id AND ci.exam_relevant=TRUE) AS active_items
+       FROM topics t LEFT JOIN topic_local_pdfs p ON p.topic_id=t.id
+       WHERE t.block='especifico'
+         AND t.name='Manual de IIFF de Navarra 2026'
+       ORDER BY t.id ASC LIMIT 1`);
+    const d=r.rows[0];
+    return res.json({ok:true,found:Boolean(d),topicId:d?.topic_id||null,
+      totalItems:Number(d?.total_items||0),activeItems:Number(d?.active_items||0),
+      pdfStored:Boolean(d?.pdf_sha256),pdfPages:d?.page_count??null,
+      pdfBytes:d?.size_bytes??null,
+      bytesVerified:Boolean(d?.pdf_sha256 && Number(d.size_bytes)===Number(d.stored_size) && d.pdf_sha256===d.stored_sha),
+      source:d?.pdf_sha256?'postgresql':'not_ready'});
+  }catch(e){return res.status(500).json({ok:false,error:String(e.message||e)});}
 });
 app.get("/api/coverage-run/:runId", async(req,res)=>{
   try{
