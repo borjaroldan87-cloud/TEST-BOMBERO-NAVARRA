@@ -7644,6 +7644,74 @@ function iiff91UnsafeQuestion(q){
   if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
   return false;
 }
+// SERVER 92 — calibración psicométrica SOLO para el Manual IIFF.
+// Basado en buenas prácticas de MCQ de Waterloo/CMU y NBME; la fuente factual
+// sigue siendo exclusivamente el PDF de este tema, nunca esas guías.
+function iiff92GenerationRules(difficulty){
+  const muyAlta=String(difficulty).toLowerCase()==='muy alta';
+  const nivel=muyAlta
+    ? `MUY ALTA: pide discriminar un requisito, orden, parámetro o consecuencia
+  entre cuatro alternativas muy próximas. Cuando UN MISMO fragmento demuestre
+  dos condiciones técnicas, utilízalas para exigir aplicación o discriminación
+  (por ejemplo condición operativa + acción, fase + consecuencia, paso + caudal).
+  NO combines hechos de otros fragmentos, NO inventes un supuesto operativo y
+  NO fuerces una doble condición cuando la evidencia solo contenga un hecho.
+  Si el objetivo no permite una Muy Alta factual, no la simules con redacción
+  más retorcida, excepciones imaginadas o negaciones.`
+    : `ALTA: pide comprensión, relación directa o aplicación literal de un hecho
+  operativo claro. No basta distinguir una alternativa obvia de tres absurdas.
+  Se admite un dato único (valor, composición o clasificación) si los distractores
+  pueden ser razonablemente confundidos por quien conoce el temario a medias.`;
+  return `
+CALIBRACIÓN EXCLUSIVA MANUAL IIFF 2026 — NIVEL ${muyAlta?'MUY ALTA':'ALTA'}:
+- El OBJETIVO y su fragmento aportan TODOS los hechos verdaderos. La pregunta
+  evalúa ese conocimiento, no el índice, la organización editorial, fotografías,
+  diagramas, ni referencias a números de página.
+- ${nivel}
+- Cuatro alternativas de la MISMA categoría, unidad y precisión; vocabulario
+  profesional natural, extensión comparable, construcciones paralelas.
+- Distractores cercanos por un cambio MATERIAL y concreto: condición,
+  orden de un paso, magnitud con la MISMA unidad, componente o consecuencia.
+  No utilices afirmaciones ridículas (extinción instantánea, anulación total
+  de procesos físicos, cantidades desproporcionadas) ni absolutos delatores
+  para hacer falsas las opciones. Evita alternativas que se descartan por
+  cultura general sin estudiar el PDF.
+- En cantidades, los cuatro valores tendrán la misma unidad y orden de
+  magnitud razonablemente comparable. No cambies unidades como trampa.
+  Los números incorrectos son distractores hipotéticos, nunca hechos del manual.
+- Un único problema preciso en el enunciado; no emparejar datos inconexos ni
+  exigir conocimientos externos. Preferir formulación POSITIVA. No INCORRECTA,
+  EXCEPTO, NI NO, por insuficiencia de evidencia negativa global.
+- Verifica que la respuesta sea la ÚNICA demostrada en el fragmento y que
+  los tres distractores sean falsos para esa pregunta. Si no puedes demostrarlo,
+  no inventes una norma o excepción para construir la pregunta.
+- La clave NO puede ser la opción manifiestamente más larga, específica o
+  formulada en lenguaje técnico frente a tres opciones caricaturescas.
+- 4 opciones con 1 sola correcta; cada una plausible a primera lectura;
+  explicación breve y basada únicamente en el fragmento.
+`;
+}
+
+// La calificación se agrega a la auditoría YA EXISTENTE: cero llamadas nuevas
+// a Gemini. La validación de contenido (answer + cita) continúa obligatoria.
+// REVISIÓN 92R: si Google detiene una salida por límite, seguridad o
+// continuación, no se evalúa como una respuesta completa. Solo IIFF.
+function iiff92RequireCompletedResponse(response,phase){
+  const reason=response?.candidates?.[0]?.finishReason;
+  if(reason && reason!=='STOP')
+    throw Error(`IIFF: respuesta de ${phase} no terminada (${String(reason)}).`);
+  if(typeof response?.text!=='string' || !response.text.trim())
+    throw Error(`IIFF: respuesta vacía en ${phase}.`);
+}
+
+function iiff92AuditSchema(base){
+  const original=base.properties.results.items;
+  return {...base,properties:{...base.properties,results:{...base.properties.results,
+    items:{...original,properties:{...original.properties,
+      calidad:{type:'integer',minimum:0,maximum:2}},
+      required:[...original.required,'calidad']}}}};
+}
+
 function iiff91Band(item){
   const page=Number(item?.source_page);
   return Math.min(IIFF91_STRATA-1,Math.floor((page-IIFF91_FIRST_CONTENT_PAGE)*IIFF91_STRATA/
@@ -7703,6 +7771,33 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
   if(selected.length<count)throw Error(`IIFF: objetivos examinables insuficientes: ${selected.length}/${count}.`);
   return selected;
 }
+// REVISIÓN 92R: en tests MIXTOS el selector compartido puede devolver
+// un índice del IIFF. Sustituir solo ese objetivo por otro del MISMO tema,
+// sin alterar prioridades ni objetivos de Legislación, Geografía u otros temas.
+function iiff92ReplaceEditorialInMixed(targets,candidates){
+  const result=[...targets];
+  const occupied=new Set(result.map(t=>Number(t.id)));
+  const usedBands=new Set(result.filter(t=>iiff91Topic(t)&&!iiff91Editorial(t)).map(iiff91Band));
+  for(let i=0;i<result.length;i++){
+    const old=result[i];
+    if(!iiff91Topic(old)||!iiff91Editorial(old))continue;
+    const available=(candidates||[]).filter(t=>iiff91Topic(t) &&
+      Number(t.topic_id)===Number(old.topic_id) && !iiff91Editorial(t) &&
+      !occupied.has(Number(t.id)));
+    if(!available.length)throw Error('IIFF: sin sustituto examinable para objetivo editorial en test mixto.');
+    available.sort((a,b)=>
+      Number(usedBands.has(iiff91Band(a)))-Number(usedBands.has(iiff91Band(b))) ||
+      Number(a.adaptive_priority||4)-Number(b.adaptive_priority||4) ||
+      Number(a.times_asked||0)-Number(b.times_asked||0) ||
+      Number(a.id)-Number(b.id));
+    const chosen=available[0];
+    result[i]=chosen;
+    occupied.add(Number(chosen.id));
+    usedBands.add(iiff91Band(chosen));
+  }
+  return result;
+}
+
 async function getIiffTargets91(count,topicIds,simulation=false){
   const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
   if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
@@ -11153,6 +11248,9 @@ function resetGroups139(rows){
     const current=last ? last.reduce((n,r)=>n+Math.min(3000,String(r.t.source_evidence||'').length),0):0;
     if(last&&last.length<R136_BATCH &&
        String(last[0].t.topic_block||'').toLowerCase()===block &&
+       // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
+       // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
+       iiff91Topic(last[0].t)===iiff91Topic(row.t) &&
        current+bytes<=R136_CONTEXT_BUDGET){
       last.push(row);
     }else groups.push([row]);
@@ -11420,7 +11518,8 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
     soloSolares ? resetSolarExamples82(targets) :
     soloFerrocarril ? FERROCARRIL_ESTILO_EJEMPLOS_2026 :
     soloCamino ? CAMINO_ESTILO_EJEMPLOS_2026 :
-    geo ? pickGeografiaExamples73(targets,3) : [
+    geo ? pickGeografiaExamples73(targets,3) :
+    targets.every(iiff91Topic) ? [] : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
     'Ríos: afluente directo o cadena indirecta sólo si todos los eslabones constan en el PDF.',
@@ -11436,7 +11535,7 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   return `Eres examinador de Bombero de Navarra, oposición nivel C. Redacta ${targets.length} preguntas NUEVAS, nivel ${difficulty}, modalidad ${mode}.
 NUNCA utilices conocimientos externos ni hechos de ejemplos de exámenes. La ÚNICA fuente factual son los fragmentos del PDF proporcionados en OBJETIVOS; si falta el dato, recupera exclusivamente del PDF del temario mediante File Search cuando se te habilite.
 Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una correcta. Distractores plausibles pero falsos a la luz del texto. No inventes normas, cifras o excepciones.
-${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
+${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo||targets.every(iiff91Topic)?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 ${reglasCalidadTransversal81(difficulty,leg,geo)}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
@@ -11499,18 +11598,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
-  const iiffGenerationRules=iiffScope?`
-REGLAS OBLIGATORIAS PARA CADA OBJETIVO DEL MANUAL IIFF 2026:
-- Pregunta por HECHOS OPERATIVOS verificables del fragmento, NO por el índice,
-  títulos, apartados, páginas, capítulos ni organización editorial.
-- Prohibidas las preguntas negativas (INCORRECTA, EXCEPTO, cuál NO) porque
-  un fragmento parcial no prueba la ausencia de una materia en todo el manual.
-- Preferir procedimientos, secuencias, condiciones, magnitudes, unidades y
-  clasificaciones técnicas; dificultad ${difficulty}: distractores del MISMO TIPO
-  distinguidos por un dato expreso. Una sola respuesta inequívoca.
-- Evitar reconocimiento o interpretación de imágenes, fotos y gráficos.
-- No inventar datos de otros capítulos para crear distractores.
-` : '';
+  const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty):'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
@@ -11518,6 +11606,7 @@ REGLAS OBLIGATORIAS PARA CADA OBJETIVO DEL MANUAL IIFF 2026:
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(RESET_GENERATE_SCHEMA_137,'questions',group.length)}});
+  if(iiffScope)iiff92RequireCompletedResponse(response,'generación');
   const parsed=JSON.parse(String(response?.text||'{}'));
   if(!Array.isArray(parsed.questions))throw Error('Sin array de preguntas');
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
@@ -11543,25 +11632,41 @@ ADICIONAL MANUAL IIFF: El índice NO es evidencia suficiente para hechos técnic
 Para una pregunta del manual, answer=-1 si una opción podría ser también
 verdadera con la evidencia disponible, si una afirmación exige demostrar
 que algo NO está en otra sección, o si cualquier distractor parece compatible
-con el fragmento. Comprueba la polaridad del enunciado y el dato que distingue
-las cuatro opciones; NO aceptes un distractor solo por no estar mencionado.
+con el fragmento. Comprueba el dato que distingue las cuatro opciones.
 No examines imágenes. No uses conocimiento externo.
+Asigna también calidad=0, 1 o 2 independientemente de la respuesta:
+0: trivial: dos o más distractores absurdos, unidades dispares, pistas de
+   longitud/absolutos, o puede resolverse sin conocer el contenido técnico;
+1: dificultad ALTA razonable: alternativas homogéneas, distractores
+   verosímiles que requieren distinguir un hecho técnico concreto;
+2: dificultad MUY ALTA real: distractores muy próximos, exige discriminar
+   condiciones, magnitudes, procedimiento o relación operativa sustentados
+   íntegramente por la evidencia; nunca basta una redacción más compleja.
+No atribuyas calidad=2 a preguntas que se resuelven descartando disparates.
+No inventes circunstancias o segundos datos para aumentar calidad.
 ` : '';
   const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
     ' quote: transcribe',
     ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
     :baselineAuditPrompt82;
+  const auditSchema=iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
     contents:auditPrompt82+iiffAuditRules,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},responseMimeType:'application/json',
-      responseJsonSchema:fixedCountSchema(RESET_AUDIT_SCHEMA_136,'results',blind.length)}});
+      responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
+  if(iiffScope)iiff92RequireCompletedResponse(auditing,'auditoría');
   const audits=JSON.parse(String(auditing?.text||'{}'))?.results;
   if(!Array.isArray(audits))throw Error('Auditoría sin resultados');
+  if(iiffScope)console.log('IIFF_92_CALIDAD_AUDITOR:',JSON.stringify({
+    nivel:difficulty,calidades:audits.map(x=>Number(x.calidad)),
+    minAceptada:difficulty==='muy alta'?2:1}));
   return questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q))||
+      (iiffScope&&(!Number.isInteger(a.calidad)||
+        a.calidad<(difficulty==='muy alta'?2:1)))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
     return {...q,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
@@ -11718,7 +11823,6 @@ app.post('/api/generate',async(req,res)=>{
         } else return res.json({ok:true,pending:true,runId});
       }
     }
-    if(!STORE)throw Error('Primero indexa el PDF del temario.');
     const count=Number(req.body?.count)||10;
     if(!Number.isInteger(count) || !(count===5||count===10||count===20||count===30||count===40||
       (count>40&&count<=120)))throw Error('Número de preguntas no admitido.');
@@ -11727,6 +11831,15 @@ app.post('/api/generate',async(req,res)=>{
     const testType=req.body?.testType==='failed'?'failed':'normal';
     const examMode=req.body?.examMode==='simulation'?'simulation':'adaptive';
     const topicIds=await resolveGenerationTopicScope(req.body);
+    // El manual IIFF reside íntegro en PostgreSQL; no depende de File Search.
+    // Se conserva la condición original para TODOS los demás ámbitos.
+    if(!STORE){
+      const sole=Array.isArray(topicIds)&&topicIds.length===1
+        ?(await db.query('SELECT name,block FROM topics WHERE id=$1',[topicIds[0]])).rows[0]
+        :null;
+      if(!iiff91Topic({topic_name:sole?.name,topic_block:sole?.block}))
+        throw Error('Primero indexa el PDF del temario.');
+    }
     let targets=resume136?.targets || (count>40?[]:(testType==='failed'
       ?await getFailedCoverageTargets(count,topicIds)
       :(await (async()=>{
@@ -11739,6 +11852,12 @@ app.post('/api/generate',async(req,res)=>{
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
           aiClient().models.generateContent(...args)}},topicIds,examMode);
       })())));
+    if(!resume136 && testType==='normal' && count<=40 &&
+       targets.some(t=>iiff91Topic(t)&&iiff91Editorial(t))){
+      const affected=[...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))];
+      const replacements=await getAdaptiveCoverageCandidates(3000,affected,examMode);
+      targets=iiff92ReplaceEditorialInMixed(targets,replacements);
+    }
     if(Array.isArray(topicIds) && topicIds.length===1 &&
        targets.some(t=>Number(t.topic_id)!==Number(topicIds[0])))
       throw Error('Los conocimientos obtenidos no corresponden al tema seleccionado. No se genera el test.');
