@@ -4208,6 +4208,53 @@ app.delete('/api/admin/topics/:id',topicAdminAuth,async(req,res)=>{
 
 app.get("/api/status",(req,res)=>res.json({ok:true,keyConfigured:!!process.env.GEMINI_API_KEY,store:STORE}));
 
+// SERVER 88 DIAGNOSTICO: comprobar en SOLO LECTURA la existencia del File Search
+// factual persistido. Nunca crea otro store, importa PDFs ni altera PostgreSQL.
+// Una respuesta GET 200 no prueba que la ruta de subida funcione (Google puede
+// devolver 404 en la subida aunque el store exista). Cache breve anti-abuso.
+let fileSearchReadOnly88Cache=null;
+app.get("/api/file-search-health",async(req,res)=>{
+  const now=Date.now();
+  if(fileSearchReadOnly88Cache &&
+     now-fileSearchReadOnly88Cache.timestamp<60000){
+    return res.json(fileSearchReadOnly88Cache.result);
+  }
+  try{
+    if(!STORE)await loadStore(); // SOLO SELECT, sin ensureStore()/create()
+    if(!STORE){
+      const result={ok:false,checked:true,reason:"store_no_registrado",
+        message:"No existe un nombre de almacén factual guardado en PostgreSQL."};
+      fileSearchReadOnly88Cache={timestamp:now,result};
+      return res.json(result);
+    }
+    const ai=aiClient();
+    const got=await ai.fileSearchStores.get({
+      name:STORE,config:{httpOptions:{timeout:15000}}
+    });
+    const result={ok:got?.name===STORE,checked:true,
+      storeRecorded:true,storeFound:got?.name===STORE,
+      message:got?.name===STORE
+        ? "El almacén existe; el 404 anterior corresponde a la subida, no a un almacén inexistente."
+        : "Google devolvió un identificador distinto. No subir otro PDF."};
+    fileSearchReadOnly88Cache={timestamp:Date.now(),result};
+    return res.json(result);
+  }catch(error){
+    const raw=String(error?.message||"");
+    const codeMatch=raw.match(/"code"\s*:\s*(\d{3})/);
+    const status=[error?.status,error?.code,codeMatch?.[1]]
+      .map(value=>Number(value)).find(value=>Number.isInteger(value) && value>=400 && value<=599)||null;
+    const result={ok:false,checked:true,storeRecorded:Boolean(STORE),
+      storeFound: status===404?false:null, googleHttpStatus:status,
+      message:status===404
+        ? "Google no encuentra el almacén con las credenciales actuales. NO crear otro ni borrar nada."
+        : "No se pudo comprobar el almacén (no demuestra que haya desaparecido)."};
+    console.warn("FILE SEARCH HEALTH 88: consulta de solo lectura fallida",status||"sin codigo");
+    fileSearchReadOnly88Cache={timestamp:Date.now(),result};
+    return res.json(result);
+  }
+});
+
+
 app.post("/api/ingest-benchmark", async(req,res)=>{
   try{
     const p=path.resolve("data/apeo-poda.pdf");
