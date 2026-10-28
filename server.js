@@ -7661,6 +7661,67 @@ function iiff91UnsafeQuestion(q,{allowProvenNegative=false}={}){
   if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
   return false;
 }
+// SERVER 93 CANDIDATO: ejemplos resueltos y comprobados exclusivamente contra
+// el Manual IIFF Navarra 2026 (páginas impresas). Los exámenes oficiales
+// Navarra 2024/2026 determinan SOLO el estilo y la dificultad, nunca datos.
+// Se muestran únicamente al generador IIFF: cero peticiones nuevas a Gemini.
+const IIFF93_EJEMPLOS_POSITIVOS = `
+EJEMPLO P1 — DISCRIMINACIÓN ENTRE MODELOS DE COMBUSTIBLE
+Enunciado: Respecto a los modelos de combustible 8 y 9, ¿qué afirmación es CORRECTA?
+A) El 9 presenta hojarasca más profunda que el 8, pero el incendio es de menor intensidad.
+B) El 9 presenta hojarasca más profunda y menos compactada que el 8, con un comportamiento del fuego más activo.
+C) El 8 presenta hojarasca menos compactada que el 9, y por ello el fuego es más activo.
+D) El 8 y el 9 se diferencian por su carga total, pero no por la disposición de la hojarasca.
+Respuesta: B.
+Justificación: El 9 acumula hojarasca más profunda y menos compactada; ambos tienen 4,5-6 t/ha, pero el 9 tiene comportamiento más activo (Manual IIFF, págs. impresas 53-54).
+
+EJEMPLO P2 — UMBRALES DE EXTINCIÓN
+Enunciado: En la tabla de capacidad de extinción, un frente con 2,8 m de altura de llama e intensidad aproximada de 2.000 kW/m corresponde a:
+A) Ataque directo con herramienta manual.
+B) Ataque con agua o maquinaria.
+C) Ataque indirecto mediante líneas de control alejadas.
+D) Situación fuera de capacidad de extinción.
+Respuesta: C.
+Justificación: El rango de 2,5-3,5 m y 1.700-3.500 kW/m corresponde a ataque indirecto (Manual IIFF, pág. impresa 87).
+
+EJEMPLO P3 — DOS PARÁMETROS DEL MISMO PROCEDIMIENTO
+Enunciado: Durante la extinción de un incendio agrícola con autobomba en marcha, ¿qué pareja de caudales se recomienda para rastrojo y cereal sin cosechar, respectivamente?
+A) 50 l/min y 90 l/min.
+B) 50 l/min y 70 l/min.
+C) 70 l/min y 90 l/min.
+D) 90 l/min y 50 l/min.
+Respuesta: A.
+Justificación: El procedimiento fija 50 l/min para rastrojo y 90 l/min para cereal sin cosechar (Manual IIFF, pág. impresa 153).
+
+EJEMPLO P4 — CONCEPTOS TÉCNICOS PRÓXIMOS
+Enunciado: En el sistema Campbell, ¿cuál de las siguientes parejas concepto-definición es CORRECTA?
+A) Punto crítico: punto de inflexión donde se pierde alguna alineación.
+B) Punto de oportunidad: punto de inflexión donde se gana alguna alineación.
+C) Carrera potencial: punto de inflexión donde se pierde alguna alineación.
+D) Punto crítico: punto de inflexión donde se gana alguna alineación.
+Respuesta: D.
+Justificación: Un punto crítico gana alineación; uno de oportunidad la pierde y una carrera potencial es una superficie o distancia recorrible por un frente (Manual IIFF, pág. impresa 87).
+
+EJEMPLO P5 — POSICIÓN DE TRABAJO EN UNA MANIOBRA
+Enunciado: En el trabajo con autobomba en marcha, ¿qué disposición de punta de lanza y escudero se ajusta al procedimiento?
+A) A unos 5 m de la parte trasera, en un lateral y con la manguera totalmente recta.
+B) A unos 5 m de la parte trasera, en un lateral, preferiblemente visibles por el retrovisor y con manguera de reserva.
+C) A unos 5 m por delante de la autobomba, en un lateral y visibles para el conductor.
+D) A unos 5 m de la parte trasera, fuera de la visual del conductor y sin manguera de reserva.
+Respuesta: B.
+Justificación: El procedimiento prescribe unos 5 m detrás, lateral, preferencia de visual por retrovisor y reserva de manguera, no completamente recta (Manual IIFF, pág. impresa 152).
+`;
+const IIFF93_EJEMPLO_NEGATIVO = `
+EJEMPLO N1 — INCORRECTA CON CONTRADICCIÓN LITERAL (SOLO SI EL SLOT ESTÁ PERMITIDO)
+Enunciado: Durante la construcción de una línea de defensa con herramientas manuales, señale la afirmación INCORRECTA.
+A) En el picado intervienen dos bomberos.
+B) El cavado sigue al picado.
+C) El peinado puede realizarse con Gorgui o McLeod.
+D) El material de picado, cavado y peinado se arrastra hacia la zona negra.
+Respuesta: D.
+Justificación: El manual prescribe expresamente arrastrar el material hacia la zona VERDE; confirma también A, B y C (Manual IIFF, pág. impresa 159).
+`;
+
 // SERVER 92 — calibración psicométrica SOLO para el Manual IIFF.
 // Basado en buenas prácticas de MCQ de Waterloo/CMU y NBME; la fuente factual
 // sigue siendo exclusivamente el PDF de este tema, nunca esas guías.
@@ -7705,14 +7766,17 @@ F. INCORRECTA DOCUMENTADA: solo en slot PERMITIDOS_NEGATIVA y solo cuando
    existen tres afirmaciones explícitas verdaderas y una afirmación
    contradicha directamente por el MISMO fragmento técnico (nunca por
    ausencia en un índice, epígrafe parcial o extracto truncado).
-EJEMPLOS FORMALES SIN HECHOS NI RESPUESTAS:
-- «Respecto a [concepto técnico], ¿qué [magnitud/característica] se establece?»
-- «En la [maniobra documentada], ¿qué [paso/parámetro] corresponde a [fase]?»
-- «¿En qué condición documentada se indica el uso de [medio o procedimiento]?»
-- «En relación con [proceso], ¿qué [efecto/elemento] lo caracteriza?»
-- «Sobre [procedimiento descrito], señale la afirmación INCORRECTA»
-  (solo con cuatro afirmaciones respaldadas/contradichas expresamente).
-Son plantillas de redacción, NO copias de preguntas oficiales ni datos del temario.
+EJEMPLOS RESUELTOS (FEW-SHOT): estas preguntas muestran el nivel y la
+estructura deseados; proceden del Manual IIFF y NO son OBJETIVOS del lote.
+NUNCA copies sus enunciados, hechos, cifras, opciones o respuestas en una
+pregunta nueva, salvo que el propio fragmento de su OBJETIVO demuestre el dato.
+No los uses como evidencia ni para completar un fragmento insuficiente.
+Imita la proximidad técnica de las cuatro opciones, no el contenido ni una cuota
+fija de familias. Los distractores se distinguen por un dato MATERIAL, no por
+sinónimos de una misma afirmación. Cada respuesta del lote requiere su propia
+verificación documental, independiente de estos ejemplos.
+${IIFF93_EJEMPLOS_POSITIVOS}
+${allowed.length ? IIFF93_EJEMPLO_NEGATIVO : 'No se muestra ejemplo INCORRECTA: no hay slots documentales habilitados.'}
 REGLAS QUE NO SE PUEDEN RELAJAR:
 - Usa únicamente el OBJETIVO y su fragmento como verdad factual. El tribunal
   oficial es referencia de estilo; no trasladar sus números, escenarios o datos.
