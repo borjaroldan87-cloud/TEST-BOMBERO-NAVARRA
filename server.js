@@ -7982,59 +7982,45 @@ function iiff91SameRecentFact(candidate,history){
 // Selector puro y auditable: primero respeta elegibilidad SRS desde SQL,
 // y dentro de cada prioridad rota franjas, secciones y páginas del PDF.
 // El orden de los ids SQL nunca desempata la elección de conocimientos nuevos.
+// SERVER98: selección conjunta de conocimientos IIFF ya elegibles por SRS.
+// La diversidad por franjas es global: no se agotan primero todos los
+// repasos vencidos de una misma franja. Dentro de una franja se favorece
+// el repaso vencido; NO se modifica ni relaja el calendario SRS en SQL.
 function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random,recentCorrect=[]}={}){
   const valid=(candidates||[]).filter(i=>iiff91Topic(i)&&!iiff91Editorial(i));
-  const selected=[], usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
-  // Calcular la similitud una sola vez por selección, no en cada plaza.
+  const selected=[],usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
+  // La prohibición de repetición sigue siendo un veto, nunca un desempate.
   const blockedMatches=new Set();
   if(recentCorrect.length)for(const candidate of valid){
     if(iiff91SameRecentFact(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
   }
-  const pools=new Map();
-  for(const item of valid){
-    const priority=simulation?4:Math.min(5,Math.max(1,Number(item.adaptive_priority)||4));
-    if(!pools.has(priority))pools.set(priority,[]);
-    pools.get(priority).push(item);
-  }
-  const weightedPick = (pool,priority) => {
-    // La similitud documental bloqueada no se rellena con otra pregunta:
-    // fallar con explicación es preferible a incumplir el plazo SRS.
-    const options=pool.filter(c=>!usedIds.has(Number(c.id)) &&
-      !blockedMatches.has(Number(c.id)) &&
-      !iiff91SameRecentFact(c,selected));
-    if(!options.length)return false;
-    let best=null,bestScore=-Infinity;
-    for(const c of options){
+  const eligible=valid.filter(c=>!blockedMatches.has(Number(c.id)));
+  const reviewBonus=priority=>priority===1?90:priority===2?65:priority===3?50:priority===4?30:0;
+  while(selected.length<count){
+    let best=null,bestScore=-Infinity,leastBandHits=Infinity;
+    for(const c of eligible){
+      if(usedIds.has(Number(c.id))||iiff91SameRecentFact(c,selected))continue;
       const band=iiff91Band(c),section=iiff91Section(c),page=Number(c.source_page);
-      const concept=iiff91Norm(c.concept);
-      const score=-(bandHits.get(band)||0)*1000-
-        (sectionHits.get(section)||0)*110-
+      const concept=iiff91Norm(c.concept),hits=bandHits.get(band)||0;
+      // Primero la franja menos utilizada, sin umbrales arbitrarios.
+      // A igualdad de franja: sección, página, concepto y preferencia SRS.
+      const priority=simulation?4:Math.min(5,Math.max(1,Number(c.adaptive_priority)||4));
+      const score=-(sectionHits.get(section)||0)*110-
         (pageHits.get(page)||0)*180-
-        (conceptHits.get(concept)||0)*400-
-        Math.min(10,Number(c.times_asked)||0)*4+
-        (Number(c.adaptive_priority)===1 ? 5 : 0)+rng();
-      if(score>bestScore){best=c;bestScore=score;}
+        (conceptHits.get(concept)||0)*400+
+        reviewBonus(priority)-Math.min(10,Number(c.times_asked)||0)*4+rng();
+      if(hits<leastBandHits||(hits===leastBandHits&&score>bestScore)){
+        best=c;bestScore=score;leastBandHits=hits;
+      }
     }
-    if(!best)return false;
+    if(!best)break;
     const band=iiff91Band(best),section=iiff91Section(best),page=Number(best.source_page);
+    const concept=iiff91Norm(best.concept);
     selected.push(best);usedIds.add(Number(best.id));
     bandHits.set(band,(bandHits.get(band)||0)+1);
     sectionHits.set(section,(sectionHits.get(section)||0)+1);
     pageHits.set(page,(pageHits.get(page)||0)+1);
-    const concept=iiff91Norm(best.concept);
     conceptHits.set(concept,(conceptHits.get(concept)||0)+1);
-    return true;
-  };
-  // Una plaza nueva cuando hay nuevos disponibles, salvo simulacro.
-  const hasNew=(pools.get(4)||[]).length>0;
-  const reserved=simulation?0:(hasNew?1:0);
-  for(const priority of [1,2,3]){
-    while(selected.length<count-reserved&&weightedPick(pools.get(priority)||[],priority)){}
-  }
-  // Si la cobertura nueva está disponible, se usa antes del mantenimiento.
-  while(selected.length<count&&weightedPick(pools.get(4)||[],4)){}
-  for(const priority of [1,2,3,5]){
-    while(selected.length<count&&weightedPick(pools.get(priority)||[],priority)){}
   }
   if(selected.length<count)throw Error(`IIFF: objetivos examinables insuficientes: ${selected.length}/${count}.`);
   return selected;
@@ -12136,7 +12122,12 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
       uniqueBands:new Set(chosen.map(iiff91Band)).size,
       uniqueSections:new Set(chosen.map(iiff91Section)).size,
       includesIndex:chosen.some(x=>Number(x.source_page)<IIFF91_FIRST_CONTENT_PAGE),
-      priorityCounts:Object.fromEntries([1,2,3,4,5].map(p=>[p,chosen.filter(x=>Number(x.adaptive_priority)===p).length]))});
+      priorityCounts:Object.fromEntries([1,2,3,4,5].map(p=>[p,chosen.filter(x=>Number(x.adaptive_priority)===p).length])),
+      // SERVER98: permite diagnosticar la relación página-prioridad sin
+      // mostrar conceptos, respuestas ni modificar la selección.
+      priorityByPage:chosen.map(x=>({page:Number(x.source_page),priority:Number(x.adaptive_priority)||4})),
+      availableBands:[...new Set(all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)&&
+        !iiff91SameRecentFact(x,blockedHistory)).map(iiff91Band))].sort((a,b)=>a-b)});
   }catch(e){console.error('IIFF_91_PREVIEW_ERROR:',String(e?.message||e));
     res.status(500).json({ok:false,error:'No se pudo consultar la selección del manual.'});}
 });
