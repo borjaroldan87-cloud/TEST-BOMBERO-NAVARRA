@@ -7633,7 +7633,22 @@ function iiff91Editorial(item){
   // No descartar conceptos técnicos del cuerpo solo por mencionar capítulos.
   if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del temario|estructura del indice)\b/.test(concept))return true;
   if(/\b(pagina|apartado|epigrafe|seccion|capitulo)\b.*\b(manual|indice|temario)\b/.test(concept))return true;
-  if(String(item?.source_evidence||'').trim().length<55)return true;
+  const evidence=iiff91Norm(item?.source_evidence);
+  if(evidence.length<55)return true;
+  // SERVER95: excluir SOLO fichas cuyo conocimiento es una referencia
+  // editorial o la finalidad genérica de un procedimiento. No excluir
+  // instrucciones concretas de ese mismo procedimiento (dosis, actuación,
+  // secuencia, precaución). No se modifican los registros de PostgreSQL.
+  const genericObjective=/\b(objetivo|objeto|finalidad|proposito)\s+(?:general\s+|formal\s+)?(?:de\s+)?(?:este\s+|el\s+|del\s+)?procedimiento\b|\bprocedimiento\s*\d+\s*[:.\-]?\s*(?:objetivo|objeto|finalidad)\b/;
+  const objectiveConcept=genericObjective.test(concept)||
+    /\b(?:objetivo|objeto|finalidad)\s+(?:general\s+|formal\s+)?(?:de\s+)?(?:la\s+)?(?:hidratacion|actuacion|maniobra|intervencion)\b/.test(concept);
+  const genericIntro=/\b(?:el\s+)?(?:objeto|objetivo|finalidad)\s+(?:de\s+)?(?:este|el|del)\s+procedimiento\s+(?:es|consiste|sera)\b/;
+  // Si la cita solo declara su finalidad y NO desarrolla una medida
+  // concreta, la pregunta sería sobre encabezados y no sobre su aplicación.
+  // Una evidencia larga con contenido operativo queda habilitada.
+  const technicalDetail=/\b(?:\d+(?:[.,]\d+)?\s*(?:l|litros?|ml|minutos?|horas?|kg|km|m|%)|cada\s+\d+|antes\s+de|despues\s+de|durante\s+la\s+(?:maniobra|intervencion)|pasos?\s+\d+|se\s+debe\s+(?:comprobar|abrir|cerrar|aplicar|beber|ajustar|mantener|realizar))\b/;
+  if(genericIntro.test(evidence) && !technicalDetail.test(evidence) &&
+     (objectiveConcept || /\bprocedimiento\b/.test(concept)))return true;
   return false;
 }
 // SERVER 92T: activar la polaridad INCORRECTA solo con prueba documental
@@ -7659,6 +7674,10 @@ function iiff91UnsafeQuestion(q,{allowProvenNegative=false}={}){
   if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del indice)\b/.test(stem))return true;
   if(/\b(segun|conforme a)\b.{0,70}\b(apartado|indice|epigrafe|capitulo)\b/.test(stem))return true;
   if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
+  // El contenido operativo sí es válido: lo que se rechaza es memorizar
+  // su número, título o declaración de finalidad.
+  if(/\b(?:objeto|objetivo|finalidad)\s+(?:general\s+|formal\s+)?(?:establecido\s+|expreso\s+|principal\s+)?(?:en\s+|de\s+)?(?:este\s+|el\s+|del\s+)?procedimiento\b/.test(stem))return true;
+  if(/\bque\s+(?:numero|titulo)\s+(?:tiene|lleva|recibe)\s+(?:el|este)\s+procedimiento\b/.test(stem))return true;
   return false;
 }
 // SERVER 93 CANDIDATO: ejemplos resueltos y comprobados exclusivamente contra
@@ -7868,23 +7887,84 @@ function iiff91Band(item){
 function iiff91Section(item){
   return `${Number(item.topic_id)}:${iiff91Norm(item.section)||'sin epigrafe'}`;
 }
+// SERVER95: una sola lectura local de sesiones COMPLETADAS. Jamás llama a
+// Gemini ni cambia SRS, estadísticas, cobertura o historial.
+async function iiff91RecentCorrect(topicId){
+  const result=await db.query(`WITH recent_sessions AS (
+    SELECT ts.id FROM test_sessions ts
+    WHERE ts.completed=TRUE AND ts.completed_at >= NOW()-INTERVAL '14 days'
+      AND EXISTS (SELECT 1 FROM test_session_questions tsq
+        JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
+        WHERE tsq.session_id=ts.id AND ci.topic_id=$1)
+    ORDER BY ts.completed_at DESC, ts.id DESC LIMIT 8
+  )
+  SELECT ci.id,ci.concept,ci.source_page,ci.section
+  FROM recent_sessions s JOIN test_session_questions tsq ON tsq.session_id=s.id
+  JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
+  WHERE ci.topic_id=$1 AND tsq.is_correct=TRUE`,[Number(topicId)]);
+  return result.rows;
+}
+// Equivalencia deliberadamente conservadora: igualdad de ficha o concepto
+// técnico casi idéntico, preservando números y letras de los tipos A/B.
+// No se usa una coincidencia genérica de tema/página como veto.
+const IIFF91_CONCEPT_STOP=new Set([
+  'de','del','la','las','el','los','un','una','unos','unas','y','o',
+  'en','por','para','con','sin','que','como','cual','cuales','sobre',
+  'segun','manual','temario','definicion','caracteristica','respecto',
+  'establece','corresponde','procedimiento','objetivo','general','formal'
+]);
+function iiff91ConceptTokens(item){
+  return [...new Set(iiff91Norm(item?.concept).match(/[a-z0-9]+/g)||[])]
+    .filter(w=>w.length>=3||/^[0-9]+$/.test(w))
+    .filter(w=>!IIFF91_CONCEPT_STOP.has(w));
+}
+function iiff91SameRecentFact(candidate,history){
+  const id=Number(candidate.id),page=Number(candidate.source_page);
+  const text=iiff91Norm(candidate.concept);
+  const tokens=iiff91ConceptTokens(candidate);
+  for(const prior of history||[]){
+    if(id===Number(prior.id))return true;
+    if(page!==Number(prior.source_page))continue;
+    if(text && text===iiff91Norm(prior.concept))return true;
+    if(tokens.length<3)continue;
+    const oldTokens=iiff91ConceptTokens(prior);
+    if(oldTokens.length<3)continue;
+    // Marcadores de clasificaciones distintas nunca son equivalentes.
+    const marker=s=>[...iiff91Norm(s).matchAll(/\btipo\s+([a-d]|\d+)\b/g)].map(x=>x[1]).join('|');
+    const one=marker(candidate.concept),two=marker(prior.concept);
+    if(one&&two&&one!==two)continue;
+    const shared=tokens.filter(t=>oldTokens.includes(t)).length;
+    if(shared>=3 && shared/Math.max(tokens.length,oldTokens.length)>=0.80)return true;
+  }
+  return false;
+}
 // Selector puro y auditable: prioridades SRS (1..3) antes de nuevos (4),
 // y dentro de cada prioridad rota franjas, secciones y páginas del PDF.
 // El orden de los ids SQL nunca desempata la elección de conocimientos nuevos.
-function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random}={}){
+function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random,recentCorrect=[]}={}){
   const valid=(candidates||[]).filter(i=>iiff91Topic(i)&&!iiff91Editorial(i));
   const selected=[], usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
+  // Calcular la similitud una sola vez por selección, no en cada plaza.
+  const previouslyCorrect=new Set();
+  if(!simulation && recentCorrect.length)for(const candidate of valid){
+    if(iiff91SameRecentFact(candidate,recentCorrect))previouslyCorrect.add(Number(candidate.id));
+  }
   const pools=new Map();
   for(const item of valid){
     const priority=simulation?4:Math.min(5,Math.max(1,Number(item.adaptive_priority)||4));
     if(!pools.has(priority))pools.set(priority,[]);
     pools.get(priority).push(item);
   }
-  const weightedPick = pool => {
+  const weightedPick = (pool,priority) => {
     const available=pool.filter(c=>!usedIds.has(Number(c.id)));
     if(!available.length)return false;
+    // Solo preferencia, nunca exclusión irreversible. Los repasos SRS
+    // vencidos (prioridad 1) se respetan íntegramente.
+    const alternatives=priority===1||simulation?available:
+      available.filter(c=>!previouslyCorrect.has(Number(c.id)));
+    const options=alternatives.length?alternatives:available;
     let best=null,bestScore=-Infinity;
-    for(const c of available){
+    for(const c of options){
       const band=iiff91Band(c),section=iiff91Section(c),page=Number(c.source_page);
       const concept=iiff91Norm(c.concept);
       const score=-(bandHits.get(band)||0)*1000-
@@ -7909,12 +7989,12 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
   const hasNew=(pools.get(4)||[]).length>0;
   const reserved=simulation?0:(hasNew?1:0);
   for(const priority of [1,2,3]){
-    while(selected.length<count-reserved&&weightedPick(pools.get(priority)||[])){}
+    while(selected.length<count-reserved&&weightedPick(pools.get(priority)||[],priority)){}
   }
   // Si la cobertura nueva está disponible, se usa antes del mantenimiento.
-  while(selected.length<count&&weightedPick(pools.get(4)||[])){}
+  while(selected.length<count&&weightedPick(pools.get(4)||[],4)){}
   for(const priority of [1,2,3,5]){
-    while(selected.length<count&&weightedPick(pools.get(priority)||[])){}
+    while(selected.length<count&&weightedPick(pools.get(priority)||[],priority)){}
   }
   if(selected.length<count)throw Error(`IIFF: objetivos examinables insuficientes: ${selected.length}/${count}.`);
   return selected;
@@ -7949,7 +8029,14 @@ function iiff92ReplaceEditorialInMixed(targets,candidates){
 async function getIiffTargets91(count,topicIds,simulation=false){
   const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
   if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
-  const targets=chooseIiffCoverage91(candidates,count,{simulation});
+  const recentCorrect=simulation?[]:await iiff91RecentCorrect(topicIds[0]);
+  const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect});
+  console.log('IIFF_95_REPETICIONES:',JSON.stringify({
+    sesionItemsAcertados:recentCorrect.length,
+    reutilizadosNoVencidos:targets.filter(t=>Number(t.adaptive_priority)!==1 &&
+      iiff91SameRecentFact(t,recentCorrect)).length,
+    repasosVencidos:targets.filter(t=>Number(t.adaptive_priority)===1).length
+  }));
   // Solamente formato TEXTO/NUMERICA, sin preguntas de interpretación gráfica.
   const assigned=targets.map(t=>({...t,
     questionFamily: (t.item_type==='formula'||t.evaluation_type==='calculo')?'2024_NUMERICA':'2024_TEXTO'}));
@@ -11957,8 +12044,12 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
     if(!found.rows.length)return res.status(404).json({ok:false,error:'Tema canónico no encontrado.'});
     const id=Number(found.rows[0].id);
     const all=await getAdaptiveCoverageCandidates(3000,[id],'adaptive');
-    const chosen=chooseIiffCoverage91(all,count);
+    const recentCorrect=await iiff91RecentCorrect(id);
+    const chosen=chooseIiffCoverage91(all,count,{recentCorrect});
     res.json({ok:true,readonly:true,geminiCalls:0,topicId:id,
+      recentCorrect:recentCorrect.length,
+      recentRepeatedNonDue:chosen.filter(t=>Number(t.adaptive_priority)!==1 &&
+        iiff91SameRecentFact(t,recentCorrect)).length,
       requested:count,eligible:all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)).length,
       skipped:all.filter(x=>iiff91Topic(x)&&iiff91Editorial(x)).length,
       pages:chosen.map(x=>Number(x.source_page)),
