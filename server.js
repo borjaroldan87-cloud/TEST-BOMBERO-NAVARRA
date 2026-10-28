@@ -6974,7 +6974,7 @@ ORDER BY
   );
 
   const iiffIds96=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
-  const blocked96=(await Promise.all(iiffIds96.map(iiff96BlockedHistory))).flat();
+  const blocked96=(await Promise.all(iiffIds96.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||
     iiff91SameRecentFact(row,blocked96)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
   Number(row.failed_validation_version)===114})))).slice(0,count).map(row=>({
@@ -7133,7 +7133,7 @@ WHERE
   // Para IIFF, adicionalmente evita hermanos semánticos en la misma página.
   const iiffTopics=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
   if(!iiffTopics.length)return result.rows;
-  const blocked=(await Promise.all(iiffTopics.map(iiff96BlockedHistory))).flat();
+  const blocked=(await Promise.all(iiffTopics.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   return result.rows.filter(r=>!iiff91Topic(r)||!iiff91SameRecentFact(r,blocked));
 }
 
@@ -12079,7 +12079,7 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     ORDER BY qb.times_shown ASC,qb.last_shown_at ASC NULLS FIRST,qb.id DESC
     LIMIT 1500`,[allowedTopicIds,difficulty]);
   const iiffTopicIds=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
-  const blocked=(await Promise.all(iiffTopicIds.map(iiff96BlockedHistory))).flat();
+  const blocked=(await Promise.all(iiffTopicIds.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   const usedQuestions=new Set(),usedCoverage=new Set(),pairs=[];
   for(const r of result.rows){
     if(iiff91Topic(r) && (iiff91SameRecentFact(r,blocked)||
