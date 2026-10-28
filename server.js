@@ -7675,15 +7675,6 @@ D) El 8 y el 9 se diferencian por su carga total, pero no por la disposición de
 Respuesta: B.
 Justificación: El 9 acumula hojarasca más profunda y menos compactada; ambos tienen 4,5-6 t/ha, pero el 9 tiene comportamiento más activo (Manual IIFF, págs. impresas 53-54).
 
-EJEMPLO P2 — UMBRALES DE EXTINCIÓN
-Enunciado: En la tabla de capacidad de extinción, un frente con 2,8 m de altura de llama e intensidad aproximada de 2.000 kW/m corresponde a:
-A) Ataque directo con herramienta manual.
-B) Ataque con agua o maquinaria.
-C) Ataque indirecto mediante líneas de control alejadas.
-D) Situación fuera de capacidad de extinción.
-Respuesta: C.
-Justificación: El rango de 2,5-3,5 m y 1.700-3.500 kW/m corresponde a ataque indirecto (Manual IIFF, pág. impresa 87).
-
 EJEMPLO P3 — DOS PARÁMETROS DEL MISMO PROCEDIMIENTO
 Enunciado: Durante la extinción de un incendio agrícola con autobomba en marcha, ¿qué pareja de caudales se recomienda para rastrojo y cereal sin cosechar, respectivamente?
 A) 50 l/min y 90 l/min.
@@ -7728,6 +7719,7 @@ Justificación: El manual prescribe expresamente arrastrar el material hacia la 
 function iiff92GenerationRules(difficulty,group=[]){
   const allowed=(group||[]).flatMap((t,i)=>
     iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)?[i+1]:[]);
+  const iiffSlots=(group||[]).flatMap((t,i)=>iiff91Topic(t)?[i+1]:[]);
   const muyAlta=String(difficulty).toLowerCase()==='muy alta';
   // SERVER 92S: formatos abstraídos de exámenes oficiales de Bomberos de
   // Navarra 2024 y 2026. Nunca aportan conocimientos ni respuestas al test.
@@ -7739,13 +7731,20 @@ function iiff92GenerationRules(difficulty,group=[]){
   secuencias técnicas y diferencias conceptuales con fundamento en el FRAGMENTO.
   Si el fragmento solo contiene un dato, exige su recuerdo preciso con cuatro
   opciones cercanas; no inventes una segunda condición. No son obligatorios ni
-  casos ficticios, ni cálculos, ni razonamientos compuestos en cada pregunta.`
+  casos ficticios, ni cálculos, ni razonamientos compuestos en cada pregunta.
+  La exigencia se demuestra por DISTRACTORES CREÍBLES y detalles técnicos
+  discriminantes, no por citar títulos, numeraciones o lugares del índice.
+  Si un aspirante puede descartar dos opciones solo por su forma o por
+  conocimientos comunes ajenos al manual, rediseña las cuatro opciones.`
     : `ALTA DE OPOSICIÓN: recuperación rigurosa y comprensión de un hecho
   técnico documentado. Mantén cuatro distractores plausibles y cercanos,
   sin exigir deducciones o aplicaciones no contenidas en el fragmento.`;
   return `
 CALIBRACIÓN MANUAL IIFF 2026 CON REFERENCIA DE ESTILO EN EXÁMENES OFICIALES
 DE BOMBEROS NAVARRA 2024 Y 2026. EXCLUSIVAMENTE ESTILO, NUNCA FUENTE FACTUAL.
+SLOTS_IIFF (1-based): ${JSON.stringify(iiffSlots)}.
+Estas reglas se aplican SOLO a SLOTS_IIFF; no cambian los criterios de
+Legislación, Geografía ni otros temas Específicos del mismo lote mixto.
 ${nivel}
 PERMITIDOS_NEGATIVA (slot 1-based): ${JSON.stringify(allowed)}.
 Si la lista está vacía, TODAS las preguntas deben ser POSITIVAS.
@@ -7778,6 +7777,12 @@ verificación documental, independiente de estos ejemplos.
 ${IIFF93_EJEMPLOS_POSITIVOS}
 ${allowed.length ? IIFF93_EJEMPLO_NEGATIVO : 'No se muestra ejemplo INCORRECTA: no hay slots documentales habilitados.'}
 REGLAS QUE NO SE PUEDEN RELAJAR:
+- EXAMINABILIDAD TÉCNICA: si el objetivo menciona «procedimiento 8»,
+  «apartado 5», la posición de una sección o un nombre de epígrafe,
+  NUNCA preguntes qué número, título, lugar u objetivo genérico tiene.
+  Pregunta por sus actuaciones, condiciones, cifras, decisiones y
+  precauciones expresas; si el fragmento no ofrece contenido técnico
+  examinable, NO inventes un supuesto para elevar la dificultad.
 - Usa únicamente el OBJETIVO y su fragmento como verdad factual. El tribunal
   oficial es referencia de estilo; no trasladar sus números, escenarios o datos.
 - Cuatro respuestas, una única válida. Mismo tipo de opción, misma unidad
@@ -7801,6 +7806,22 @@ REGLAS QUE NO SE PUEDEN RELAJAR:
 - Para que la pregunta sea válida, la alternativa correcta debe justificarse
   literalmente y los distractores no pueden ser también correctos en el contexto.
 - Sin cuotas de patrones; alterna cuando lo permitan los objetivos del lote.
+CONTROL DE CALIDAD EN ESTA MISMA GENERACIÓN, ANTES DE EMITIR EL JSON:
+1. ¿Se puede elegir la respuesta sin conocer el manual porque las otras
+   opciones son absurdas, absolutas («siempre», «nunca», «únicamente») o
+   pertenecen a categorías evidentemente distintas? Si sí, REESCRIBE.
+2. ¿Las cuatro alternativas son de la MISMA clase técnica, con una
+   diferencia concreta y comprobable (unidad, cifra, orden, condición,
+   componente, localización o término) cuando el fragmento la permite?
+   Evita tres paráfrasis de la misma verdad, aun en pregunta INCORRECTA.
+3. ¿La respuesta es la única compatible con el enunciado COMPLETO y
+   con la evidencia? Si no puedes demostrarlo, NO fabriques una segunda
+   condición: reformula sobre el hecho que sí esté acreditado.
+4. ¿La dificultad depende del contenido operativo y NO de recordar el
+   número de procedimiento, el título de un epígrafe o una obviedad?
+   Si depende de eso, REESCRIBE con el dato técnico del fragmento.
+No muestres este control, justificaciones añadidas ni borradores; responde
+SOLO con el JSON existente. No invoques herramientas ni auditorías nuevas.
 `;
 }
 
