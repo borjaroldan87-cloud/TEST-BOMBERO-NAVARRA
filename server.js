@@ -7781,20 +7781,22 @@ function iiff92GenerationRules(difficulty,group=[]){
   // Navarra 2024 y 2026. Nunca aportan conocimientos ni respuestas al test.
   // Un objetivo documentado puede justificar alta dificultad sin dos hechos.
   const nivel=muyAlta
-    ? `MUY ALTA DE OPOSICIÓN: el objetivo es que un opositor bien preparado
-  distinga cuatro alternativas verosímiles y cercanas, como en los exámenes
-  oficiales. Prioriza condiciones precisas de aplicación, parámetros próximos,
-  secuencias técnicas y diferencias conceptuales con fundamento en el FRAGMENTO.
-  Si el fragmento solo contiene un dato, exige su recuerdo preciso con cuatro
-  opciones cercanas; no inventes una segunda condición. No son obligatorios ni
-  casos ficticios, ni cálculos, ni razonamientos compuestos en cada pregunta.
-  La exigencia se demuestra por DISTRACTORES CREÍBLES y detalles técnicos
-  discriminantes, no por citar títulos, numeraciones o lugares del índice.
-  Si un aspirante puede descartar dos opciones solo por su forma o por
-  conocimientos comunes ajenos al manual, rediseña las cuatro opciones.`
-    : `ALTA DE OPOSICIÓN: recuperación rigurosa y comprensión de un hecho
-  técnico documentado. Mantén cuatro distractores plausibles y cercanos,
-  sin exigir deducciones o aplicaciones no contenidas en el fragmento.`;
+    ? `MUY ALTA DE OPOSICIÓN: exige distinguir un dato técnico preciso del
+  FRAGMENTO, no descartar opciones absurdas. Para cada objetivo formula una
+  pregunta focalizada y después la clave documental. En POSITIVA, crea
+  TRES distractores falsos y plausibles; en INCORRECTA, la clave es la
+  ÚNICA afirmación falsa y las otras TRES deben ser verdaderas, acreditadas
+  con citas literales y próximas técnicamente. Cada opción no-clave debe
+  diferir de la clave por un rasgo discriminante del fragmento:
+  un valor cercano, unidad compatible, condición, orden, componente o relación.
+  Cuatro opciones de la misma clase técnica y nivel de detalle; para magnitudes,
+  misma unidad y orden de magnitud, con valores próximos NO solapados.
+  No inventes otra condición ni un supuesto que el fragmento no permita.
+  La dificultad procede de la precisión del temario, no de la extensión.`
+    : `ALTA DE OPOSICIÓN: pregunta por un hecho documentado con cuatro
+  alternativas homogéneas y no-clave creíbles: en POSITIVA son falsas;
+  en INCORRECTA son tres verdaderas, cada una demostrada literalmente.
+  No introduzcas condiciones que el fragmento no documenta.`;
   return `
 CALIBRACIÓN MANUAL IIFF 2026 CON REFERENCIA DE ESTILO EN EXÁMENES OFICIALES
 DE BOMBEROS NAVARRA 2024 Y 2026. EXCLUSIVAMENTE ESTILO, NUNCA FUENTE FACTUAL.
@@ -7862,22 +7864,21 @@ REGLAS QUE NO SE PUEDEN RELAJAR:
 - Para que la pregunta sea válida, la alternativa correcta debe justificarse
   literalmente y los distractores no pueden ser también correctos en el contexto.
 - Sin cuotas de patrones; alterna cuando lo permitan los objetivos del lote.
-CONTROL DE CALIDAD EN ESTA MISMA GENERACIÓN, ANTES DE EMITIR EL JSON:
-1. ¿Se puede elegir la respuesta sin conocer el manual porque las otras
-   opciones son absurdas, absolutas («siempre», «nunca», «únicamente») o
-   pertenecen a categorías evidentemente distintas? Si sí, REESCRIBE.
-2. ¿Las cuatro alternativas son de la MISMA clase técnica, con una
-   diferencia concreta y comprobable (unidad, cifra, orden, condición,
-   componente, localización o término) cuando el fragmento la permite?
-   Evita tres paráfrasis de la misma verdad, aun en pregunta INCORRECTA.
-3. ¿La respuesta es la única compatible con el enunciado COMPLETO y
-   con la evidencia? Si no puedes demostrarlo, NO fabriques una segunda
-   condición: reformula sobre el hecho que sí esté acreditado.
-4. ¿La dificultad depende del contenido operativo y NO de recordar el
-   número de procedimiento, el título de un epígrafe o una obviedad?
-   Si depende de eso, REESCRIBE con el dato técnico del fragmento.
-No muestres este control, justificaciones añadidas ni borradores; responde
-SOLO con el JSON existente. No invoques herramientas ni auditorías nuevas.
+REVISIÓN INTERNA DEL MISMO LOTE (SIN LLAMADAS NI CAMPOS NUEVOS):
+1. En POSITIVA, examina cada una de las tres opciones falsas; en
+   INCORRECTA, examina las tres opciones verdaderas. Verifica para cada
+   una que sea de la misma clase técnica, creíble para un opositor
+   preparado y distinta de la clave por un dato material documentado.
+   Si falla, reescríbela sin alterar la evidencia ni su valor de verdad.
+2. Compara las CUATRO opciones: nada de sinónimos/solapamientos, pistas por
+   absolutos, longitud o palabras compartidas solo con la clave. No uses
+   tres cifras de órdenes de magnitud lejanos frente a una cifra precisa.
+3. La clave ha de ser ÚNICA y demostrable por el fragmento. Si no puedes
+   sostener un caso compuesto, usa un único hecho técnico comprobable.
+   En INCORRECTA conserva las cuatro evidencias exigidas: sin excepciones.
+4. No preguntes índices, números u objetivos editoriales de procedimientos.
+   En extractos simples prioriza precisión factual antes que complejidad falsa.
+Responde solo con el JSON existente; no adjuntes esta revisión interna.
 `;
 }
 
@@ -11932,19 +11933,25 @@ verdadera con la evidencia disponible, si una afirmación exige demostrar
 que algo NO está en otra sección, o si cualquier distractor parece compatible
 con el fragmento. Comprueba el dato que distingue las cuatro opciones.
 No examines imágenes. No uses conocimiento externo.
-Asigna también calidad=0, 1 o 2 independientemente de la respuesta:
-0: por debajo de una oposición real: al menos dos distractores evidentes,
-   pista formal que regala la solución o resolución sin conocer el contenido;
-1: pregunta exigente y válida de estilo OPOSICIÓN, con cuatro alternativas
-   homogéneas y plausibles, que exige recuerdo técnico preciso o distinción
-   acreditada por el fragmento. Un dato único y cuatro valores cercanos
-   pueden ser plenamente válidos incluso para MUY ALTA solicitada;
-2: especialmente discriminante en una oposición real: diferencias técnicas
-   muy próximas, condiciones, secuencias o parámetros documentados.
-Los niveles 1 y 2 son aptos para un examen oficial exigente; 2 es una meta
-preferida en MUY ALTA, pero NO una condición necesaria de validez factual.
-La dificultad NO se mide por longitud, dificultad de redacción o multiplicar
-hechos. Las cuatro opciones deben superar la auditoría factual igual que antes.
+Asigna calidad=0, 1 o 2 a TODAS las filas (el esquema lo exige).
+SOLO PARA FILAS IIFF, aplica estos criterios adicionales de dificultad;
+para las demás conserva los criterios de auditoría comunes.
+Examina las TRES opciones no-clave frente a la clave: en POSITIVA deben
+ser falsas; en INCORRECTA deben ser verdaderas y la clave la única falsa,
+con sus cuatro pruebas literales. Comprueba misma clase técnica/unidad,
+plausibilidad, diferencia material y ausencia de pistas por absolutos,
+longitud, gramática, escalas inverosímiles o repeticiones semánticas.
+Sin evidencia
+suficiente para elegir una sola respuesta, answer=-1 (control factual aparte).
+0: DOS o más distractores se descartan sin conocer el temario, hay pista
+   formal decisiva o la pregunta exige solo reconocer un título editorial.
+1: pregunta técnicamente válida, focalizada, con como máximo un distractor
+   débil; requiere recuerdo preciso. Un solo dato con valores próximos vale.
+2: los TRES distractores son creíbles y próximos sin solaparse; exige una
+   distinción documentada de valor, condición, secuencia o procedimiento.
+En MUY ALTA se PREFIERE 2, pero 1 sigue admitido: NO impongas un veto
+subjetivo que rechace preguntas factuales correctas. No confundas proximidad
+con que otra alternativa también sea verdadera. No inventes justificaciones.
 Para preguntas INCORRECTA/FALSA aporta optionProofs EN EL ORDEN A,B,C,D:
 cuatro objetos {trueAccordingToPDF:boolean,quote:string}. Tres valores true
 con citas LITERALES que prueben expresamente cada afirmación y un solo false
