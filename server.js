@@ -6866,6 +6866,25 @@ async function resolveGenerationTopicScope(body = {}){
 
   return allowedTopicIds;
 }
+// SERVER96 — el SRS es una restricción temporal, NO una puntuación.
+// NOW() y las fechas TIMESTAMPTZ se comparan en PostgreSQL (instante absoluto).
+// Para registros legados sin estado SRS, último uso +24 h; si no hay fecha,
+// un conocimiento marcado como trabajado no se reactiva a ciegas.
+// Una sesión generada sin entregar también bloquea el mismo conocimiento 24 h.
+const SRS96_ELIGIBLE_SQL = `
+  (crs.next_review_at IS NULL OR crs.next_review_at <= NOW())
+  AND (COALESCE(ci.times_asked,0)=0 OR
+    (ci.last_asked_at IS NOT NULL AND
+      (crs.next_review_at IS NOT NULL OR
+       ci.last_asked_at <= NOW()-INTERVAL '1 day')))
+  AND NOT EXISTS (
+    SELECT 1 FROM test_session_questions used96
+    JOIN test_sessions sess96 ON sess96.id=used96.session_id
+    WHERE used96.coverage_item_id=ci.id
+      AND sess96.started_at > NOW()-INTERVAL '1 day'
+  )
+`;
+
 async function getFailedCoverageTargets(
   count,
   allowedTopicIds = null
@@ -6929,9 +6948,11 @@ qb.validation_version AS failed_validation_version
 
 JOIN question_bank qb
   ON qb.id = la.question_id
+LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
 
 WHERE
   la.is_correct = FALSE
+  AND ${SRS96_ELIGIBLE_SQL}
   AND (ci.exam_relevant = TRUE OR ci.item_type='anki_independent')
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND (
@@ -6952,7 +6973,10 @@ ORDER BY
 ]
   );
 
-  return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
+  const iiffIds96=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
+  const blocked96=(await Promise.all(iiffIds96.map(iiff96BlockedHistory))).flat();
+  return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||
+    iiff91SameRecentFact(row,blocked96)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
   Number(row.failed_validation_version)===114})))).slice(0,count).map(row=>({
   ...row,
 
@@ -7086,6 +7110,7 @@ LEFT JOIN LATERAL (
 
 WHERE
   ci.exam_relevant = TRUE
+  AND ${SRS96_ELIGIBLE_SQL}
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND (
     $2::int[] IS NULL
@@ -7104,7 +7129,12 @@ WHERE
 ]
   );
 
-  return result.rows;
+  // SERVER96: la SQL ya bloquea por fecha/ID todos los bloques.
+  // Para IIFF, adicionalmente evita hermanos semánticos en la misma página.
+  const iiffTopics=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
+  if(!iiffTopics.length)return result.rows;
+  const blocked=(await Promise.all(iiffTopics.map(iiff96BlockedHistory))).flat();
+  return result.rows.filter(r=>!iiff91Topic(r)||!iiff91SameRecentFact(r,blocked));
 }
 
 async function getNewCoverageCandidate(
@@ -7139,8 +7169,10 @@ async function getNewCoverageCandidate(
     FROM coverage_items ci
     JOIN topics t
       ON t.id = ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     WHERE
   ci.exam_relevant = TRUE
+  AND ${SRS96_ELIGIBLE_SQL}
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
   AND ci.times_asked = 0
   AND (
@@ -7151,7 +7183,7 @@ async function getNewCoverageCandidate(
       ci.times_asked ASC,
       ci.last_asked_at ASC NULLS FIRST,
       ci.id ASC
-    LIMIT 1
+    LIMIT 60
   `,
   [
     Array.isArray(allowedTopicIds)
@@ -7160,7 +7192,12 @@ async function getNewCoverageCandidate(
   ]
 );
 
-  return result.rows[0] || null;
+  for(const candidate of result.rows){
+    if(!iiff91Topic(candidate))return candidate;
+    const blocked=await iiff96BlockedHistory(Number(candidate.topic_id));
+    if(!iiff91SameRecentFact(candidate,blocked))return candidate;
+  }
+  return null;
 }
 
 /* SERVER 83: selector puro, testeable y sin llamadas de red.
@@ -7887,21 +7924,23 @@ function iiff91Band(item){
 function iiff91Section(item){
   return `${Number(item.topic_id)}:${iiff91Norm(item.section)||'sin epigrafe'}`;
 }
-// SERVER95: una sola lectura local de sesiones COMPLETADAS. Jamás llama a
-// Gemini ni cambia SRS, estadísticas, cobertura o historial.
-async function iiff91RecentCorrect(topicId){
-  const result=await db.query(`WITH recent_sessions AS (
-    SELECT ts.id FROM test_sessions ts
-    WHERE ts.completed=TRUE AND ts.completed_at >= NOW()-INTERVAL '14 days'
-      AND EXISTS (SELECT 1 FROM test_session_questions tsq
-        JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
-        WHERE tsq.session_id=ts.id AND ci.topic_id=$1)
-    ORDER BY ts.completed_at DESC, ts.id DESC LIMIT 8
-  )
-  SELECT ci.id,ci.concept,ci.source_page,ci.section
-  FROM recent_sessions s JOIN test_session_questions tsq ON tsq.session_id=s.id
-  JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
-  WHERE ci.topic_id=$1 AND tsq.is_correct=TRUE`,[Number(topicId)]);
+// SERVER96 — historial de conocimientos bloqueados (aciertos, errores,
+// blancos e intentos mostrados). Una sola consulta local; sin Gemini.
+async function iiff96BlockedHistory(topicId,executor=db){
+  const result=await executor.query(`
+    SELECT DISTINCT ON (ci.id)
+      ci.id,ci.concept,ci.source_page,ci.section
+    FROM test_session_questions tsq
+    JOIN test_sessions ts ON ts.id=tsq.session_id
+    JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND (
+      crs.next_review_at > NOW() OR
+      ts.started_at > NOW()-INTERVAL '1 day' OR
+      (ci.times_asked>0 AND ci.last_asked_at>NOW()-INTERVAL '1 day')
+    )
+    ORDER BY ci.id,ts.started_at DESC,ts.id DESC
+  `,[Number(topicId)]);
   return result.rows;
 }
 // Equivalencia deliberadamente conservadora: igualdad de ficha o concepto
@@ -7924,8 +7963,10 @@ function iiff91SameRecentFact(candidate,history){
   const tokens=iiff91ConceptTokens(candidate);
   for(const prior of history||[]){
     if(id===Number(prior.id))return true;
-    if(page!==Number(prior.source_page))continue;
     if(text && text===iiff91Norm(prior.concept))return true;
+    // Solo aproximación léxica MUY conservadora en la misma página;
+    // distintos conceptos técnicos nunca se fusionan por sección común.
+    if(page!==Number(prior.source_page))continue;
     if(tokens.length<3)continue;
     const oldTokens=iiff91ConceptTokens(prior);
     if(oldTokens.length<3)continue;
@@ -7938,16 +7979,16 @@ function iiff91SameRecentFact(candidate,history){
   }
   return false;
 }
-// Selector puro y auditable: prioridades SRS (1..3) antes de nuevos (4),
+// Selector puro y auditable: primero respeta elegibilidad SRS desde SQL,
 // y dentro de cada prioridad rota franjas, secciones y páginas del PDF.
 // El orden de los ids SQL nunca desempata la elección de conocimientos nuevos.
 function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random,recentCorrect=[]}={}){
   const valid=(candidates||[]).filter(i=>iiff91Topic(i)&&!iiff91Editorial(i));
   const selected=[], usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
   // Calcular la similitud una sola vez por selección, no en cada plaza.
-  const previouslyCorrect=new Set();
-  if(!simulation && recentCorrect.length)for(const candidate of valid){
-    if(iiff91SameRecentFact(candidate,recentCorrect))previouslyCorrect.add(Number(candidate.id));
+  const blockedMatches=new Set();
+  if(recentCorrect.length)for(const candidate of valid){
+    if(iiff91SameRecentFact(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
   }
   const pools=new Map();
   for(const item of valid){
@@ -7956,13 +7997,12 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
     pools.get(priority).push(item);
   }
   const weightedPick = (pool,priority) => {
-    const available=pool.filter(c=>!usedIds.has(Number(c.id)));
-    if(!available.length)return false;
-    // Solo preferencia, nunca exclusión irreversible. Los repasos SRS
-    // vencidos (prioridad 1) se respetan íntegramente.
-    const alternatives=priority===1||simulation?available:
-      available.filter(c=>!previouslyCorrect.has(Number(c.id)));
-    const options=alternatives.length?alternatives:available;
+    // La similitud documental bloqueada no se rellena con otra pregunta:
+    // fallar con explicación es preferible a incumplir el plazo SRS.
+    const options=pool.filter(c=>!usedIds.has(Number(c.id)) &&
+      !blockedMatches.has(Number(c.id)) &&
+      !iiff91SameRecentFact(c,selected));
+    if(!options.length)return false;
     let best=null,bestScore=-Infinity;
     for(const c of options){
       const band=iiff91Band(c),section=iiff91Section(c),page=Number(c.source_page);
@@ -8029,12 +8069,12 @@ function iiff92ReplaceEditorialInMixed(targets,candidates){
 async function getIiffTargets91(count,topicIds,simulation=false){
   const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
   if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
-  const recentCorrect=simulation?[]:await iiff91RecentCorrect(topicIds[0]);
-  const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect});
-  console.log('IIFF_95_REPETICIONES:',JSON.stringify({
-    sesionItemsAcertados:recentCorrect.length,
-    reutilizadosNoVencidos:targets.filter(t=>Number(t.adaptive_priority)!==1 &&
-      iiff91SameRecentFact(t,recentCorrect)).length,
+  const blockedHistory=await iiff96BlockedHistory(topicIds[0]);
+  const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect:blockedHistory});
+  console.log('IIFF_96_BLOQUEO_SRS:',JSON.stringify({
+    historialBloqueado:blockedHistory.length,
+    equivalentesBloqueadosEnResultado:targets.filter(t=>
+      iiff91SameRecentFact(t,blockedHistory)).length,
     repasosVencidos:targets.filter(t=>Number(t.adaptive_priority)===1).length
   }));
   // Solamente formato TEXTO/NUMERICA, sin preguntas de interpretación gráfica.
@@ -9466,6 +9506,32 @@ async function persistGeneratedTest({
 
   try{
     await client.query("BEGIN");
+    // Las generaciones simultáneas sobre un mismo manual se serializan
+    // al GUARDAR (no durante Gemini), evitando sesiones hermanas distintas.
+    const iiffTopics96=[...new Set(targets.filter(iiff91Topic)
+      .map(t=>Number(t.topic_id)))];
+    if(iiffTopics96.length)await client.query(`SELECT id FROM topics
+      WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE`,[iiffTopics96]);
+    // SERVER96: última barrera, bajo bloqueo de filas, contra dos POST
+    // concurrentes, recuperaciones y sustituciones posteriores a selección.
+    const ids=targets.map(t=>Number(t?.id));
+    if(ids.some(id=>!Number.isInteger(id)||id<=0)||new Set(ids).size!==ids.length)
+      throw new Error('SRS96: objetivos inexistentes o repetidos dentro del test.');
+    const locked=await client.query(`SELECT id FROM coverage_items
+      WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE`,[ids]);
+    if(locked.rows.length!==ids.length)
+      throw new Error('SRS96: conocimiento eliminado durante la generación.');
+    const eligible=await client.query(`SELECT ci.id FROM coverage_items ci
+      LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+      WHERE ci.id=ANY($1::int[]) AND ${SRS96_ELIGIBLE_SQL}`,[ids]);
+    if(eligible.rows.length!==ids.length)
+      throw new Error('SRS96: algún conocimiento se preguntó antes de su plazo de repaso. No se guarda el test.');
+    for(const topicId of iiffTopics96){
+      const blocked=await iiff96BlockedHistory(topicId,client);
+      if(targets.some(t=>Number(t.topic_id)===topicId &&
+        iiff91SameRecentFact(t,blocked)))
+        throw new Error('SRS96: objetivo IIFF equivalente aún bloqueado por el calendario de repaso.');
+    }
 
     const sessionResult = await client.query(
   `INSERT INTO test_sessions (
@@ -11163,6 +11229,14 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
       LEFT JOIN coverage_review_state vr ON vr.coverage_item_id=ci.id
       WHERE a.topic_order=$1 AND a.option_count IN (3,4) AND a.direct_use_eligible=TRUE
         AND a.validation_status='validated'
+        AND (sr.next_review_at IS NULL OR sr.next_review_at<=NOW())
+        AND (vr.next_review_at IS NULL OR vr.next_review_at<=NOW())
+        AND (a.last_used_at IS NULL OR a.last_used_at<=NOW()-INTERVAL '1 day')
+        AND NOT EXISTS (SELECT 1 FROM question_bank qrecent
+          JOIN test_session_questions qts ON qts.question_id=qrecent.id
+          JOIN test_sessions qsession ON qsession.id=qts.session_id
+          WHERE qrecent.source_anki_question_id=a.id
+            AND qsession.started_at>NOW()-INTERVAL '1 day')
       ORDER BY CASE WHEN COALESCE(sr.next_review_at,vr.next_review_at)<=NOW()
         THEN 0 ELSE 1 END ASC,a.times_used ASC,a.last_used_at ASC NULLS FIRST,a.id ASC
       LIMIT 700`,[g.order,topicId]);
@@ -11994,16 +12068,22 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     aq.direct_use_eligible AS anki_direct_eligible
     FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
     JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
-    WHERE qb.active=TRUE AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
+    WHERE qb.active=TRUE AND ${SRS96_ELIGIBLE_SQL}
+      AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
       AND qb.validation_version>=6
       AND qb.validation_version NOT IN (107,113)
       AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
       AND qb.difficulty=$2
     ORDER BY qb.times_shown ASC,qb.last_shown_at ASC NULLS FIRST,qb.id DESC
     LIMIT 1500`,[allowedTopicIds,difficulty]);
+  const iiffTopicIds=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
+  const blocked=(await Promise.all(iiffTopicIds.map(iiff96BlockedHistory))).flat();
   const usedQuestions=new Set(),usedCoverage=new Set(),pairs=[];
   for(const r of result.rows){
+    if(iiff91Topic(r) && (iiff91SameRecentFact(r,blocked)||
+      iiff91SameRecentFact(r,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
     const stem=R136_NORM(r.stem),ci=Number(r.correct_index),id=Number(r.coverage_item_id);
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
@@ -12044,12 +12124,12 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
     if(!found.rows.length)return res.status(404).json({ok:false,error:'Tema canónico no encontrado.'});
     const id=Number(found.rows[0].id);
     const all=await getAdaptiveCoverageCandidates(3000,[id],'adaptive');
-    const recentCorrect=await iiff91RecentCorrect(id);
-    const chosen=chooseIiffCoverage91(all,count,{recentCorrect});
+    const blockedHistory=await iiff96BlockedHistory(id);
+    const chosen=chooseIiffCoverage91(all,count,{recentCorrect:blockedHistory});
     res.json({ok:true,readonly:true,geminiCalls:0,topicId:id,
-      recentCorrect:recentCorrect.length,
-      recentRepeatedNonDue:chosen.filter(t=>Number(t.adaptive_priority)!==1 &&
-        iiff91SameRecentFact(t,recentCorrect)).length,
+      blockedHistory:blockedHistory.length,
+      blockedEquivalentsSelected:chosen.filter(t=>
+        iiff91SameRecentFact(t,blockedHistory)).length,
       requested:count,eligible:all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)).length,
       skipped:all.filter(x=>iiff91Topic(x)&&iiff91Editorial(x)).length,
       pages:chosen.map(x=>Number(x.source_page)),
