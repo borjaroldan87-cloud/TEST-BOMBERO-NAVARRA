@@ -4575,13 +4575,66 @@ function isIiffManual86(topic){
   return String(topic?.block||"").toLowerCase()==="especifico" &&
     normalizeIiffTopicName86(topic?.name,"especifico")==="Manual de IIFF de Navarra 2026";
 }
-function coverageImageRulesIiff86(topic){
+// SERVER 103: Guía compacta de examinabilidad VISUAL del Manual IIFF 2026.
+// Fuente: PDF del usuario, 231 páginas, y su informe de revisión visual.
+// Esta guía orienta; NUNCA sustituye a source_evidence ni prueba una respuesta.
+const IIFF_VISUAL_GUIA_103 = Object.freeze([
+  [2,5,'Gráficos estadísticos: tendencias y categorías solamente con ejes, periodo y leyenda inequívocos; no extrapolar datos. Fotografías de incendios: ilustrativas salvo técnica visible.'],
+  [12,17,'Mapa, organigrama y cuadros de dotación: relaciones y capacidades legibles. Fotografías de brigadas: técnica y composición verificables, no identidades personales ni lugar de la toma.'],
+  [22,22,'Alfabeto radiofónico: correspondencia de comunicaciones documentada, no posición editorial de las celdas.'],
+  [26,43,'Esquemas de reacciones, llama, tetraedro y chorros: reconocer procesos, zonas, componentes, técnicas y diferencias operativas verificables.'],
+  [47,58,'Modelos de combustible y topografía: utilizar tablas, carga y grupos con condiciones completas; los modelos 8 y 9 comparten algunos rangos y no pueden distinguirse solo por ellos. Fotografías de combustible: reconocimiento solo si sus rasgos permiten respuesta única.'],
+  [64,67,'Fórmula de humedad y tabla Beaufort: variables, unidades e intervalos exactos; conservar fuerza, escala, límites y correspondencias con leyenda.'],
+  [69,80,'Foehn, contravientos, inversiones y radiosondeos: interpretación de flechas, perfiles y cambios solo con datos y ejes visibles; fotos ambientales no prueban por sí solas causas.'],
+  [82,90,'Campbell, longitud/altura de llama, capacidad de extinción y partes del incendio: relaciones completas, rangos no solapados y condiciones operativas.'],
+  [100,112,'Herramientas y motosierra: reconocer componentes, riesgos, posiciones, corte, rebote y técnica correcta cuando el dibujo o foto sea inequívoco y concordante con el texto.'],
+  [115,131,'Mangueras, lanzas, bombas y curvas hidráulicas: componentes, normativa, relaciones y cálculo con unidades. El gráfico de bomba de la página 131 es FICTICIO: sus cifras no son prestaciones reales.'],
+  [138,143,'Medios aéreos: capacidades y clasificaciones verificadas por tabla y texto; fotos de aeronaves no justifican por sí solas marcas, base o prestaciones.'],
+  [145,168,'Procedimientos y autoprotección: pasos y secuencias, comprobaciones, caudales y seguridad; distinguir condiciones similares sin preguntar el número editorial de procedimiento.'],
+  [169,176,'Suplementación y garrapatas: tablas y técnicas documentadas; no memorizar marca, color de envase o diagnóstico deducido de una foto aislada.'],
+  [183,198,'LACES, EPI, convoy, operaciones aéreas y señales a helicóptero: uso, limitaciones, señales, maniobras y secuencias; no marcas ni rasgos casuales.'],
+  [200,219,'Primeros auxilios: tablas de parámetros, RCP, DEA, quemaduras, movilización y START. Comprobar el algoritmo COMPLETO: dos alternativas con signos reales no deben tratarse falsamente como excluyentes. Fotografía clínica aislada no prueba diagnóstico único.'],
+]);
+function iiffVisualManualPage103(target){
+  const printed=Number(target?.manual_page ?? target?.manualPage);
+  if(Number.isInteger(printed) && printed>=1 && printed<=221)return printed;
+  const physical=Number(target?.source_page ?? target?.sourcePage);
+  return Number.isInteger(physical)&&physical>=11&&physical<=231?physical-10:null;
+}
+function iiffVisualSpecific103(items){
+  const pages=[...new Set((items||[]).filter(iiff91Topic).map(iiffVisualManualPage103)
+    .filter(p=>Number.isInteger(p)))];
+  const lines=[];
+  for(const [first,last,criterion] of IIFF_VISUAL_GUIA_103){
+    const matched=pages.filter(p=>p>=first&&p<=last);
+    if(matched.length)lines.push(`Páginas impresas ${first}-${last} (objetivos ${matched.join(',')}): ${criterion}`);
+  }
+  return lines.join('\n');
+}
+function iiffVisualForChunk103(firstPhysical,lastPhysical){
+  const lines=[];
+  for(const [first,last,criterion] of IIFF_VISUAL_GUIA_103){
+    if(last+10>=firstPhysical&&first+10<=lastPhysical)
+      lines.push(`Páginas impresas ${first}-${last}: ${criterion}`);
+  }
+  return lines.join('\n');
+}
+const IIFF_VISUAL_CRITERIOS_103 = `CRITERIO DE UTILIDAD VISUAL — MANUAL IIFF:
+- APROVECHA tablas, gráficos, fórmulas, mapas, esquemas y fotografías ORIGINALES solo si contienen un hecho técnico, regla, valor, condición, riesgo, secuencia o actuación verificable.
+- Una fotografía meramente ambiental o un pie de foto, autor, lugar, color accidental, número de figura o número editorial de procedimiento NO aporta por sí solo conocimiento examinable.
+- Para una pregunta textual fundada en tabla o gráfico, el FRAGMENTO aportado debe contener el dato, la unidad y sus condiciones. Para RECONOCER visualmente una imagen es indispensable mostrar al opositor la imagen ORIGINAL: si la aplicación no adjunta esa imagen, NO formules reconocimiento visual.
+- No copies cifras de gráficos didácticos ficticios como especificaciones reales; no mezcles filas o escalas ni inventes lecturas, etiquetas o datos invisibles.
+- Contrasta TODAS las opciones con el dato completo y sus condiciones. No deduzcas que una opción es falsa solo por no aparecer en un extracto parcial. Ante discrepancia documental que afecte la respuesta única, rechaza o utiliza otro aspecto inequívoco.
+- Jamás GENERES imágenes nuevas. Esta guía solo clasifica material visual: NO es evidencia de respuestas y nunca sustituye el texto o visual realmente verificado en el PDF.`;
+
+function coverageImageRulesIiff86(topic,firstPhysical=null,lastPhysical=null){
   return isIiffManual86(topic) ? `
-REGLA EXCLUSIVA DEL MANUAL DE IIFF:
-- Las preguntas de este manual son solamente textuales.
-- No incluyas fichas que obliguen a reconocer o interpretar fotos, dibujos, mapas, gráficas o figuras.
-- Conserva todo el contenido examinable escrito, incluso tablas y fórmulas legibles.
-- No deduzcas información técnica a partir de ilustraciones.
+${IIFF_VISUAL_CRITERIOS_103}
+PARA ESTA EXTRACCIÓN DEL PDF ORIGINAL (si se identifica el intervalo):
+${Number.isInteger(firstPhysical)&&Number.isInteger(lastPhysical)?iiffVisualForChunk103(firstPhysical,lastPhysical):''}
+Extrae la INFORMACIÓN TÉCNICA de tablas, figuras, gráficos, fotografías útiles
+según su evidencia visible real. No crees fichas por fotografía o pie de foto
+si solo son ilustrativos. Conserva sourcePage y manualPage verificables.
 ` : "";
 }
 const coverageSchema={
@@ -5565,11 +5618,12 @@ for(const chunk of (literalItems?[]:chunks)){
       model:"gemini-3.5-flash-lite",
       contents:[
         {text:coverageAnalysisPrompt(topic.name,allItems)+
-          coverageImageRulesIiff86(topic)+`
+          coverageImageRulesIiff86(topic,part.startPage,part.endPage)+`
 IMPORTANTE: analiza exhaustivamente sólo las páginas físicas
 ${part.startPage} a ${part.endPage} del PDF original.
-No omitas cifras, tablas, fórmulas, excepciones, clasificaciones o
-procedimientos escritos. No prepares preguntas con imágenes.
+No omitas cifras, tablas, fórmulas, excepciones, clasificaciones,
+procedimientos ni información VISUAL técnicamente demostrable.
+Este paso construye solo un inventario factual: NO generes preguntas ni imágenes nuevas.
 sourcePage debe estar dentro de ${part.startPage}-${part.endPage}.
 manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
 `},
@@ -5711,7 +5765,7 @@ for(const chunk of (literalItems?[]:auditChunks)){
             const p=Number(item.sourcePage);
             return Number.isFinite(p) && p>=1 && p<part.startPage;
           })
-        )+coverageImageRulesIiff86(topic)},
+        )+coverageImageRulesIiff86(topic,part.startPage,part.endPage)},
         {inlineData:{mimeType:"application/pdf",data:part.data}}
       ],
       config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
@@ -6976,7 +7030,7 @@ ORDER BY
   const iiffIds96=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
   const blocked96=(await Promise.all(iiffIds96.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||
-    iiff91SameRecentFact(row,blocked96)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
+    iiff102CandidateRepetition(row,blocked96)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
   Number(row.failed_validation_version)===114})))).slice(0,count).map(row=>({
   ...row,
 
@@ -7134,7 +7188,7 @@ WHERE
   const iiffTopics=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
   if(!iiffTopics.length)return result.rows;
   const blocked=(await Promise.all(iiffTopics.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
-  return result.rows.filter(r=>!iiff91Topic(r)||!iiff91SameRecentFact(r,blocked));
+  return result.rows.filter(r=>!iiff91Topic(r)||!iiff102CandidateRepetition(r,blocked));
 }
 
 async function getNewCoverageCandidate(
@@ -7192,10 +7246,15 @@ async function getNewCoverageCandidate(
   ]
 );
 
+  // Una consulta del historial por tema, no una por cada candidato:
+  // evita hasta 60 SELECT repetidos en la vía mixta, sin cambiar resultados.
+  const historyByTopic=new Map();
   for(const candidate of result.rows){
     if(!iiff91Topic(candidate))return candidate;
-    const blocked=await iiff96BlockedHistory(Number(candidate.topic_id));
-    if(!iiff91SameRecentFact(candidate,blocked))return candidate;
+    const topicId=Number(candidate.topic_id);
+    if(!historyByTopic.has(topicId))
+      historyByTopic.set(topicId,await iiff96BlockedHistory(topicId));
+    if(!iiff102CandidateRepetition(candidate,historyByTopic.get(topicId)))return candidate;
   }
   return null;
 }
@@ -7711,6 +7770,11 @@ function iiff91UnsafeQuestion(q,{allowProvenNegative=false}={}){
   if(/\b(indice|sumario|tabla de contenidos|estructura del manual|estructura del indice)\b/.test(stem))return true;
   if(/\b(segun|conforme a)\b.{0,70}\b(apartado|indice|epigrafe|capitulo)\b/.test(stem))return true;
   if(/\b(apartados?|epigrafes?|secciones?)\b.{0,70}\b(bloque|manual)\b/.test(stem))return true;
+  // SERVER103: el test IIFF textual no adjunta una imagen original.
+  // Solo vetamos referencias DEÍCTICAS a una imagen ausente, no preguntas
+  // textuales sobre datos extraídos y comprobados de tablas o gráficos.
+  if(/\b(?:observa|mira|fijate en)\b.{0,35}\b(?:imagen|foto|fotografia|figura|ilustracion)\b/.test(stem)||
+     /\b(?:imagen|fotografia|figura|ilustracion)\b.{0,30}\b(?:adjunta|mostrada|siguiente|a continuacion)\b/.test(stem))return true;
   // El contenido operativo sí es válido: lo que se rechaza es memorizar
   // su número, título o declaración de finalidad.
   if(/\b(?:objeto|objetivo|finalidad)\s+(?:general\s+|formal\s+)?(?:establecido\s+|expreso\s+|principal\s+)?(?:en\s+|de\s+)?(?:este\s+|el\s+|del\s+)?procedimiento\b/.test(stem))return true;
@@ -7804,6 +7868,9 @@ SLOTS_IIFF (1-based): ${JSON.stringify(iiffSlots)}.
 Estas reglas se aplican SOLO a SLOTS_IIFF; no cambian los criterios de
 Legislación, Geografía ni otros temas Específicos del mismo lote mixto.
 ${nivel}
+${IIFF_VISUAL_CRITERIOS_103}
+GUÍA VISUAL RELEVANTE PARA ESTOS OBJETIVOS (solo orientación, NO fuente factual):
+${iiffVisualSpecific103(group)}
 PERMITIDOS_NEGATIVA (slot 1-based): ${JSON.stringify(allowed)}.
 Si la lista está vacía, TODAS las preguntas deben ser POSITIVAS.
 PATRONES DE PREGUNTA REALISTA (elige SOLO los que la evidencia permita):
@@ -7849,7 +7916,9 @@ REGLAS QUE NO SE PUEDEN RELAJAR:
   dobles negaciones y afirmaciones falsas que sean obvias por cultura general.
 - No inventar magnitudes ni condiciones fuera de la evidencia para endurecer.
   Los números falsos son distractores, no datos afirmados del manual.
-- No preguntar por índice, estructura editorial, fotografías ni dibujos.
+- No preguntar por índices, títulos o aspectos incidentales de fotografías/dibujos.
+  SÍ preguntar hechos técnicos EXTRAÍDOS de imágenes originales si el fragmento
+  aportado demuestra la respuesta; no inventar contenido visual no adjunto.
 - Las preguntas POSITIVAS son el formato predeterminado.
 - INCORRECTA/FALSA es una opción de estilo oficial, NO una cuota. Solo
   cuando el slot esté en PERMITIDOS_NEGATIVA y las CUATRO opciones puedan
@@ -7931,7 +8000,11 @@ async function iiff96BlockedHistory(topicId,executor=db){
   const result=await executor.query(`
     SELECT ci.id,ci.concept,ci.source_page,ci.section,
       ARRAY_AGG(DISTINCT qb.stem) FILTER (WHERE qb.stem IS NOT NULL)
-        AS previous_stems
+        AS previous_stems,
+      JSONB_AGG(DISTINCT JSONB_BUILD_OBJECT(
+        'stem',qb.stem,
+        'answer',qb.options->>qb.correct_index
+      )) FILTER (WHERE qb.stem IS NOT NULL) AS previous_questions
     FROM test_session_questions tsq
     JOIN test_sessions ts ON ts.id=tsq.session_id
     JOIN question_bank qb ON qb.id=tsq.question_id
@@ -7960,17 +8033,86 @@ function iiff91ConceptTokens(item){
     .filter(w=>w.length>=3||/^[0-9]+$/.test(w))
     .filter(w=>!IIFF91_CONCEPT_STOP.has(w));
 }
-// Historial SRS: cotejar TODOS los enunciados de los conocimientos
-// todavía bloqueados, no solo el último por coverage_item. Igualdad
-// normalizada estricta; NO identificar hechos por compartir un párrafo.
+// Identidad textual del hecho preguntado, usando SOLO el historial local de
+// sesiones. Nunca sustituye a la fecha SRS; compara preguntas de fichas
+// diferentes sin bloquear una página entera del manual.
 function iiff101StemKey(value){
   return iiff91Norm(value).replace(/[^a-z0-9]+/g,' ').trim();
 }
+const IIFF102_STOP=new Set([
+  ...IIFF91_CONCEPT_STOP,'en','que','cuales','cual','pregunta','indique',
+  'indica','afirmacion','correcta','incorrecta','siguiente','siguientes',
+  'marco','ambito','acuerdo','relacion','cual','como','donde','cuando',
+  'forestal','forestales','incendio','incendios','navarra','durante',
+  'debe','deben','son','sera','seran','esta','este','segun','referente',
+  'manera','forma','considera','establece','cual','sistema','personal'
+]);
+function iiff102Words(value){
+  return [...new Set((iiff101StemKey(value).match(/[a-z0-9]+/g)||[])
+    .filter(w=>w.length>=4||/^[0-9]+$/.test(w))
+    .filter(w=>!IIFF102_STOP.has(w))
+    .map(w=>w.length>5?w.replace(/es$|s$/,''):w))];
+}
+function iiff102Overlap(a,b){
+  const one=iiff102Words(a),two=iiff102Words(b);
+  const common=one.filter(w=>two.includes(w)).length;
+  return {common,short:common/Math.max(1,Math.min(one.length,two.length)),
+    long:common/Math.max(1,Math.max(one.length,two.length)),
+    first:one.length,second:two.length};
+}
+// Clasificaciones A/B y Tipo 1/2 diferentes no deben fusionarse.
+function iiff102DifferentType(a,b){
+  const type=s=>[...iiff101StemKey(s).matchAll(/\b(?:tipo|clase|modelo|fuerza|filtro)\s+([a-d]|\d+|quimico|fisico)\b/g)]
+    .map(x=>x[1]).join('|');
+  const first=type(a),second=type(b);
+  return Boolean(first&&second&&first!==second);
+}
+function iiff102DuplicateQuestion(question,previous){
+  const a=iiff101StemKey(question?.stem),b=iiff101StemKey(previous?.stem);
+  if(!a||!b||iiff102DifferentType(a,b))return false;
+  if(a===b)return true;
+  const stems=iiff102Overlap(a,b);
+  const index=question?.correctIndex ?? question?.correct_index;
+  const currentAnswer=question?.options?.[Number(index)] ?? question?.answer;
+  const oldAnswer=previous?.answer;
+  // Con respuestas disponibles no basta una pregunta con palabras similares:
+  // filtro químico/físico o dos tablas de valores pueden ser hechos distintos.
+  if(!currentAnswer||!oldAnswer)
+    return stems.common>=3 && stems.short>=0.78 && stems.long>=0.55;
+  const answers=iiff102Overlap(currentAnswer,oldAnswer);
+  if(stems.common>=3 && stems.short>=0.75 && stems.long>=0.47 &&
+    answers.common>=2 && answers.short>=0.50 && answers.long>=0.25)return true;
+  // No confundir opciones con magnitudes o clasificaciones distintas.
+  if(iiff102DifferentType(String(currentAnswer),String(oldAnswer)))return false;
+  if(stems.common>=2 && stems.short>=0.54 && stems.long>=0.27 &&
+    answers.common>=2 && answers.short>=0.60 && answers.long>=0.32)return true;
+  // Una respuesta técnica extensa casi idéntica, con un anclaje temático
+  // común, identifica el mismo hecho incluso si se reformula el enunciado.
+  return stems.common>=1 && answers.common>=5 &&
+    answers.short>=0.70 && answers.long>=0.55;
+}
 function iiff101RepeatedStem(question,history){
-  const key=iiff101StemKey(question?.stem);
-  if(!key)return false;
+  if(!question?.stem)return false;
   return (history||[]).some(prior=>
-    (prior.previous_stems||[]).some(stem=>key===iiff101StemKey(stem)));
+    (prior.previous_questions||prior.previous_stems?.map(stem=>({stem}))||[])
+      .some(p=>iiff102DuplicateQuestion(question,p)));
+}
+function iiff102CandidateRepetition(candidate,history){
+  if(iiff91SameRecentFact(candidate,history))return true;
+  // No se presupone identidad por compartir un párrafo del PDF.
+  // La pregunta anterior debe mencionar el mismo concepto técnico y su
+  // respuesta debe estar realmente sustentada en la evidencia candidata.
+  return (history||[]).some(prior=>{
+    if(iiff102DifferentType(candidate.concept,prior.concept))return false;
+    const samePage=Number(candidate.source_page)===Number(prior.source_page);
+    if(!samePage)return false;
+    return (prior.previous_questions||[]).some(q=>{
+      const title=iiff102Overlap(candidate.concept,q.stem);
+      const evidence=iiff102Overlap(candidate.source_evidence,q.answer);
+      return title.common>=2 && title.short>=0.66 &&
+        evidence.common>=3 && evidence.short>=0.75 && evidence.long>=0.10;
+    });
+  });
 }
 function iiff91SameRecentFact(candidate,history){
   const id=Number(candidate.id),page=Number(candidate.source_page);
@@ -7994,6 +8136,29 @@ function iiff91SameRecentFact(candidate,history){
   }
   return false;
 }
+// SERVER105: preferencia EDITORIAL, no veto factual ni requisito SRS.
+// En Muy alta prioriza fragmentos con varias relaciones técnicas explícitas.
+// Un texto largo por sí mismo NO obtiene máxima puntuación: se valoran
+// indicadores de cifras, condiciones, secuencias y comparaciones documentadas.
+// Los distractores continúan sujetos a la auditoría factual existente.
+function iiff105TechnicalMerit(item){
+  const text=iiff91Norm(item?.source_evidence);
+  if(!text)return 0;
+  const units=/\b\d+(?:[.,]\d+)?\s*(?:l\/min|km\/h|kg|ml|litros?|minutos?|horas?|metros?|m\/s|m\/min|kpa|mpa|bar|kw\/m|mw\/m|%)\b/;
+  const condition=/\b(?:si|cuando|siempre que|salvo|excepto|en caso de|antes de|despues de|solo si|en funcion de|a partir de)\b/;
+  const relation=/\b(?:mayor que|menor que|respecto a|mientras que|a diferencia de|en comparacion|entre|frente a|superior a|inferior a)\b/;
+  const sequence=/\b(?:primero|despues|a continuacion|seguidamente|paso [0-9]|fase [0-9]|etapa [0-9])\b/;
+  const detail=/\b(?:presion|caudal|intensidad|velocidad|temperatura|volumen|distancia|pendiente|seguridad|maniobra|riesgo|combustible)\b/;
+  let merit=0;
+  if(units.test(text))merit+=5;
+  if(condition.test(text))merit+=4;
+  if(relation.test(text))merit+=3;
+  if(sequence.test(text))merit+=4;
+  if(detail.test(text))merit+=2;
+  if(text.length>=180)merit+=2;
+  if(text.length>=320)merit+=2;
+  return Math.min(20,merit);
+}
 // Selector puro y auditable: primero respeta elegibilidad SRS desde SQL,
 // y dentro de cada prioridad rota franjas, secciones y páginas del PDF.
 // El orden de los ids SQL nunca desempata la elección de conocimientos nuevos.
@@ -8001,20 +8166,34 @@ function iiff91SameRecentFact(candidate,history){
 // La diversidad por franjas es global: no se agotan primero todos los
 // repasos vencidos de una misma franja. Dentro de una franja se favorece
 // el repaso vencido; NO se modifica ni relaja el calendario SRS en SQL.
-function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random,recentCorrect=[]}={}){
+function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random,recentCorrect=[],difficulty="alta"}={}){
   const valid=(candidates||[]).filter(i=>iiff91Topic(i)&&!iiff91Editorial(i));
   const selected=[],usedIds=new Set(),bandHits=new Map(),sectionHits=new Map(),pageHits=new Map(),conceptHits=new Map();
   // La prohibición de repetición sigue siendo un veto, nunca un desempate.
   const blockedMatches=new Set();
   if(recentCorrect.length)for(const candidate of valid){
-    if(iiff91SameRecentFact(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
+    if(iiff102CandidateRepetition(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
   }
   const eligible=valid.filter(c=>!blockedMatches.has(Number(c.id)));
   const reviewBonus=priority=>priority===1?90:priority===2?65:priority===3?50:priority===4?30:0;
+  const technicalMerit=new Map();
+  if(difficulty==='muy alta'&&!simulation)for(const c of eligible){
+    technicalMerit.set(Number(c.id),iiff105TechnicalMerit(c));
+  }
+  // IIFF: combinar cobertura NUEVA y repasos VENCIDOS en el test ordinario.
+  // El tope actúa únicamente cuando hay fichas nuevas ELEGIBLES disponibles;
+  // no anticipa repasos ni elimina sus fechas. Si no hay nuevas, se completa
+  // con repasos vencidos, preservando el tamaño solicitado.
+  const reviewLimit=Math.ceil(count/2);
+  let selectedReviews=0;
   while(selected.length<count){
     let best=null,bestScore=-Infinity,leastBandHits=Infinity;
+    const freshAvailable=!simulation && selectedReviews>=reviewLimit &&
+      eligible.some(c=>Number(c.times_asked||0)===0 &&
+        !usedIds.has(Number(c.id))&&!iiff91SameRecentFact(c,selected));
     for(const c of eligible){
       if(usedIds.has(Number(c.id))||iiff91SameRecentFact(c,selected))continue;
+      if(freshAvailable && Number(c.times_asked||0)>0)continue;
       const band=iiff91Band(c),section=iiff91Section(c),page=Number(c.source_page);
       const concept=iiff91Norm(c.concept),hits=bandHits.get(band)||0;
       // Primero la franja menos utilizada, sin umbrales arbitrarios.
@@ -8023,7 +8202,8 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
       const score=-(sectionHits.get(section)||0)*110-
         (pageHits.get(page)||0)*180-
         (conceptHits.get(concept)||0)*400+
-        reviewBonus(priority)-Math.min(10,Number(c.times_asked)||0)*4+rng();
+        reviewBonus(priority)-Math.min(10,Number(c.times_asked)||0)*4+
+        (technicalMerit.get(Number(c.id))||0)+rng();
       if(hits<leastBandHits||(hits===leastBandHits&&score>bestScore)){
         best=c;bestScore=score;leastBandHits=hits;
       }
@@ -8032,6 +8212,7 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
     const band=iiff91Band(best),section=iiff91Section(best),page=Number(best.source_page);
     const concept=iiff91Norm(best.concept);
     selected.push(best);usedIds.add(Number(best.id));
+    if(Number(best.times_asked||0)>0)selectedReviews++;
     bandHits.set(band,(bandHits.get(band)||0)+1);
     sectionHits.set(section,(sectionHits.get(section)||0)+1);
     pageHits.set(page,(pageHits.get(page)||0)+1);
@@ -8067,18 +8248,18 @@ function iiff92ReplaceEditorialInMixed(targets,candidates){
   return result;
 }
 
-async function getIiffTargets91(count,topicIds,simulation=false){
+async function getIiffTargets91(count,topicIds,simulation=false,difficulty="alta"){
   const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
   if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
   const blockedHistory=await iiff96BlockedHistory(topicIds[0]);
-  const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect:blockedHistory});
+  const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect:blockedHistory,difficulty});
   console.log('IIFF_96_BLOQUEO_SRS:',JSON.stringify({
     historialBloqueado:blockedHistory.length,
     equivalentesBloqueadosEnResultado:targets.filter(t=>
-      iiff91SameRecentFact(t,blockedHistory)).length,
+      iiff102CandidateRepetition(t,blockedHistory)).length,
     repasosVencidos:targets.filter(t=>Number(t.adaptive_priority)===1).length
   }));
-  // Solamente formato TEXTO/NUMERICA, sin preguntas de interpretación gráfica.
+  // Preguntas de texto, datos y tablas/figuras documentadas; no generar imágenes nuevas.
   const assigned=targets.map(t=>({...t,
     questionFamily: (t.item_type==='formula'||t.evaluation_type==='calculo')?'2024_NUMERICA':'2024_TEXTO'}));
   console.log('IIFF_91_SELECCION:',JSON.stringify({count,
@@ -9530,7 +9711,7 @@ async function persistGeneratedTest({
     for(const topicId of iiffTopics96){
       const blocked=await iiff96BlockedHistory(topicId,client);
       if(targets.some((t,index)=>Number(t.topic_id)===topicId &&
-        (iiff91SameRecentFact(t,blocked) ||
+        (iiff102CandidateRepetition(t,blocked) ||
          iiff101RepeatedStem(questions[index],blocked))))
         throw new Error('SRS101: conocimiento o pregunta IIFF todavía bloqueado por su calendario de repaso.');
     }
@@ -11923,6 +12104,16 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   const parsed=JSON.parse(String(response?.text||'{}'));
   if(!Array.isArray(parsed.questions))throw Error('Sin array de preguntas');
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
+  // Evitar gastar además en auditar preguntas que ya figuran como
+  // aprendidas/bloqueadas; una lectura SQL por lote, sin llamada Gemini.
+  const priorQuestions=iiffScope?await iiff96BlockedHistory(group.find(iiff91Topic).topic_id):[];
+  for(let i=0;i<questions.length;i++){
+    if(iiff91Topic(group[i])&&iiff101RepeatedStem(questions[i],priorQuestions)){
+      console.warn('IIFF_102_REPETIDA_ANTES_AUDITOR:',JSON.stringify({
+        topicId:group[i].topic_id,slot:i}));
+      questions[i]=null;
+    }
+  }
   // Auditor independiente: una llamada por lote, no múltiples auditores
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
@@ -11947,7 +12138,10 @@ Para una pregunta del manual, answer=-1 si una opción podría ser también
 verdadera con la evidencia disponible, si una afirmación exige demostrar
 que algo NO está en otra sección, o si cualquier distractor parece compatible
 con el fragmento. Comprueba el dato que distingue las cuatro opciones.
-No examines imágenes. No uses conocimiento externo.
+${IIFF_VISUAL_CRITERIOS_103}
+CRITERIOS PARTICULARES POR PÁGINA, SOLO EN FILAS IIFF:
+${iiffVisualSpecific103(group)}
+Si el enunciado requiere mirar una fotografía/figura que NO se presenta al usuario, answer=-1. Si un gráfico de ejemplo es ficticio, no convertir sus datos en especificaciones reales. No uses conocimiento externo.
 Asigna calidad=0, 1 o 2 a TODAS las filas (el esquema lo exige).
 SOLO PARA FILAS IIFF, aplica estos criterios adicionales de dificultad;
 para las demás conserva los criterios de auditoría comunes.
@@ -12102,7 +12296,7 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     // comparaciones SRS/factuales usan exclusivamente coverage_item_id.
     const fact={...r,id:Number(r.coverage_item_id),
       source_page:r.ci_source_page,source_evidence:r.ci_evidence};
-    if(iiff91Topic(r) && (iiff91SameRecentFact(fact,blocked)||
+    if(iiff91Topic(r) && (iiff102CandidateRepetition(fact,blocked)||
       iiff101RepeatedStem(r,blocked)||
       iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
     const stem=R136_NORM(r.stem),ci=Number(r.correct_index),id=Number(r.coverage_item_id);
@@ -12146,11 +12340,17 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
     const id=Number(found.rows[0].id);
     const all=await getAdaptiveCoverageCandidates(3000,[id],'adaptive');
     const blockedHistory=await iiff96BlockedHistory(id);
-    const chosen=chooseIiffCoverage91(all,count,{recentCorrect:blockedHistory});
-    res.json({ok:true,readonly:true,geminiCalls:0,topicId:id,
+    const difficulty=req.query?.difficulty==='muy alta'?'muy alta':'alta';
+    const chosen=chooseIiffCoverage91(all,count,{recentCorrect:blockedHistory,difficulty});
+    res.json({ok:true,readonly:true,geminiCalls:0,topicId:id,difficulty,
       blockedHistory:blockedHistory.length,
+      // SERVER102: validación gratuita de que SQL cargó enunciados y
+      // respuestas históricas; solo números agregados, nunca contenido.
+      historyQuestionsLoaded:blockedHistory.reduce((n,r)=>n+(r.previous_questions?.length||0),0),
+      historyAnswersLoaded:blockedHistory.reduce((n,r)=>n+(r.previous_questions||[]).filter(q=>
+        String(q.answer||'').trim()).length,0),
       blockedEquivalentsSelected:chosen.filter(t=>
-        iiff91SameRecentFact(t,blockedHistory)).length,
+        iiff102CandidateRepetition(t,blockedHistory)).length,
       requested:count,eligible:all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)).length,
       skipped:all.filter(x=>iiff91Topic(x)&&iiff91Editorial(x)).length,
       pages:chosen.map(x=>Number(x.source_page)),
@@ -12158,11 +12358,17 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
       uniqueSections:new Set(chosen.map(iiff91Section)).size,
       includesIndex:chosen.some(x=>Number(x.source_page)<IIFF91_FIRST_CONTENT_PAGE),
       priorityCounts:Object.fromEntries([1,2,3,4,5].map(p=>[p,chosen.filter(x=>Number(x.adaptive_priority)===p).length])),
+      freshSelected:chosen.filter(x=>Number(x.times_asked||0)===0).length,
+      reviewSelected:chosen.filter(x=>Number(x.times_asked||0)>0).length,
+      // Diagnóstico de preferencia editorial, no calificación oficial.
+      technicalMeritMean:Math.round(chosen.reduce((n,x)=>n+iiff105TechnicalMerit(x),0)/chosen.length*10)/10,
+      freshEligible:all.filter(x=>Number(x.times_asked||0)===0&&!iiff91Editorial(x)&&
+        !iiff102CandidateRepetition(x,blockedHistory)).length,
       // SERVER98: permite diagnosticar la relación página-prioridad sin
       // mostrar conceptos, respuestas ni modificar la selección.
       priorityByPage:chosen.map(x=>({page:Number(x.source_page),priority:Number(x.adaptive_priority)||4})),
       availableBands:[...new Set(all.filter(x=>iiff91Topic(x)&&!iiff91Editorial(x)&&
-        !iiff91SameRecentFact(x,blockedHistory)).map(iiff91Band))].sort((a,b)=>a-b)});
+        !iiff102CandidateRepetition(x,blockedHistory)).map(iiff91Band))].sort((a,b)=>a-b)});
   }catch(e){console.error('IIFF_91_PREVIEW_ERROR:',String(e?.message||e));
     res.status(500).json({ok:false,error:'No se pudo consultar la selección del manual.'});}
 });
@@ -12219,7 +12425,7 @@ app.post('/api/generate',async(req,res)=>{
         if(Array.isArray(topicIds)&&topicIds.length===1){
           const check=await db.query('SELECT name,block FROM topics WHERE id=$1',[topicIds[0]]);
           if(iiff91Topic({topic_name:check.rows[0]?.name,topic_block:check.rows[0]?.block}))
-            return getIiffTargets91(count,topicIds,examMode==='simulation');
+            return getIiffTargets91(count,topicIds,examMode==='simulation',difficulty);
         }
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
           aiClient().models.generateContent(...args)}},topicIds,examMode);
