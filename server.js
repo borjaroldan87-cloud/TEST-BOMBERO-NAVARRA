@@ -7929,10 +7929,12 @@ function iiff91Section(item){
 // blancos e intentos mostrados). Una sola consulta local; sin Gemini.
 async function iiff96BlockedHistory(topicId,executor=db){
   const result=await executor.query(`
-    SELECT DISTINCT ON (ci.id)
-      ci.id,ci.concept,ci.source_page,ci.section
+    SELECT ci.id,ci.concept,ci.source_page,ci.section,
+      ARRAY_AGG(DISTINCT qb.stem) FILTER (WHERE qb.stem IS NOT NULL)
+        AS previous_stems
     FROM test_session_questions tsq
     JOIN test_sessions ts ON ts.id=tsq.session_id
+    JOIN question_bank qb ON qb.id=tsq.question_id
     JOIN coverage_items ci ON ci.id=tsq.coverage_item_id
     LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     WHERE ci.topic_id=$1 AND (
@@ -7940,7 +7942,7 @@ async function iiff96BlockedHistory(topicId,executor=db){
       ts.started_at > NOW()-INTERVAL '1 day' OR
       (ci.times_asked>0 AND ci.last_asked_at>NOW()-INTERVAL '1 day')
     )
-    ORDER BY ci.id,ts.started_at DESC,ts.id DESC
+    GROUP BY ci.id,ci.concept,ci.source_page,ci.section
   `,[Number(topicId)]);
   return result.rows;
 }
@@ -7957,6 +7959,18 @@ function iiff91ConceptTokens(item){
   return [...new Set(iiff91Norm(item?.concept).match(/[a-z0-9]+/g)||[])]
     .filter(w=>w.length>=3||/^[0-9]+$/.test(w))
     .filter(w=>!IIFF91_CONCEPT_STOP.has(w));
+}
+// Historial SRS: cotejar TODOS los enunciados de los conocimientos
+// todavía bloqueados, no solo el último por coverage_item. Igualdad
+// normalizada estricta; NO identificar hechos por compartir un párrafo.
+function iiff101StemKey(value){
+  return iiff91Norm(value).replace(/[^a-z0-9]+/g,' ').trim();
+}
+function iiff101RepeatedStem(question,history){
+  const key=iiff101StemKey(question?.stem);
+  if(!key)return false;
+  return (history||[]).some(prior=>
+    (prior.previous_stems||[]).some(stem=>key===iiff101StemKey(stem)));
 }
 function iiff91SameRecentFact(candidate,history){
   const id=Number(candidate.id),page=Number(candidate.source_page);
@@ -9515,9 +9529,10 @@ async function persistGeneratedTest({
       throw new Error('SRS96: algún conocimiento se preguntó antes de su plazo de repaso. No se guarda el test.');
     for(const topicId of iiffTopics96){
       const blocked=await iiff96BlockedHistory(topicId,client);
-      if(targets.some(t=>Number(t.topic_id)===topicId &&
-        iiff91SameRecentFact(t,blocked)))
-        throw new Error('SRS96: objetivo IIFF equivalente aún bloqueado por el calendario de repaso.');
+      if(targets.some((t,index)=>Number(t.topic_id)===topicId &&
+        (iiff91SameRecentFact(t,blocked) ||
+         iiff101RepeatedStem(questions[index],blocked))))
+        throw new Error('SRS101: conocimiento o pregunta IIFF todavía bloqueado por su calendario de repaso.');
     }
 
     const sessionResult = await client.query(
@@ -11988,9 +12003,17 @@ No añadas escenarios, parámetros ni condiciones no documentados.
         a.calidad<1))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
-    return {...q,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
+    // Para INCORRECTA se evita una explicación libre que pueda asignar
+    // otra letra a la falsedad después de auditar y barajar las opciones.
+    // El contenido literal procede de la prueba del auditor ya validada.
+    const negative=iiff91Topic(group[i])&&iiff92IsNegativeStem(q);
+    const explanation=negative
+      ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
+       `El manual establece: «${String(a.optionProofs[q.correctIndex].quote).trim()}».`
+      :q.explanation;
+    return {...q,explanation,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
       manualPage:group[i].manual_page??null,
-      iiffNegativeVerified:iiff91Topic(group[i])&&iiff92IsNegativeStem(q),
+      iiffNegativeVerified:negative,
       questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:null};
   });
   if(iiffScope){
@@ -12075,8 +12098,13 @@ async function resetBank136(allowedTopicIds,count,difficulty){
   const blocked=(await Promise.all(iiffTopicIds.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   const usedQuestions=new Set(),usedCoverage=new Set(),pairs=[];
   for(const r of result.rows){
-    if(iiff91Topic(r) && (iiff91SameRecentFact(r,blocked)||
-      iiff91SameRecentFact(r,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
+    // qb.id y coverage_items.id pertenecen a tablas DISTINTAS. Las
+    // comparaciones SRS/factuales usan exclusivamente coverage_item_id.
+    const fact={...r,id:Number(r.coverage_item_id),
+      source_page:r.ci_source_page,source_evidence:r.ci_evidence};
+    if(iiff91Topic(r) && (iiff91SameRecentFact(fact,blocked)||
+      iiff101RepeatedStem(r,blocked)||
+      iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
     const stem=R136_NORM(r.stem),ci=Number(r.correct_index),id=Number(r.coverage_item_id);
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
