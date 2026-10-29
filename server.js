@@ -7020,6 +7020,7 @@ WHERE
   AND ${SRS96_ELIGIBLE_SQL}
   AND (ci.exam_relevant = TRUE OR ci.item_type='anki_independent')
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
+  AND ${GEO112_BANK_PHYSICAL_SQL}
   AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
@@ -7668,11 +7669,33 @@ function geographyDiverseCandidates115(rows){
 // SERVER 125: la misma regla de examinabilidad para selección, historial y
 // estadísticas. No borra ni modifica los 209 registros históricos del Tema 22.
 // El filtro SQL reproduce el prefijo de geographyEligible124 (polígono con nombre).
+// SERVER112: no presentar como un parque físico la agrupación administrativa
+// Altsasu/Alsasua-Auritz/Burguete en GEO T22. Las fichas se reactivan
+// automáticamente cuando su evidencia factual se corrija usando los apuntes
+// validados del usuario. Esta barrera NUNCA afecta al tema legislativo 21.
 const GEOGRAPHY_EXAMINABLE_SQL_125 = `(
-  LOWER(BTRIM(COALESCE(t.block,''))) <> 'geografia'
-  OR t.topic_order IS DISTINCT FROM 22
-  OR BTRIM(COALESCE(ci.concept,'')) ~* '^pol[ií]gono[[:space:]]+[^[:space:]]'
+  (
+    LOWER(BTRIM(COALESCE(t.block,''))) <> 'geografia'
+    OR t.topic_order IS DISTINCT FROM 22
+    OR BTRIM(COALESCE(ci.concept,'')) ~* '^pol[ií]gono[[:space:]]+[^[:space:]]'
+  )
+  AND NOT (
+    ci.topic_id=24 AND (
+      ci.concept ILIKE '%Altsasu/Alsasua-Auritz/Burguete%'
+      OR ci.source_evidence ILIKE '%Altsasu/Alsasua-Auritz/Burguete%'
+      OR ci.concept ILIKE '%Lodosa-Peralta/Azkoien%'
+      OR ci.source_evidence ILIKE '%Lodosa-Peralta/Azkoien%'
+    )
+  )
 )`;
+// La barrera del banco se aplica a la RESPUESTA de GEO T22, no a una norma
+// administrativa legítima (T21). No tocar sesiones ya contestadas.
+const GEO112_BANK_PHYSICAL_SQL = `NOT (ci.topic_id=24 AND (
+  qb.stem ILIKE '%Altsasu/Alsasua-Auritz/Burguete%'
+  OR qb.options::text ILIKE '%Altsasu/Alsasua-Auritz/Burguete%'
+  OR qb.stem ILIKE '%Lodosa-Peralta/Azkoien%'
+  OR qb.options::text ILIKE '%Lodosa-Peralta/Azkoien%'
+))`;
 
 // En el PDF T22 aparecen varias sedes AGRUPADAS. Estas no son parques únicos.
 // Lodosa, Peralta, Alsasua, Oronoz, Navascués y Sangüesa son independientes.
@@ -10000,6 +10023,10 @@ LIMIT 1 FOR UPDATE`,
   }
 
   const bankRow107=reusableCheck.rows[0];
+  if(Number(target.topic_id)===24 &&
+     /(?:Altsasu\/Alsasua-Auritz\/Burguete|Lodosa-Peralta\/Azkoien)/i.test(
+       String(bankRow107.stem||'')+' '+JSON.stringify(bankRow107.options||[])))
+    throw Error('GEO112: pregunta de parque administrativo agrupado no apta para examen territorial.');
   if(question.readyVerified107===true){
     if(Number(bankRow107.validation_version)!==LEGISLATION_READY_VERSION_107 ||
        bankRow107.last_shown_at!=null || Number(bankRow107.times_shown||0)!==0 ||
@@ -12204,8 +12231,22 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
   const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
+  // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
+  // mando NO es una única dotación física. No altera las preguntas sobre la
+  // organización administrativa del tema jurídico T21.
+  const geoPhysical112=group.some(t=>Number(t.topic_id)===24)?`
+GEOGRAFÍA — PARQUES FÍSICOS INDEPENDIENTES: los parques de Altsasu/Alsasua
+ y Auritz/Burguete son DOS parques diferentes, igual que Lodosa y Peralta/Azkoien.
+Las denominaciones administrativas Altsasu/Alsasua-Auritz/Burguete y
+Lodosa-Peralta/Azkoien NUNCA deben usarse como respuesta de parque actuante.
+Usa exclusivamente el parque territorial físico que conste EXPRESAMENTE en
+la evidencia de este objetivo. No deduzcas el parque solo por proximidad,
+municipio, nombre o conocimientos externos. Si la fuente solo da la
+agrupación administrativa y no distingue la sede física, NO inventes ni
+asignes un parque: ese objetivo no permite preguntar por el parque físico.
+`:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules,config:{
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
@@ -12235,6 +12276,9 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
     }
     if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
       iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))return [];
+    if(Number(group[i].topic_id)===24 &&
+       /(?:Altsasu\/Alsasua-Auritz\/Burguete|Lodosa-Peralta\/Azkoien)/i.test(
+         String(q.stem||'')+' '+JSON.stringify(q.options||[])))return [];
     if((esTemaSolares2026(group[i])||esTemaEolicos2026(group[i])) &&
        /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
     return [{index:i,tema:group[i].topic_name,
@@ -12309,7 +12353,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
     :baselineAuditPrompt82;
   const auditSchema=iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
-    contents:auditPrompt82+iiffAuditRules,
+    contents:auditPrompt82+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
   if(iiffScope)iiff92RequireCompletedResponse(auditing,'auditoría');
@@ -12420,6 +12464,8 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
       AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
       AND qb.validation_version>=6
       AND qb.validation_version NOT IN (107,113)
+      AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
+      AND ${GEO112_BANK_PHYSICAL_SQL}
       AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
       AND qb.difficulty=$2
     ORDER BY qb.times_shown ASC,qb.last_shown_at ASC NULLS FIRST,qb.id DESC
@@ -12589,6 +12635,7 @@ async function fetchBankReview111({count,topicIds,testType,difficulty}){
       AND ci.times_asked>0
       AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
       AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
+      AND ${GEO112_BANK_PHYSICAL_SQL}
       AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
       AND ($2::text IS NULL OR qb.difficulty=$2)
       ${dueSql}
