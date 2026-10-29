@@ -6925,6 +6925,16 @@ async function resolveGenerationTopicScope(body = {}){
 // Para registros legados sin estado SRS, último uso +24 h; si no hay fecha,
 // un conocimiento marcado como trabajado no se reactiva a ciegas.
 // Una sesión generada sin entregar también bloquea el mismo conocimiento 24 h.
+// SERVER111: «nueva» significa que el conocimiento nunca apareció en una sesión.
+// Independiente de los contadores legacy times_asked, que solo suben al responder.
+const FRESH111_SQL = `
+  COALESCE(ci.times_asked,0)=0
+  AND NOT EXISTS (SELECT 1 FROM test_session_questions prior111
+    WHERE prior111.coverage_item_id=ci.id)
+`;
+const PRACTICE111_TYPES=new Set(['practice_all','practice_failed']);
+const isPractice111=type=>PRACTICE111_TYPES.has(String(type||''));
+const srsAffects111=type=>!isPractice111(type);
 const SRS96_ELIGIBLE_SQL = `
   (crs.next_review_at IS NULL OR crs.next_review_at <= NOW())
   AND (COALESCE(ci.times_asked,0)=0 OR
@@ -6935,6 +6945,7 @@ const SRS96_ELIGIBLE_SQL = `
     SELECT 1 FROM test_session_questions used96
     JOIN test_sessions sess96 ON sess96.id=used96.session_id
     WHERE used96.coverage_item_id=ci.id
+      AND sess96.test_type NOT IN ('practice_all','practice_failed')
       AND sess96.started_at > NOW()-INTERVAL '1 day'
   )
 `;
@@ -7054,7 +7065,8 @@ questionFamily:
 async function getAdaptiveCoverageCandidates(
   limit = 120,
   allowedTopicIds = null,
-  selectionStrategy = "adaptive"
+  selectionStrategy = "adaptive",
+  onlyFresh111 = false
 ){
   const orderClause =
     selectionStrategy === "simulation"
@@ -7166,6 +7178,7 @@ WHERE
   ci.exam_relevant = TRUE
   AND ${SRS96_ELIGIBLE_SQL}
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
+  AND ${onlyFresh111 ? FRESH111_SQL : 'TRUE'}
   AND (
     $2::int[] IS NULL
     OR ci.topic_id = ANY($2::int[])
@@ -7228,7 +7241,7 @@ async function getNewCoverageCandidate(
   ci.exam_relevant = TRUE
   AND ${SRS96_ELIGIBLE_SQL}
   AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
-  AND ci.times_asked = 0
+  AND ${FRESH111_SQL}
   AND (
     $1::int[] IS NULL
     OR ci.topic_id = ANY($1::int[])
@@ -8299,8 +8312,8 @@ function iiff92ReplaceEditorialInMixed(targets,candidates){
   return result;
 }
 
-async function getIiffTargets91(count,topicIds,simulation=false,difficulty="alta"){
-  const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive');
+async function getIiffTargets91(count,topicIds,simulation=false,difficulty="alta",freshOnly111=false){
+  const candidates=await getAdaptiveCoverageCandidates(3000,topicIds,simulation?'simulation':'adaptive',freshOnly111);
   if(!iiff91Scope(candidates))throw Error('IIFF: ámbito incorrecto; no se ha usado el selector especial.');
   const blockedHistory=await iiff96BlockedHistory(topicIds[0]);
   const targets=chooseIiffCoverage91(candidates,count,{simulation,recentCorrect:blockedHistory,difficulty});
@@ -8325,7 +8338,8 @@ async function getCoverageTargetsForGeneration(
   count,
   ai,
   allowedTopicIds = null,
-  selectionStrategy = "adaptive"
+  selectionStrategy = "adaptive",
+  freshOnly111 = false
 ){
   /*
     SELECCIÓN DE OBJETIVOS
@@ -8350,7 +8364,8 @@ const adaptiveCandidates = geographyDiverseCandidates115(
   await getAdaptiveCoverageCandidates(
     nucleusCandidateLimit,
     allowedTopicIds,
-    selectionStrategy
+    selectionStrategy,
+    freshOnly111
   )
 );
 
@@ -9723,7 +9738,8 @@ async function persistGeneratedTest({
   mode,
   testType = "normal",
   runId = null,
-  runSignature = null
+  runSignature = null,
+  freshOnly111 = false
 }){
   if(
     !Array.isArray(questions) ||
@@ -9756,7 +9772,8 @@ async function persistGeneratedTest({
       throw new Error('SRS96: conocimiento eliminado durante la generación.');
     const eligible=await client.query(`SELECT ci.id FROM coverage_items ci
       LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
-      WHERE ci.id=ANY($1::int[]) AND ${SRS96_ELIGIBLE_SQL}`,[ids]);
+      WHERE ci.id=ANY($1::int[]) AND ${SRS96_ELIGIBLE_SQL}
+        AND ${freshOnly111 ? FRESH111_SQL : 'TRUE'}`,[ids]);
     if(eligible.rows.length!==ids.length)
       throw new Error('SRS96: algún conocimiento se preguntó antes de su plazo de repaso. No se guarda el test.');
     for(const topicId of iiffTopics96){
@@ -10172,10 +10189,12 @@ async function registerQuestionAnswer({
          tsq.selected_index,
          tsq.is_correct,
          tsq.answered_at,
-         qb.correct_index
+         qb.correct_index,
+         sess.test_type,
+         sess.completed AS session_completed
        FROM test_session_questions tsq
-       JOIN question_bank qb
-         ON qb.id = tsq.question_id
+       JOIN question_bank qb ON qb.id = tsq.question_id
+       JOIN test_sessions sess ON sess.id=tsq.session_id
        WHERE tsq.session_id = $1
          AND tsq.question_id = $2
        FOR UPDATE`,
@@ -10192,7 +10211,6 @@ async function registerQuestionAnswer({
     }
 
     const row = result.rows[0];
-
     if(row.answered_at){
       /*
         GUARDADO IDEMPOTENTE:
@@ -10201,7 +10219,7 @@ async function registerQuestionAnswer({
         no contamos de nuevo estadísticas ni SRS. Simplemente confirmamos
         que esa respuesta ya estaba persistida.
       */
-      if(Number(row.selected_index) === Number(selectedIndex)){
+      if(row.selected_index != null && Number(row.selected_index) === Number(selectedIndex)){
         await client.query("COMMIT");
 
         return {
@@ -10216,12 +10234,26 @@ async function registerQuestionAnswer({
       );
     }
 
+    if(row.session_completed){
+      throw new Error('RESPUESTA: el test ya está finalizado.');
+    }
     const coverageItemId = Number(row.coverage_item_id);
     const correctIndex = Number(row.correct_index);
     const isCorrect =
       Number(selectedIndex) === correctIndex;
 
     const now = new Date();
+
+    // SERVER111: la práctica voluntaria puntúa la sesión, pero NO altera
+    // banco, cobertura, ni fechas, etapas o contadores SRS.
+    if(isPractice111(row.test_type)){
+      await client.query(`UPDATE test_session_questions
+        SET selected_index=$1,is_correct=$2,answered_at=$3 WHERE id=$4`,
+        [Number(selectedIndex),isCorrect,now,Number(row.session_question_id)]);
+      await client.query('COMMIT');
+      return {isCorrect,correctIndex,practice:true,reviewStage:null,
+        nextReviewAt:null,completed:false};
+    }
 
     const reviewResult = await client.query(
       `SELECT *
@@ -11235,6 +11267,20 @@ app.post("/api/finish-test", async(req,res)=>{
     }
 
     await client.query("BEGIN");
+    const session111=await client.query(
+      'SELECT test_type,completed FROM test_sessions WHERE id=$1 FOR UPDATE',[sessionId]);
+    if(!session111.rows.length)throw new Error('Sesión no encontrada.');
+    if(session111.rows[0].completed){
+      // Las sesiones con todas las preguntas contestadas pueden quedar
+      // completadas al registrar la última respuesta, ANTES de /finish-test.
+      // Esta segunda llamada es idempotente, también si Render reintenta HTTP.
+      const done111=await client.query(`SELECT correct_answers AS correct,
+        wrong_answers AS wrong,blank_answers AS blank
+        FROM test_sessions WHERE id=$1`,[sessionId]);
+      await client.query('COMMIT');
+      return res.json({ok:true,sessionId,...done111.rows[0],alreadyFinished:true});
+    }
+    const free111=isPractice111(session111.rows[0].test_type);
 
     /*
       Toda pregunta todavía sin answered_at al entregar
@@ -11258,6 +11304,7 @@ app.post("/api/finish-test", async(req,res)=>{
       pero NO como acierto ni como error.
     */
     for(const row of blankResult.rows){
+      if(free111)continue; // solo cuenta como blanco de ESTA sesión
       await client.query(
         `UPDATE question_bank
          SET
@@ -11453,7 +11500,13 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
              a.times_used,a.last_used_at,
              ci.id AS linked_id,ci.topic_id AS linked_topic_id,
              ci.section AS linked_section,ci.concept AS linked_concept,
-             ci.source_evidence AS linked_evidence,ci.exam_relevant AS linked_exam_relevant
+             ci.source_evidence AS linked_evidence,ci.exam_relevant AS linked_exam_relevant,
+             ci.times_asked AS linked_times_asked,
+             shadow.times_asked AS shadow_times_asked,
+             EXISTS(SELECT 1 FROM test_session_questions seenlink111
+               WHERE seenlink111.coverage_item_id=ci.id) AS linked_presented,
+             EXISTS(SELECT 1 FROM test_session_questions seenshadow111
+               WHERE seenshadow111.coverage_item_id=shadow.id) AS shadow_presented
       FROM legislation_anki_questions a
       LEFT JOIN coverage_items ci ON ci.id=a.validated_coverage_item_id
       LEFT JOIN coverage_items shadow ON shadow.topic_id=$2
@@ -11465,7 +11518,8 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
         AND a.validation_status='validated'
         AND (sr.next_review_at IS NULL OR sr.next_review_at<=NOW())
         AND (vr.next_review_at IS NULL OR vr.next_review_at<=NOW())
-        AND (a.last_used_at IS NULL OR a.last_used_at<=NOW()-INTERVAL '1 day')
+        AND a.times_used=0 AND a.last_used_at IS NULL
+        AND NOT EXISTS(SELECT 1 FROM question_bank seen111 JOIN test_session_questions present111 ON present111.question_id=seen111.id WHERE seen111.source_anki_question_id=a.id)
         AND NOT EXISTS (SELECT 1 FROM question_bank qrecent
           JOIN test_session_questions qts ON qts.question_id=qrecent.id
           JOIN test_sessions qsession ON qsession.id=qts.session_id
@@ -11484,6 +11538,10 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
          // Mantener originales; no aceptar alternativas idénticas en un test.
          new Set(options.map(normalizeLegislationMatchText)).size!==options.length||
          notes.has(String(a.anki_note_id))||stems.has(textKey)||
+         // Solo fichas nunca presentadas; Anki y cobertura son dimensiones
+         // distintas, pero en modo 100 % nuevo se protegen ambas.
+         !((a.linked_id && Number(a.linked_times_asked||0)===0 && !a.linked_presented) ||
+           (Number(a.shadow_times_asked||0)===0 && !a.shadow_presented)) ||
          legislationKnownAmbiguityIssue({stem:a.stem,options}))continue;
       chosen.push(a);notes.add(String(a.anki_note_id));stems.add(textKey);
       if(chosen.length===needs)break;
@@ -11515,7 +11573,9 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
       };
       const linked=a.validation_status==='validated'&&a.linked_exam_relevant===true&&
         Number(a.linked_topic_id)===topicId&&Number(a.linked_id)>0&&
-        !reserved.has(Number(a.linked_id))&&legislationExactCoverageLink(linkTarget,a)&&
+        !reserved.has(Number(a.linked_id))&&
+        Number(a.linked_times_asked||0)===0 && !a.linked_presented &&
+        legislationExactCoverageLink(linkTarget,a)&&
         !legislationConflictingArticles(linkTarget,a);
       let target;
       if(linked){
@@ -11562,7 +11622,7 @@ async function applyLegislationAnkiQuota84(originalTargets,allowedTopicIds,reque
     if(direct.has(index))continue;
     if(reserved.has(Number(targets[index].id))){
       // Evitar colisión únicamente entre slots, sin reinterpretar sus contenidos.
-      const candidate=await getAdaptiveCoverageCandidates(150,allowedTopicIds,'adaptive');
+      const candidate=await getAdaptiveCoverageCandidates(150,allowedTopicIds,'adaptive',true);
       const next=candidate.find(c=>Number(c.topic_id)===Number(targets[index].topic_id)&&
         c.item_type!=='anki_independent'&&!reserved.has(Number(c.id)));
       if(!next)throw new Error('ANKI: no quedan objetivos curriculares distintos para las preguntas nuevas.');
@@ -12342,7 +12402,7 @@ function resetBalanceNewAnswers83(questions){
   return result;
 }
 
-async function resetBank136(allowedTopicIds,count,difficulty){
+async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false){
   // Tests >40: el banco dicta QUÉ conocimientos existen, no una selección
   // previa de cobertura que pudiera no tener preguntas almacenadas.
   const result=await db.query(`SELECT qb.*,ci.topic_id,ci.section,ci.concept,
@@ -12356,6 +12416,7 @@ async function resetBank136(allowedTopicIds,count,difficulty){
     LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
     WHERE qb.active=TRUE AND ${SRS96_ELIGIBLE_SQL}
+      AND ${onlyFresh111 ? FRESH111_SQL : 'TRUE'}
       AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
       AND qb.validation_version>=6
       AND qb.validation_version NOT IN (107,113)
@@ -12447,6 +12508,172 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
   }catch(e){console.error('IIFF_91_PREVIEW_ERROR:',String(e?.message||e));
     res.status(500).json({ok:false,error:'No se pudo consultar la selección del manual.'});}
 });
+// SERVER111 — dos vías independientes: práctica voluntaria sin reprogramación,
+// y repasos SRS vencidos con actualización del ciclo. 100% desde banco,
+// cero llamadas a Gemini. Se mantienen 4 opciones o Anki original de 3.
+const REVIEW111_MODES=new Set(['practice_all','practice_failed','srs']);
+function selectBankReview111(rows,count,testType){
+  const used=new Set(),usedStems=new Set(),chosen=[],grouped=new Map();
+  const sorted=[...rows];
+  if(testType==='srs'){
+    sorted.sort((a,b)=>new Date(a.next_review_at)-new Date(b.next_review_at) ||
+      Number(a.coverage_item_id)-Number(b.coverage_item_id));
+  }else{
+    // Orden inicial rotado. No depender siempre de los últimos IDs.
+    for(let i=sorted.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [sorted[i],sorted[j]]=[sorted[j],sorted[i]];
+    }
+  }
+  for(const r of sorted){
+    if(used.has(Number(r.coverage_item_id)))continue;
+    const stemKey=R136_NORM(r.stem);
+    if(!stemKey||usedStems.has(stemKey))continue;
+    const ankiOriginalBank=Boolean(r.source_anki_question_id &&
+      r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
+    const q={stem:r.stem,options:r.options,correctIndex:Number(r.correct_index),ankiOriginalBank};
+    if(resetShape136(q))continue;
+    if(iiff91Topic(r)&&iiff91UnsafeQuestion(r,{allowProvenNegative:Number(r.validation_version)===114}))continue;
+    const key=Number(r.topic_id);
+    if(!grouped.has(key))grouped.set(key,[]);
+    grouped.get(key).push(r);
+    used.add(Number(r.coverage_item_id));usedStems.add(stemKey);
+  }
+  // Diversidad por temas cuando se seleccionan varios; dentro de cada tema
+  // los candidatos ya están barajados (o ordenados por vencimiento).
+  const topics=[...grouped.keys()];
+  while(chosen.length<count && topics.length){
+    for(let i=0;i<topics.length&&chosen.length<count;){
+      const q=grouped.get(topics[i]).shift();
+      if(q)chosen.push(q);
+      if(!grouped.get(topics[i]).length)topics.splice(i,1);
+      else i++;
+    }
+  }
+  return chosen;
+}
+async function fetchBankReview111({count,topicIds,testType,difficulty}){
+  // NO aplicar SRS96 a la práctica libre. En SRS sí se exige vencimiento,
+  // fecha exacta y ausencia de otra sesión normal/SRS en las últimas 24h.
+  const dueSql=testType==='srs' ? `
+    AND crs.next_review_at IS NOT NULL
+    AND crs.next_review_at<=NOW()
+    AND COALESCE(ci.times_asked,0)>0
+    AND NOT EXISTS (SELECT 1 FROM test_session_questions recent111
+      JOIN test_sessions sess111 ON sess111.id=recent111.session_id
+      WHERE recent111.coverage_item_id=ci.id
+        AND sess111.test_type NOT IN ('practice_all','practice_failed')
+        AND sess111.started_at>NOW()-INTERVAL '1 day')` : '';
+  const failedSql=testType==='practice_failed' ? `
+    AND EXISTS(SELECT 1 FROM test_session_questions failed111
+      WHERE failed111.coverage_item_id=ci.id AND failed111.is_correct=FALSE
+        AND failed111.is_blank=FALSE)` : '';
+  const result=await db.query(`
+    SELECT DISTINCT ON (ci.id) qb.id AS question_id,qb.coverage_item_id,
+      qb.stem,qb.options,qb.correct_index,qb.explanation,qb.source_evidence,
+      qb.source_page,qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,
+      qb.validation_version,qb.source_anki_question_id,
+      aq.validation_status AS anki_validation_status,
+      aq.direct_use_eligible AS anki_direct_eligible,
+      ci.id AS id,ci.topic_id,ci.section,ci.concept,
+      ci.source_evidence AS ci_source_evidence,ci.source_page AS ci_source_page,
+      ci.manual_page AS ci_manual_page,ci.item_type,ci.exam_relevant,
+      ci.times_asked,crs.next_review_at,t.name AS topic_name,t.block AS topic_block
+    FROM coverage_items ci
+    JOIN question_bank qb ON qb.coverage_item_id=ci.id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
+    WHERE qb.active=TRUE AND qb.validation_version>=6
+      AND qb.validation_version NOT IN (107,113)
+      AND ci.times_asked>0
+      AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
+      AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
+      AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
+      AND ($2::text IS NULL OR qb.difficulty=$2)
+      ${dueSql}
+      ${failedSql}
+    ORDER BY ci.id,qb.id DESC
+    LIMIT 8000
+  `,[topicIds,difficulty==='any'?null:difficulty]);
+  return selectBankReview111(result.rows,count,testType);
+}
+// Estado accesible sin coste para elegir repaso. Consultas acotadas.
+app.get('/api/study-modes-counts',async(req,res)=>{
+  try{
+    const ids=req.query?.topicIds ? String(req.query.topicIds).split(',').map(Number) : null;
+    if(ids && (ids.some(x=>!Number.isInteger(x)||x<1)||ids.length>100))
+      return res.status(400).json({ok:false,error:'Temas inválidos.'});
+    const r=await db.query(`SELECT
+      COUNT(DISTINCT ci.id) FILTER (WHERE ci.times_asked=0 AND
+        NOT EXISTS(SELECT 1 FROM test_session_questions sq0 WHERE sq0.coverage_item_id=ci.id))::int AS fresh,
+      COUNT(DISTINCT ci.id) FILTER (WHERE ci.times_asked>0)::int AS worked,
+      COUNT(DISTINCT ci.id) FILTER (WHERE ci.times_wrong>0)::int AS failed,
+      COUNT(DISTINCT ci.id) FILTER (WHERE crs.next_review_at<=NOW()
+        AND ci.times_asked>0)::int AS due
+      FROM coverage_items ci
+      LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+      WHERE ci.exam_relevant=TRUE AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))`,
+      [ids]);
+    res.json({ok:true,readonly:true,counts:r.rows[0]});
+  }catch(e){console.error('111_COUNTS:',e);res.status(500).json({ok:false,error:'No se pudo obtener disponibilidad.'});}
+});
+app.post('/api/study-bank-test',async(req,res)=>{
+  let client=null;
+  try{
+    const testType=String(req.body?.studyMode||'');
+    if(!REVIEW111_MODES.has(testType))
+      return res.status(400).json({ok:false,error:'Modalidad de repaso inválida.'});
+    const count=Number(req.body?.count);
+    if(!Number.isInteger(count)||count<1||count>75)
+      return res.status(400).json({ok:false,error:'Número de preguntas inválido (1–75).'});
+    const difficulty=['alta','muy alta'].includes(req.body?.difficulty)
+      ? req.body.difficulty : 'any';
+    const topicIds=await resolveGenerationTopicScope(req.body);
+    const selected=await fetchBankReview111({count,topicIds,testType,difficulty});
+    if(selected.length!==count)
+      return res.status(422).json({ok:false,error:`Banco insuficiente para ${count} preguntas de esta modalidad y dificultad: ${selected.length} disponibles. Amplía temas o reduce cantidad.`});
+    const ids=selected.map(x=>Number(x.coverage_item_id));
+    if(new Set(ids).size!==ids.length)throw Error('BANCOS111: conocimientos duplicados.');
+    client=await db.connect();await client.query('BEGIN');
+    // Evitar que dos sesiones SRS paralelas consuman el mismo repaso.
+    if(testType==='srs'){
+      await client.query('SELECT id FROM coverage_items WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE',[ids]);
+      const valid=await client.query(`SELECT ci.id FROM coverage_items ci
+        JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+        WHERE ci.id=ANY($1::int[]) AND crs.next_review_at<=NOW()
+        AND NOT EXISTS(SELECT 1 FROM test_session_questions sq
+          JOIN test_sessions ts ON ts.id=sq.session_id
+          WHERE sq.coverage_item_id=ci.id
+            AND ts.test_type NOT IN('practice_all','practice_failed')
+            AND ts.started_at>NOW()-INTERVAL '1 day')`,[ids]);
+      if(valid.rows.length!==ids.length)throw Error('SRS111: repaso ya utilizado por otra sesión. No se ha guardado.');
+    }
+    const inserted=await client.query(`INSERT INTO test_sessions
+      (requested_count,difficulty,mode,test_type,total_questions)
+      VALUES ($1,$2,$3,$4,$1) RETURNING id`,
+      [count,difficulty==='any'?'mixta':difficulty,'banco',testType]);
+    const sessionId=Number(inserted.rows[0].id);
+    for(let i=0;i<selected.length;i++){
+      await client.query(`INSERT INTO test_session_questions
+        (session_id,question_id,coverage_item_id,position)
+        VALUES($1,$2,$3,$4)`,
+        [sessionId,Number(selected[i].question_id),ids[i],i+1]);
+    }
+    await client.query('COMMIT');client.release();client=null;
+    const questions=selected.map(x=>({
+      stem:x.stem,options:x.options,correctIndex:Number(x.correct_index),
+      explanation:x.explanation||'',sourceEvidence:x.source_evidence||x.ci_source_evidence||'',
+      sourcePage:null,manualPage:x.manual_page||x.ci_manual_page||null,
+      questionFamily:x.question_family,difficulty:x.difficulty,
+      graphic:x.graphic||null,questionId:Number(x.question_id),
+      coverageItemId:Number(x.coverage_item_id),reused:true
+    }));
+    return res.json({ok:true,sessionId,questions,studyMode:testType,
+      geminiCalls:0,coverage:{targeted:count,markedWorked:0}});
+  }catch(e){if(client){try{await client.query('ROLLBACK')}catch{}client.release()}
+    console.error('111_BANK:',e);return res.status(500).json({ok:false,error:String(e.message||e)});}
+});
 app.post('/api/generate',async(req,res)=>{
   const started=Date.now();const supplied=req.body?.runId;
   const runId=normalizeGenerationRunId(supplied);const signature=runId?generationRunSignature(req.body):null;
@@ -12481,8 +12708,14 @@ app.post('/api/generate',async(req,res)=>{
       (count>40&&count<=120)))throw Error('Número de preguntas no admitido.');
     const difficulty=req.body?.difficulty==='muy alta'?'muy alta':'alta';
     const mode=['literal','mixto','calculos'].includes(req.body?.mode)?req.body.mode:'mixto';
-    const testType=req.body?.testType==='failed'?'failed':'normal';
+    if(req.body?.testType==='failed')throw Error(
+      'Para repetir falladas utiliza Repaso libre: no se modificará el SRS.');
+    // Mantener los caminos auditados de recuperación/Anki para normal.
+    const testType='normal';
     const examMode=req.body?.examMode==='simulation'?'simulation':'adaptive';
+    const freshOnly111=examMode!=='simulation';
+    if(req.body?.testType && !['new','normal'].includes(req.body.testType))
+      throw Error('Modalidad incorrecta: los repasos tienen un endpoint sin Gemini.');
     const topicIds=await resolveGenerationTopicScope(req.body);
     // El manual IIFF reside íntegro en PostgreSQL; no depende de File Search.
     // Se conserva la condición original para TODOS los demás ámbitos.
@@ -12500,15 +12733,15 @@ app.post('/api/generate',async(req,res)=>{
         if(Array.isArray(topicIds)&&topicIds.length===1){
           const check=await db.query('SELECT name,block FROM topics WHERE id=$1',[topicIds[0]]);
           if(iiff91Topic({topic_name:check.rows[0]?.name,topic_block:check.rows[0]?.block}))
-            return getIiffTargets91(count,topicIds,examMode==='simulation',difficulty);
+            return getIiffTargets91(count,topicIds,examMode==='simulation',difficulty,freshOnly111);
         }
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
-          aiClient().models.generateContent(...args)}},topicIds,examMode);
+          aiClient().models.generateContent(...args)}},topicIds,examMode,freshOnly111);
       })())));
     if(!resume136 && testType==='normal' && count<=40 &&
        targets.some(t=>iiff91Topic(t)&&iiff91Editorial(t))){
       const affected=[...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))];
-      const replacements=await getAdaptiveCoverageCandidates(3000,affected,examMode);
+      const replacements=await getAdaptiveCoverageCandidates(3000,affected,examMode,freshOnly111);
       targets=iiff92ReplaceEditorialInMixed(targets,replacements);
     }
     if(Array.isArray(topicIds) && topicIds.length===1 &&
@@ -12523,6 +12756,14 @@ app.post('/api/generate',async(req,res)=>{
         for(const [i,q] of quota.direct)direct.set(i,q);
       }
     }
+    // SERVER111: impedir llamadas pagadas si Anki/selector insertaron repeticiones.
+    if(!resume136 && freshOnly111 && count<=40){
+      const ids=targets.map(t=>Number(t.id));
+      if(ids.length!==count || new Set(ids).size!==count)throw Error('NUEVAS111: objetivos repetidos.');
+      const verified=await db.query(`SELECT ci.id FROM coverage_items ci
+        WHERE ci.id=ANY($1::int[]) AND ${FRESH111_SQL}`,[ids]);
+      if(verified.rows.length!==count)throw Error('NUEVAS111: hay conocimientos ya presentados. Sin gasto Gemini.');
+    }
     // Preflight SIN GEMINI: cuando un objetivo no trae fragmento del PDF,
     // sustituirlo por otro del MISMO tema que sí lo trae. No altera cobertura
     // ni el historial; evita pagar lotes destinados a rechazo automático.
@@ -12532,7 +12773,7 @@ app.post('/api/generate',async(req,res)=>{
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
-          Math.max(count*50,1000),topicIds,examMode);
+          Math.max(count*50,1000),topicIds,examMode,freshOnly111);
         const occupied=new Set(targets.map(t=>Number(t.id)));
         for(const {t,i} of missing){
           const substitute=alternates.find(a=>Number(a.topic_id)===Number(t.topic_id)&&
@@ -12549,7 +12790,7 @@ app.post('/api/generate',async(req,res)=>{
     for(const [i,q] of direct)questions[i]=q;
     draft136={targets,questions};
     if(count>40){
-      const pairs=await resetBank136(topicIds,count,difficulty);
+      const pairs=await resetBank136(topicIds,count,difficulty,freshOnly111);
       targets=pairs.map(x=>x.target);questions=pairs.map(x=>x.question);
     }else{
       // Las preguntas son nuevas salvo la cuota de Anki ORIGINAL de Alta.
@@ -12608,7 +12849,7 @@ app.post('/api/generate',async(req,res)=>{
         } else {
           if(testType==='normal'){
             const alternatives=await getAdaptiveCoverageCandidates(
-              Math.max(1000,count*50),topicIds,examMode);
+              Math.max(1000,count*50),topicIds,examMode,freshOnly111);
             const occupied=new Set(targets.map(t=>Number(t.id)));
             for(const slot of holes){
               const other=alternatives.find(candidate=>
@@ -12669,8 +12910,16 @@ app.post('/api/generate',async(req,res)=>{
     questions=resetBalanceNewAnswers83(questions);
     if(questions.some(q=>resetShape136(q)))
       throw Error('Redistribución de opciones inválida: no se guardó el test.');
+    if(freshOnly111){
+      const ids=targets.map(t=>Number(t.id));
+      const clean=await db.query(`SELECT ci.id FROM coverage_items ci
+        WHERE ci.id=ANY($1::int[]) AND ${FRESH111_SQL}`,[ids]);
+      if(clean.rows.length!==targets.length)
+        throw Error('NUEVAS111: sustitución por conocimiento ya presentado. No se guardó el test.');
+    }
     const persisted=await persistGeneratedTest({questions,targets,requestedCount:count,
-      difficulty,mode,testType,runId,runSignature:signature});
+      difficulty,mode,testType:freshOnly111?'new':testType,runId,
+      runSignature:signature,freshOnly111});
     console.log('RESET_136_COMPLETO:',JSON.stringify({count,sessionId:persisted.sessionId,
       ms:Date.now()-started,local:questions.filter(q=>q.resetLocal136).length}));
     return res.json({ok:true,sessionId:persisted.sessionId,questions:publicManualPageQuestions(persisted.questions),
