@@ -7781,6 +7781,31 @@ function iiff91UnsafeQuestion(q,{allowProvenNegative=false}={}){
   if(/\bque\s+(?:numero|titulo)\s+(?:tiene|lleva|recibe)\s+(?:el|este)\s+procedimiento\b/.test(stem))return true;
   return false;
 }
+// SERVER107: veto ACOTADO de un error cuantificable ocurrido en el test 91.
+// Si la única base para la cifra correcta es APROXIMADA, no se puede
+// convertir en mínimo/máximo rígido. No aplica a negativas ni a otros temas.
+// No compara cifras por proximidad ni invalida intervalos correctamente
+// atribuidos: «unos 3 m» no equivale a «como mínimo 3 m».
+function iiff107UnsupportedStrictLimit(question,source){
+  if(!question || iiff92IsNegativeStem(question))return false;
+  const stem=iiff91Norm(question.stem);
+  const evidence=iiff91Norm(source);
+  const answer=iiff91Norm(question.options?.[question.correctIndex]);
+  if(!stem || !evidence || !answer)return false;
+  const min=/\b(?:minim[oa]s?|como minimo|al menos|no menos de)\b/;
+  const max=/\b(?:maxim[oa]s?|como maximo|a lo sumo|no mas de)\b/;
+  const strict=min.test(stem)?min:max.test(stem)?max:null;
+  if(!strict || strict.test(evidence))return false;
+  // Fuente y respuesta DEBEN compartir literalmente la misma cifra.
+  // Se ignoran aproximaciones no asociadas a la respuesta comprobada.
+  const approx=/\b(?:unos?|unas?|aproximadamente|aprox\.?|alrededor de|cerca de)\s+(\d+(?:[.,]\d+)?)\b/g;
+  const answerValues=[...answer.matchAll(/\b\d+(?:[.,]\d+)?\b/g)]
+    .map(x=>Number(x[0].replace(',','.')));
+  for(const m of evidence.matchAll(approx)){
+    if(answerValues.includes(Number(m[1].replace(',','.'))))return true;
+  }
+  return false;
+}
 // SERVER 93 CANDIDATO: ejemplos resueltos y comprobados exclusivamente contra
 // el Manual IIFF Navarra 2026 (páginas impresas). Los exámenes oficiales
 // Navarra 2024/2026 determinan SOLO el estilo y la dificultad, nunca datos.
@@ -7916,6 +7941,19 @@ REGLAS QUE NO SE PUEDEN RELAJAR:
   dobles negaciones y afirmaciones falsas que sean obvias por cultura general.
 - No inventar magnitudes ni condiciones fuera de la evidencia para endurecer.
   Los números falsos son distractores, no datos afirmados del manual.
+- PRECISIÓN DE MODALIDAD: «unos / aproximadamente X» expresa un valor
+  orientativo y NO autoriza «mínimo X», «máximo X» ni «exactamente X».
+  «puede» no autoriza «debe», ni «se recomienda» equivale a «es obligatorio».
+  Conserva en el ENUNCIADO las reservas del fragmento. Por ejemplo,
+  pregunta «¿qué distancia aproximada indica el manual?» en lugar de
+  «¿cuál es la distancia mínima?» cuando solo hay un valor orientativo.
+  Si cifras próximas podrían cumplir una indicación aproximada, no las
+  uses como falsedades inequívocas: elige alternativas distinguibles.
+- DISTRACCIÓN ÚTIL: cada falsa debe representar una confusión técnica
+  plausible (unidad, rango, condición, secuencia, categoría del MISMO campo).
+  No recurras a términos rebuscados, efectos extremos o categorías ajenas;
+  si el fragmento no soporta tres alternativas cercanas con respuesta única,
+  conserva la literalidad y NO simules dificultad inventando hechos.
 - No preguntar por índices, títulos o aspectos incidentales de fotografías/dibujos.
   SÍ preguntar hechos técnicos EXTRAÍDOS de imágenes originales si el fragmento
   aportado demuestra la respuesta; no inventar contenido visual no adjunto.
@@ -7968,11 +8006,13 @@ function iiff92AuditSchema(base){
   return {...base,properties:{...base.properties,results:{...base.properties.results,
     items:{...original,properties:{...original.properties,
       calidad:{type:'integer',minimum:0,maximum:2},
+      // SERVER107: revisar también la explicación; no añade otra auditoría.
+      explanationOk:{type:'boolean'},
       // Opcional en positivas. Obligatorio y revisado EN SERVIDOR en negativas.
       optionProofs:{type:'array',minItems:4,maxItems:4,items:{type:'object',
         properties:{trueAccordingToPDF:{type:'boolean'},quote:{type:'string'}},
         required:['trueAccordingToPDF','quote']}}},
-      required:[...original.required,'calidad']}}}};
+      required:[...original.required,'calidad','explanationOk']}}}};
 }
 function iiff92FourOptionProofs(q,a,fragment){
   if(!Array.isArray(a?.optionProofs)||a.optionProofs.length!==4)return false;
@@ -8220,6 +8260,17 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
   }
   if(selected.length<count)throw Error(`IIFF: objetivos examinables insuficientes: ${selected.length}/${count}.`);
   return selected;
+}
+// SERVER106 (candidato): el rescate de una pregunta rechazada no debe
+// superar la cuota de repaso fijada antes de llamar a Gemini.
+// Aplica solo a test normal del ÚNICO tema IIFF, no a simulacros ni a otros temas.
+function iiff106ReplacementAllowed(candidate,targets,slot,simulation=false){
+  if(simulation||!Array.isArray(targets)||!targets.length||
+     !targets.every(iiff91Topic))return true;
+  if(iiff91SameRecentFact(candidate,targets.filter((_,i)=>i!==slot)))return false;
+  if(Number(candidate.times_asked||0)<=0)return true;
+  const others=targets.reduce((n,t,i)=>n+(i!==slot && Number(t.times_asked||0)>0?1:0),0);
+  return others<Math.ceil(targets.length/2);
 }
 // REVISIÓN 92R: en tests MIXTOS el selector compartido puede devolver
 // un índice del IIFF. Sustituir solo ese objetivo por otro del MISMO tema,
@@ -12118,6 +12169,10 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
     if(resetShape136(q))return [];
+    if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
+      console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
+      return [];
+    }
     if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
       iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))return [];
     if((esTemaSolares2026(group[i])||esTemaEolicos2026(group[i])) &&
@@ -12125,7 +12180,8 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
     return [{index:i,tema:group[i].topic_name,
       epigrafe:group[i].section,concepto:group[i].concept,
       fragmento:String(group[i].source_evidence||'').slice(0,3500),
-      stem:q.stem,options:q.options}];
+      stem:q.stem,options:q.options,
+      ...(iiff91Topic(group[i])?{explanation:q.explanation}:{})}];
   });
   if(!blind.length)return questions.map(()=>null);
   // El texto de auditoría es IDÉNTICO al SERVER 81 para todas las materias
@@ -12145,6 +12201,22 @@ Si el enunciado requiere mirar una fotografía/figura que NO se presenta al usua
 Asigna calidad=0, 1 o 2 a TODAS las filas (el esquema lo exige).
 SOLO PARA FILAS IIFF, aplica estos criterios adicionales de dificultad;
 para las demás conserva los criterios de auditoría comunes.
+ALERTA DE PRECISIÓN MODAL: un valor orientativo como «unos 3 m» NO
+prueba que «3 m» sea un mínimo estricto. Si el enunciado transforma
+aproximaciones, posibilidades o recomendaciones en límites u obligaciones
+no documentados, answer=-1 aunque la cifra correcta figure en el PDF.
+Para valorar dificultad de MUY ALTA, que una clave reproduzca la frase
+literal del fragmento NO convierte en plausibles las otras tres opciones.
+Si al menos DOS distractores son descartables por incongruencia evidente,
+categorías alejadas o valores absurdos, calidad=0, incluso con clave factual
+correcta. No penalices una pregunta literal SOLO por ser breve o por tener
+un único dato: puede ser difícil con tres distractores realmente próximos.
+EXPLICACIÓN: examina el campo explanation de cada fila, sin usar fuentes
+externas. Devuelve explanationOk=true SOLO si sus afirmaciones técnicas
+concuerdan con la cita y el fragmento, sin invertir causas, secuencias,
+ascenso/descenso, valores o condiciones. Ante contradicción o inferencia
+no demostrada, explanationOk=false, pero audita answer normalmente:
+el servidor sustituirá la explicación dudosa por la cita literal validada.
 Examina las TRES opciones no-clave frente a la clave: en POSITIVA deben
 ser falsas; en INCORRECTA deben ser verdaderas y la clave la única falsa,
 con sus cuatro pruebas literales. Comprueba misma clase técnica/unidad,
@@ -12189,6 +12261,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
   const validated=questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||!a||a.answer!==q.correctIndex ||
+      (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
       (iiff91Topic(group[i])&&iiff92IsNegativeStem(q)&&
@@ -12204,7 +12277,9 @@ No añadas escenarios, parámetros ni condiciones no documentados.
     const explanation=negative
       ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
        `El manual establece: «${String(a.optionProofs[q.correctIndex].quote).trim()}».`
-      :q.explanation;
+      :(iiff91Topic(group[i]) && a.explanationOk!==true
+        ?`El manual establece: «${evidence}».`
+        :q.explanation);
     return {...q,explanation,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
       manualPage:group[i].manual_page??null,
       iiffNegativeVerified:negative,
@@ -12463,6 +12538,7 @@ app.post('/api/generate',async(req,res)=>{
           const substitute=alternates.find(a=>Number(a.topic_id)===Number(t.topic_id)&&
             !occupied.has(Number(a.id))&&
             (!iiff91Topic(a)||!iiff91Editorial(a))&&
+            iiff106ReplacementAllowed(a,targets,i,examMode==='simulation')&&
             (String(a.source_evidence||'').trim().length>=55||geographyTableRecord135(a)));
           if(substitute){targets[i]=substitute;occupied.add(Number(substitute.id));}
         }
@@ -12539,6 +12615,7 @@ app.post('/api/generate',async(req,res)=>{
                 Number(candidate.topic_id)===Number(slot.t.topic_id) &&
                 !occupied.has(Number(candidate.id)) &&
                 (!iiff91Topic(candidate)||!iiff91Editorial(candidate)) &&
+                iiff106ReplacementAllowed(candidate,targets,slot.index,examMode==='simulation') &&
                 (String(candidate.source_evidence||'').trim().length>=55 ||
                   geographyTableRecord135(candidate)));
               if(!other)continue;
