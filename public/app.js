@@ -508,6 +508,54 @@ async function generate(){
     btn.textContent=originalText;
   }
 }
+// SERVER111: repaso del banco y repaso SRS sin Gemini ni nuevos knowledge IDs.
+// No toca la recuperación idempotente de la generación de preguntas NUEVAS.
+let bankModeBusy111=false;
+async function startBankMode111(studyMode){
+  if(bankModeBusy111)return;
+  const names={
+    practice_all:'Repaso libre — preguntas trabajadas',
+    practice_failed:'Repaso libre — preguntas falladas',
+    srs:'Repasos programados SRS'
+  };
+  if(!names[studyMode])return;
+  if(localStorage.getItem(GENERATION_PENDING_112)){
+    alert('Hay una generación pendiente de recuperar. Usa primero el botón de nuevas para recuperar el mismo trabajo, sin generar otro.');
+    return;
+  }
+  const scopeAll=$('scopeAll')?.checked===true;
+  if(!scopeAll&&selectedBlocks.size===0&&selectedTopicIds.size===0){
+    alert('Selecciona un bloque o tema para repasar.');return;
+  }
+  const buttons=document.querySelectorAll('.study-choice111');
+  bankModeBusy111=true;buttons.forEach(b=>b.disabled=true);
+  try{
+    const body={
+      studyMode,count:Number($('count').value),difficulty:'any',
+      selectedBlocks:scopeAll?[]:[...selectedBlocks],
+      selectedTopicIds:scopeAll?[]:[...selectedTopicIds]
+    };
+    generationProgress112('Recuperando preguntas verificadas del banco (sin Gemini)...');
+    const j=await api('/api/study-bank-test',{
+      method:'POST',body:JSON.stringify(body)
+    });
+    currentTestLabel=names[studyMode]+' · '+buildSelectionLabel();
+    showGeneratedTest112(j);
+    generationProgress112(names[studyMode]+' — '+j.questions.length+' preguntas guardadas. Sin consumo Gemini.');
+  }catch(e){
+    generationProgress112(e?.message||String(e));
+    alert(e?.message||String(e));
+  }finally{
+    buttons.forEach(b=>b.disabled=false);bankModeBusy111=false;
+  }
+}
+async function refreshDue111(){
+  try{
+    const r=await api('/api/study-modes-counts');
+    const el=$('srsDueCount111');
+    if(el)el.textContent='('+(Number(r?.counts?.due)||0)+' vencidos en todo el temario)';
+  }catch(e){console.warn('No se pudo actualizar el contador SRS.',e);}
+}
 async function analyzeCoverage(){
   const btn=$("coverage");
   const originalText=btn.textContent;
@@ -1102,10 +1150,7 @@ function syncExamMode(){
 
   if(simulation){
 
-    if(testType){
-      testType.value="normal";
-      testType.disabled=true;
-    }
+    if(testType){testType.value="new";}
 
     if(generateButton){
       generateButton.textContent=
@@ -1119,13 +1164,11 @@ function syncExamMode(){
 
   }else{
 
-    if(testType){
-      testType.disabled=false;
-    }
+    if(testType){testType.value="new";}
 
     if(generateButton){
       generateButton.textContent=
-        "GENERAR TEST";
+        "1. GENERAR TEST — 100 % CONOCIMIENTOS NUEVOS";
     }
 
     if(kicker){
@@ -2051,6 +2094,7 @@ async function loadStatistics(){
 
     renderTopicSelector();
     renderSelectionStatistics();
+    await refreshDue111();
 
   }catch(e){
 

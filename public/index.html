@@ -926,6 +926,15 @@ background-position:center;
 }
 .exam-question .opt .katex-display {margin:.2em 0;}
 .exam-question .katex-html {max-width:none;}
+  /* SERVER111: controles funcionales, legibles también en tablet/móvil. */
+.study-mode111{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.practice-actions111{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.study-choice111{min-height:48px;width:100%;padding:13px 14px;
+  border-radius:10px;border:1px solid #b9c8dc;background:#fff;color:#1c3665;
+  font-weight:700;text-align:center;cursor:pointer}
+.srs-choice111{border-color:#a5b9d8;background:#eef3fc}
+.study-hint111{font-size:13px;color:#536078;margin:0 0 4px}
+@media(max-width:640px){.practice-actions111{grid-template-columns:1fr}}
 </style>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
 </head>
@@ -992,17 +1001,8 @@ background-position:center;
 
   </select>
 </label>
-      <label>
-        Tipo de test
-        <select id="testType">
-          <option value="normal" selected>
-            Entrenamiento normal
-          </option>
-          <option value="failed">
-            Solo preguntas falladas
-          </option>
-        </select>
-      </label>
+      <input type="hidden" id="testType" value="new">
+
 
       <label>
         Preguntas
@@ -1085,12 +1085,24 @@ background-position:center;
 
     </div>
 
-    <button
-      class="generate-button"
-      id="generate"
-      onclick="generate()">
-      GENERAR TEST
-    </button>
+    <div class="study-mode111" role="group" aria-label="Modalidades de estudio">
+      <button class="generate-button" id="generate" onclick="generate()">
+        1. GENERAR TEST — 100 % CONOCIMIENTOS NUEVOS
+      </button>
+      <div class="practice-actions111">
+        <button class="study-choice111" onclick="startBankMode111('practice_all')">
+          2. REPASO LIBRE — PREGUNTAS TRABAJADAS
+        </button>
+        <button class="study-choice111" onclick="startBankMode111('practice_failed')">
+          3. REPASO LIBRE — SOLO PREGUNTAS FALLADAS
+        </button>
+      </div>
+      <button class="study-choice111 srs-choice111" onclick="startBankMode111('srs')">
+        4. REPASOS PROGRAMADOS SRS <span id="srsDueCount111"></span>
+      </button>
+      <p class="study-hint111">Los repasos libres son voluntarios y no adelantan las fechas del SRS.
+        Los repasos SRS se activan cuando vence el ciclo de memoria.</p>
+    </div>
     <p id="generateProgress" role="status" aria-live="polite"
        style="margin:10px 0 0;font-size:13px;color:#343a40;"></p>
 
