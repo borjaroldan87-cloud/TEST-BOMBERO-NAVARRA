@@ -8214,6 +8214,177 @@ function iiff91SameRecentFact(candidate,history){
 // Un texto largo por sí mismo NO obtiene máxima puntuación: se valoran
 // indicadores de cifras, condiciones, secuencias y comparaciones documentadas.
 // Los distractores continúan sujetos a la auditoría factual existente.
+
+// SERVER120 — pregunta cuantitativa combinada, construida BAJO DEMANDA.
+// No consume Gemini ni crea un banco por adelantado. Solo se habilita cuando
+// dos magnitudes independientes figuran expresamente en la misma ficha del PDF.
+// Los otros tres pares modifican cifras próximas (distractores, NO nuevos hechos).
+const IIFF120_SPEC_LABELS = Object.freeze([
+  ['Cilindrada', /\bcilindrada\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(cm³|cm3|cc)(?![\p{L}\d])/iu],
+  ['Potencia del motor', /\bpotencia\s+(?:(?:del|de)\s+)?motor\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(kW|cv)(?![\p{L}\d])/iu],
+  ['Autonomía', /\bautonom[ií]a\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(horas?|h|minutos?|min)(?![\p{L}\d])/iu],
+  ['Aspiración', /\baspiraci[oó]n\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(m|metros?)(?![\p{L}\d])/iu],
+  ['Elevación máxima', /\belevaci[oó]n\s+m[aá]xima\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(m|metros?)(?![\p{L}\d])/iu],
+  ['Caudal máximo', /\bcaudal\s+m[aá]ximo\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(l\/min|lpm|litros?\/h|litros?\/min|l\/h)(?![\p{L}\d])/iu],
+  ['Depósito', /\bdep[oó]sito\s*(?:(?:de\s+(?:gasolina|combustible))\s*)?(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(litros?|l)(?![\p{L}\d])/iu],
+  ['Altura', /\baltura\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(mm|cm|m|metros?)(?![\p{L}\d])/iu],
+  ['Longitud', /\blongitud\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(mm|cm|m|metros?)(?![\p{L}\d])/iu],
+  ['Anchura', /\banchura\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(mm|cm|m|metros?)(?![\p{L}\d])/iu],
+  ['Peso en seco', /\bpeso\s*(?:\(en\s+seco\)|en\s+seco)\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(kg|g)(?![\p{L}\d])/iu],
+  ['Presión nominal', /\bpresi[oó]n\s+nominal\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(bar|kPa|MPa)(?![\p{L}\d])/iu],
+  ['Presión máxima', /\bpresi[oó]n\s+m[aá]xima\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(bar|kPa|MPa)(?![\p{L}\d])/iu],
+  ['Velocidad máxima', /\bvelocidad\s+m[aá]xima\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(km\/h|m\/s)(?![\p{L}\d])/iu],
+  ['Distancia', /\bdistancia\s*(?:de\s+|:\s*)?(\d{1,5}(?:,\d{1,2})?)\s*(mm|cm|m|metros?)(?![\p{L}\d])/iu]
+]);
+function iiff120Specs(target){
+  if(!iiff91Topic(target)||iiff91Editorial(target))return [];
+  const evidence=String(target.source_evidence||'');
+  const result=[];
+  for(const [label,re] of IIFF120_SPEC_LABELS){
+    const all=[...evidence.matchAll(new RegExp(re.source,'giu'))];
+    if(all.length!==1)continue; // Etiqueta ambigua: no adivinar.
+    const m=all[0],num=m[1],unit=m[2];
+    const position=m.index;
+    // Rechazar comparaciones orientativas o umbrales imprecisos:
+    // «unos», «aproximadamente», «hasta», «entre», «más de».
+    const prefix=evidence.slice(Math.max(0,position-34),position).toLowerCase();
+    if(/(?:aproximadamente|aprox\.?|alrededor de|unos?\s+|entre\s+|hasta\s+|m[aá]s de\s+|menos de\s+)\s*$/.test(prefix))continue;
+    const value=Number(num.replace(',','.'));
+    if(!Number.isFinite(value)||value<=0||value>100000)continue;
+    result.push({label,value,raw:num,unit,quote:m[0],index:position});
+  }
+  return result;
+}
+function iiff120NearValue(f){
+  // Valor erróneo dentro de ~10-20%, manteniendo cifras y precisión similares.
+  const value=f.value,decimal=f.raw.includes(',');
+  const unit=String(f.unit).toLowerCase();
+  let step;
+  if(decimal)step=value<1?0.1:value<10?0.5:value<100?2:10;
+  else step=value<10?1:value<100?4:value<1000?10:Math.max(50,Math.round(value/10));
+  const altered=value+step;
+  const formatted=decimal?altered.toFixed(f.raw.split(',')[1].length).replace('.',','):String(Math.round(altered));
+  return formatted!==f.raw?formatted:null;
+}
+
+// Alternativa segura para una ficha con UN único intervalo cuantitativo
+// literalmente documentado. No se usa para intervalos múltiples/ambiguos.
+function iiff120RangeFact(target){
+  if(!iiff91Topic(target)||iiff91Editorial(target))return null;
+  const text=String(target.source_evidence||'');
+  const units='(?:litros?\\/min|l\\/min|km\\/h|kW\\/m|MW\\/m|horas?|minutos?|mm|cm|metros?|m|bar|%)';
+  const patterns=[
+    new RegExp(`\\b([0-9]{1,5}(?:\\.[0-9]{3})?(?:,[0-9]{1,2})?)\\s*[-–]\\s*([0-9]{1,5}(?:\\.[0-9]{3})?(?:,[0-9]{1,2})?)\\s*(${units})(?![\\p{L}\\d/])`,'giu'),
+    /\bentre\s+(?:el\s+|la\s+)?(\d{1,5}(?:,\d{1,2})?)\s*(%)\s*(?:\([^)]{0,45}\)\s*)?(?:y|a|hasta)\s+(?:el\s+|la\s+)?(\d{1,5}(?:,\d{1,2})?)\s*%/giu
+  ];
+  const matches=[];
+  for(let i=0;i<patterns.length;i++){
+    for(const m of text.matchAll(patterns[i])){
+      const a=i===0?m[1]:m[1],b=i===0?m[2]:m[3],unit=i===0?m[3]:'%';
+      const toNum=v=>Number(String(v).replace(/\.(?=\d{3}(?:,|$))/g,'').replace(',','.'));
+      const lo=toNum(a),hi=toNum(b);
+      if(!Number.isFinite(lo)||!Number.isFinite(hi)||lo<=0||hi<=lo||hi>100000)continue;
+      matches.push({lo,hi,a,b,unit,quote:m[0]});
+    }
+  }
+  if(matches.length!==1)return null;
+  return matches[0];
+}
+function iiff120RangeQuestion(target){
+  const r=iiff120RangeFact(target);
+  if(!r)return null;
+  const near=(val,raw)=>{
+    const decimal=raw.includes(',');
+    let step=decimal?(val<10?0.5:val<100?2:10):val<5?1:val<20?2:val<100?5:val<1000?20:100;
+    let changed=val+step;
+    const digits=raw.includes(',')?raw.split(',')[1].length:0;
+    if(decimal)return changed.toFixed(digits).replace('.',',');
+    // Conserva el formato de millares en cifras como 1.700.
+    return raw.includes('.')?String(Math.round(changed)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'):String(Math.round(changed));
+  };
+  const otherLo=near(r.lo,r.a),otherHi=near(r.hi,r.b);
+  if(otherLo===r.a||otherHi===r.b||Number(otherLo.replace('.','').replace(',','.'))>=r.hi)return null;
+  const option=(a,b)=>`${a}–${b} ${r.unit}`;
+  const options=[option(r.a,r.b),option(otherLo,r.b),option(r.a,otherHi),option(otherLo,otherHi)];
+  // Evitar revelar los dos extremos incluidos a menudo en el concepto de la ficha.
+  let concept=String(target.concept||'').trim();
+  concept=concept.replace(/\([^)]*\d[^)]*\)/g,'')
+    .replace(/\b\d{1,5}(?:[.,]\d+)?\s*(?:[-–a]\s*\d{1,5}(?:[.,]\d+)?)?\s*(?:%|kW\/m|MW\/m|km\/h|litros?\/min|l\/min|mm|cm|m)?\b/gi,'')
+    .replace(/\s{2,}/g,' ').replace(/\s+([,.:])/g,'$1').replace(/[,.:\s-]+$/,'')
+    .replace(/\b(?:establecido|descrita|prevista|definido|de|del|en|con|para|por|a)\s*$/i,'').trim();
+  if(!concept||concept.length<18)return null;
+  const q={stem:`¿Qué intervalo cuantitativo recoge el manual para ${concept.charAt(0).toLowerCase()+concept.slice(1)}?`,
+    options,correctIndex:0,explanation:`El manual recoge expresamente «${r.quote}».`,
+    sourceEvidence:String(target.source_evidence||''),sourcePage:target.source_page??null,
+    manualPage:target.manual_page??null,questionFamily:'IIFF120_INTERVALO_PRECISO',
+    difficulty:'muy alta',graphic:null,iiffHighVerified:true,iiff120Verified:true};
+  return resetShape136(q)||iiff91UnsafeQuestion(q)?null:q;
+}
+
+function iiff120LocalQuestion(target){
+  const facts=iiff120Specs(target);
+  if(facts.length<2)return iiff120RangeQuestion(target);
+  // Deben ser propiedades distintas. Si ambas son longitudes de la misma
+  // etiqueta, los enunciados pueden ser ambiguos y se descartan.
+  const [a,b]=facts;
+  if(a.label===b.label)return null;
+  const wrongA=iiff120NearValue(a),wrongB=iiff120NearValue(b);
+  if(!wrongA||!wrongB)return null;
+  const val=(x,y)=>`${a.label}: ${x} ${a.unit}; ${b.label}: ${y} ${b.unit}`;
+  const concept=String(target.concept||'').trim().replace(/[.?!]+$/,'').replace(/^Características técnicas de (?:la|el|los|las) /i,'').replace(/^Características de (?:la|el|los|las) /i,'');
+  if(new RegExp('\\b'+a.raw.replace(/[.,]/g,'[.,]')+'\\b').test(concept)||
+     new RegExp('\\b'+b.raw.replace(/[.,]/g,'[.,]')+'\\b').test(concept))return null;
+  const stem=`Respecto a ${concept}, ¿qué pareja de ${a.label.toLowerCase()} y ${b.label.toLowerCase()} recoge el manual?`;
+  const options=[val(a.raw,b.raw),val(wrongA,b.raw),val(a.raw,wrongB),val(wrongA,wrongB)];
+  const q={stem,options,correctIndex:0,
+    explanation:`El texto de referencia establece «${a.quote}» y «${b.quote}».`,
+    sourceEvidence:String(target.source_evidence||''),
+    sourcePage:target.source_page??null,manualPage:target.manual_page??null,
+    questionFamily:'IIFF120_DOS_PARAMETROS',difficulty:'muy alta',graphic:null,
+    iiffHighVerified:true,iiff120Verified:true};
+  return resetShape136(q)||iiff91UnsafeQuestion(q)?null:q;
+}
+function iiff120VerifyLocal(q,target){
+  if(!q||q.iiff120Verified!==true||!Array.isArray(q.options)||
+     !Number.isInteger(q.correctIndex))return false;
+  const base=iiff120LocalQuestion(target);
+  if(!base||q.stem!==base.stem||q.options.length!==4||
+    q.options[q.correctIndex]!==base.options[0])return false;
+  const norm=arr=>arr.map(R136_NORM).sort().join('|');
+  return norm(q.options)===norm(base.options)&&
+    String(q.sourceEvidence)===String(target.source_evidence);
+}
+async function iiff120FillLocal({questions,targets,topicIds,examMode,freshOnly111,stems,exclude}){
+  const holes=targets.map((t,index)=>({t,index})).filter(x=>!questions[x.index]);
+  if(!holes.length||!targets.every(iiff91Topic))return 0;
+  const pool=await getAdaptiveCoverageCandidates(Math.max(1000,holes.length*150),topicIds,examMode,freshOnly111);
+  const blocked=(await Promise.all([...new Set(targets.map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id)))).flat();
+  const occupied=new Set(targets.map(t=>Number(t.id)));
+  let filled=0;
+  for(const hole of holes){
+    // El banco de fichas sigue el SRS y el modo «solo nuevas»; la elección
+    // local no reasigna una ficha vencida a otro plazo ni repite conceptos.
+    const choices=pool.filter(c=>
+      Number(c.topic_id)===Number(hole.t.topic_id)&&
+      !occupied.has(Number(c.id))&&!(exclude?.has(Number(c.id)))&&
+      !iiff91Editorial(c)&&!iiff102CandidateRepetition(c,blocked)&&
+      iiff106ReplacementAllowed(c,targets,hole.index,examMode==='simulation')&&
+      !iiff91SameRecentFact(c,targets.filter((_,i)=>i!==hole.index))&&
+      iiff120LocalQuestion(c)!==null);
+    choices.sort((a,b)=>
+      Number(iiff91Band(b)===iiff91Band(hole.t))-Number(iiff91Band(a)===iiff91Band(hole.t))||
+      iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a)||Number(a.id)-Number(b.id));
+    const match=choices.map(c=>({c,q:iiff120LocalQuestion(c)}))
+      .find(x=>x.q && !stems.has(R136_NORM(x.q.stem)));
+    if(!match)continue;
+    targets[hole.index]=match.c;
+    questions[hole.index]=match.q;
+    occupied.add(Number(match.c.id));exclude?.add(Number(match.c.id));
+    stems.add(R136_NORM(match.q.stem));filled++;
+  }
+  return filled;
+}
+
 function iiff105TechnicalMerit(item){
   const text=iiff91Norm(item?.source_evidence);
   if(!text)return 0;
@@ -9840,8 +10011,9 @@ async function persistGeneratedTest({
       // SERVER118: última barrera bajo transacción. Un borrador reanudado,
       // pregunta local o ítem antiguo del banco no pueden falsear Muy alta.
       if(iiff91Topic(target)&&difficulty==='muy alta'&&
-         !(question.iiffHighVerified===true||
-           (question.reused===true&&[118,119].includes(Number(question.iiffHighBankVersion)))))
+         !((question.iiffHighVerified===true&&question.iiff120Verified!==true)||
+           iiff120VerifyLocal(question,target)||
+           (question.reused===true&&[118,119,120].includes(Number(question.iiffHighBankVersion)))))
         throw Error('IIFF118: pregunta Muy alta sin auditoría calidad 2; no se guarda.');
       if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
@@ -10081,7 +10253,8 @@ last_shown_at
 )
 VALUES (
   $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-  CASE WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
+  CASE WHEN $14::boolean THEN 120
+       WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
        ELSE CASE WHEN $12::boolean THEN 114 ELSE 6 END END,NOW()
 )
     RETURNING id`,
@@ -10102,7 +10275,8 @@ VALUES (
         ? JSON.stringify(question.graphic)
         : null,
       Boolean(iiff91Topic(target)&&question.iiffNegativeVerified===true),
-      Boolean(iiff91Topic(target)&&difficulty==='muy alta'&&question.iiffHighVerified===true)
+      Boolean(iiff91Topic(target)&&difficulty==='muy alta'&&question.iiffHighVerified===true),
+      Boolean(iiff91Topic(target)&&difficulty==='muy alta'&&iiff120VerifyLocal(question,target))
     ]
   );
 
@@ -12421,10 +12595,14 @@ No añadas escenarios, parámetros ni condiciones no documentados.
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
     :baselineAuditPrompt82;
   const auditSchema=iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136;
-  const auditing=await resetGeminiCall139(ai,'auditar',{model:R136_AUDITOR,
+  // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
+  // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
+  const auditModel120=iiffScope&&difficulty==='muy alta'
+    ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
+  const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
     contents:auditPrompt82+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
-      ...(R136_AUDITOR.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
+      ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'low'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
@@ -12559,7 +12737,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     // Las preguntas antiguas 6/114 NO tienen certificado de calidad 2.
     // Se conservan para repaso libre/SRS pero no para nuevos tests Muy alta.
     if(iiff91Topic(r)&&difficulty==='muy alta'&&
-      ![118,119].includes(Number(r.validation_version)))continue;
+      ![118,119,120].includes(Number(r.validation_version)))continue;
     if(iiff91Topic(r) && (iiff102CandidateRepetition(fact,blocked)||
       iiff101RepeatedStem(r,blocked)||
       iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
@@ -13137,6 +13315,17 @@ app.post('/api/generate',async(req,res)=>{
         !(questions[i].reused===true&&
           [118,119].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
     }
+    // SERVER120: al reanudar, completar plazas vacías con hechos dobles del
+    // PDF antes de pagar nuevas llamadas al generador. No genera anticipadamente.
+    if(resume136&&difficulty==='muy alta'&&targets.every(iiff91Topic)&&
+       questions.some(Boolean)&&questions.some(q=>!q)){
+      const used120=new Set(targets.map(t=>Number(t.id)));
+      const seen120=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
+      const filled120=await iiff120FillLocal({questions,targets,topicIds,examMode,
+        freshOnly111,stems:seen120,exclude:used120});
+      console.log('IIFF120_REANUDACION:',JSON.stringify({filled120,
+        total:questions.length,validas:questions.filter(Boolean).length}));
+    }
     draft136={targets,questions};
     if(count>40){
       const pairs=await resetBank136(topicIds,count,difficulty,freshOnly111);
@@ -13195,11 +13384,21 @@ app.post('/api/generate',async(req,res)=>{
         }else acceptedStems.add(key);
       }
       draft136={targets,questions};
+      // SERVER120: cubrir primero los fallos con preguntas técnicas compuestas
+      // basadas literalmente en dos parámetros de otra ficha elegible.
+      if(difficulty==='muy alta'&&targets.every(iiff91Topic)&&questions.some(q=>!q)){
+        const occupied120=new Set(targets.map(t=>Number(t.id)));
+        const filled120=await iiff120FillLocal({questions,targets,topicIds,examMode,
+          freshOnly111,stems:acceptedStems,exclude:occupied120});
+        console.log('IIFF120_RESCATE_LOCAL:',JSON.stringify({filled120,
+          validas:questions.filter(Boolean).length,total:count}));
+        draft136={targets,questions};
+      }
       // SERVER119: rescates acotados por calidad, sin rebajar calidad=2 ni
       // fabricar hechos y sin tocar el resto de materias. Cada ronda usa
       // nuevos objetivos elegibles, preserva lo ya validado y el SRS.
       const high119=difficulty==='muy alta'&&targets.length>0&&targets.every(iiff91Topic);
-      const maxRounds119=high119?(count<=10?3:2):1;
+      const maxRounds119=1; // SERVER120: no repetir tres tandas caras idénticas.
       const tried119=new Set(targets.map(t=>Number(t.id)));
       const blocked119=high119?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
@@ -13271,6 +13470,12 @@ app.post('/api/generate',async(req,res)=>{
         if(high119)console.log('IIFF119_RECUPERACION:',JSON.stringify({ronda:round119+1,
           objetivos:repairGroups.flat().length,validas:questions.filter(Boolean).length,
           faltantes:questions.filter(q=>!q).length}));
+      }
+      if(high119&&questions.some(q=>!q)){
+        const fallback120=await iiff120FillLocal({questions,targets,topicIds,examMode,
+          freshOnly111,stems:acceptedStems,exclude:tried119});
+        console.log('IIFF120_ULTIMO_RESCATE:',JSON.stringify({fallback120,
+          validas:questions.filter(Boolean).length,total:count}));
       }
       draft136={targets,questions};
       // Nunca considerar válidas respuestas cuyo origen no ha sido verificado.
