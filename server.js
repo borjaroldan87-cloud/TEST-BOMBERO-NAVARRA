@@ -4145,11 +4145,13 @@ app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{
     const rows=(await db.query(`SELECT t.id,t.name,t.total_items,
       (SELECT COUNT(*)::int FROM coverage_items ci WHERE ci.topic_id=t.id) AS actual_items
       FROM topics t ORDER BY t.name,t.id`)).rows;
+    const existingArchive=(await db.query("SELECT to_regclass('public.topic_retirement_archives') AS archive_table")).rows[0]?.archive_table;
+    const canDownloadArchive=Boolean(existingArchive && (await db.query('SELECT 1 FROM topic_retirement_archives WHERE topic_id=$1',[24])).rowCount);
     res.set('Cache-Control','no-store');
     res.type('html').send(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Administrar temas</title>
     <style>body{font:16px system-ui;max-width:800px;margin:30px auto;padding:12px}article{border:1px solid #ccc;padding:14px;margin:10px 0;border-radius:8px}button{padding:9px;cursor:pointer}input{padding:9px;width:95%}small{color:#555}</style>
-    <h1>Administrar temas</h1><p>El borrado definitivo solo se permite si el tema no tiene preguntas, sesiones ni progreso. Escribe el nombre exacto para confirmar.</p>
-    ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p>${/^\s*(?:TEMA\s*23\s*[.:-]?\s*)?(?:parques|plantas)\s+solares\s*$/i.test(t.name)?`<button data-solar-id="${t.id}" data-solar-name="${escapeTopicHtml82(t.name)}">Eliminar tema solar y sus pruebas</button>`:`<button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button>`}</article>`).join('')}
+    <h1>Administrar temas</h1>${canDownloadArchive?`<p><a href="/api/admin/topics/24/archive">Descargar respaldo completo del Tema 22 antiguo</a></p>`:''}<p>El borrado definitivo solo se permite si el tema no tiene preguntas, sesiones ni progreso. Escribe el nombre exacto para confirmar.</p>
+    ${rows.map(t=>`<article><b>${escapeTopicHtml82(t.name)}</b><p><small>ID ${t.id} · ${t.actual_items} conocimientos</small></p>${Number(t.id)===24 && t.name==='TEMA 22.Poligonos industriales'?`<button data-legacy-id="${t.id}">Retirar antiguo Tema 22 con respaldo</button>`:/^\s*(?:TEMA\s*23\s*[.:-]?\s*)?(?:parques|plantas)\s+solares\s*$/i.test(t.name)?`<button data-solar-id="${t.id}" data-solar-name="${escapeTopicHtml82(t.name)}">Eliminar tema solar y sus pruebas</button>`:`<button data-id="${t.id}" data-name="${escapeTopicHtml82(t.name)}">Eliminar este tema</button>`}</article>`).join('')}
     <script>document.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
       const name=b.dataset.name;const typed=prompt('Para eliminar DEFINITIVAMENTE el tema, escribe su nombre exacto:\\n'+name);
       if(typed!==name)return alert('Cancelado: el nombre no coincide.');
@@ -4164,9 +4166,126 @@ app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{
       if(!confirm('¿Confirmas borrar definitivamente este tema solar y sus pruebas, sin eliminar datos de otros temas?'))return;
       b.disabled=true;
       try{const r=await fetch('/api/admin/topics/'+b.dataset.solarId,{method:'DELETE',headers:{'Content-Type':'application/json','X-Topic-Admin':'delete'},body:JSON.stringify({confirmName:name,deleteSolarTrialData:true,confirmDeleteTrialData:'BORRAR PRUEBAS SOLARES'})});const x=await r.json();alert(x.message||x.error||'Error');if(x.ok)location.reload();}catch(e){alert('Error de conexión: '+e.message);}finally{b.disabled=false;}
+    });
+    document.querySelectorAll('button[data-legacy-id]').forEach(b=>b.onclick=async()=>{
+      const phrase='RETIRAR TEMA 22 ANTIGUO';
+      if(prompt('Se guardara una copia recuperable de las preguntas, sesiones y repasos antiguos dentro de PostgreSQL.\\nPara retirar UNICAMENTE el tema antiguo ID 24 escribe: '+phrase)!==phrase)return alert('Cancelado.');
+      if(!confirm('Confirmar retirada definitiva del temario del ID 24. El tema NUEVO ID 46 seguira intacto. El historial antiguo se conservara en una tabla de archivo recuperable.'))return;
+      b.disabled=true;
+      try{
+        const r=await fetch('/api/admin/topics/24/retire',{method:'POST',headers:{'Content-Type':'application/json','X-Topic-Admin':'retire-legacy-22'},body:JSON.stringify({confirmPhrase:phrase,confirmName:'TEMA 22.Poligonos industriales'})});
+        const x=await r.json();
+        alert(x.message||x.error||'Error');
+        if(x.ok)location.reload();
+      }catch(e){alert('Error de conexion: '+e.message);}finally{b.disabled=false;}
     });</script></html>`);
   }catch(e){res.status(500).send('No se pudieron listar los temas: '+escapeTopicHtml82(e.message));}
 });
+
+// SERVER 117: retirada de UN solo tema legado (ID 24), con instantanea
+// transaccional recuperable. No se emplea en los demas temas ni en Gemini.
+// La copia conserva sesiones enteras, incluidas las porciones mixtas anteriores.
+app.get('/api/admin/topics/24/archive',topicAdminAuth,async(req,res)=>{
+  try{
+    const check=await db.query("SELECT to_regclass('public.topic_retirement_archives') AS archive_table");
+    if(!check.rows[0]?.archive_table)return res.status(404).json({ok:false,error:'No existe copia archivada del tema antiguo.'});
+    const found=await db.query('SELECT snapshot FROM topic_retirement_archives WHERE topic_id=$1',[24]);
+    if(!found.rowCount)return res.status(404).json({ok:false,error:'No existe copia archivada del tema antiguo.'});
+    res.set('Cache-Control','no-store');
+    res.set('Content-Disposition','attachment; filename="respaldo_tema22_antiguo_id24.json"');
+    res.type('application/json').send(JSON.stringify(found.rows[0].snapshot,null,2));
+  }catch(e){res.status(500).json({ok:false,error:'No se ha podido consultar el respaldo del tema 22.'});}
+});
+app.post('/api/admin/topics/24/retire',topicAdminAuth,async(req,res)=>{
+  if(req.get('X-Topic-Admin')!=='retire-legacy-22' ||
+     req.body?.confirmPhrase!=='RETIRAR TEMA 22 ANTIGUO' ||
+     req.body?.confirmName!=='TEMA 22.Poligonos industriales'){
+    return res.status(403).json({ok:false,error:'Confirmacion especifica incorrecta.'});
+  }
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SET LOCAL lock_timeout = \'10s\'');
+    await client.query('SET LOCAL statement_timeout = \'60s\'');
+    const old=(await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[24])).rows[0];
+    const replacement=(await client.query('SELECT * FROM topics WHERE id=$1 FOR SHARE',[46])).rows[0];
+    if(!old || old.name!=='TEMA 22.Poligonos industriales' || old.block!=='geografia'){
+      throw Object.assign(new Error('El tema 24 ya no existe o su identidad ha cambiado. No se ha alterado nada.'),{status:409});
+    }
+    if(!replacement || replacement.block!=='geografia' || !/197 FICHAS/i.test(replacement.name)){
+      throw Object.assign(new Error('Falta verificar el tema nuevo ID 46; operacion cancelada.'),{status:409});
+    }
+    const replacementBefore=await client.query('SELECT COUNT(*)::int AS n FROM coverage_items WHERE topic_id=$1',[46]);
+    if(Number(replacementBefore.rows[0].n)!==197){
+      throw Object.assign(new Error('El nuevo tema ya no contiene exactamente 197 conocimientos. Operacion cancelada.'),{status:409});
+    }
+    const pdfs=await client.query('SELECT COUNT(*)::int AS n FROM topic_local_pdfs WHERE topic_id=$1',[24]);
+    const docs=await client.query('SELECT COUNT(*)::int AS n FROM topic_source_documents WHERE topic_id=$1',[24]);
+    if(Number(pdfs.rows[0].n)||Number(docs.rows[0].n)){
+      throw Object.assign(new Error('El tema antiguo tiene fuentes no previstas; no se borran documentos automaticamente.'),{status:409});
+    }
+    const anki=await client.query('SELECT COUNT(*)::int AS n FROM legislation_anki_questions l JOIN coverage_items c ON c.id=l.validated_coverage_item_id WHERE c.topic_id=$1',[24]);
+    if(Number(anki.rows[0].n)){
+      throw Object.assign(new Error('El tema antiguo tiene relaciones Anki no previstas. Operacion cancelada.'),{status:409});
+    }
+    const coverage=(await client.query('SELECT * FROM coverage_items WHERE topic_id=$1 ORDER BY id FOR UPDATE',[24])).rows;
+    const questions=(await client.query('SELECT q.* FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id WHERE c.topic_id=$1 ORDER BY q.id FOR UPDATE OF q',[24])).rows;
+    const reviews=(await client.query('SELECT r.* FROM coverage_review_state r JOIN coverage_items c ON c.id=r.coverage_item_id WHERE c.topic_id=$1 ORDER BY r.coverage_item_id FOR UPDATE OF r',[24])).rows;
+    const links=(await client.query('SELECT sq.* FROM test_session_questions sq JOIN coverage_items c ON c.id=sq.coverage_item_id WHERE c.topic_id=$1 ORDER BY sq.session_id,sq.position FOR UPDATE OF sq',[24])).rows;
+    const sessionIds=[...new Set(links.map(r=>String(r.session_id)))];
+    const sessions=sessionIds.length?(await client.query('SELECT * FROM test_sessions WHERE id=ANY($1::bigint[]) ORDER BY id FOR UPDATE',[sessionIds])).rows:[];
+    const allSessionQuestions=sessionIds.length?(await client.query('SELECT * FROM test_session_questions WHERE session_id=ANY($1::bigint[]) ORDER BY session_id,position FOR UPDATE',[sessionIds])).rows:[];
+    const counts={coverage:coverage.length,questions:questions.length,reviews:reviews.length,session_links:links.length,sessions:sessions.length};
+    if(counts.coverage!==209 || counts.questions!==80 || counts.reviews!==40 || counts.session_links!==83){
+      throw Object.assign(new Error('Las dependencias del antiguo Tema 22 han cambiado; no se ha eliminado nada.'),{status:409});
+    }
+    if(allSessionQuestions.length<links.length || sessions.length!==sessionIds.length){
+      throw Object.assign(new Error('No se puede respaldar integramente el historial antiguo; operacion cancelada.'),{status:409});
+    }
+    const snapshot={version:1,retired_at:new Date().toISOString(),topic:old,coverage_items:coverage,question_bank:questions,coverage_review_state:reviews,original_test_sessions:sessions,original_test_session_questions:allSessionQuestions,counts};
+    // PostgreSQL hace que el respaldo y el borrado formen una sola transaccion.
+    await client.query(`CREATE TABLE IF NOT EXISTS topic_retirement_archives (
+      topic_id integer PRIMARY KEY,
+      topic_name text NOT NULL,
+      archived_at timestamptz NOT NULL DEFAULT NOW(),
+      snapshot jsonb NOT NULL
+    )`);
+    const already=await client.query('SELECT topic_id FROM topic_retirement_archives WHERE topic_id=$1 FOR UPDATE',[24]);
+    if(already.rowCount)throw Object.assign(new Error('Ya existe un respaldo previo; no sobrescribir.'),{status:409});
+    await client.query('INSERT INTO topic_retirement_archives(topic_id,topic_name,snapshot) VALUES($1,$2,$3::jsonb)',[24,old.name,JSON.stringify(snapshot)]);
+    const removed=await client.query(`DELETE FROM test_session_questions sq USING coverage_items c
+      WHERE sq.coverage_item_id=c.id AND c.topic_id=$1 RETURNING sq.id`,[24]);
+    if(removed.rowCount!==links.length)throw new Error('El numero de respuestas retiradas no coincide con el respaldo.');
+    if(sessionIds.length){
+      await client.query(`DELETE FROM test_sessions s WHERE s.id=ANY($1::bigint[])
+        AND NOT EXISTS(SELECT 1 FROM test_session_questions sq WHERE sq.session_id=s.id)`,[sessionIds]);
+      await client.query(`UPDATE test_sessions s SET total_questions=x.total,requested_count=x.total,
+        correct_answers=x.correct,wrong_answers=x.wrong,blank_answers=x.blank
+        FROM (SELECT session_id,COUNT(*)::int total,
+          COUNT(*) FILTER(WHERE is_correct=TRUE)::int correct,
+          COUNT(*) FILTER(WHERE is_correct=FALSE AND is_blank=FALSE)::int wrong,
+          COUNT(*) FILTER(WHERE is_blank=TRUE)::int blank
+          FROM test_session_questions WHERE session_id=ANY($1::bigint[]) GROUP BY session_id) x
+        WHERE s.id=x.session_id`,[sessionIds]);
+    }
+    const retired=await client.query('DELETE FROM topics WHERE id=$1 RETURNING id',[24]);
+    if(retired.rowCount!==1)throw new Error('No se ha retirado exactamente el tema antiguo.');
+    const checkOld=await client.query('SELECT COUNT(*)::int AS n FROM coverage_items WHERE topic_id=$1',[24]);
+    const checkNew=await client.query('SELECT COUNT(*)::int AS n FROM coverage_items WHERE topic_id=$1',[46]);
+    if(Number(checkOld.rows[0].n)!==0 || Number(checkNew.rows[0].n)!==197){
+      throw new Error('Comprobacion de integridad posterior al borrado fallida.');
+    }
+    const stored=await client.query('SELECT snapshot->\'counts\' AS counts FROM topic_retirement_archives WHERE topic_id=$1',[24]);
+    if(!stored.rowCount || Number(stored.rows[0].counts.coverage)!==209)throw new Error('Respaldo no recuperable.');
+    await client.query('COMMIT');
+    return res.json({ok:true,message:'Tema 22 antiguo ID 24 retirado de la plataforma. El nuevo Tema 22 ID 46 conserva sus 197 fichas. Respaldo recuperable en PostgreSQL y descargable en /api/admin/topics/24/archive.',counts});
+  }catch(e){
+    try{await client.query('ROLLBACK');}catch{}
+    console.error('[retirar-24] Operacion revertida:',e.message);
+    return res.status(e.status||500).json({ok:false,error:e.message});
+  }finally{client.release();}
+});
+
 app.delete('/api/admin/topics/:id',topicAdminAuth,async(req,res)=>{
   if(req.get('X-Topic-Admin')!=='delete')return res.status(403).json({error:'Solicitud no autorizada'});
   const id=Number(req.params.id);
