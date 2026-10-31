@@ -3372,6 +3372,18 @@ function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
 
+  if(topicNumber===38){
+    return `LECTURA PRECISA — TEMA 38 (estas instrucciones NO son conocimientos examinables):
+- No mezcles datos de sustancias o agentes diferentes (polvos especiales, nitrógeno, CO2, agua, espumas), ni confundas columnas o apartados vecinos.
+- Una ficha por conocimiento independiente. No unas aplicaciones o técnicas distintas, ni afirmaciones de páginas diferentes, en una ficha con una sola cita.
+- Extrae fielmente cifras, intervalos, unidades, tablas y fórmulas, incluso las dibujadas. Si una expresión no se distingue, no completes ni deduzcas símbolos.
+- Cada sourceEvidence debe demostrar TODOS los datos del concept, incluyendo sustancia, condiciones y límites; si no puede demostrarlos, reduce o descarta esa ficha.
+- sourcePage es la página física; manualPage es SOLO el número visible al pie de la hoja original. No uses offsets.
+- No dupliques en 'Conviene recordar' hechos ya representados. Omite anécdotas sin valor objetivo de oposición, pero conserva cualquier dato técnico examinable.
+- No corrijas ni completes el manual con datos externos.
+`;
+  }
+
    if(topicNumber===21){
   return `
 REGLAS ESPECÍFICAS DEL TEMA 21 — PARQUES, MUNICIPIOS Y CONCEJOS:
