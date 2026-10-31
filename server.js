@@ -8032,66 +8032,25 @@ Responde solo con el JSON existente; no adjuntes esta revisión interna.
 `;
 }
 
-function iiff126HighGenerationRules(group=[]){
-  const paired=group.length>0&&group.length%2===0&&
-    group.every(iiff91Topic)&&group.every((t,i)=>
-      i%2===0||Number(t.id)===Number(group[i-1].id));
-  const allowed=(group||[]).flatMap((t,i)=>
-    iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)&&
-    (!paired||i%2===1)?[i+1]:[]);
-  return `
-# TAREA FINAL — SOLO MANUAL IIFF DE NAVARRA 2026, MUY ALTA
-Los OBJETIVOS inmediatamente anteriores son la ÚNICA fuente de hechos;
-los exámenes oficiales 2024/2026 marcan SOLO el estilo de redacción.
-Devuelve las ${group.length} preguntas, una por slot y en orden, con la
-estructura JSON pedida: stem, options[4], correctIndex, explanation.
-
-# REDACCIÓN Y DIFICULTAD
-- Enunciado cerrado, breve y natural de oposición. Pregunta qué valor,
-  combinación, paso, condición, relación o componente corresponde. No copies
-  el título de la ficha ni anticipes la clave («ganancia activa», etc.).
-- Decide PRIMERO qué hecho exacto demuestra el fragmento y construye la clave.
-  Diseña DESPUÉS tres errores realistas de un opositor que confunde un dato:
-  cifras/umbrales próximos, componentes comparables, orden de maniobra o
-  condición de aplicación. Los cuatro deben responder a LA MISMA pregunta,
-  usando unidad, escala, categoría y extensión semejantes.
-- Para hacer difícil una pregunta, exige conocer el fragmento; no añadas
-  teoría externa, excepciones inventadas, escalas absurdas ni enunciados largos.
-  Una cifra exacta con tres valores cercanos SÍ puede ser Muy alta.
-- Comprueba antes de emitir: sin estudiar, ¿se descartan DOS opciones por
-  sentido común, gramática, longitud o palabras absolutas? Sustitúyelas.
-  Con el fragmento, ¿otra opción también es correcta? Corrige o cambia el
-  detalle evaluado. No uses sinónimos equivalentes ni rangos solapados.
-- Respeta modalidades de evidencia: «unos X» no es «mínimo X»; «puede» no
-  es «debe». No uses un supuesto operativo no contenido en el fragmento.
-- Se permiten datos de tablas/figuras originales SI el fragmento los aporta;
-  nunca preguntes qué se ve en una imagen que no se adjunta al examen.
-
-# DOS VARIANTES POR FICHA (SOLO UNA SERÁ ELEGIDA POR EL AUDITOR)
-${paired ? `Slots impares 1,3,5...: SIEMPRE POSITIVA. Los slots pares son una
-SEGUNDA pregunta POSITIVA por defecto, con otra formulación/distractores.
-Puede ser INCORRECTA/FALSA solo si el slot está en
-${JSON.stringify(allowed)} Y el fragmento contiene tres afirmaciones
-verdaderas explícitas MÁS una contradicción literal para la cuarta.
-Si no puedes acreditar las CUATRO por separado, escribe POSITIVA.
-No hagas dos INCORRECTA sobre una misma ficha.` : `Preferir POSITIVA; solo
-INCORRECTA en slots ${JSON.stringify(allowed)} cuando sus cuatro
-alternativas se puedan demostrar literalmente.`}
-
-# DOS EJEMPLOS DE FORMATO, NO DE HECHOS PARA OTROS SLOTS
-1) «¿Qué caudales corresponden a rastrojo y cereal sin cosechar,
-   respectivamente?» A) 50 y 90 l/min. B) 50 y 70 l/min.
-   C) 70 y 90 l/min. D) 90 y 50 l/min. Clave: A.
-2) «Durante el trabajo con autobomba en marcha, ¿qué disposición es
-   correcta?» A) 5 m delante y tendido recto. B) 5 m detrás, en lateral,
-   visible por retrovisor y con reserva. C) 5 m detrás, sin reserva.
-   D) 5 m delante y sin reserva. Clave: B.
-Ambos ejemplos solo muestran homogeneidad y estilo, NUNCA sirven para
-justificar datos de otra ficha. No copies sus cifras salvo evidencia propia.
-
-# SALIDA
-No muestres análisis ni pruebas intermedias. Devuelve SOLO el JSON del
-esquema; cada clave y explicación debe sustentarse en el FRAGMENTO de su slot.
+// SERVER127: una sola pregunta por conocimiento, sin generar variantes
+// que multiplicaban carga, coste y posibilidades de rechazo.
+function iiff127HighGenerationRules(){
+  return `MANUAL IIFF — MUY ALTA (SOLO ESTILO, FUENTE: CADA FRAGMENTO):
+En cada slot formula UNA pregunta concreta de oposición: valor/intervalo,
+orden operativo, condición, criterio, relación o característica técnica.
+Escribe primero la clave demostrable por la cita y luego tres distractores
+como errores plausibles sobre LA MISMA variable: valores próximos, inversión
+de pasos o confusión entre procedimientos/componentes comparables.
+Cuatro opciones de clase, unidad y extensión equivalentes; una sola válida.
+Sin pistas por sentido común, absolutos, gramática ni enunciado revelador.
+No conviertas aproximaciones en mínimos ni recomendaciones en obligaciones.
+No inventes supuestos, datos ni contenido de figuras no aportado.
+Prefiere pregunta POSITIVA. INCORRECTA/FALSA solo cuando el fragmento
+acredite literalmente TRES verdaderas y contradiga la cuarta; si no,
+formula POSITIVA. No copies los títulos del manual ni sus metadatos.
+Antes de devolver JSON revisa que ninguna otra opción pueda ser correcta
+con el fragmento y que ningún distractor sea grotesco o trivial.
+Sé preciso: Muy alta no significa una pregunta larga.
 `;
 }
 
@@ -8540,36 +8499,6 @@ function iiff120VerifyLocal(q,target){
   return norm(q.options)===norm(base.options)&&
     String(q.sourceEvidence)===String(target.source_evidence);
 }
-async function iiff120FillLocal({questions,targets,topicIds,examMode,freshOnly111,stems,exclude}){
-  const holes=targets.map((t,index)=>({t,index})).filter(x=>!questions[x.index]);
-  if(!holes.length||!targets.every(iiff91Topic))return 0;
-  const pool=await getAdaptiveCoverageCandidates(Math.max(1000,holes.length*150),topicIds,examMode,freshOnly111);
-  const blocked=(await Promise.all([...new Set(targets.map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id)))).flat();
-  const occupied=new Set(targets.map(t=>Number(t.id)));
-  let filled=0;
-  for(const hole of holes){
-    // El banco de fichas sigue el SRS y el modo «solo nuevas»; la elección
-    // local no reasigna una ficha vencida a otro plazo ni repite conceptos.
-    const choices=pool.filter(c=>
-      Number(c.topic_id)===Number(hole.t.topic_id)&&
-      !occupied.has(Number(c.id))&&!(exclude?.has(Number(c.id)))&&
-      !iiff91Editorial(c)&&!iiff102CandidateRepetition(c,blocked)&&
-      iiff106ReplacementAllowed(c,targets,hole.index,examMode==='simulation')&&
-      !iiff91SameRecentFact(c,targets.filter((_,i)=>i!==hole.index))&&
-      iiff120LocalQuestion(c)!==null);
-    choices.sort((a,b)=>
-      Number(iiff91Band(b)===iiff91Band(hole.t))-Number(iiff91Band(a)===iiff91Band(hole.t))||
-      iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a)||Number(a.id)-Number(b.id));
-    const match=choices.map(c=>({c,q:iiff120LocalQuestion(c)}))
-      .find(x=>x.q && !stems.has(R136_NORM(x.q.stem)));
-    if(!match)continue;
-    targets[hole.index]=match.c;
-    questions[hole.index]=match.q;
-    occupied.add(Number(match.c.id));exclude?.add(Number(match.c.id));
-    stems.add(R136_NORM(match.q.stem));filled++;
-  }
-  return filled;
-}
 
 function iiff105TechnicalMerit(item){
   const text=iiff91Norm(item?.source_evidence);
@@ -8605,11 +8534,6 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
     if(iiff102CandidateRepetition(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
   }
   const eligibleBase=valid.filter(c=>!blockedMatches.has(Number(c.id)));
-  // SERVER118: para Muy alta, alimentar primero al generador con fichas
-  // de precisión técnica suficiente. Conservamos todas las franjas si hay
-  // cobertura amplia; en otro caso NO eliminamos ningún objetivo elegible.
-  const technical118=difficulty==='muy alta'
-    ?eligibleBase.filter(c=>iiff105TechnicalMerit(c)>=8):[];
   // SERVER121: no descartar fichas examinables ni diferir vencimientos SRS
   // por estar redactadas con un único dato. La calidad se optimiza SOLO
   // como prioridad de selección entre objetivos elegibles.
@@ -8644,7 +8568,7 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
         (pageHits.get(page)||0)*180-
         (conceptHits.get(concept)||0)*400+
         reviewBonus(priority)-Math.min(10,Number(c.times_asked)||0)*4+
-        (technicalMerit.get(Number(c.id))||0)*(difficulty==='muy alta'?3:1)+rng();
+        (technicalMerit.get(Number(c.id))||0)*(difficulty==='muy alta'?6:1)+rng();
       if(hits<leastBandHits||(hits===leastBandHits&&score>bestScore)){
         best=c;bestScore=score;leastBandHits=hits;
       }
@@ -12259,7 +12183,7 @@ function resetGroups139(rows,difficulty=null){
     const block=String(row.t.topic_block||'').toLowerCase();
     const bytes=Math.min(3000,String(row.t.source_evidence||'').length);
     const current=last ? last.reduce((n,r)=>n+Math.min(3000,String(r.t.source_evidence||'').length),0):0;
-    if(last&&last.length<(difficulty==='muy alta'&&iiff91Topic(row.t)?4:R136_BATCH) &&
+    if(last&&last.length<(difficulty==='muy alta'&&iiff91Topic(row.t)?5:R136_BATCH) &&
        String(last[0].t.topic_block||'').toLowerCase()===block &&
        // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
        // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
@@ -12642,16 +12566,12 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   const comparisons=resetGeoComparisons82(group,comparisonPool,difficulty);
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
-  const originalGroup118=group;
   const iiffScope=group.some(iiff91Topic);
-  // SERVER118: dos candidatas por objetivo en IIFF Muy alta.
-  // Una sola generación y una sola auditoría por lote (NO por candidata).
-  // La salida al usuario tiene el mismo número original de preguntas.
-  const paired118=difficulty==='muy alta'&&group.length>0&&group.every(iiff91Topic);
-  if(paired118)group=group.flatMap(t=>[t,t]);
+  // SERVER127: no duplicar cada objetivo. Una generación y una auditoría
+  // independiente por lote. La comprobación factual y calidad=2 permanecen.
   const iiffGenerationRules=iiffScope?
-    (paired118?iiff126HighGenerationRules(group):
-      iiff92GenerationRules(difficulty,group)):' '; 
+    (difficulty==='muy alta'?iiff127HighGenerationRules():
+      iiff92GenerationRules(difficulty,group)):'';
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
   // organización administrativa del tema jurídico T21.
@@ -12678,15 +12598,6 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   const parsed=JSON.parse(String(response?.text||'{}'));
   if(!Array.isArray(parsed.questions))throw Error('Sin array de preguntas');
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
-  // SERVER125: la primera variante de cada ficha conserva su opción
-  // POSITIVA incluso si el generador no respetó la instrucción. No se
-  // relaja la auditoría ni se convierte la negativa en positiva a ciegas.
-  if(paired118)for(let i=0;i<questions.length;i+=2){
-    if(iiff92IsNegativeStem(questions[i])){
-      console.warn('IIFF125_PRIMERA_VARIANTE_NO_POSITIVA:',JSON.stringify({slot:i}));
-      questions[i]=null;
-    }
-  }
   // Evitar gastar además en auditar preguntas que ya figuran como
   // aprendidas/bloqueadas; una lectura SQL por lote, sin llamada Gemini.
   const priorQuestions=iiffScope?await iiff96BlockedHistory(group.find(iiff91Topic).topic_id):[];
@@ -12721,82 +12632,38 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       stem:q.stem,options:q.options,
       ...(iiff91Topic(group[i])?{explanation:q.explanation}:{})}];
   });
-  if(!blind.length)return originalGroup118.map(()=>null);
+  if(!blind.length)return group.map(()=>null);
   // El texto de auditoría es IDÉNTICO al SERVER 81 para todas las materias
   // sin comparadores. El refuerzo contextual solo afecta a solares/eólicos
   // Muy alta y no añade otra llamada de validación.
   const baselineAuditPrompt82=`Audita un test de oposición comparando EXCLUSIVAMENTE los datos del PDF entregados por fila, incluido su EPÍGRAFE como asignación expresa de parque; sin memoria externa, sin copiar hechos de modelos de estilo. answer=0..3 SOLO cuando existe una única respuesta sustentada por la FILA evaluada. Antes de elegir, contrasta LAS CUATRO alternativas con el enunciado COMPLETO y con la evidencia de esta fila. Para detectar una segunda respuesta válida, examina también las OTRAS FILAS DEL MISMO TEMA presentes en este lote como posibles contraejemplos, incluso si corresponden a otro índice; NO las utilices para justificar la respuesta principal ni mezcles objetivos. Si otro registro demuestra explícitamente que una segunda opción satisface TODAS las condiciones del enunciado, answer=-1, aunque la opción prevista sea más cercana, frecuente, concentrada o encaje mejor. No rechaces por simples semejanzas parciales: exige coincidencia documental con el enunciado completo. Si dos opciones son iguales/equivalentes, o dos satisfacen el mismo enunciado, o la respuesta exige deducir un municipio o parque ausente, answer=-1. quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres) que justifique la respuesta; puedes usar el EPÍGRAFE para validar la asignación del parque, pero no como sustituto de quote. Si falta evidencia, answer=-1. Fila index conserva índice original. FILAS: ${JSON.stringify(blind)}`;
   const iiffAuditRules=iiffScope?`
-ADICIONAL MANUAL IIFF: El índice NO es evidencia suficiente para hechos técnicos.
-Para una pregunta del manual, answer=-1 si una opción podría ser también
-verdadera con la evidencia disponible, si una afirmación exige demostrar
-que algo NO está en otra sección, o si cualquier distractor parece compatible
-con el fragmento. Comprueba el dato que distingue las cuatro opciones.
+MANUAL IIFF: la única verdad es el FRAGMENTO de cada fila, no memoria
+externa, ejemplos de exámenes ni índices editoriales. Comprueba pregunta
+completa y las cuatro opciones. answer=0..3 SOLO si una alternativa es
+inequívocamente correcta y las otras tres son incompatibles con la
+misma condición de la pregunta; si faltan datos, answer=-1.
+No conviertas «unos X» en mínimo X ni «puede» en «debe».
+Si la pregunta necesita mirar una figura no adjunta, answer=-1.
 ${IIFF_VISUAL_CRITERIOS_103}
-CRITERIOS PARTICULARES POR PÁGINA, SOLO EN FILAS IIFF:
 ${iiffVisualSpecific103(group)}
-Si el enunciado requiere mirar una fotografía/figura que NO se presenta al usuario, answer=-1. Si un gráfico de ejemplo es ficticio, no convertir sus datos en especificaciones reales. No uses conocimiento externo.
-Asigna calidad=0, 1 o 2 a TODAS las filas (el esquema lo exige).
-SOLO PARA FILAS IIFF, aplica estos criterios adicionales de dificultad;
-para las demás conserva los criterios de auditoría comunes.
-ALERTA DE PRECISIÓN MODAL: un valor orientativo como «unos 3 m» NO
-prueba que «3 m» sea un mínimo estricto. Si el enunciado transforma
-aproximaciones, posibilidades o recomendaciones en límites u obligaciones
-no documentados, answer=-1 aunque la cifra correcta figure en el PDF.
-Para valorar dificultad de MUY ALTA, que una clave reproduzca la frase
-literal del fragmento NO convierte en plausibles las otras tres opciones.
-Si al menos DOS distractores son descartables por incongruencia evidente,
-categorías alejadas o valores absurdos, calidad=0, incluso con clave factual
-correcta. No penalices una pregunta literal SOLO por ser breve o por tener
-un único dato: puede ser difícil con tres distractores realmente próximos.
-EXPLICACIÓN: examina el campo explanation de cada fila, sin usar fuentes
-externas. Devuelve explanationOk=true SOLO si sus afirmaciones técnicas
-concuerdan con la cita y el fragmento, sin invertir causas, secuencias,
-ascenso/descenso, valores o condiciones. Ante contradicción o inferencia
-no demostrada, explanationOk=false, pero audita answer normalmente:
-el servidor sustituirá la explicación dudosa por la cita literal validada.
-Examina las TRES opciones no-clave frente a la clave: en POSITIVA deben
-ser falsas; en INCORRECTA deben ser verdaderas y la clave la única falsa,
-con sus cuatro pruebas literales. Comprueba misma clase técnica/unidad,
-plausibilidad, diferencia material y ausencia de pistas por absolutos,
-longitud, gramática, escalas inverosímiles o repeticiones semánticas.
-Sin evidencia
-suficiente para elegir una sola respuesta, answer=-1 (control factual aparte).
-COMPROBACIÓN EXIGENTE DE PLAUSIBILIDAD, SOLO EN POSITIVAS: la respuesta
-correcta y los TRES distractores deben variar la MISMA variable técnica.
-Si las alternativas describen efectos biológicos, aparatos o acciones
-DIFERENTES entre sí, que un lector descarta sin estudiar la ficha,
-calidad=0 aun si cada distractor es falso. No basta con compartir el
-contexto («incendio», «barritas», «seguridad»): deben ser sustituciones
-realistas de una sola especificación, secuencia o criterio técnico.
-No des calidad 2 a una definición general que se copia entera y cuya clave
-puede elegirse por lenguaje común sin precisión del temario.
-CALIBRACIÓN ESTILO TRIBUNAL: en la prueba oficial 2024 existen ítems
-sobre UN intervalo con cuatro rangos cercanos; ese formato puede ser
-exigente si los tres distractores son posibles confusiones concretas,
-no existe solapamiento y no hay pistas en el enunciado. No penalices por
-la cantidad de hechos ni por la longitud de la pregunta. Lo determinante
-es poder descartar las tres opciones equivocadas solo estudiando el manual.
-0: DOS o más distractores se descartan sin conocer el temario, hay pista
-   formal decisiva o la pregunta exige solo reconocer un título editorial.
-1: pregunta técnicamente válida, focalizada, con como máximo un distractor
-   débil; requiere recuerdo preciso. Un solo dato con valores próximos vale.
-2: los TRES distractores son creíbles y próximos sin solaparse; exige una
-   distinción documentada de valor, condición, secuencia o procedimiento.
-En MUY ALTA calidad=2 es obligatoria; una pregunta de calidad=1 NO debe
-entrar en el test aunque la respuesta sea factual. SOLO marca 2 si los TRES
-distractores son cercanos, homogéneos, falsos, creíbles y sin pistas. Si dudas
-entre 1 y 2, asigna 1. Nunca eleves la nota para completar el test; el
-servidor rechaza las preguntas que no alcancen 2 y buscará otro objetivo.
-No confundas proximidad con dos respuestas válidas; nunca inventes datos.
-Para preguntas INCORRECTA/FALSA aporta optionProofs EN EL ORDEN A,B,C,D:
-cuatro objetos {trueAccordingToPDF:boolean,quote:string}. Tres valores true
-con citas LITERALES que prueben expresamente cada afirmación y un solo false
-con cita LITERAL que CONTRADIGA la afirmación falsa. No basta que no figure
-el dato: ni un índice, ni una lista parcial, ni un apartado omitido prueban
-una ausencia. Si falta cualquiera de las cuatro pruebas, answer=-1 y NO
-inventes quote ni optionProofs. Para preguntas positivas omite optionProofs.
-No añadas escenarios, parámetros ni condiciones no documentados.
+Evalúa además explanationOk: true solo si toda la explicación coincide
+con la evidencia. Para cada fila devuelve calidad=0,1,2:
+0 = al menos dos distractores obvios/incongruentes o pistas decisivas.
+1 = respuesta factual pero hay un distractor débil o confusión poco creíble.
+2 = los tres distractores son próximos y plausibles en la MISMA variable
+    técnica; todos responden al enunciado, solo la clave está probada.
+La longitud de una pregunta, exigir dos datos o que sea literal NO decide
+la nota. Una cifra con tres valores confundibles puede merecer 2.
+Califica con independencia; no asciendas notas para completar el examen.
+La dificultad Muy alta exige 2 y una respuesta inequívoca. Una pregunta
+calidad 1 sigue siendo rechazada por el servidor.
+INCORRECTA/FALSA: optionProofs[4] obligatorio en orden A-D; tres
+true con citas literales que acrediten las opciones verdaderas y un
+false cuya cita CONTRADIGA literalmente la opción falsa. Si no hay
+cuatro pruebas, answer=-1. En positivas, omite optionProofs.
+Copia la cita literal de la respuesta en quote, mínimo 18 caracteres;
+si no existe, answer=-1. No aportes explicaciones fuera del JSON.
 ` : '';
   const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
     ' quote: transcribe',
@@ -12821,7 +12688,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
   if(iiffScope)console.log('IIFF_119_CALIDAD_AUDITOR:',JSON.stringify({
     nivel:difficulty,calidades:audits.map(x=>Number(x.calidad)),
     minAceptada:difficulty==='muy alta'?2:1,
-    fichasOriginales:originalGroup118.length,candidatas:questions.length}));
+    fichasOriginales:group.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
@@ -12861,8 +12728,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
       aceptadas:negativeIndices.filter(i=>validated[i]?.iiffNegativeVerified===true).length,
       rechazadas:negativeIndices.filter(i=>!validated[i]).length}));
   }
-  return paired118?originalGroup118.map((_,i)=>
-    validated[2*i]||validated[2*i+1]||null):validated;
+  return validated;
 }
 // SERVER 83 — barajado de PRESENTACIÓN ANTES de persistir la pregunta nueva.
 // Conserva la respuesta literal y todas las alternativas ya auditadas contra PDF.
@@ -13533,17 +13399,6 @@ app.post('/api/generate',async(req,res)=>{
         !(questions[i].reused===true&&
           [118,119,121,122,124].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
     }
-    // SERVER120: al reanudar, completar plazas vacías con hechos dobles del
-    // PDF antes de pagar nuevas llamadas al generador. No genera anticipadamente.
-    if(resume136&&difficulty==='muy alta'&&targets.every(iiff91Topic)&&
-       questions.some(Boolean)&&questions.some(q=>!q)){
-      const used120=new Set(targets.map(t=>Number(t.id)));
-      const seen120=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
-      const filled120=await iiff120FillLocal({questions,targets,topicIds,examMode,
-        freshOnly111,stems:seen120,exclude:used120});
-      console.log('IIFF120_REANUDACION:',JSON.stringify({filled120,
-        total:questions.length,validas:questions.filter(Boolean).length}));
-    }
     draft136={targets,questions};
     if(count>40){
       const pairs=await resetBank136(topicIds,count,difficulty,freshOnly111);
@@ -13572,8 +13427,8 @@ app.post('/api/generate',async(req,res)=>{
       // SERVER 82: carga acotada de fichas comparables, una sola consulta.
       // No cambia objetivos, sesiones ni la política de la selección.
       const comparisonPool82=await resetGeoComparePool82(targets,difficulty);
-      // Lotes dinámicos: máximo 10; en IIFF Muy alta, máximo 4 fichas
-      // con doble candidata y presupuesto de contexto reducido.
+      // Lotes dinámicos: máximo 10; en IIFF Muy alta, hasta 5 fichas,
+      // una candidata por objetivo y presupuesto de contexto reducido.
       // Cada pregunta conserva su objetivo individual aunque cambie el tema.
       const groups=resetGroups139(remaining,difficulty);
       const ai=groups.length?aiClient():null;
@@ -13602,18 +13457,6 @@ app.post('/api/generate',async(req,res)=>{
         }else acceptedStems.add(key);
       }
       draft136={targets,questions};
-      // SERVER120: cubrir primero los fallos con preguntas técnicas compuestas
-      // basadas literalmente en dos parámetros de otra ficha elegible.
-      let attemptedLocal125=false;
-      if(difficulty==='muy alta'&&targets.every(iiff91Topic)&&questions.some(q=>!q)){
-        attemptedLocal125=true;
-        const occupied120=new Set(targets.map(t=>Number(t.id)));
-        const filled120=await iiff120FillLocal({questions,targets,topicIds,examMode,
-          freshOnly111,stems:acceptedStems,exclude:occupied120});
-        console.log('IIFF120_RESCATE_LOCAL:',JSON.stringify({filled120,
-          validas:questions.filter(Boolean).length,total:count}));
-        draft136={targets,questions};
-      }
       // SERVER119: rescates acotados por calidad, sin rebajar calidad=2 ni
       // fabricar hechos y sin tocar el resto de materias. Cada ronda usa
       // nuevos objetivos elegibles, preserva lo ya validado y el SRS.
@@ -13635,7 +13478,7 @@ app.post('/api/generate',async(req,res)=>{
         }
         // No seguir sumando llamadas si el tiempo de esta petición se agota;
         // el borrador guardado se reanudará con el MISMO runId.
-        if(high119&&Date.now()-started>70000){
+        if(high119&&Date.now()-started>45000){
           console.warn('IIFF119_LIMITE_TIEMPO_REANUDABLE:',JSON.stringify({faltan:holes.length,round119}));
           break;
         }
@@ -13664,7 +13507,10 @@ app.post('/api/generate',async(req,res)=>{
             occupied.add(Number(other.id));tried119.add(Number(other.id));
             slot.t=other;
             // Los formatos geográficos deterministas mantienen su ruta normal.
-            const local=resetGeoTableQuestion136(other,slot.index,difficulty);
+            // Reutilizar la construcción local IIFF previamente acordada SOLO
+            // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
+            const local=(high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
+              resetGeoTableQuestion136(other,slot.index,difficulty);
             if(local&&!acceptedStems.has(R136_NORM(local.stem))){
               questions[slot.index]=local;acceptedStems.add(R136_NORM(local.stem));
             }
@@ -13690,15 +13536,6 @@ app.post('/api/generate',async(req,res)=>{
         if(high119)console.log('IIFF119_RECUPERACION:',JSON.stringify({ronda:round119+1,
           objetivos:repairGroups.flat().length,validas:questions.filter(Boolean).length,
           faltantes:questions.filter(q=>!q).length}));
-      }
-      // SERVER125: la misma búsqueda local ya se ejecutó. Repetirla con
-      // las mismas fichas y bloqueos puede añadir decenas de segundos y no
-      // produce nueva evidencia. En una reanudación habrá otro intento.
-      if(high119&&questions.some(q=>!q)&&!attemptedLocal125){
-        const fallback120=await iiff120FillLocal({questions,targets,topicIds,examMode,
-          freshOnly111,stems:acceptedStems,exclude:tried119});
-        console.log('IIFF120_ULTIMO_RESCATE:',JSON.stringify({fallback120,
-          validas:questions.filter(Boolean).length,total:count}));
       }
       draft136={targets,questions};
       // Nunca considerar válidas respuestas cuyo origen no ha sido verificado.
