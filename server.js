@@ -8042,6 +8042,39 @@ function iiff118ObviousWeakDistractors(q){
   return q.options.filter((v,i)=>i!==q.correctIndex&&
     extreme.test(iiff91Norm(v))).length>=2;
 }
+// SERVER122 — veto local de distractores con temas dispares, sin IA adicional.
+// Conservador: solo preguntas POSITIVAS con respuestas de prosa relativamente
+// largas. No puntua negativamente cifras, listados cortos ni INCORRECTA/FALSA.
+// La auditoria sigue siendo obligatoria: esto solo puede RECHAZAR, no aprobar.
+function iiff122DistractorOutlier(q){
+  if(!q||!Array.isArray(q.options)||q.options.length!==4||
+     !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3)return true;
+  if(iiff92IsNegativeStem(q))return false;
+  const stem=iiff91Norm(q.stem).replace(/^[¿¡\s]+/,'');
+  // Definicion literal de un parrafo como respuesta: preguntas de reconocimiento
+  // demasiado mecanicas para el nivel Muy alta. No rechaza preguntas de formulas,
+  // magnitudes, secuencias o distinciones tecnicas precisas.
+  if(/^(?:como define el manual|cual es la definicion de|que se entiende por)\b/.test(stem)&&
+     q.options.every(x=>String(x).length>=62)&&
+     !/\d/.test(String(q.options[q.correctIndex])))return true;
+  const stop=new Set('el la los las un una unos unas de del y o a al en con por para entre sobre si que como cual cuales cuando cuanto segun se su sus es son esta estan estos estas este no mas menos tiene tienen durante a fin por respecto sin tanto ante desde despues antes asi solo otro otra uno misma mismo todo toda todos todas debe pueden puede mas'.split(' '));
+  const words=value=>new Set(iiff91Norm(value).match(/[a-z0-9]+/g)?.filter(w=>
+    w.length>3&&!stop.has(w)&&!/^[0-9]+$/.test(w))||[]);
+  const key=words(q.options[q.correctIndex]);
+  if(key.size<6||String(q.options[q.correctIndex]).length<65)return false;
+  let weak=0;
+  for(let i=0;i<4;i++){
+    if(i===q.correctIndex)continue;
+    const other=words(q.options[i]);
+    if(other.size<6||String(q.options[i]).length<65)continue;
+    let shared=0;
+    for(const w of key)if(other.has(w))shared++;
+    const dice=2*shared/(key.size+other.size);
+    if(dice<0.26)weak++;
+  }
+  return weak>=2;
+}
+
 function iiff92AuditSchema(base){
   const original=base.properties.results.items;
   return {...base,properties:{...base.properties,results:{...base.properties.results,
@@ -10061,9 +10094,12 @@ async function persistGeneratedTest({
       // SERVER118: última barrera bajo transacción. Un borrador reanudado,
       // pregunta local o ítem antiguo del banco no pueden falsear Muy alta.
       if(iiff91Topic(target)&&difficulty==='muy alta'&&
+         iiff122DistractorOutlier(question))
+        throw Error('IIFF122: distractores incongruentes; no se guarda pregunta Muy alta.');
+      if(iiff91Topic(target)&&difficulty==='muy alta'&&
          !((question.iiffHighVerified===true&&question.iiff120Verified!==true)||
            iiff120VerifyLocal(question,target)||
-           (question.reused===true&&[118,119,121].includes(Number(question.iiffHighBankVersion)))))
+           (question.reused===true&&[118,119,121,122].includes(Number(question.iiffHighBankVersion)))))
         throw Error('IIFF118: pregunta Muy alta sin auditoría calidad 2; no se guarda.');
       if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
@@ -10303,7 +10339,7 @@ last_shown_at
 )
 VALUES (
   $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-  CASE WHEN $14::boolean THEN 121
+  CASE WHEN $14::boolean THEN 122
        WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
        ELSE CASE WHEN $12::boolean THEN 114 ELSE 6 END END,NOW()
 )
@@ -12507,16 +12543,33 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // La salida al usuario tiene el mismo número original de preguntas.
   const paired118=difficulty==='muy alta'&&group.length>0&&group.every(iiff91Topic);
   if(paired118)group=group.flatMap(t=>[t,t]);
-  const pairInstructions118=paired118?`IIFF MUY ALTA: cada DOS OBJETIVOS
-consecutivos son la MISMA FICHA repetida para producir DOS VARIANTES
-independientes, NO dos preguntas finales. Redacta dos preguntas distintas
-con distractores diferentes, igualmente respaldadas por la evidencia. No
-copies el mismo enunciado ni construyas alternativas obvias. Una sola
-variante, únicamente si obtiene calidad=2, será incorporada al test.
-No hagas preguntas de definiciones obvias cuando el fragmento aporte una
-condición, dato comparativo, secuencia o procedimiento. Las cuatro opciones
-deben pertenecer al mismo campo técnico y diferenciarse en un dato material.
-No inventes condiciones ni datos para elevar la dificultad.`:'';
+  const pairInstructions118=paired118?`IIFF MUY ALTA. Dos posiciones
+consecutivas corresponden a UNA MISMA ficha: produce DOS VARIANTES para
+que solo una llegue al examen. NO son dos preguntas finales.
+MÉTODO OBLIGATORIO (razona internamente, sin nuevos campos ni llamadas):
+1) Extrae de la ficha el dato, regla o condición discriminante y formula
+   UNA pregunta breve con redacción natural como un tribunal de Navarra.
+2) Escribe la respuesta literal correcta. Después crea 3 distractores de
+   LA MISMA CATEGORÍA Y MISMA VARIABLE técnica: cambia solo un valor,
+   intervalo, relación, requisito, orden o componente. Conserva el resto
+   de la frase técnica en los cuatro casos.
+3) En números, usa la misma unidad, precisiones comparables y confusiones
+   cercanas; evita solapamientos si el enunciado no pide el rango EXACTO.
+4) En procedimientos, las 4 respuestas deben describir la MISMA acción y
+   diferir en un paso/condición: NUNCA inventes tres efectos inconexos.
+5) Haz la prueba del opositor sin temario: si dos distractores se pueden
+   descartar por sentido común, cambia las tres alternativas. Ejemplos de
+   defectos PROHIBIDOS: ganar masa muscular instantáneamente, sustituir
+   agua con barritas, prevenir lesiones por una maniobra imposible;
+   NO uses esos ejemplos como hechos del manual ni en preguntas nuevas.
+6) Respalda SOLO el dato correcto con el fragmento; las falsas son
+   variantes controladas y NO nuevos hechos reales. Tres opciones creíbles
+   aunque falsas. En INCORRECTA exige cuatro pruebas literales como siempre.
+7) No preguntes solo por una definición general si el fragmento incluye
+   fórmula, condición, secuencia, rangos o una discriminación operativa.
+No copies títulos de ficha, no aumentes longitud para fingir dificultad.
+Las dos candidatas deben ser DIFERENTES en enfoque o variable.
+Un mismo lote de generación, una sola auditoría posterior, sin pasos extra.`:'';
   const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
@@ -12566,6 +12619,8 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
     }
     if(iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
       iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))return [];
+    if(iiff91Topic(group[i])&&difficulty==='muy alta'&&
+       iiff122DistractorOutlier(q))return [];
     if(Number(group[i].topic_id)===24 &&
        /(?:Altsasu\/Alsasua-Auritz\/Burguete|Lodosa-Peralta\/Azkoien)/i.test(
          String(q.stem||'')+' '+JSON.stringify(q.options||[])))return [];
@@ -12618,6 +12673,15 @@ plausibilidad, diferencia material y ausencia de pistas por absolutos,
 longitud, gramática, escalas inverosímiles o repeticiones semánticas.
 Sin evidencia
 suficiente para elegir una sola respuesta, answer=-1 (control factual aparte).
+COMPROBACIÓN EXIGENTE DE PLAUSIBILIDAD, SOLO EN POSITIVAS: la respuesta
+correcta y los TRES distractores deben variar la MISMA variable técnica.
+Si las alternativas describen efectos biológicos, aparatos o acciones
+DIFERENTES entre sí, que un lector descarta sin estudiar la ficha,
+calidad=0 aun si cada distractor es falso. No basta con compartir el
+contexto («incendio», «barritas», «seguridad»): deben ser sustituciones
+realistas de una sola especificación, secuencia o criterio técnico.
+No des calidad 2 a una definición general que se copia entera y cuya clave
+puede elegirse por lenguaje común sin precisión del temario.
 CALIBRACIÓN ESTILO TRIBUNAL: en la prueba oficial 2024 existen ítems
 sobre UN intervalo con cuatro rangos cercanos; ese formato puede ser
 exigente si los tres distractores son posibles confusiones concretas,
@@ -12680,7 +12744,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
       (iiff91Topic(group[i])&&(!Number.isInteger(a.calidad)||
         a.calidad<(difficulty==='muy alta'?2:1)||a.calidad>2))||
       (iiff91Topic(group[i])&&difficulty==='muy alta'&&
-        (iiff118ObviousWeakDistractors(q)||
+        (iiff118ObviousWeakDistractors(q)||iiff122DistractorOutlier(q)||
          /que intervalo cuantitativo recoge el manual para/i.test(iiff91Norm(q.stem))))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
@@ -12794,7 +12858,10 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     // Las preguntas antiguas 6/114 NO tienen certificado de calidad 2.
     // Se conservan para repaso libre/SRS pero no para nuevos tests Muy alta.
     if(iiff91Topic(r)&&difficulty==='muy alta'&&
-      ![118,119,121].includes(Number(r.validation_version)))continue;
+      ![118,119,121,122].includes(Number(r.validation_version)))continue;
+    if(iiff91Topic(r)&&difficulty==='muy alta'&&
+       iiff122DistractorOutlier({stem:r.stem,options:r.options,
+         correctIndex:Number(r.correct_index)}))continue;
     if(iiff91Topic(r) && (iiff102CandidateRepetition(fact,blocked)||
       iiff101RepeatedStem(r,blocked)||
       iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
@@ -13372,7 +13439,7 @@ app.post('/api/generate',async(req,res)=>{
           questions[i].questionFamily!=='IIFF120_INTERVALO_PRECISO') &&
         !iiff120VerifyLocal(questions[i],targets[i]) &&
         !(questions[i].reused===true&&
-          [118,119,121].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
+          [118,119,121,122].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
     }
     // SERVER120: al reanudar, completar plazas vacías con hechos dobles del
     // PDF antes de pagar nuevas llamadas al generador. No genera anticipadamente.
