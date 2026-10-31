@@ -7900,6 +7900,14 @@ function iiff92GenerationRules(difficulty,group=[]){
   misma unidad y orden de magnitud, con valores próximos NO solapados.
   No inventes otra condición ni un supuesto que el fragmento no permita.
   La dificultad procede de la precisión del temario, no de la extensión.
+  ESTILO OPOSICIÓN NAVARRA 2024/2026: el tribunal utiliza tanto
+  enunciados técnicos breves con cuatro intervalos próximos como
+  preguntas operativas sobre condiciones y procedimientos con cuatro
+  afirmaciones homogéneas. Si la evidencia aporta varias relaciones,
+  prioriza discriminar condiciones, orden y parámetros conjuntos.
+  No copies el texto entero del concepto ni redactes preguntas tipo
+  «¿Qué intervalo cuantitativo recoge el manual para definición y...?».
+  Usa un enunciado natural y preciso, sin revelar ningún dato preguntado.
   Solo se aceptará calidad=2 en MUY ALTA. Comprueba que las TRES alternativas
   falsas son cercanas, técnicamente plausibles y distintas; no pueden
   descartarse por sentido común, pistas formales ni categorías absurdas.
@@ -8275,7 +8283,7 @@ function iiff120RangeFact(target){
   const units='(?:litros?\\/min|l\\/min|km\\/h|kW\\/m|MW\\/m|horas?|minutos?|mm|cm|metros?|m|bar|%)';
   const patterns=[
     new RegExp(`\\b([0-9]{1,5}(?:\\.[0-9]{3})?(?:,[0-9]{1,2})?)\\s*[-–]\\s*([0-9]{1,5}(?:\\.[0-9]{3})?(?:,[0-9]{1,2})?)\\s*(${units})(?![\\p{L}\\d/])`,'giu'),
-    /\bentre\s+(?:el\s+|la\s+)?(\d{1,5}(?:,\d{1,2})?)\s*(%)\s*(?:\([^)]{0,45}\)\s*)?(?:y|a|hasta)\s+(?:el\s+|la\s+)?(\d{1,5}(?:,\d{1,2})?)\s*%/giu
+    /\bentre\s+(?:el\s+|la\s+|un\s+|una\s+)?(\d{1,5}(?:,\d{1,2})?)\s*(%)\s*(?:\([^)]{0,45}\)\s*)?(?:y|a|hasta)\s+(?:el\s+|la\s+|un\s+|una\s+)?(\d{1,5}(?:,\d{1,2})?)\s*%/giu
   ];
   const matches=[];
   for(let i=0;i<patterns.length;i++){
@@ -8290,37 +8298,73 @@ function iiff120RangeFact(target){
   if(matches.length!==1)return null;
   return matches[0];
 }
+// SERVER121: enunciados cerrados y naturales, SOLO para relaciones
+// inequívocas presentes en el mismo extracto. Nada de copiar el concepto.
+// Los modelos 2024/2026 autorizan rangos próximos; no autorizan formular
+// preguntas con títulos íntegros de las fichas o con la respuesta filtrada.
+function iiff121RangeLead(target,r){
+  const concept=iiff91Norm(target.concept);
+  const source=iiff91Norm(target.source_evidence);
+  const unit=iiff91Norm(r.unit);
+  if(/bomba[s]? de alta presion/.test(concept) &&
+      /litros?\/min|l\/min/.test(unit) &&
+      /caudal/.test(source))
+    return 'En las bombas de alta presión descritas para extinción forestal, ¿qué rango de caudal indica el manual?';
+  if(/caudal de trabajo.*selector|selector.*minimo/.test(concept) &&
+      /l\/min|litros?\/min/.test(unit) &&
+      /por defecto/.test(source))
+    return 'Durante la extinción forestal, ¿con qué intervalo de caudal se trabaja por defecto con el selector al mínimo?';
+  if(/humedad.*combustibles? vivos?/.test(concept) && unit==='%')
+    return '¿Entre qué porcentajes puede oscilar la humedad de los combustibles vivos respecto a su peso seco?';
+  if(/humedad.*combustibles? muertos?/.test(concept) && unit==='%')
+    return '¿Entre qué porcentajes puede oscilar la humedad de los combustibles muertos respecto a su peso seco?';
+  if(/intoxicacion.*monoxido|carboxihemoglobina|cohb/.test(concept) &&unit==='%'){
+    const cls=/leve/.test(concept)?'leve':/moderad/.test(concept)?'moderado':/grave/.test(concept)?'grave':null;
+    if(cls)return `¿Qué intervalo porcentual de carboxihemoglobina se asocia a un cuadro de intoxicación por CO ${cls}?`;
+  }
+  if(/intensidad.*altura de llama|altura de llama.*intensidad/.test(concept) &&
+      /kw\/m|mw\/m/.test(unit)){
+    // Solo si la evidencia identifica de forma literal el intervalo de altura.
+    const match=String(target.source_evidence||'').match(/\b(\d+(?:,\d+)?)\s*(?:a|[-–])\s*(\d+(?:,\d+)?)\s*m\b/i);
+    if(match)return `Para una altura de llama comprendida entre ${match[1]} y ${match[2]} m, ¿qué intervalo de intensidad lineal recoge el manual?`;
+  }
+  return null; // No existen plantillas seguras para otros conceptos.
+}
 function iiff120RangeQuestion(target){
   const r=iiff120RangeFact(target);
   if(!r)return null;
+  const stem=iiff121RangeLead(target,r);
+  if(!stem||stem.length>170)return null;
   const near=(val,raw)=>{
     const decimal=raw.includes(',');
-    let step=decimal?(val<10?0.5:val<100?2:10):val<5?1:val<20?2:val<100?5:val<1000?20:100;
-    let changed=val+step;
+    const step=decimal?(val<10?0.5:val<100?2:10):val<5?1:val<20?2:val<100?5:val<1000?20:100;
+    const changed=val+step;
     const digits=raw.includes(',')?raw.split(',')[1].length:0;
     if(decimal)return changed.toFixed(digits).replace('.',',');
-    // Conserva el formato de millares en cifras como 1.700.
     return raw.includes('.')?String(Math.round(changed)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'):String(Math.round(changed));
   };
   const otherLo=near(r.lo,r.a),otherHi=near(r.hi,r.b);
   if(otherLo===r.a||otherHi===r.b||Number(otherLo.replace('.','').replace(',','.'))>=r.hi)return null;
   const option=(a,b)=>`${a}–${b} ${r.unit}`;
   const options=[option(r.a,r.b),option(otherLo,r.b),option(r.a,otherHi),option(otherLo,otherHi)];
-  // Evitar revelar los dos extremos incluidos a menudo en el concepto de la ficha.
-  let concept=String(target.concept||'').trim();
-  concept=concept.replace(/\([^)]*\d[^)]*\)/g,'')
-    .replace(/\b\d{1,5}(?:[.,]\d+)?\s*(?:[-–a]\s*\d{1,5}(?:[.,]\d+)?)?\s*(?:%|kW\/m|MW\/m|km\/h|litros?\/min|l\/min|mm|cm|m)?\b/gi,'')
-    .replace(/\s{2,}/g,' ').replace(/\s+([,.:])/g,'$1').replace(/[,.:\s-]+$/,'')
-    .replace(/\b(?:establecido|descrita|prevista|definido|de|del|en|con|para|por|a)\s*$/i,'').trim();
-  if(!concept||concept.length<18)return null;
-  const q={stem:`¿Qué intervalo cuantitativo recoge el manual para ${concept.charAt(0).toLowerCase()+concept.slice(1)}?`,
-    options,correctIndex:0,explanation:`El manual recoge expresamente «${r.quote}».`,
+  const q={stem,options,correctIndex:0,
+    explanation:`La evidencia del manual establece «${r.quote}».`,
     sourceEvidence:String(target.source_evidence||''),sourcePage:target.source_page??null,
-    manualPage:target.manual_page??null,questionFamily:'IIFF120_INTERVALO_PRECISO',
-    difficulty:'muy alta',graphic:null,iiffHighVerified:true,iiff120Verified:true};
-  return resetShape136(q)||iiff91UnsafeQuestion(q)?null:q;
+    manualPage:target.manual_page??null,questionFamily:'IIFF121_INTERVALO_EXAMEN',
+    difficulty:'muy alta',graphic:null,iiffHighVerified:false,iiff120Verified:true};
+  return resetShape136(q)||iiff91UnsafeQuestion(q)||iiff121LocalStyleIssue(q)?null:q;
 }
-
+// Barrea específica y objetiva, distinta de la comprobación factual previa.
+function iiff121LocalStyleIssue(q){
+  if(!q||!Array.isArray(q.options)||q.options.length!==4||
+     typeof q.stem!=='string'||q.stem.length>175||q.stem.length<35||
+     !q.stem.endsWith('?')||/que intervalo cuantitativo recoge/i.test(iiff91Norm(q.stem)))return true;
+  const a=q.options.map(x=>String(x).trim());
+  if(new Set(a.map(R136_NORM)).size!==4)return true;
+  const lengths=a.map(x=>x.length);
+  if(Math.max(...lengths)>Math.min(...lengths)*2.2)return true;
+  return false;
+}
 function iiff120LocalQuestion(target){
   const facts=iiff120Specs(target);
   if(facts.length<2)return iiff120RangeQuestion(target);
@@ -8334,15 +8378,18 @@ function iiff120LocalQuestion(target){
   const concept=String(target.concept||'').trim().replace(/[.?!]+$/,'').replace(/^Características técnicas de (?:la|el|los|las) /i,'').replace(/^Características de (?:la|el|los|las) /i,'');
   if(new RegExp('\\b'+a.raw.replace(/[.,]/g,'[.,]')+'\\b').test(concept)||
      new RegExp('\\b'+b.raw.replace(/[.,]/g,'[.,]')+'\\b').test(concept))return null;
-  const stem=`Respecto a ${concept}, ¿qué pareja de ${a.label.toLowerCase()} y ${b.label.toLowerCase()} recoge el manual?`;
+  // No publicar una lista de etiquetas: la forma se calibra como examen.
+  const name=/motobomba Honda GB 20 XT/i.test(concept)?'la motobomba Honda GB 20 XT':null;
+  if(!name)return null;
+  const stem=`En ${name}, ¿qué combinación de ${a.label.toLowerCase()} y ${b.label.toLowerCase()} figura en las especificaciones técnicas?`;
   const options=[val(a.raw,b.raw),val(wrongA,b.raw),val(a.raw,wrongB),val(wrongA,wrongB)];
   const q={stem,options,correctIndex:0,
     explanation:`El texto de referencia establece «${a.quote}» y «${b.quote}».`,
     sourceEvidence:String(target.source_evidence||''),
     sourcePage:target.source_page??null,manualPage:target.manual_page??null,
     questionFamily:'IIFF120_DOS_PARAMETROS',difficulty:'muy alta',graphic:null,
-    iiffHighVerified:true,iiff120Verified:true};
-  return resetShape136(q)||iiff91UnsafeQuestion(q)?null:q;
+    iiffHighVerified:false,iiff120Verified:true};
+  return resetShape136(q)||iiff91UnsafeQuestion(q)||iiff121LocalStyleIssue(q)?null:q;
 }
 function iiff120VerifyLocal(q,target){
   if(!q||q.iiff120Verified!==true||!Array.isArray(q.options)||
@@ -8424,13 +8471,16 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
   // cobertura amplia; en otro caso NO eliminamos ningún objetivo elegible.
   const technical118=difficulty==='muy alta'
     ?eligibleBase.filter(c=>iiff105TechnicalMerit(c)>=8):[];
-  const eligible=technical118.length>=count &&
-    new Set(technical118.map(iiff91Band)).size>=Math.min(IIFF91_STRATA,count)
-    ?technical118:eligibleBase;
+  // SERVER121: no descartar fichas examinables ni diferir vencimientos SRS
+  // por estar redactadas con un único dato. La calidad se optimiza SOLO
+  // como prioridad de selección entre objetivos elegibles.
+  const eligible=eligibleBase;
   const reviewBonus=priority=>priority===1?90:priority===2?65:priority===3?50:priority===4?30:0;
   const technicalMerit=new Map();
   if(difficulty==='muy alta'&&!simulation)for(const c of eligible){
-    technicalMerit.set(Number(c.id),iiff105TechnicalMerit(c));
+    const txt=String(c.source_evidence||'');
+    const relational=txt.length>=170 && (txt.match(/[.;,:]/g)||[]).length>=3;
+    technicalMerit.set(Number(c.id),iiff105TechnicalMerit(c)+(relational?9:0));
   }
   // IIFF: combinar cobertura NUEVA y repasos VENCIDOS en el test ordinario.
   // El tope actúa únicamente cuando hay fichas nuevas ELEGIBLES disponibles;
@@ -10013,7 +10063,7 @@ async function persistGeneratedTest({
       if(iiff91Topic(target)&&difficulty==='muy alta'&&
          !((question.iiffHighVerified===true&&question.iiff120Verified!==true)||
            iiff120VerifyLocal(question,target)||
-           (question.reused===true&&[118,119,120].includes(Number(question.iiffHighBankVersion)))))
+           (question.reused===true&&[118,119,121].includes(Number(question.iiffHighBankVersion)))))
         throw Error('IIFF118: pregunta Muy alta sin auditoría calidad 2; no se guarda.');
       if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
@@ -10253,7 +10303,7 @@ last_shown_at
 )
 VALUES (
   $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-  CASE WHEN $14::boolean THEN 120
+  CASE WHEN $14::boolean THEN 121
        WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
        ELSE CASE WHEN $12::boolean THEN 114 ELSE 6 END END,NOW()
 )
@@ -12484,7 +12534,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+
-      pairInstructions118+(repair118?'IIFF: RESCATE UNICO. Reconstruye distractores cercanos y sin pistas; nunca inventes.':'')+
+      pairInstructions118+(repair118?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
       geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
@@ -12568,6 +12618,12 @@ plausibilidad, diferencia material y ausencia de pistas por absolutos,
 longitud, gramática, escalas inverosímiles o repeticiones semánticas.
 Sin evidencia
 suficiente para elegir una sola respuesta, answer=-1 (control factual aparte).
+CALIBRACIÓN ESTILO TRIBUNAL: en la prueba oficial 2024 existen ítems
+sobre UN intervalo con cuatro rangos cercanos; ese formato puede ser
+exigente si los tres distractores son posibles confusiones concretas,
+no existe solapamiento y no hay pistas en el enunciado. No penalices por
+la cantidad de hechos ni por la longitud de la pregunta. Lo determinante
+es poder descartar las tres opciones equivocadas solo estudiando el manual.
 0: DOS o más distractores se descartan sin conocer el temario, hay pista
    formal decisiva o la pregunta exige solo reconocer un título editorial.
 1: pregunta técnicamente válida, focalizada, con como máximo un distractor
@@ -12603,7 +12659,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
     contents:auditPrompt82+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
-        {thinkingConfig:{thinkingLevel:'low'}}:{}),
+        {thinkingConfig:{thinkingLevel:'medium'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
   if(iiffScope)iiff92RequireCompletedResponse(auditing,'auditoría');
@@ -12624,7 +12680,8 @@ No añadas escenarios, parámetros ni condiciones no documentados.
       (iiff91Topic(group[i])&&(!Number.isInteger(a.calidad)||
         a.calidad<(difficulty==='muy alta'?2:1)||a.calidad>2))||
       (iiff91Topic(group[i])&&difficulty==='muy alta'&&
-        iiff118ObviousWeakDistractors(q))||
+        (iiff118ObviousWeakDistractors(q)||
+         /que intervalo cuantitativo recoge el manual para/i.test(iiff91Norm(q.stem))))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
     // Para INCORRECTA se evita una explicación libre que pueda asignar
@@ -12737,7 +12794,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     // Las preguntas antiguas 6/114 NO tienen certificado de calidad 2.
     // Se conservan para repaso libre/SRS pero no para nuevos tests Muy alta.
     if(iiff91Topic(r)&&difficulty==='muy alta'&&
-      ![118,119,120].includes(Number(r.validation_version)))continue;
+      ![118,119,121].includes(Number(r.validation_version)))continue;
     if(iiff91Topic(r) && (iiff102CandidateRepetition(fact,blocked)||
       iiff101RepeatedStem(r,blocked)||
       iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
@@ -13311,9 +13368,11 @@ app.post('/api/generate',async(req,res)=>{
     for(const [i,q] of direct)questions[i]=q;
     if(difficulty==='muy alta')for(let i=0;i<questions.length;i++){
       if(iiff91Topic(targets[i])&&questions[i]&&
-        questions[i].iiffHighVerified!==true &&
+        !(questions[i].iiffHighVerified===true &&
+          questions[i].questionFamily!=='IIFF120_INTERVALO_PRECISO') &&
+        !iiff120VerifyLocal(questions[i],targets[i]) &&
         !(questions[i].reused===true&&
-          [118,119].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
+          [118,119,121].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
     }
     // SERVER120: al reanudar, completar plazas vacías con hechos dobles del
     // PDF antes de pagar nuevas llamadas al generador. No genera anticipadamente.
