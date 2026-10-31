@@ -7025,7 +7025,7 @@ ORDER BY
   const blocked96=(await Promise.all(iiffIds96.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   return result.rows.filter(row=>!(iiff91Topic(row)&&(iiff91Editorial(row)||
     iiff102CandidateRepetition(row,blocked96)||iiff91UnsafeQuestion({stem:row.failed_stem},{allowProvenNegative:
-  Number(row.failed_validation_version)===114})))).slice(0,count).map(row=>({
+  [114,119].includes(Number(row.failed_validation_version))})))).slice(0,count).map(row=>({
   ...row,
 
 questionFamily:
@@ -7899,7 +7899,11 @@ function iiff92GenerationRules(difficulty,group=[]){
   Cuatro opciones de la misma clase técnica y nivel de detalle; para magnitudes,
   misma unidad y orden de magnitud, con valores próximos NO solapados.
   No inventes otra condición ni un supuesto que el fragmento no permita.
-  La dificultad procede de la precisión del temario, no de la extensión.`
+  La dificultad procede de la precisión del temario, no de la extensión.
+  Solo se aceptará calidad=2 en MUY ALTA. Comprueba que las TRES alternativas
+  falsas son cercanas, técnicamente plausibles y distintas; no pueden
+  descartarse por sentido común, pistas formales ni categorías absurdas.
+  Si el fragmento no permite ese nivel, NO inventes hechos o condicionantes.`
     : `ALTA DE OPOSICIÓN: pregunta por un hecho documentado con cuatro
   alternativas homogéneas y no-clave creíbles: en POSITIVA son falsas;
   en INCORRECTA son tres verdaderas, cada una demostrada literalmente.
@@ -8019,6 +8023,17 @@ function iiff92RequireCompletedResponse(response,phase){
     throw Error(`IIFF: respuesta vacía en ${phase}.`);
 }
 
+// SERVER118: veto mecánico conservador de pistas visibles muy fuertes.
+// No sustituye la auditoría semántica y NO afecta a dificultad Alta.
+function iiff118ObviousWeakDistractors(q){
+  if(!q||!Array.isArray(q.options)||q.options.length!==4||
+     !Number.isInteger(q.correctIndex)||q.correctIndex<0||q.correctIndex>3)return true;
+  if(iiff92IsNegativeStem(q))return false; // Negativas mantienen cuatro pruebas.
+  const extreme=/\b(?:siempre|nunca|jamas|exclusivamente|unicamente|imposible|puramente|totalmente|sin excepcion|en ningun caso)\b/;
+  if(extreme.test(iiff91Norm(q.options[q.correctIndex])))return false;
+  return q.options.filter((v,i)=>i!==q.correctIndex&&
+    extreme.test(iiff91Norm(v))).length>=2;
+}
 function iiff92AuditSchema(base){
   const original=base.properties.results.items;
   return {...base,properties:{...base.properties,results:{...base.properties.results,
@@ -8232,7 +8247,15 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
   if(recentCorrect.length)for(const candidate of valid){
     if(iiff102CandidateRepetition(candidate,recentCorrect))blockedMatches.add(Number(candidate.id));
   }
-  const eligible=valid.filter(c=>!blockedMatches.has(Number(c.id)));
+  const eligibleBase=valid.filter(c=>!blockedMatches.has(Number(c.id)));
+  // SERVER118: para Muy alta, alimentar primero al generador con fichas
+  // de precisión técnica suficiente. Conservamos todas las franjas si hay
+  // cobertura amplia; en otro caso NO eliminamos ningún objetivo elegible.
+  const technical118=difficulty==='muy alta'
+    ?eligibleBase.filter(c=>iiff105TechnicalMerit(c)>=6):[];
+  const eligible=technical118.length>=count &&
+    new Set(technical118.map(iiff91Band)).size>=Math.min(IIFF91_STRATA,count)
+    ?technical118:eligibleBase;
   const reviewBonus=priority=>priority===1?90:priority===2?65:priority===3?50:priority===4?30:0;
   const technicalMerit=new Map();
   if(difficulty==='muy alta'&&!simulation)for(const c of eligible){
@@ -8261,7 +8284,7 @@ function chooseIiffCoverage91(candidates,count,{simulation=false,rng=Math.random
         (pageHits.get(page)||0)*180-
         (conceptHits.get(concept)||0)*400+
         reviewBonus(priority)-Math.min(10,Number(c.times_asked)||0)*4+
-        (technicalMerit.get(Number(c.id))||0)+rng();
+        (technicalMerit.get(Number(c.id))||0)*(difficulty==='muy alta'?3:1)+rng();
       if(hits<leastBandHits||(hits===leastBandHits&&score>bestScore)){
         best=c;bestScore=score;leastBandHits=hits;
       }
@@ -9814,6 +9837,12 @@ async function persistGeneratedTest({
     for(let i = 0; i < questions.length; i++){
       const question = questions[i];
       const target = targets[i];
+      // SERVER118: última barrera bajo transacción. Un borrador reanudado,
+      // pregunta local o ítem antiguo del banco no pueden falsear Muy alta.
+      if(iiff91Topic(target)&&difficulty==='muy alta'&&
+         !(question.iiffHighVerified===true||
+           (question.reused===true&&[118,119].includes(Number(question.iiffHighBankVersion)))))
+        throw Error('IIFF118: pregunta Muy alta sin auditoría calidad 2; no se guarda.');
       if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
       // Prioridad a la página IMPRESA del manual. La página física del PDF
@@ -10052,7 +10081,8 @@ last_shown_at
 )
 VALUES (
   $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-  CASE WHEN $12::boolean THEN 114 ELSE 6 END,NOW()
+  CASE WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
+       ELSE CASE WHEN $12::boolean THEN 114 ELSE 6 END END,NOW()
 )
     RETURNING id`,
     [
@@ -10071,7 +10101,8 @@ VALUES (
       question.graphic
         ? JSON.stringify(question.graphic)
         : null,
-      Boolean(iiff91Topic(target)&&question.iiffNegativeVerified===true)
+      Boolean(iiff91Topic(target)&&question.iiffNegativeVerified===true),
+      Boolean(iiff91Topic(target)&&difficulty==='muy alta'&&question.iiffHighVerified===true)
     ]
   );
 
@@ -11855,21 +11886,22 @@ function resetGeoTableQuestion136(){ return null; }
 // Une objetivos contiguos del mismo bloque SIN perder su posición global.
 // Un lote se limita por número de preguntas Y tamaño de evidencia, para evitar
 // que una petición enorme convierta menos llamadas en más latencia y 504.
-function resetGroups139(rows){
+function resetGroups139(rows,difficulty=null){
   const groups=[];
   for(const row of rows){
     const last=groups.at(-1);
     const block=String(row.t.topic_block||'').toLowerCase();
     const bytes=Math.min(3000,String(row.t.source_evidence||'').length);
     const current=last ? last.reduce((n,r)=>n+Math.min(3000,String(r.t.source_evidence||'').length),0):0;
-    if(last&&last.length<R136_BATCH &&
+    if(last&&last.length<(difficulty==='muy alta'&&iiff91Topic(row.t)?4:R136_BATCH) &&
        String(last[0].t.topic_block||'').toLowerCase()===block &&
        // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
        // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
        iiff91Topic(last[0].t)===iiff91Topic(row.t) &&
        (coverageTopicNumber(last[0].t.topic_name)===22)===
          (coverageTopicNumber(row.t.topic_name)===22) &&
-       current+bytes<=R136_CONTEXT_BUDGET){
+       current+bytes<=(difficulty==='muy alta'&&iiff91Topic(row.t)
+         ?Math.floor(R136_CONTEXT_BUDGET/2):R136_CONTEXT_BUDGET)){
       last.push(row);
     }else groups.push([row]);
   }
@@ -12232,7 +12264,7 @@ async function resetGeminiCall139(ai,phase,opts){
     throw error;
   }
 }
-async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]){
+async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[],repair118=false){
   const requiresSearch=group.some(t=>String(t.source_evidence||'').trim().length<55);
   if(requiresSearch)throw Error('Objetivo sin extracto PDF suficiente. No se realizan llamadas pagadas para adivinar hechos.');
   // El número exigido en JSON debe coincidir con los objetivos del lote.
@@ -12244,7 +12276,19 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   const comparisons=resetGeoComparisons82(group,comparisonPool,difficulty);
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
+  const originalGroup118=group;
   const iiffScope=group.some(iiff91Topic);
+  // SERVER118: dos candidatas por objetivo en IIFF Muy alta.
+  // Una sola generación y una sola auditoría por lote (NO por candidata).
+  // La salida al usuario tiene el mismo número original de preguntas.
+  const paired118=difficulty==='muy alta'&&group.length>0&&group.every(iiff91Topic);
+  if(paired118)group=group.flatMap(t=>[t,t]);
+  const pairInstructions118=paired118?`IIFF MUY ALTA: cada DOS OBJETIVOS
+consecutivos son la MISMA FICHA repetida para producir DOS VARIANTES
+independientes, NO dos preguntas finales. Redacta dos preguntas distintas
+con distractores diferentes, igualmente respaldadas por la evidencia. No
+copies el mismo enunciado ni construyas alternativas obvias. Una sola
+variante, únicamente si obtiene calidad=2, será incorporada al test.`:'';
   const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
@@ -12261,7 +12305,9 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+geoPhysical112,config:{
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+
+      pairInstructions118+(repair118?'IIFF: RESCATE UNICO. Reconstruye distractores cercanos y sin pistas; nunca inventes.':'')+
+      geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:geoHighChallenge?'medium':'low'}}:{}),
@@ -12281,8 +12327,9 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       questions[i]=null;
     }
   }
-  // Auditor independiente: una llamada por lote, no múltiples auditores
-  // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
+  // Auditor independiente: una llamada por lote, nunca múltiples capas.
+  // Comprueba evidencia y calidad de distractores: Muy alta exige calidad=2
+  // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
     if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
@@ -12302,7 +12349,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       stem:q.stem,options:q.options,
       ...(iiff91Topic(group[i])?{explanation:q.explanation}:{})}];
   });
-  if(!blind.length)return questions.map(()=>null);
+  if(!blind.length)return originalGroup118.map(()=>null);
   // El texto de auditoría es IDÉNTICO al SERVER 81 para todas las materias
   // sin comparadores. El refuerzo contextual solo afecta a solares/eólicos
   // Muy alta y no añade otra llamada de validación.
@@ -12349,9 +12396,12 @@ suficiente para elegir una sola respuesta, answer=-1 (control factual aparte).
    débil; requiere recuerdo preciso. Un solo dato con valores próximos vale.
 2: los TRES distractores son creíbles y próximos sin solaparse; exige una
    distinción documentada de valor, condición, secuencia o procedimiento.
-En MUY ALTA se PREFIERE 2, pero 1 sigue admitido: NO impongas un veto
-subjetivo que rechace preguntas factuales correctas. No confundas proximidad
-con que otra alternativa también sea verdadera. No inventes justificaciones.
+En MUY ALTA calidad=2 es obligatoria; una pregunta de calidad=1 NO debe
+entrar en el test aunque la respuesta sea factual. SOLO marca 2 si los TRES
+distractores son cercanos, homogéneos, falsos, creíbles y sin pistas. Si dudas
+entre 1 y 2, asigna 1. Nunca eleves la nota para completar el test; el
+servidor rechaza las preguntas que no alcancen 2 y buscará otro objetivo.
+No confundas proximidad con dos respuestas válidas; nunca inventes datos.
 Para preguntas INCORRECTA/FALSA aporta optionProofs EN EL ORDEN A,B,C,D:
 cuatro objetos {trueAccordingToPDF:boolean,quote:string}. Tres valores true
 con citas LITERALES que prueben expresamente cada afirmación y un solo false
@@ -12376,7 +12426,8 @@ No añadas escenarios, parámetros ni condiciones no documentados.
   if(!Array.isArray(audits))throw Error('Auditoría sin resultados');
   if(iiffScope)console.log('IIFF_92_CALIDAD_AUDITOR:',JSON.stringify({
     nivel:difficulty,calidades:audits.map(x=>Number(x.calidad)),
-    minAceptada:1,objetivoPreferido:difficulty==='muy alta'?2:1}));
+    minAceptada:difficulty==='muy alta'?2:1,
+    fichasOriginales:originalGroup118.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
     if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
@@ -12385,8 +12436,10 @@ No añadas escenarios, parámetros ni condiciones no documentados.
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
       (iiff91Topic(group[i])&&iiff92IsNegativeStem(q)&&
         !iiff92FourOptionProofs(q,a,group[i].source_evidence))||
-      (iiffScope&&(!Number.isInteger(a.calidad)||
-        a.calidad<1))||
+      (iiff91Topic(group[i])&&(!Number.isInteger(a.calidad)||
+        a.calidad<(difficulty==='muy alta'?2:1)||a.calidad>2))||
+      (iiff91Topic(group[i])&&difficulty==='muy alta'&&
+        iiff118ObviousWeakDistractors(q))||
       !resetQuote136(a.quote,group[i].source_evidence))return null;
     const evidence=String(a.quote);
     // Para INCORRECTA se evita una explicación libre que pueda asignar
@@ -12402,6 +12455,8 @@ No añadas escenarios, parámetros ni condiciones no documentados.
     return {...q,explanation,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
       manualPage:group[i].manual_page??null,
       iiffNegativeVerified:negative,
+      // Unicamente esta auditoría puede marcar una pregunta como Muy alta.
+      iiffHighVerified:iiff91Topic(group[i])&&difficulty==='muy alta'&&a.calidad===2,
       questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:null};
   });
   if(iiffScope){
@@ -12411,7 +12466,8 @@ No añadas escenarios, parámetros ni condiciones no documentados.
       aceptadas:negativeIndices.filter(i=>validated[i]?.iiffNegativeVerified===true).length,
       rechazadas:negativeIndices.filter(i=>!validated[i]).length}));
   }
-  return validated;
+  return paired118?originalGroup118.map((_,i)=>
+    validated[2*i]||validated[2*i+1]||null):validated;
 }
 // SERVER 83 — barajado de PRESENTACIÓN ANTES de persistir la pregunta nueva.
 // Conserva la respuesta literal y todas las alternativas ya auditadas contra PDF.
@@ -12493,6 +12549,10 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     // comparaciones SRS/factuales usan exclusivamente coverage_item_id.
     const fact={...r,id:Number(r.coverage_item_id),
       source_page:r.ci_source_page,source_evidence:r.ci_evidence};
+    // Las preguntas antiguas 6/114 NO tienen certificado de calidad 2.
+    // Se conservan para repaso libre/SRS pero no para nuevos tests Muy alta.
+    if(iiff91Topic(r)&&difficulty==='muy alta'&&
+      ![118,119].includes(Number(r.validation_version)))continue;
     if(iiff91Topic(r) && (iiff102CandidateRepetition(fact,blocked)||
       iiff101RepeatedStem(r,blocked)||
       iiff91SameRecentFact(fact,pairs.filter(p=>iiff91Topic(p.target)).map(p=>p.target))))continue;
@@ -12502,7 +12562,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     if(geo114QuestionIssue(r))continue;
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
       (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
-        Number(r.validation_version)===114})))||
+        [114,119].includes(Number(r.validation_version))})))||
       resetShape136({stem:r.stem,options:r.options,correctIndex:ci,ankiOriginalBank}))continue;
     usedQuestions.add(stem);usedCoverage.add(id);
     const target={id,topic_id:Number(r.topic_id),topic_name:r.topic_name,
@@ -12515,6 +12575,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
       manualPage:r.manual_page??null,explanation:r.explanation||'',
       questionFamily:r.question_family,difficulty:r.difficulty,
       graphic:r.graphic||null,reused:true,questionId:Number(r.id),
+      iiffHighBankVersion:iiff91Topic(r)?Number(r.validation_version):null,
       ankiOriginalBank};
     pairs.push({question,target});if(pairs.length>=count)break;
   }
@@ -12807,7 +12868,7 @@ function selectBankReview111(rows,count,testType){
     const q={stem:r.stem,options:r.options,correctIndex:Number(r.correct_index),ankiOriginalBank};
     if(resetShape136(q))continue;
     if(geo114QuestionIssue(r))continue;
-    if(iiff91Topic(r)&&iiff91UnsafeQuestion(r,{allowProvenNegative:Number(r.validation_version)===114}))continue;
+    if(iiff91Topic(r)&&iiff91UnsafeQuestion(r,{allowProvenNegative:[114,119].includes(Number(r.validation_version))}))continue;
     const key=Number(r.topic_id);
     if(!grouped.has(key))grouped.set(key,[]);
     grouped.get(key).push(r);
@@ -13063,6 +13124,12 @@ app.post('/api/generate',async(req,res)=>{
     let questions=resume136?.questions?.length===targets.length
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     for(const [i,q] of direct)questions[i]=q;
+    if(difficulty==='muy alta')for(let i=0;i<questions.length;i++){
+      if(iiff91Topic(targets[i])&&questions[i]&&
+        questions[i].iiffHighVerified!==true &&
+        !(questions[i].reused===true&&
+          [118,119].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
+    }
     draft136={targets,questions};
     if(count>40){
       const pairs=await resetBank136(topicIds,count,difficulty,freshOnly111);
@@ -13091,9 +13158,10 @@ app.post('/api/generate',async(req,res)=>{
       // SERVER 82: carga acotada de fichas comparables, una sola consulta.
       // No cambia objetivos, sesiones ni la política de la selección.
       const comparisonPool82=await resetGeoComparePool82(targets,difficulty);
-      // Lotes dinámicos: 10 como máximo, o menos si el PDF es extenso.
+      // Lotes dinámicos: máximo 10; en IIFF Muy alta, máximo 4 fichas
+      // con doble candidata y presupuesto de contexto reducido.
       // Cada pregunta conserva su objetivo individual aunque cambie el tema.
-      const groups=resetGroups139(remaining);
+      const groups=resetGroups139(remaining,difficulty);
       const ai=groups.length?aiClient():null;
       const run=await resetPool136(groups,async group=>{
         const items=group.map(x=>x.t);
@@ -13135,7 +13203,14 @@ app.post('/api/generate',async(req,res)=>{
               Math.max(1000,count*50),topicIds,examMode,freshOnly111);
             const occupied=new Set(targets.map(t=>Number(t.id)));
             for(const slot of holes){
-              const other=alternatives.find(candidate=>
+              // Antes del rescate pagar por una ficha distinta SOLO si
+              // tiene mayor información técnica y sigue siendo SRS elegible.
+              const rescuePool118=iiff91Topic(slot.t)&&difficulty==='muy alta'?
+                [...alternatives].sort((a,b)=>
+                  (iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a))*3+
+                  (Number(iiff91Band(a)===iiff91Band(slot.t))-
+                   Number(iiff91Band(b)===iiff91Band(slot.t)))*8):alternatives;
+              const other=rescuePool118.find(candidate=>
                 Number(candidate.topic_id)===Number(slot.t.topic_id) &&
                 !occupied.has(Number(candidate.id)) &&
                 (!iiff91Topic(candidate)||!iiff91Editorial(candidate)) &&
@@ -13156,10 +13231,10 @@ app.post('/api/generate',async(req,res)=>{
           }
           holes=holes.filter(x=>!questions[x.index]);
           // Igual límite de contexto en el único rescate autorizado.
-          const repairGroups=resetGroups139(holes);
+          const repairGroups=resetGroups139(holes,difficulty);
           if(repairGroups.length){
             const repaired=await resetPool136(repairGroups,async group=>
-              resetGenerateGroup136(ai,group.map(x=>x.t),difficulty,mode,comparisonPool82),2);
+              resetGenerateGroup136(ai,group.map(x=>x.t),difficulty,mode,comparisonPool82,true),2);
             repaired.forEach((result,g)=>{
               if(!result.ok){failures.push({batch:g,reason:result.error});return;}
               repairGroups[g].forEach((item,j)=>{
