@@ -2723,6 +2723,27 @@ async function replaceIiffDocument90(topic,pdfPath,items){
     `conocimientos guardados en PostgreSQL. File Search sin cambios.`);
 }
 
+// SERVER115 R2 — nuevo Tema 22: PDF completo, 197 fichas confirmadas
+// en PostgreSQL, sin indexación Google ni reextracción AI de cobertura.
+async function replaceGeo22Document115(topic,pdfPath,items){
+  if(String(topic?.block||'').trim().toLowerCase()!=='geografia')
+    throw new Error('T22: solo se admite cargar el tema en el bloque geografía. Sin cambios.');
+  // Aislar el tema histórico real: su historial no se reutiliza ni se reemplaza por error.
+  if(Number(topic?.id)===24)
+    throw new Error('T22: el tema antiguo (id 24) está protegido. Crea un tema nuevo antes de cargar este PDF.');
+  const bytes=fs.readFileSync(pdfPath);
+  if(bytes.length<1000 || bytes.length>20*1024*1024 ||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw new Error('T22: archivo PDF inválido o demasiado grande.');
+  const source=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(source.getPageCount()<20 || source.getPageCount()>60 || items.length!==197)
+    throw new Error('T22: recuento de páginas/fichas incompatible. Sin cambios.');
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages:source.getPageCount(),bytes});
+  console.log('[T22-R2] PDF de 197 fichas / 197 conocimientos examinables guardados transaccionalmente.');
+}
+
 function normalizeCoverageItem(item){
   const clean = value =>
     typeof value === "string"
@@ -3573,105 +3594,26 @@ examinable del Tema 21, que también debe conservarse.
 
   if(topicNumber===22){
     return `
-REGLAS ESPECÍFICAS DEL TEMA 22 — ACTIVIDADES INDUSTRIALES:
+TEMA 22: POLÍGONOS INDUSTRIALES — FUENTE NUEVA GEOFACT1.
 
-Este tema contiene una tabla de emplazamientos y ámbitos industriales.
+La fuente válida es el PDF completo de 197 fichas y doce parques físicos.
+La cobertura examinable se extrae de las 197 unidades confirmadas
+por GEOFACT1, sin volver a analizar ni deducir datos con Gemini.
 
-REGLA FUNDAMENTAL:
+No aplicar las antiguas reglas de la tabla cartográfica de 702 filas,
+ni el antiguo recuento de 209 filas, ni preguntar por superficies o
+perímetros ausentes del nuevo documento.
 
-TODO registro de la tabla es materia de estudio,
-independientemente de la denominación concreta que utilice,
-SALVO las filas identificadas expresamente con el término
-"Área industrial" seguido de su numeración o código.
+Conservar: nombre o sector documentado, emplazamiento, parque territorial
+físico, parque potencial de apoyo por cercanía y las rutas expresas y
+alternativas de ambos. Todas las grafías están confirmadas por el usuario,
+incluidos Errekaldea, Ezkabarte, Iruregaña y Elusender. Ninguna ficha
+se excluye por una antigua advertencia de transcripción.
 
-Por tanto:
-
-- NO limites la extracción a registros cuyo nombre contenga
-  "Polígono Industrial";
-
-- conserva también cualquier registro denominado, por ejemplo,
-  parque empresarial, zona, sector, ciudad, campus empresarial,
-  área de actividades económicas, polígono, instalación industrial
-  o cualquier otra denominación presente en la tabla;
-
-- la denominación concreta del registro NO determina su exclusión.
-
-ÚNICA EXCLUSIÓN:
-
-Excluye exclusivamente las filas cuyo nombre corresponda al patrón:
-
-"Área industrial" + numeración/código
-
-Ejemplos de filas que deben EXCLUIRSE:
-
-"Área industrial 202-1"
-"Área industrial 104-1"
-"Área industrial 902-3"
-
-No generes ninguna unidad examinable sobre esas filas.
-
-Cualquier otra fila de la tabla debe conservarse.
-CONTROL ESTRUCTURAL OBLIGATORIO:
-
-La tabla completa contiene 702 filas numeradas.
-
-De ellas:
-- 493 filas son "Área industrial" + código y deben EXCLUIRSE;
-- 209 filas son registros válidos y deben CONSERVARSE.
-
-Por tanto, en el conjunto completo del documento deben quedar
-representadas exactamente las 209 filas válidas.
-
-En cada fragmento de PDF que recibas:
-
-- devuelve EXACTAMENTE UNA unidad de cobertura por cada fila válida
-  presente en ese fragmento;
-- NO agrupes varias filas en una sola unidad;
-- NO resumas conjuntos de registros;
-- NO omitas una fila válida aunque su denominación sea poco habitual;
-- NO intentes generar 209 elementos dentro de un único fragmento:
-  devuelve únicamente las filas válidas físicamente presentes
-  en las páginas recibidas.
-
-El campo sourceEvidence de cada unidad debe comenzar SIEMPRE
-con el número de fila original de la tabla.
-Para CADA registro válido conserva exactamente:
-
-- número de fila, cuando aparezca;
-- denominación completa;
-- municipio o municipios asociados;
-- parque de bomberos asociado;
-- superficie/área;
-- perímetro.
-
-Cada fila válida debe permanecer como una unidad independiente.
-
-La relación:
-
-REGISTRO -> MUNICIPIO -> PARQUE DE BOMBEROS
-
-debe quedar expresamente representada y ser preguntable.
-
-Los valores de área/superficie, perímetro y número de fila
-deben conservarse por fidelidad documental e identificación
-del registro, pero NO constituyen por sí mismos objetivos
-prioritarios de pregunta en la generación automática.
-
-La prioridad examinable es:
-
-REGISTRO -> MUNICIPIO -> PARQUE DE BOMBEROS.
-NO:
-
-- mezcles datos de filas consecutivas;
-- atribuyas a un registro el municipio de otro;
-- atribuyas a un registro el parque de otro;
-- atribuyas a un registro el área o perímetro de otro;
-- excluyas una fila válida por no contener las palabras
-  "Polígono Industrial";
-- incluyas filas "Área industrial" numeradas.
-
-La prioridad es conservar TODAS las filas válidas de la tabla,
-excluyendo únicamente las filas "Área industrial" numeradas.
+Para la generación de preguntas, los doce modelos 2026/2024 son solo estilo;
+la fuente factual es exclusivamente la evidencia del objetivo seleccionado.
+No convertir un apoyo potencial en asignación oficial, ni inventar
+municipios, distancias, tiempos o carreteras.
 `;
   }
 
@@ -4515,6 +4457,13 @@ if(!pdfHeader.includes("%PDF-")){
     // SERVER 86: una descarga móvil "Manual de IIFF de Navarra 2026 (1).pdf"
     // es el mismo tema, no debe crear una segunda ficha curricular.
     const canonicalTopicName86=normalizeIiffTopicName86(topicName,block);
+    // T22-R2: no alterar metadatos del tema histórico ANTES de rechazarlo.
+    if(coverageTopicNumber(canonicalTopicName86)===22){
+      const previous=await db.query('SELECT id FROM topics WHERE name=$1 LIMIT 1',
+        [canonicalTopicName86]);
+      if(Number(previous.rows[0]?.id)===24)
+        throw new Error('T22: el tema antiguo (id 24) está protegido. Utiliza un nombre nuevo para la carga.');
+    }
     let topic=
       await getOrCreateTopic(
         canonicalTopicName86,
@@ -5084,7 +5033,7 @@ function structuredPdfFromText(filePath){
 // a Gemini para extraer fichas. No modifica la generación de preguntas.
 async function geoCoverageMetadataRecords(pdfPath, topicName){
   const topicNumber=coverageTopicNumber(topicName);
-  if(![23,24,26,27,36].includes(topicNumber))return null;
+  if(![22,23,24,26,27,36].includes(topicNumber))return null;
   const bytes=fs.readFileSync(pdfPath);
   const pdf=await PDFDocument.load(bytes,{updateMetadata:false});
   const subject=String(pdf.getSubject()||"");
@@ -5106,6 +5055,12 @@ async function geoCoverageMetadataRecords(pdfPath, topicName){
       !Array.isArray(manifest.items) || manifest.items.length<30 ||
       manifest.items.length>2000){
     throw new Error("Cobertura GEO: tema o número de fichas incorrecto.");
+  }
+  if(topicNumber===22){
+    if(manifest.catalogCount!==197 || manifest.items.length!==197 ||
+       !Array.isArray(manifest.pendingIds) || manifest.pendingIds.length!==0){
+      throw new Error('TEMA 22: se exigen 197 fichas confirmadas y ninguna grafía pendiente. Sin cambios.');
+    }
   }
   const sections=new Map(),ids=new Set(),literalItems=[];
   for(let i=0;i<manifest.items.length;i++){
@@ -5531,6 +5486,11 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       ? null
       : ((await geoCoverageMetadataRecords(pdfPath,topic.name)) ||
           sequentialPdfRecordIds(pdfPath));
+    if(coverageTopicNumber(topic.name)===22 &&
+       (!structuredSource || structuredSource.prefix!=='GEO-' ||
+        structuredSource.literalItems?.length!==197)){
+      throw new Error('TEMA 22: el PDF no tiene manifiesto GEOFACT1 válido con 197 fichas examinables. No se llama a Gemini ni se modifica cobertura.');
+    }
     if(structuredSource){
       console.log(`[coverage] Fuente numerada: ${structuredSource.ids.size} IDs `+
         `con prefijo ${structuredSource.prefix}; extracción por bloques cortos.`);
@@ -5902,106 +5862,8 @@ const parsed={
     }
     
 
-if(coverageTopicNumber(topic.name)===22){
-  const normalizeTema22Text=value=>
-    String(value || "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g,"")
-      .toLowerCase()
-      .trim();
-
-  const getTema22RowNumber=item=>{
-    const match=
-      String(item?.sourceEvidence || "")
-        .match(/^\s*(\d{1,3})\b/);
-
-    return match
-      ? Number(match[1])
-      : null;
-  };
-
-  const isExcludedIndustrialArea=item=>
-    /^\s*\d{1,3}\s+area industrial\b/.test(
-      normalizeTema22Text(
-        item.sourceEvidence
-      )
-    );
-
-  const tema22Candidates=
-    validItems.filter(
-      item=>!isExcludedIndustrialArea(item)
-    );
-
-  const rowsByNumber=
-    new Map();
-
-  for(const item of tema22Candidates){
-    const rowNumber=
-      getTema22RowNumber(item);
-
-    if(
-      !Number.isInteger(rowNumber) ||
-      rowNumber<1 ||
-      rowNumber>702
-    ){
-      continue;
-    }
-
-    const previous=
-      rowsByNumber.get(rowNumber);
-
-    if(!previous){
-      rowsByNumber.set(
-        rowNumber,
-        item
-      );
-      continue;
-    }
-
-    const currentScore=
-      String(item.concept || "").length +
-      String(item.sourceEvidence || "").length;
-
-    const previousScore=
-      String(previous.concept || "").length +
-      String(previous.sourceEvidence || "").length;
-
-    if(currentScore>previousScore){
-      rowsByNumber.set(
-        rowNumber,
-        item
-      );
-    }
-  }
-
-  if(rowsByNumber.size!==209){
-    throw new Error(
-      `COVERAGE TEMA 22 incompleta: ` +
-      `${rowsByNumber.size}/209 filas válidas distintas.`
-    );
-  }
-
-  const tema22FinalItems=
-    [...rowsByNumber.entries()]
-      .sort(
-        (a,b)=>a[0]-b[0]
-      )
-      .map(
-        ([,item])=>item
-      );
-
-  validItems.splice(
-    0,
-    validItems.length,
-    ...tema22FinalItems
-  );
-
-  console.log(
-    `COVERAGE TEMA 22: ` +
-    `${tema22Candidates.length} elementos válidos detectados -> ` +
-    `${validItems.length} filas únicas conservadas.`
-  );
-}
+// SERVER115 R2: T22 nuevo se valida íntegramente con 197 fichas GEOFACT1.
+// Las 209 filas numeradas del archivo cartográfico antiguo ya NO son criterio.
     if(coverageTopicNumber(topic.name)===21){
   const structuralKey=value=>
     String(value || "")
@@ -6054,6 +5916,7 @@ if(coverageTopicNumber(topic.name)===22){
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
     if(iiffManual86) await replaceIiffDocument90(topic,pdfPath,validItems);
+    else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
@@ -9832,6 +9695,8 @@ async function persistGeneratedTest({
     for(let i = 0; i < questions.length; i++){
       const question = questions[i];
       const target = targets[i];
+      if(geo114QuestionIssue({...question,topic_block:target.topic_block}))
+        throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
       // Prioridad a la página IMPRESA del manual. La página física del PDF
       // se utiliza únicamente si no hay numeración de manual disponible.
       if(!String(question.manualPage ?? '').trim() && String(target.manual_page ?? '').trim())
@@ -11883,6 +11748,8 @@ function resetGroups139(rows){
        // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
        // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
        iiff91Topic(last[0].t)===iiff91Topic(row.t) &&
+       (coverageTopicNumber(last[0].t.topic_name)===22)===
+         (coverageTopicNumber(row.t.topic_name)===22) &&
        current+bytes<=R136_CONTEXT_BUDGET){
       last.push(row);
     }else groups.push([row]);
@@ -12068,6 +11935,8 @@ function reglasCalidadTransversal81(difficulty,leg,geo){
   return `CALIDAD TRANSVERSAL DE OPOSICIÓN:
 - Enunciado natural y directo, sin pistas, fórmulas vacías ni preguntas sobre tablas o páginas.
 - Cuatro alternativas distintas de la MISMA categoría, extensión y precisión similares. Distractores cercanos: variar una propiedad significativa y comprobable, no añadir nombres ni hechos externos. Prohibidas pistas gramaticales y una opción desproporcionadamente detallada.
+${geo ? `- GEOGRAFÍA (pistas): si preguntas QUÉ polígono está en el municipio X, NINGUNA alternativa puede revelar su municipio entre paréntesis ni incluir una etiqueta geográfica que permita contestar leyendo el propio nombre. NO cambies ni recortes denominaciones oficiales; si el nombre contiene esa pista de forma inherente, reformula la pregunta a otro atributo con evidencia.
+- HIDROGRAFÍA (cuatro opciones): no preguntes SOLO por izquierda/derecha con cuatro respuestas; pregunta por DOS propiedades juntas, p.ej. receptor DIRECTO + margen, o margen + lugar de confluencia, siempre que ambos campos se acrediten expresamente para ese afluente. Las cuatro alternativas han de ser 2 x 2 (dos receptores o dos lugares DOCUMENTADOS x izquierda/derecha), una sola verdadera. No uses márgenes central/superior/posterior/inferior. Si no hay dos lugares respaldados que realmente discriminen, usa receptor directo + margen o cambia la operación examinable. No inventes localidades, receptores o relaciones para completar opciones.` : ""}
 - Exactamente UNA alternativa compatible con el enunciado completo. Si dos comparten la respuesta o la evidencia no discrimina, reformular usando otro atributo demostrado del mismo objetivo.
 - Explicación breve que justifique la solución. Ejemplos oficiales y de calibración: SOLO estilo; PDF: ÚNICA fuente factual.
 ${nivel}
@@ -12136,15 +12005,39 @@ function resetGeoComparisons82(targets,pool,difficulty){
   }
   return result;
 }
+// SERVER115 — EXACTAMENTE los doce modelos que el usuario aprobó,
+// SOLO estilo, sin transferir hechos a la pregunta ni mostrar la fuente.
+const T22_ESTILO_MODELOS_115=Object.freeze(["SOS Navarra recibe un aviso de incendio en el polígono industrial El Juncarillo. ¿Qué combinación de parque territorial, posible apoyo por proximidad y carreteras de acceso es correcta? A) Peralta por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-129. B) Lodosa por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-129. C) Lodosa por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-134. D) Estella por NA-129 y Lodosa por NA-1110 + NA-122 + NA-666 + NA-129.", "Se produce un incendio en el polígono industrial Landaben. ¿Qué combinación de parque territorial, posible apoyo por proximidad y vías de acceso es correcta? A) Cordovilla por PA-31 + A-15 + NA-30; apoyo Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge. B) Trinitarios por Calle Biurdana + Av. Guipúzcoa + PA-30-3; apoyo Cordovilla por PA-31 + A-15 + PA-34 + PA-30-3. C) Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge; apoyo Cordovilla por PA-31 + A-15 + NA-30. D) Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge; apoyo Cordovilla por PA-31 + A-15 + PA-34 + PA-30-3.", "Se declara un incendio en el polígono industrial Comarca I Agustinos. ¿Qué itinerario corresponde a la salida del parque de Trinitarios? A) Calle Biurdana + Av. Navarra + Av. San Jorge. B) Calle Biurdana + Av. Guipúzcoa + PA-30-3. C) PA-31 + A-15 + PA-34 + PA-30-3. D) Calle Biurdana + Av. Navarra + Av. San Jorge + PA-30-4.", "Se requiere la intervención de una dotación de Alsasua como posible apoyo en el polígono industrial Otazabaleta. ¿Qué itinerario corresponde a su desplazamiento? A) A-10 + A-15 + NA-1300 + NA-7561. B) A-10 + A-15 + NA-1300 + NA-4150. C) PA-31 + A-15 + AP-15 + A-15 + NA-1300 + NA-7561. D) A-10 + A-15 + NA-170 + NA-7561.", "En un incendio en el polígono industrial Ipertegui II, una dotación de Trinitarios se aproxima por PA-30-4. ¿Cuáles son las dos alternativas de entrada a partir de esa vía? A) PA-30-4 + NA-700 y PA-30-4 + NA-30. B) PA-30-4 + PA-30-5 y PA-30-4 + NA-30. C) PA-30-4 + PA-30-5 y PA-30-4 + NA-6002. D) PA-30-4 + PA-34 y PA-30-4 + NA-30.", "Señale la afirmación CORRECTA sobre la posición relativa de los siguientes sectores industriales. A) El sector Berriainz de Berrioplano se sitúa al sur del de Berriozar. B) Ipertegui II se localiza al norte de Ipertegui I. C) Talluntxe, en el Valle de Aranguren, se encuentra al norte del sector Talluntxe de Noáin. D) La ampliación del polígono Comarca I en Orkoien se sitúa al sur del sector Comarca I.", "SOS Navarra recibe un aviso de incendio en el polígono industrial El Saso de Caparroso. ¿Qué pareja de parques y vías de acceso corresponde al parque territorial y al posible apoyo por proximidad, respectivamente? A) Lodosa por NA-128 + N-121; apoyo Tafalla por N-121. B) Peralta por NA-128 + N-121; apoyo Estella por N-121. C) Peralta por NA-129 + N-121; apoyo Tafalla por N-121. D) Peralta por NA-128 + N-121; apoyo Tafalla por N-121.", "¿En qué tres municipios se distribuyen los sectores del polígono industrial Meseta de Salinas? A) Galar, Noáin y Beriáin. B) Galar, Noáin y Orkoien. C) Galar, Berrioplano y Beriáin. D) Aranguren, Noáin y Beriáin.", "¿En qué dos municipios se encuentran los sectores del polígono industrial Berriainz? A) Berriozar y Galar. B) Berriozar y Berrioplano. C) Berrioplano y Orkoien. D) Orkoien y Galar.", "¿Cuál de las siguientes afirmaciones es CORRECTA acerca de los dos sectores denominados Talluntxe II? A) Ambos pertenecen a Galar y tienen itinerarios distintos desde Cordovilla. B) Uno pertenece a Noáin y otro a Galar, con parques territoriales diferentes. C) Uno pertenece a Aranguren y otro a Galar, y ambos comparten los accesos desde Cordovilla y Trinitarios. D) Los dos pertenecen a Aranguren y sus posibles parques de apoyo son diferentes.", "SOS Navarra recibe un aviso de incendio en el polígono industrial Irakuregi. ¿Qué pareja identifica, respectivamente, su parque territorial y el posible apoyo por proximidad? A) Cordovilla y Oronoz. B) Oronoz y Cordovilla. C) Cordovilla y Alsasua. D) Trinitarios y Oronoz.", "Desde Cordovilla, ¿qué itinerarios corresponden, respectivamente, a los accesos de los polígonos industriales Mutilva y Mutilva II? A) PA-31 + PA-30-1; PA-31 + PA-32. B) PA-31 + NA-6002; PA-31 + PA-30-1. C) PA-31 + PA-32; PA-31 + NA-6002. D) PA-31 + PA-32; PA-31 + PA-30-1."]);
+function t22ModelosPorLote115(targets){
+  const seed=(targets||[]).reduce((acc,t)=>acc+(Number(t.id)||0),0);
+  const principales=[0,1,2,3,4,5,6,10];
+  const secundarios=[7,8,9,11];
+  return [
+    T22_ESTILO_MODELOS_115[principales[seed%principales.length]],
+    T22_ESTILO_MODELOS_115[principales[(seed+3)%principales.length]],
+    T22_ESTILO_MODELOS_115[secundarios[seed%secundarios.length]]
+  ];
+}
+const T22_REGLAS_ESTILO_115=`SOLO TEMA 22, GEOGRAFÍA DE POLÍGONOS:
+El estilo principal reproduce el enfoque 2026 (incidente + parque territorial físico + posible apoyo + carreteras); 2024 es secundario.
+El opositor nunca lee «según los apuntes», «según el inventario», «según la ficha», páginas, metadatos ni claves PI/GEO.
+Cuatro opciones plausibles y una correcta. Mantén rutas ORDENADAS y sus alternativas. No deduzcas rapidez, distancia, prioridad reglamentaria ni municipio ausente.
+El posible apoyo se elige por proximidad para estudiar, NO es despacho oficial. El parque territorial es el expresamente indicado.
+Cuando hay varios polígonos del mismo nombre, no fusionar municipios/sectores ni incluir pistas municipales en opciones que pregunten por el municipio.
+Las doce muestras de estilo NO aportan hechos geográficos. Únicamente son hechos los fragmentos de OBJETIVOS. NO usar datos de observaciones editoriales para redactar preguntas.
+Evita repreguntar un mismo vínculo, combinaciones incoherentes, distracciones imposibles y negativos sin contradicción documental demostrada.
+`; 
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
+  const soloPoligonos=geo && targets.length>0 && targets.every(t=>coverageTopicNumber(t.topic_name)===22);
   const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
   const soloEolicos=geo && targets.length>0 && targets.every(esTemaEolicos2026);
   const soloSolares=geo && targets.length>0 && targets.every(esTemaSolares2026);
   const soloFerrocarril=geo && targets.length>0 && targets.every(esTemaFerrocarril2026);
   const soloCamino=geo && targets.length>0 && targets.every(esTemaCamino2026);
   const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
+    soloPoligonos ? t22ModelosPorLote115(targets) :
     soloConexiones ? CONEXIONES_ESTILO_EJEMPLOS_2026 :
     soloEolicos ? EOLICOS_ESTILO_EJEMPLOS_2026 :
     soloSolares ? resetSolarExamples82(targets) :
@@ -12175,6 +12068,7 @@ ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicaci
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
+${soloPoligonos?T22_REGLAS_ESTILO_115:''}
 ${soloSolares?SOLARES_REGLAS_2026:''}
 ${soloEolicos?EOLICOS_REGLAS_EXAMEN_80:''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
@@ -12234,7 +12128,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
   // organización administrativa del tema jurídico T21.
-  const geoPhysical112=group.some(t=>Number(t.topic_id)===24)?`
+  const geoPhysical112=group.some(t=>String(t.topic_block||'').toLowerCase()==='geografia' && coverageTopicNumber(t.topic_name)===22)?`
 GEOGRAFÍA — PARQUES FÍSICOS INDEPENDIENTES: los parques de Altsasu/Alsasua
  y Auritz/Burguete son DOS parques diferentes, igual que Lodosa y Peralta/Azkoien.
 Las denominaciones administrativas Altsasu/Alsasua-Auritz/Burguete y
@@ -12269,7 +12163,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // Auditor independiente: una llamada por lote, no múltiples auditores
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
-    if(resetShape136(q))return [];
+    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block}))return [];
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
       console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
       return [];
@@ -12484,6 +12378,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     const stem=R136_NORM(r.stem),ci=Number(r.correct_index),id=Number(r.coverage_item_id);
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
+    if(geo114QuestionIssue(r))continue;
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
       (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
         Number(r.validation_version)===114})))||
@@ -12557,6 +12452,104 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
 // SERVER111 — dos vías independientes: práctica voluntaria sin reprogramación,
 // y repasos SRS vencidos con actualización del ciclo. 100% desde banco,
 // cero llamadas a Gemini. Se mantienen 4 opciones o Anki original de 3.
+// SERVER113 — evita pistas de municipio y márgenes ficticios en preguntas
+// geográficas YA ALMACENADAS. La fuente curricular NO se modifica.
+// Los nombres oficiales/administrativos se preservan íntegramente: si una
+// pregunta revela la clave, se omite la pregunta en lugar de editarla.
+// SERVER114: control editorial común de preguntas geográficas. Solo lectura.
+// No altera nombres, claves, fichas, tablas, ni el régimen legal de T21.
+// Motivos explícitos permiten distinguir rechazo formal de verificación factual.
+function geo114QuestionIssue(q){
+  const normalize=x=>String(x??'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+  if(normalize(q?.topic_block)!=='geografia')return null;
+  const stem=normalize(q?.stem);
+  const opts=Array.isArray(q?.options)?q.options:[];
+  if(coverageTopicNumber(q?.topic_name)===22 &&
+    /(?:segun\s+(?:los\s+)?(?:apuntes|inventario|documento|ficha)|\bpi[- ]?\d{3}\b|\bgeo[- ]?\d{4}\b)/i
+      .test([stem,...opts].map(normalize).join(' ')))return 'alusion_fuente_interna';
+  if(opts.length!==4)return null; // Anki original (3) queda fuera.
+  const options=opts.map(normalize);
+  // No existen los márgenes inventados en una confluencia izquierda/derecha.
+  if(/\bmargen\b/.test(stem)&&options.some(o=>
+    /\bmargen\s+(central|superior|posterior|inferior|delantera|trasera)\b/.test(o)))
+    return 'margen_inexistente';
+  // Preguntar SOLO por un dato binario con cuatro opciones crea relleno o pistas.
+  // Si la respuesta debe combinar margen y receptor/lugar, preguntarlos AMBOS.
+  const onlyMarginAsked=/\b(?:por|de|en)\s+qu[eé]\s+margen\b|\b(?:cual es el|qu[eé])\s+margen\b/.test(stem);
+  const asksTwoProperties=/\b(?:receptor|r[ií]o|arroyo|lugar|localidad|punto)\b[^?]{0,180}\by\b[^?]{0,55}\bmargen\b/.test(stem) ||
+    /\bmargen\b[^?]{0,100}\by\b[^?]{0,150}\b(?:receptor|r[ií]o|arroyo|lugar|localidad|punto)\b/.test(stem);
+  if(onlyMarginAsked && !asksTwoProperties)return 'solo_dos_margenes';
+  if(/\bp[aá]gina\s+no\s+determinada\b/.test(stem))return 'referencia_editorial';
+  // En una pregunta de municipio -> polígono, el municipio escrito en la
+  // alternativa (p.ej. Berriainz (Berriozar)) es una pista determinante.
+  // Se rechaza la pregunta: NO recortar la denominación autorizada.
+  if(/\bqu[eé]\s+pol[ií]gono\b/.test(stem) && /\bmunicipio\b/.test(stem)){
+    const hint=options.some(o=>[...o.matchAll(/\(([^()]*)\)/g)].some(m=>{
+      const v=m[1].trim();
+      return /^[a-zñ][a-zñ\s-]{2,45}$/.test(v) &&
+        !/^(?:ampliacion(?:\s+(?:i+|iv|v|vi|vii|viii|[0-9]+|norte|sur|este|oeste))?|fase\s*[a-z0-9]+|sector\s*[a-z0-9]+|zona\s+(?:norte|sur|este|oeste)|poligono\s+.+|i+|iv|v|vi|vii|viii)$/.test(v);
+    }));
+    if(hint)return 'municipio_revelado';
+  }
+  return null;
+}
+// Una pareja 2 x 2 se construye SOLO de campos explícitos de apuntes
+// validados de ríos: receptor DIRECTO y margen. No inferir por mapas.
+function geo114RiverFact(record){
+  const geo=String(record?.topic_block||'').toLowerCase()==='geografia';
+  if(!geo||!/r[ií]os|arroyos/i.test(String(record?.topic_name||'')))return null;
+  const ev=String(record?.source_evidence||record?.ci_source_evidence||'');
+  const m=ev.match(/Afluente o cauce aportante:\s*([^;]+);\s*Receptor DIRECTO:\s*([^;]+);\s*Margen de entrada en\s+([^:;]+):\s*(DERECHA|IZQUIERDA)\s*;/i);
+  if(!m)return null;
+  const [afluente,receptor,receptorMargen,margen]=m.slice(1).map(x=>x.trim());
+  const norm=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  if(norm(receptor)!==norm(receptorMargen) ||
+     [afluente,receptor].some(x=>!x||/[\/;]|\s+(?:o|y)\s+/i.test(x)) ||
+     norm(afluente)===norm(receptor))return null;
+  return {afluente,receptor,margen:margen.toUpperCase(),evidence:ev};
+}
+function geo114RiverComposite(target,comparisonRows,difficulty){
+  const fact=geo114RiverFact(target);
+  if(!fact)return null;
+  const sameSection=String(target.section||'');
+  const donor=(comparisonRows||[]).map(r=>({r,fact:geo114RiverFact(r)}))
+    .find(x=>x.fact && Number(x.r.topic_id)===Number(target.topic_id) &&
+      String(x.r.section||'')===sameSection &&
+      R136_NORM(x.fact.receptor)!==R136_NORM(fact.receptor) &&
+      !R136_NORM(x.fact.receptor).includes(R136_NORM(fact.receptor)) &&
+      !R136_NORM(fact.receptor).includes(R136_NORM(x.fact.receptor)));
+  if(!donor)return null; // Faltarían datos: no completar las 4 a ciegas.
+  const other=fact.margen==='DERECHA'?'IZQUIERDA':'DERECHA';
+  const options=[
+    `${fact.receptor} — margen ${fact.margen.toLowerCase()}`,
+    `${fact.receptor} — margen ${other.toLowerCase()}`,
+    `${donor.fact.receptor} — margen ${fact.margen.toLowerCase()}`,
+    `${donor.fact.receptor} — margen ${other.toLowerCase()}`
+  ];
+  const q={stem:`¿A qué río o arroyo desemboca directamente ${fact.afluente} y por qué margen lo hace?`,
+    options,correctIndex:0,
+    explanation:`El apunte validado indica: «${fact.evidence.trim()}».`,
+    sourceEvidence:fact.evidence,sourcePage:target.source_page??null,
+    manualPage:target.manual_page??null,
+    questionFamily:target.questionFamily||'GEO_RIO_RECEPTOR_MARGEN_2X2',
+    difficulty,graphic:null,resetLocal136:true};
+  if(geo114QuestionIssue({...q,topic_block:target.topic_block})||resetShape136(q))return null;
+  return q;
+}
+async function geo114RiverComparators(targets){
+  const riverIds=[...new Set(targets.filter(t=>geo114RiverFact(t))
+    .map(t=>Number(t.topic_id)).filter(Number.isInteger))];
+  if(!riverIds.length)return [];
+  const rows=await db.query(`SELECT ci.id,ci.topic_id,ci.section,ci.source_evidence,
+       t.name AS topic_name,t.block AS topic_block
+    FROM coverage_items ci JOIN topics t ON t.id=ci.topic_id
+    WHERE ci.topic_id=ANY($1::int[]) AND ci.exam_relevant=TRUE
+      AND ci.source_evidence ILIKE '%Receptor DIRECTO:%'
+      AND ci.source_evidence ILIKE '%Margen de entrada%'
+    ORDER BY ci.id LIMIT 1200`,[riverIds]);
+  return rows.rows;
+}
 const REVIEW111_MODES=new Set(['practice_all','practice_failed','srs']);
 function selectBankReview111(rows,count,testType){
   const used=new Set(),usedStems=new Set(),chosen=[],grouped=new Map();
@@ -12579,6 +12572,7 @@ function selectBankReview111(rows,count,testType){
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
     const q={stem:r.stem,options:r.options,correctIndex:Number(r.correct_index),ankiOriginalBank};
     if(resetShape136(q))continue;
+    if(geo114QuestionIssue(r))continue;
     if(iiff91Topic(r)&&iiff91UnsafeQuestion(r,{allowProvenNegative:Number(r.validation_version)===114}))continue;
     const key=Number(r.topic_id);
     if(!grouped.has(key))grouped.set(key,[]);
@@ -12842,10 +12836,18 @@ app.post('/api/generate',async(req,res)=>{
     }else{
       // Las preguntas son nuevas salvo la cuota de Anki ORIGINAL de Alta.
       const todo=targets.map((t,index)=>({t,index})).filter(x=>!questions[x.index]);
+      // Hasta 1 pregunta compuesta por cada 5 objetivos de río. Solo
+      // cuando sus dos receptores constan en fichas VALIDADAS del mismo tema
+      // y epígrafe; una consulta SQL y cero Gemini para esas posiciones.
+      const riverCandidates=freshOnly111?todo.filter(x=>geo114RiverFact(x.t)):[];
+      const riverLocalSlots=new Set(riverCandidates.filter((_,j)=>j%5===0).map(x=>x.index));
+      const riverProofs=riverLocalSlots.size?await geo114RiverComparators(targets):[];
       const usedLocalStems=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
       for(const {t,index} of todo){
         for(const shift of [0,1]){
-          const local=resetGeoTableQuestion136(t,index+shift,difficulty);
+          const local=(shift===0 && riverLocalSlots.has(index)
+            ?geo114RiverComposite(t,riverProofs,difficulty):null) ||
+            resetGeoTableQuestion136(t,index+shift,difficulty);
           if(local&&!usedLocalStems.has(R136_NORM(local.stem))){
             questions[index]=local;usedLocalStems.add(R136_NORM(local.stem));break;
           }
@@ -12948,6 +12950,8 @@ app.post('/api/generate',async(req,res)=>{
     if(questions.some((q,i)=>!q||resetShape136(q))){
       throw Error('Pregunta malformada detectada antes de guardar.');
     }
+    const invalidGeo=questions.findIndex((q,i)=>geo114QuestionIssue({...q,topic_block:targets[i]?.topic_block}));
+    if(invalidGeo>=0)throw Error('GEO114: pregunta geográfica no apta antes de guardar.');
     const unique=new Set(questions.map(q=>R136_NORM(q.stem)));
     if(unique.size!==questions.length)throw Error('Preguntas duplicadas; no se guardó test.');
     // SERVER 83: equilibrado mecánico de letras. NUNCA confiar la posición
