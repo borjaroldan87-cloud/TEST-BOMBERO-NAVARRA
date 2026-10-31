@@ -8296,16 +8296,18 @@ function iiff120Specs(target){
   }
   return result;
 }
-function iiff120NearValue(f){
-  // Valor erróneo dentro de ~10-20%, manteniendo cifras y precisión similares.
+// SERVER124: el rescate no debe revelar la clave por ser siempre el
+// menor de los cuatro valores. Conserva precisión y magnitud de la ficha;
+// los valores modificados son DISTRACTORES, no datos nuevos del PDF.
+function iiff120NearValue(f,direction=1){
   const value=f.value,decimal=f.raw.includes(',');
-  const unit=String(f.unit).toLowerCase();
-  let step;
-  if(decimal)step=value<1?0.1:value<10?0.5:value<100?2:10;
-  else step=value<10?1:value<100?4:value<1000?10:Math.max(50,Math.round(value/10));
-  const altered=value+step;
-  const formatted=decimal?altered.toFixed(f.raw.split(',')[1].length).replace('.',','):String(Math.round(altered));
-  return formatted!==f.raw?formatted:null;
+  const precision=decimal?f.raw.split(',')[1].length:0;
+  const step=decimal?(value<1?Math.pow(10,-precision):value<10?0.5:value<100?2:10)
+    :value<10?1:value<100?4:value<1000?10:Math.max(50,Math.round(value/10));
+  const sign=direction<0&&value-step>0?-1:1;
+  const altered=value+sign*step;
+  const formatted=decimal?altered.toFixed(precision).replace('.',','):String(Math.round(altered));
+  return formatted!==f.raw&&altered>0?formatted:null;
 }
 
 // Alternativa segura para una ficha con UN único intervalo cuantitativo
@@ -8368,22 +8370,46 @@ function iiff120RangeQuestion(target){
   if(!r)return null;
   const stem=iiff121RangeLead(target,r);
   if(!stem||stem.length>170)return null;
-  const near=(val,raw)=>{
-    const decimal=raw.includes(',');
-    const step=decimal?(val<10?0.5:val<100?2:10):val<5?1:val<20?2:val<100?5:val<1000?20:100;
-    const changed=val+step;
-    const digits=raw.includes(',')?raw.split(',')[1].length:0;
-    if(decimal)return changed.toFixed(digits).replace('.',',');
-    return raw.includes('.')?String(Math.round(changed)).replace(/\B(?=(\d{3})+(?!\d))/g,'.'):String(Math.round(changed));
+  // Cuatro rangos homogéneos: la clave NO es sistemáticamente el rango
+  // menor. Una alternativa cambia el límite inferior, otra el superior y
+  // otra ambos. El sentido cambia de manera determinista entre fichas.
+  const delta=(val,raw)=>{
+    if(raw.includes(',')){
+      const decimals=raw.split(',')[1].length;
+      const step=val<1?Math.pow(10,-decimals):val<10?0.2:val<100?0.5:5;
+      return Math.round(step*Math.pow(10,decimals))/Math.pow(10,decimals);
+    }
+    return val<5?1:val<20?2:val<100?5:val<1000?20:100;
   };
-  const otherLo=near(r.lo,r.a),otherHi=near(r.hi,r.b);
-  if(otherLo===r.a||otherHi===r.b||Number(otherLo.replace('.','').replace(',','.'))>=r.hi)return null;
-  const option=(a,b)=>`${a}–${b} ${r.unit}`;
-  const options=[option(r.a,r.b),option(otherLo,r.b),option(r.a,otherHi),option(otherLo,otherHi)];
+  const lowStep=delta(r.lo,r.a),highStep=delta(r.hi,r.b);
+  const fmt=(v,raw)=>raw.includes(',')
+    ?v.toFixed(raw.split(',')[1].length).replace('.',',')
+    :raw.includes('.')?String(Math.round(v)).replace(/\B(?=(\d{3})+(?!\d))/g,'.')
+    :String(Math.round(v));
+  const option=(lo,hi)=>`${fmt(lo,r.a)}–${fmt(hi,r.b)} ${r.unit}`;
+  const valid=(lo,hi)=>lo>0&&lo<hi&&hi<=100000&&
+    // La COHb no supera el 100%; la humedad de combustibles sí puede.
+    (!/cohb|carboxihemoglobina|intoxicaci[oó]n.*co/i.test(String(target.concept||'')) || hi<=100);
+  const seed=Math.abs(Number(target.id)||Number(target.source_page)||1);
+  let loSign=seed%2===0?-1:1;
+  let hiSign=seed%3===0?-1:1;
+  if(!valid(r.lo+loSign*lowStep,r.hi))loSign=-loSign;
+  if(!valid(r.lo,r.hi+hiSign*highStep))hiSign=-hiSign;
+  if(!valid(r.lo+loSign*lowStep,r.hi)||!valid(r.lo,r.hi+hiSign*highStep))return null;
+  const third=[[ -loSign,-hiSign ],[loSign,hiSign],
+    [loSign,-hiSign],[-loSign,hiSign]]
+    .map(([a,b])=>[r.lo+a*lowStep,r.hi+b*highStep])
+    .find(([a,b])=>valid(a,b));
+  if(!third)return null;
+  const options=[option(r.lo,r.hi),
+    option(r.lo+loSign*lowStep,r.hi),
+    option(r.lo,r.hi+hiSign*highStep),
+    option(...third)];
+  if(new Set(options.map(R136_NORM)).size!==4)return null;
   const q={stem,options,correctIndex:0,
     explanation:`La evidencia del manual establece «${r.quote}».`,
     sourceEvidence:String(target.source_evidence||''),sourcePage:target.source_page??null,
-    manualPage:target.manual_page??null,questionFamily:'IIFF121_INTERVALO_EXAMEN',
+    manualPage:target.manual_page??null,questionFamily:'IIFF124_INTERVALO_OPOSICION',
     difficulty:'muy alta',graphic:null,iiffHighVerified:false,iiff120Verified:true};
   return resetShape136(q)||iiff91UnsafeQuestion(q)||iiff121LocalStyleIssue(q)?null:q;
 }
@@ -8405,7 +8431,10 @@ function iiff120LocalQuestion(target){
   // etiqueta, los enunciados pueden ser ambiguos y se descartan.
   const [a,b]=facts;
   if(a.label===b.label)return null;
-  const wrongA=iiff120NearValue(a),wrongB=iiff120NearValue(b);
+  const seed=Math.abs(Number(target.id)||Number(target.source_page)||1);
+  const signA=seed%2===0?-1:1;
+  const wrongA=iiff120NearValue(a,signA);
+  const wrongB=iiff120NearValue(b,-signA);
   if(!wrongA||!wrongB)return null;
   const val=(x,y)=>`${a.label}: ${x} ${a.unit}; ${b.label}: ${y} ${b.unit}`;
   const concept=String(target.concept||'').trim().replace(/[.?!]+$/,'').replace(/^Características técnicas de (?:la|el|los|las) /i,'').replace(/^Características de (?:la|el|los|las) /i,'');
@@ -8420,7 +8449,7 @@ function iiff120LocalQuestion(target){
     explanation:`El texto de referencia establece «${a.quote}» y «${b.quote}».`,
     sourceEvidence:String(target.source_evidence||''),
     sourcePage:target.source_page??null,manualPage:target.manual_page??null,
-    questionFamily:'IIFF120_DOS_PARAMETROS',difficulty:'muy alta',graphic:null,
+    questionFamily:'IIFF124_DOS_PARAMETROS',difficulty:'muy alta',graphic:null,
     iiffHighVerified:false,iiff120Verified:true};
   return resetShape136(q)||iiff91UnsafeQuestion(q)||iiff121LocalStyleIssue(q)?null:q;
 }
@@ -8429,6 +8458,7 @@ function iiff120VerifyLocal(q,target){
      !Number.isInteger(q.correctIndex))return false;
   const base=iiff120LocalQuestion(target);
   if(!base||q.stem!==base.stem||q.options.length!==4||
+    q.questionFamily!==base.questionFamily||
     q.options[q.correctIndex]!==base.options[0])return false;
   const norm=arr=>arr.map(R136_NORM).sort().join('|');
   return norm(q.options)===norm(base.options)&&
@@ -10099,7 +10129,7 @@ async function persistGeneratedTest({
       if(iiff91Topic(target)&&difficulty==='muy alta'&&
          !((question.iiffHighVerified===true&&question.iiff120Verified!==true)||
            iiff120VerifyLocal(question,target)||
-           (question.reused===true&&[118,119,121,122].includes(Number(question.iiffHighBankVersion)))))
+           (question.reused===true&&[118,119,121,122,124].includes(Number(question.iiffHighBankVersion)))))
         throw Error('IIFF118: pregunta Muy alta sin auditoría calidad 2; no se guarda.');
       if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
@@ -10339,7 +10369,7 @@ last_shown_at
 )
 VALUES (
   $1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,
-  CASE WHEN $14::boolean THEN 122
+  CASE WHEN $14::boolean THEN 124
        WHEN $13::boolean THEN CASE WHEN $12::boolean THEN 119 ELSE 118 END
        ELSE CASE WHEN $12::boolean THEN 114 ELSE 6 END END,NOW()
 )
@@ -12543,33 +12573,32 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // La salida al usuario tiene el mismo número original de preguntas.
   const paired118=difficulty==='muy alta'&&group.length>0&&group.every(iiff91Topic);
   if(paired118)group=group.flatMap(t=>[t,t]);
-  const pairInstructions118=paired118?`IIFF MUY ALTA. Dos posiciones
-consecutivas corresponden a UNA MISMA ficha: produce DOS VARIANTES para
-que solo una llegue al examen. NO son dos preguntas finales.
-MÉTODO OBLIGATORIO (razona internamente, sin nuevos campos ni llamadas):
-1) Extrae de la ficha el dato, regla o condición discriminante y formula
-   UNA pregunta breve con redacción natural como un tribunal de Navarra.
-2) Escribe la respuesta literal correcta. Después crea 3 distractores de
-   LA MISMA CATEGORÍA Y MISMA VARIABLE técnica: cambia solo un valor,
-   intervalo, relación, requisito, orden o componente. Conserva el resto
-   de la frase técnica en los cuatro casos.
-3) En números, usa la misma unidad, precisiones comparables y confusiones
-   cercanas; evita solapamientos si el enunciado no pide el rango EXACTO.
-4) En procedimientos, las 4 respuestas deben describir la MISMA acción y
-   diferir en un paso/condición: NUNCA inventes tres efectos inconexos.
-5) Haz la prueba del opositor sin temario: si dos distractores se pueden
-   descartar por sentido común, cambia las tres alternativas. Ejemplos de
-   defectos PROHIBIDOS: ganar masa muscular instantáneamente, sustituir
-   agua con barritas, prevenir lesiones por una maniobra imposible;
-   NO uses esos ejemplos como hechos del manual ni en preguntas nuevas.
-6) Respalda SOLO el dato correcto con el fragmento; las falsas son
-   variantes controladas y NO nuevos hechos reales. Tres opciones creíbles
-   aunque falsas. En INCORRECTA exige cuatro pruebas literales como siempre.
-7) No preguntes solo por una definición general si el fragmento incluye
-   fórmula, condición, secuencia, rangos o una discriminación operativa.
-No copies títulos de ficha, no aumentes longitud para fingir dificultad.
-Las dos candidatas deben ser DIFERENTES en enfoque o variable.
-Un mismo lote de generación, una sola auditoría posterior, sin pasos extra.`:'';
+  // SERVER123: un cambio de prompt exclusivo para IIFF Muy alta.
+  const pairInstructions118=paired118?`IIFF MUY ALTA (estilo Navarra 2024/2026).
+Cada DOS posiciones son LA MISMA FICHA: redacta DOS VARIANTES distintas,
+pero solo UNA sobrevivirá a la auditoría. Entrega únicamente el JSON previsto.
+MÉTODO INTERNO DE CONSTRUCCIÓN Y AUTOEXAMEN:
+1) Identifica en el FRAGMENTO el detalle discriminante: dato, comparación,
+   condición, orden, función o parámetro. Si hay varios, prioriza la relación
+   técnica; si solo existe uno, una cifra exacta puede ser exigente.
+2) Escribe una pregunta breve, cerrada y natural, como el tribunal. NO
+   reveles la clave en el enunciado: si preguntas por el efecto sobre la
+   humedad, evita añadir «ganancia activa» o sinónimos que lo anticipen.
+3) Redacta la clave literalmente documentada. Produce tres distractores
+   como ERRORES CREÍBLES de quien ha estudiado: valor cercano, inversión de
+   dos pasos, confusión entre piezas comparables o una condición alterada.
+   Todas las opciones deben contestar LA MISMA variable/acción, con unidad,
+   escala, detalle y gramática homogéneos. Ningún efecto o equipo inconexo.
+4) PRUEBA A CIEGAS: sin la ficha, ¿se eliminan dos opciones por lógica,
+   extravagancia o pistas formales? Entonces reescríbelas. Con la ficha,
+   ¿dos opciones podrían ser válidas? Cambia el enfoque. Si los rangos
+   solapan, pregunta por el intervalo EXACTO del manual.
+5) Para INCORRECTA/FALSA: tres afirmaciones expresamente verdaderas y una
+   contradicha literalmente, con las CUATRO pruebas; ausencia no es prueba.
+6) No copies el título del concepto, no inventes hechos, normas o supuestos,
+   ni uses los ejemplos de estilo como fuente. Diferencia las dos variantes
+   cuando la ficha lo permita, sin forzar largas preguntas compuestas.
+Sin llamadas, campos ni pasos adicionales.`:'';
   const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
@@ -12858,7 +12887,10 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     // Las preguntas antiguas 6/114 NO tienen certificado de calidad 2.
     // Se conservan para repaso libre/SRS pero no para nuevos tests Muy alta.
     if(iiff91Topic(r)&&difficulty==='muy alta'&&
-      ![118,119,121,122].includes(Number(r.validation_version)))continue;
+      ![118,119,121,122,124].includes(Number(r.validation_version)))continue;
+    if(iiff91Topic(r)&&difficulty==='muy alta'&&
+       Number(r.validation_version)<124&&
+       ['IIFF121_INTERVALO_EXAMEN','IIFF120_DOS_PARAMETROS'].includes(String(r.question_family)))continue;
     if(iiff91Topic(r)&&difficulty==='muy alta'&&
        iiff122DistractorOutlier({stem:r.stem,options:r.options,
          correctIndex:Number(r.correct_index)}))continue;
@@ -13439,7 +13471,7 @@ app.post('/api/generate',async(req,res)=>{
           questions[i].questionFamily!=='IIFF120_INTERVALO_PRECISO') &&
         !iiff120VerifyLocal(questions[i],targets[i]) &&
         !(questions[i].reused===true&&
-          [118,119,121,122].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
+          [118,119,121,122,124].includes(Number(questions[i].iiffHighBankVersion))))questions[i]=null;
     }
     // SERVER120: al reanudar, completar plazas vacías con hechos dobles del
     // PDF antes de pagar nuevas llamadas al generador. No genera anticipadamente.
