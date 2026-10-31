@@ -7880,10 +7880,18 @@ Justificación: El manual prescribe expresamente arrastrar el material hacia la 
 // Basado en buenas prácticas de MCQ de Waterloo/CMU y NBME; la fuente factual
 // sigue siendo exclusivamente el PDF de este tema, nunca esas guías.
 function iiff92GenerationRules(difficulty,group=[]){
-  const allowed=(group||[]).flatMap((t,i)=>
-    iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)?[i+1]:[]);
-  const iiffSlots=(group||[]).flatMap((t,i)=>iiff91Topic(t)?[i+1]:[]);
   const muyAlta=String(difficulty).toLowerCase()==='muy alta';
+  // SERVER125: cada objetivo IIFF Muy alta se genera en dos variantes.
+  // La primera será siempre POSITIVA: una negativa no verificable nunca debe
+  // dejar sin alternativa positiva al mismo objetivo. No impone cuotas globales.
+  const paired125=muyAlta&&group.length>0&&group.length%2===0&&
+    group.every(iiff91Topic)&&group.every((t,i)=>
+      i%2===0||Number(t.id)===Number(group[i-1].id));
+  const allowed=(group||[]).flatMap((t,i)=>
+    iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)&&
+    (!paired125||i%2===1)?[i+1]:[]);
+  const positive125=paired125?group.flatMap((_,i)=>i%2===0?[i+1]:[]):[];
+  const iiffSlots=(group||[]).flatMap((t,i)=>iiff91Topic(t)?[i+1]:[]);
   // SERVER 92S: formatos abstraídos de exámenes oficiales de Bomberos de
   // Navarra 2024 y 2026. Nunca aportan conocimientos ni respuestas al test.
   // Un objetivo documentado puede justificar alta dificultad sin dos hechos.
@@ -7927,6 +7935,11 @@ ${IIFF_VISUAL_CRITERIOS_103}
 GUÍA VISUAL RELEVANTE PARA ESTOS OBJETIVOS (solo orientación, NO fuente factual):
 ${iiffVisualSpecific103(group)}
 PERMITIDOS_NEGATIVA (slot 1-based): ${JSON.stringify(allowed)}.
+POSITIVAS_OBLIGATORIAS (slot 1-based): ${JSON.stringify(positive125)}.
+Si una ficha aparece DOS veces, su PRIMERA variante (slot impar) DEBE ser
+POSITIVA. La segunda puede ser INCORRECTA solo si el slot está permitido Y
+las cuatro afirmaciones están respaldadas literalmente; en otro caso
+ambas variantes son POSITIVAS, con distractores diferentes.
 Si la lista está vacía, TODAS las preguntas deben ser POSITIVAS.
 PATRONES DE PREGUNTA REALISTA (elige SOLO los que la evidencia permita):
 A. DATO TÉCNICO EXACTO: pregunta por el valor, magnitud, clasificación o
@@ -12627,6 +12640,15 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   const parsed=JSON.parse(String(response?.text||'{}'));
   if(!Array.isArray(parsed.questions))throw Error('Sin array de preguntas');
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
+  // SERVER125: la primera variante de cada ficha conserva su opción
+  // POSITIVA incluso si el generador no respetó la instrucción. No se
+  // relaja la auditoría ni se convierte la negativa en positiva a ciegas.
+  if(paired118)for(let i=0;i<questions.length;i+=2){
+    if(iiff92IsNegativeStem(questions[i])){
+      console.warn('IIFF125_PRIMERA_VARIANTE_NO_POSITIVA:',JSON.stringify({slot:i}));
+      questions[i]=null;
+    }
+  }
   // Evitar gastar además en auditar preguntas que ya figuran como
   // aprendidas/bloqueadas; una lectura SQL por lote, sin llamada Gemini.
   const priorQuestions=iiffScope?await iiff96BlockedHistory(group.find(iiff91Topic).topic_id):[];
@@ -13544,7 +13566,9 @@ app.post('/api/generate',async(req,res)=>{
       draft136={targets,questions};
       // SERVER120: cubrir primero los fallos con preguntas técnicas compuestas
       // basadas literalmente en dos parámetros de otra ficha elegible.
+      let attemptedLocal125=false;
       if(difficulty==='muy alta'&&targets.every(iiff91Topic)&&questions.some(q=>!q)){
+        attemptedLocal125=true;
         const occupied120=new Set(targets.map(t=>Number(t.id)));
         const filled120=await iiff120FillLocal({questions,targets,topicIds,examMode,
           freshOnly111,stems:acceptedStems,exclude:occupied120});
@@ -13629,7 +13653,10 @@ app.post('/api/generate',async(req,res)=>{
           objetivos:repairGroups.flat().length,validas:questions.filter(Boolean).length,
           faltantes:questions.filter(q=>!q).length}));
       }
-      if(high119&&questions.some(q=>!q)){
+      // SERVER125: la misma búsqueda local ya se ejecutó. Repetirla con
+      // las mismas fichas y bloqueos puede añadir decenas de segundos y no
+      // produce nueva evidencia. En una reanudación habrá otro intento.
+      if(high119&&questions.some(q=>!q)&&!attemptedLocal125){
         const fallback120=await iiff120FillLocal({questions,targets,topicIds,examMode,
           freshOnly111,stems:acceptedStems,exclude:tried119});
         console.log('IIFF120_ULTIMO_RESCATE:',JSON.stringify({fallback120,
