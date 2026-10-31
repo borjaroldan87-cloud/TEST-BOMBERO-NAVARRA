@@ -9695,7 +9695,7 @@ async function persistGeneratedTest({
     for(let i = 0; i < questions.length; i++){
       const question = questions[i];
       const target = targets[i];
-      if(geo114QuestionIssue({...question,topic_block:target.topic_block}))
+      if(geo114QuestionIssue({...question,topic_block:target.topic_block,topic_name:target.topic_name,concept:target.concept}))
         throw Error('GEO114: alternativa con pista o margen no válido; no se ha guardado.');
       // Prioridad a la página IMPRESA del manual. La página física del PDF
       // se utiliza únicamente si no hay numeración de manual disponible.
@@ -12007,7 +12007,7 @@ function resetGeoComparisons82(targets,pool,difficulty){
 }
 // SERVER115 — EXACTAMENTE los doce modelos que el usuario aprobó,
 // SOLO estilo, sin transferir hechos a la pregunta ni mostrar la fuente.
-const T22_ESTILO_MODELOS_115=Object.freeze(["SOS Navarra recibe un aviso de incendio en el polígono industrial El Juncarillo. ¿Qué combinación de parque territorial, posible apoyo por proximidad y carreteras de acceso es correcta? A) Peralta por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-129. B) Lodosa por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-129. C) Lodosa por NA-129 y Estella por NA-1110 + NA-122 + NA-666 + NA-134. D) Estella por NA-129 y Lodosa por NA-1110 + NA-122 + NA-666 + NA-129.", "Se produce un incendio en el polígono industrial Landaben. ¿Qué combinación de parque territorial, posible apoyo por proximidad y vías de acceso es correcta? A) Cordovilla por PA-31 + A-15 + NA-30; apoyo Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge. B) Trinitarios por Calle Biurdana + Av. Guipúzcoa + PA-30-3; apoyo Cordovilla por PA-31 + A-15 + PA-34 + PA-30-3. C) Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge; apoyo Cordovilla por PA-31 + A-15 + NA-30. D) Trinitarios por Calle Biurdana + Av. Navarra + Av. San Jorge; apoyo Cordovilla por PA-31 + A-15 + PA-34 + PA-30-3.", "Se declara un incendio en el polígono industrial Comarca I Agustinos. ¿Qué itinerario corresponde a la salida del parque de Trinitarios? A) Calle Biurdana + Av. Navarra + Av. San Jorge. B) Calle Biurdana + Av. Guipúzcoa + PA-30-3. C) PA-31 + A-15 + PA-34 + PA-30-3. D) Calle Biurdana + Av. Navarra + Av. San Jorge + PA-30-4.", "Se requiere la intervención de una dotación de Alsasua como posible apoyo en el polígono industrial Otazabaleta. ¿Qué itinerario corresponde a su desplazamiento? A) A-10 + A-15 + NA-1300 + NA-7561. B) A-10 + A-15 + NA-1300 + NA-4150. C) PA-31 + A-15 + AP-15 + A-15 + NA-1300 + NA-7561. D) A-10 + A-15 + NA-170 + NA-7561.", "En un incendio en el polígono industrial Ipertegui II, una dotación de Trinitarios se aproxima por PA-30-4. ¿Cuáles son las dos alternativas de entrada a partir de esa vía? A) PA-30-4 + NA-700 y PA-30-4 + NA-30. B) PA-30-4 + PA-30-5 y PA-30-4 + NA-30. C) PA-30-4 + PA-30-5 y PA-30-4 + NA-6002. D) PA-30-4 + PA-34 y PA-30-4 + NA-30.", "Señale la afirmación CORRECTA sobre la posición relativa de los siguientes sectores industriales. A) El sector Berriainz de Berrioplano se sitúa al sur del de Berriozar. B) Ipertegui II se localiza al norte de Ipertegui I. C) Talluntxe, en el Valle de Aranguren, se encuentra al norte del sector Talluntxe de Noáin. D) La ampliación del polígono Comarca I en Orkoien se sitúa al sur del sector Comarca I.", "SOS Navarra recibe un aviso de incendio en el polígono industrial El Saso de Caparroso. ¿Qué pareja de parques y vías de acceso corresponde al parque territorial y al posible apoyo por proximidad, respectivamente? A) Lodosa por NA-128 + N-121; apoyo Tafalla por N-121. B) Peralta por NA-128 + N-121; apoyo Estella por N-121. C) Peralta por NA-129 + N-121; apoyo Tafalla por N-121. D) Peralta por NA-128 + N-121; apoyo Tafalla por N-121.", "¿En qué tres municipios se distribuyen los sectores del polígono industrial Meseta de Salinas? A) Galar, Noáin y Beriáin. B) Galar, Noáin y Orkoien. C) Galar, Berrioplano y Beriáin. D) Aranguren, Noáin y Beriáin.", "¿En qué dos municipios se encuentran los sectores del polígono industrial Berriainz? A) Berriozar y Galar. B) Berriozar y Berrioplano. C) Berrioplano y Orkoien. D) Orkoien y Galar.", "¿Cuál de las siguientes afirmaciones es CORRECTA acerca de los dos sectores denominados Talluntxe II? A) Ambos pertenecen a Galar y tienen itinerarios distintos desde Cordovilla. B) Uno pertenece a Noáin y otro a Galar, con parques territoriales diferentes. C) Uno pertenece a Aranguren y otro a Galar, y ambos comparten los accesos desde Cordovilla y Trinitarios. D) Los dos pertenecen a Aranguren y sus posibles parques de apoyo son diferentes.", "SOS Navarra recibe un aviso de incendio en el polígono industrial Irakuregi. ¿Qué pareja identifica, respectivamente, su parque territorial y el posible apoyo por proximidad? A) Cordovilla y Oronoz. B) Oronoz y Cordovilla. C) Cordovilla y Alsasua. D) Trinitarios y Oronoz.", "Desde Cordovilla, ¿qué itinerarios corresponden, respectivamente, a los accesos de los polígonos industriales Mutilva y Mutilva II? A) PA-31 + PA-30-1; PA-31 + PA-32. B) PA-31 + NA-6002; PA-31 + PA-30-1. C) PA-31 + PA-32; PA-31 + NA-6002. D) PA-31 + PA-32; PA-31 + PA-30-1."]);
+const T22_ESTILO_MODELOS_115=Object.freeze(["Se declara un incendio industrial en [NOMBRE DEL POLÍGONO]. ¿Qué parque acudiría como primer apoyo por proximidad y qué itinerario seguiría? (Opciones: cuatro parejas parque y ruta completa.)", "En un accidente laboral en [NOMBRE DEL POLÍGONO], ¿qué combinación de parque territorial y posible primer apoyo es correcta? (Opciones: cuatro parejas de parques.)", "Ante un incendio en [NOMBRE DEL POLÍGONO], ¿qué recorrido corresponde al parque territorial? (Opciones: cuatro itinerarios completos y diferentes.)", "Se solicita un segundo recurso para intervenir en [NOMBRE DEL POLÍGONO]. ¿Qué parque actuaría como apoyo por proximidad y por qué vías accedería? (Opciones: parejas de parque y ruta.)", "Se produce un rescate en [NOMBRE DEL POLÍGONO]. ¿Qué combinación de parque territorial, primer apoyo por proximidad y vías de acceso sería correcta? (Opciones: cuatro combinaciones coherentes.)", "En una intervención en [NOMBRE DEL POLÍGONO], ¿qué itinerario seguiría el parque de primer apoyo por proximidad? (Opciones: cuatro rutas diferentes.)", "En un incendio industrial en [NOMBRE DEL POLÍGONO], ¿qué pareja identifica el parque territorial y las carreteras de acceso desde este? (Opciones: parque más itinerario.)", "Ante un accidente en [NOMBRE DEL POLÍGONO], ¿qué dos recorridos corresponden, respectivamente, al parque territorial y al apoyo por proximidad? (Opciones: dos rutas completas por alternativa.)", "¿En qué municipio se encuentra [NOMBRE DEL POLÍGONO SIN PISTA MUNICIPAL]? (Úsala únicamente si el municipio consta explícitamente y el nombre no lo desvela.)", "¿A qué parque corresponde territorialmente [NOMBRE DEL POLÍGONO]? (Opciones: cuatro parques físicos distintos.)", "¿Dónde se localiza [NOMBRE DEL POLÍGONO]? (Opciones: cuatro descripciones territoriales comparables; no adelantar la ubicación.)", "¿Qué parque acudiría como primer apoyo por proximidad a [NOMBRE DEL POLÍGONO]? (Opciones: cuatro parques posibles, sin nombre del parque en el enunciado.)"]);
 function t22ModelosPorLote115(targets){
   const seed=(targets||[]).reduce((acc,t)=>acc+(Number(t.id)||0),0);
   const principales=[0,1,2,3,4,5,6,10];
@@ -12018,19 +12018,21 @@ function t22ModelosPorLote115(targets){
     T22_ESTILO_MODELOS_115[secundarios[seed%secundarios.length]]
   ];
 }
-const T22_REGLAS_ESTILO_115=`SOLO TEMA 22, GEOGRAFÍA DE POLÍGONOS:
-El estilo principal reproduce el enfoque 2026 (incidente + parque territorial físico + posible apoyo + carreteras); 2024 es secundario.
-El opositor nunca lee «según los apuntes», «según el inventario», «según la ficha», páginas, metadatos ni claves PI/GEO.
-Cuatro opciones plausibles y una correcta. Mantén rutas ORDENADAS y sus alternativas. No deduzcas rapidez, distancia, prioridad reglamentaria ni municipio ausente.
-El posible apoyo se elige por proximidad para estudiar, NO es despacho oficial. El parque territorial es el expresamente indicado.
-Cuando hay varios polígonos del mismo nombre, no fusionar municipios/sectores ni incluir pistas municipales en opciones que pregunten por el municipio.
-Las doce muestras de estilo NO aportan hechos geográficos. Únicamente son hechos los fragmentos de OBJETIVOS. NO usar datos de observaciones editoriales para redactar preguntas.
-Evita repreguntar un mismo vínculo, combinaciones incoherentes, distracciones imposibles y negativos sin contradicción documental demostrada.
-`; 
+const T22_REGLAS_ESTILO_115=`SOLO TEMA 22 NUEVO, GEOGRAFÍA DE POLÍGONOS — ESTILO DEL TRIBUNAL 2026 PRIORITARIO Y 2024 SECUNDARIO:
+Fórmula preferida: «Se declara un incendio industrial / un accidente / un rescate en [NOMBRE DEL POLÍGONO]. ¿Qué parque actuaría como primer apoyo por proximidad y qué itinerario seguiría?». Varía escenarios creíbles y operaciones que los datos permitan.
+REGLA ESTRICTA: EL ENUNCIADO SOLO IDENTIFICA EL POLÍGONO. No anticipes su municipio, zona geográfica, situación cardinal, parque territorial, parque de apoyo, ni siquiera UNA de sus carreteras. Tampoco incluyas esas pistas entre paréntesis o como «desde [parque]», ni reveles la base para preguntar por su ruta. Se puede aludir de forma genérica a «su parque territorial» o «el primer apoyo por proximidad» SIN NOMBRARLOS.
+Si se pregunta un municipio y el nombre del sector ya contiene ese municipio o permite deducirlo, usa otra operación. Si hay varios sectores de igual nombre con accesos diferentes, identifica el sector únicamente mediante la denominación mínima indispensable, sin adelantar la respuesta; si no se puede diferenciar sin pistas, no formules esa pregunta.
+El nombre de polígono/área, y no una pista de su ficha, debe permitir resolver la pregunta a quien haya estudiado el temario. NUNCA preguntar «según la ficha», «según los apuntes», «según el inventario» ni sus metadatos. Tampoco usar «parque territorial físico» o «parque potencial de apoyo por cercanía»: son etiquetas internas, NO redacción de tribunal.
+Cuatro alternativas homogéneas, todas plausibles, una sola correcta y con cada itinerario EN ORDEN. Evita opciones que contienen exactamente las mismas vías permutadas, variantes sin diferencia material, pistas de longitud o absurdo geográfico. Cuando se pidan parque y ruta, cada opción contendrá ambos. No permitas dos alternativas equivalentes aunque solo cambie el orden de sus carreteras.
+El «primer apoyo» se interpreta únicamente como posible apoyo por proximidad para estudio, no como asignación operativa reglamentaria. Nunca afirmar tiempos mínimos ni rapidez sin datos. Solo usar hechos en el OBJETIVO y no copiar nombres/carreteras de los EJEMPLOS.
+Prioriza 2026: escenarios de intervención y relaciones compuestas (parque territorial, posible apoyo e itinerario). Incluye diversidad 2024: polígono a municipio, a parque o a carretera cuando consten los datos. No convertir cada pregunta en una enumeración de toda la ficha.
+En explanation, explica de forma breve el dato territorial y cita interna en sourceEvidence, pero sin fórmulas «según la ficha» o «según los apuntes». La evidencia no forma parte del enunciado.
+`;
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
   const soloPoligonos=geo && targets.length>0 && targets.every(t=>coverageTopicNumber(t.topic_name)===22);
+  const incluyeTema22Nuevo=geo && targets.some(t=>t22NewTopic116(t));
   const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
   const soloEolicos=geo && targets.length>0 && targets.every(esTemaEolicos2026);
   const soloSolares=geo && targets.length>0 && targets.every(esTemaSolares2026);
@@ -12068,7 +12070,7 @@ ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicaci
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
-${soloPoligonos?T22_REGLAS_ESTILO_115:''}
+${incluyeTema22Nuevo?T22_REGLAS_ESTILO_115:''}
 ${soloSolares?SOLARES_REGLAS_2026:''}
 ${soloEolicos?EOLICOS_REGLAS_EXAMEN_80:''}
 ${soloConexiones?'CONEXIONES POR CARRETERA: Alterna las tres modalidades mostradas cuando el objetivo documental lo permita; NO generes preguntas cuya operación principal sea identificar una salida. Las salidas S. y la red local R.LOCAL pueden aparecer dentro del itinerario correcto cuando consten literalmente. Respeta orden, vías, parque de origen y alternativas documentadas. No deduzcas itinerarios de mapas ni inventes carreteras locales de cuatro cifras. Los ejemplos son SOLO estilo, no hechos que puedas trasladar a otros objetivos.':''}
@@ -12163,7 +12165,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // Auditor independiente: una llamada por lote, no múltiples auditores
   // superpuestos. No audita dificultad subjetiva, sólo respuesta y evidencia.
   const blind=questions.flatMap((q,i)=>{
-    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block}))return [];
+    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
       console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
       return [];
@@ -12258,7 +12260,7 @@ No añadas escenarios, parámetros ni condiciones no documentados.
     minAceptada:1,objetivoPreferido:difficulty==='muy alta'?2:1}));
   const validated=questions.map((q,i)=>{
     const a=audits.find(x=>x.index===i);
-    if(resetShape136(q)||!a||a.answer!==q.correctIndex ||
+    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -12459,10 +12461,123 @@ app.get('/api/iiff-selection-preview',async(req,res)=>{
 // SERVER114: control editorial común de preguntas geográficas. Solo lectura.
 // No altera nombres, claves, fichas, tablas, ni el régimen legal de T21.
 // Motivos explícitos permiten distinguir rechazo formal de verificación factual.
+// SERVER116 — Filtro editorial por ficha para el NUEVO TEMA 22.
+// Ejecución local y determinista, sin llamadas Gemini adicionales.
+function t22NewTopic116(q){
+  const t=String(q?.topic_name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  return String(q?.topic_block||'').toLowerCase()==='geografia' &&
+    /\btema\s*22\b/.test(t) && /poligonos\s+industriales/.test(t) && /197\s+fichas/.test(t);
+}
+function t22Fold116(s){return String(s||'').normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();}
+function t22Fact116(q){
+  const src=[q?.concept,q?.ci_evidence,q?.target_evidence,q?.source_evidence]
+    .map(x=>String(x||'')).find(x=>/Pol[ií]gono o [aá]rea:/i.test(x))||'';
+  const get=re=>String(src.match(re)?.[1]||'').trim();
+  return {
+    name:get(/Pol[ií]gono o [aá]rea:\s*([^;]+)/i),
+    park:get(/Parque territorial f[ií]sico:\s*([^;]+)/i),
+    support:get(/Parque potencial de apoyo por cercan[ií]a\s*\(NO asignaci[oó]n oficial\):\s*([^;]+)/i),
+    location:get(/Ubicaci[oó]n:\s*([^;]+)/i),
+    roads:get(/Acceso desde parque territorial:\s*([^;]+)/i),
+    supportRoads:get(/Acceso desde apoyo potencial:\s*([^;]+)/i),
+    fullSource:src
+  };
+}
+function t22Roads116(x){
+  return (String(x||'').toUpperCase().match(/\b(?:NA|PA|AP|PR|N|A)\s*-\s*\d+(?:-[A-Z0-9]+)*/g)||[])
+    .map(y=>y.replace(/\s+/g,''));
+}
+function t22OnlyRoadOption116(s){
+  const rest=t22Fold116(String(s||'').replace(/\b(?:NA|PA|AP|PR|N|A)\s*-\s*\d+(?:-[A-Z0-9]+)*/gi,' '))
+    .replace(/\b(?:y|o|por|via|desde|hasta|a|la|el|en)\b/g,'')
+    .replace(/[^a-z]/g,'');
+  return rest.length===0;
+}
+function t22QuestionIssue116(q){
+  if(!t22NewTopic116(q))return null;
+  const fact=t22Fact116(q);
+  // Fallar cerrado ante una ficha ilegible: nunca validar por intuición.
+  if(!fact.name||!fact.park)return 'ficha_no_identificable';
+  const stem=t22Fold116(q?.stem);
+  if(!stem)return 'sin_enunciado';
+  // Exigir identificar el polígono. Eliminar SOLO la primera aparición de
+  // su nombre antes de buscar pistas. Las segundas menciones siguen visibles.
+  const core=t22Fold116(fact.name)
+    .replace(/^(?:p\.?\s*i\.?|poligono industrial|poligono|area de actividades? economicas?|parque empresarial)\s+/,'');
+  if(core.length<3)return 'poligono_no_identificado';
+  // Aceptar diferencias meramente tipográficas («Perguita» / Perguita,
+  // guiones o espacios) sin tolerar cambios de letras del topónimo.
+  const nameTerms=core.match(/[a-z0-9]+/g)||[];
+  const pat=nameTerms.map(x=>x.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('[^a-z0-9]*');
+  const match=pat ? new RegExp(pat,'i').exec(stem) : null;
+  if(!match)return 'poligono_no_identificado';
+  const rest=stem.slice(0,match.index)+' '+stem.slice(match.index+match[0].length);
+  const parkNames=[fact.park,fact.support,
+    'Burguete','Auritz','Navascués','Sangüesa','Tafalla',
+    'Peralta','Lodosa','Oronoz','Estella','Alsasua','Altsasu',
+    'Tudela','Cordovilla','Trinitarios','Central Pamplona'].filter(Boolean)
+    .flatMap(s=>[t22Fold116(s),t22Fold116(s).replace(/^central\s+/,'')]);
+  if(parkNames.some(n=>n.length>=4 && new RegExp('(?:^|[^a-z])'+n.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?:$|[^a-z])').test(rest)))
+    return 'parque_revelado_en_enunciado';
+  // No regalar carreteras o ubicación para preguntar otro dato.
+  if(t22Roads116(rest).length)return 'carretera_revelada_en_enunciado';
+  if(/\b(?:calle|avenida|av\.)\s+[a-z]/.test(rest))return 'via_urbana_revelada';
+  const namedRoutePieces=[fact.roads,fact.supportRoads].flatMap(r=>String(r||'').split('+'))
+    .map(t22Fold116).filter(x=>x.length>7 && !t22Roads116(x).length &&
+      !['no consta','red local'].includes(x));
+  if(namedRoutePieces.some(x=>rest.includes(x)))return 'ruta_nominal_revelada';
+  if(/\b(?:al|en|hacia|por|situad[oa]s?\s+al)\s+(?:norte|sur|este|oeste|noreste|noroeste|sureste|suroeste)\b/.test(rest))
+    return 'ubicacion_revelada_en_enunciado';
+  const loc=t22Fold116(fact.location);
+  if(loc.length>10 && rest.includes(loc))return 'ubicacion_revelada_en_enunciado';
+  // Localidades escritas en la ubicación: evitar «en Viana» o «junto a Arre»
+  // sin una dirección cardinal. La coincidencia debe ser por palabra entera.
+  const placeTokens=(String(fact.location||'').match(/\b[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{3,}(?:[\s-]+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{3,})*/g)||[])
+    .map(t22Fold116).filter(w=>!new Set(['norte','sur','este','oeste','noreste',
+      'noroeste','sureste','suroeste','zona','municipio','valle','junto',
+      'parque','pegado','salida','entrada','calle','avenida','carretera']).has(w));
+  if(placeTokens.some(w=>new RegExp('(?:^|[^a-z])'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?:$|[^a-z])').test(rest)))
+    return 'localidad_revelada_en_enunciado';
+  if(/\bparque\s+territorial\s+fisico\b|\bparque\s+potencial\s+de\s+apoyo\s+por\s+cercania\b/.test(rest))
+    return 'redaccion_de_ficha';
+  if(/\b(?:segun|conforme\s+a)\s+(?:la\s+)?(?:ficha|apuntes|inventario|documento)\b/.test(rest))
+    return 'referencia_a_fuente_en_enunciado';
+  // La ausencia de un atributo NO autoriza a crear datos plausibles.
+  const asksSupport=/\b(?:apoyo|segundo\s+parque|segunda\s+dotacion)\b/.test(rest);
+  const asksRoute=/\b(?:ruta|itinerario|carretera|v[ií]a|acceso|recorrido|desplazamiento)\b/.test(rest);
+  if(asksSupport && (!fact.support || t22Fold116(fact.support)==='no consta'))
+    return 'apoyo_no_documentado';
+  if(asksRoute && asksSupport && (!fact.supportRoads || t22Fold116(fact.supportRoads)==='no consta'))
+    return 'ruta_apoyo_no_documentada';
+  if(asksRoute && !asksSupport && (!fact.roads || t22Fold116(fact.roads)==='no consta'))
+    return 'ruta_territorial_no_documentada';
+  if(/\b(?:municipio|termino\s+municipal|localidad)\b/.test(rest) &&
+      !/\bmunicipio\b|\btermino\s+(?:de\s+)?[a-z]{3,}|\bpertenece\s+al\s+(?:municipio|valle)\b/.test(t22Fold116(fact.fullSource)))
+    return 'municipio_no_documentado';
+  // No formular «¿en qué municipio?» cuando el sector ya se llama (Municipio).
+  if(/\b(?:municipio|termino\s+municipal|localidad)\b/.test(rest) &&
+    /\((?!ampliacion\b|fase\b|sector\b|zona\b)[^)]{3,}\)/i.test(fact.name))
+    return 'municipio_en_nombre_sector';
+  const opts=Array.isArray(q.options)?q.options:[];
+  if(opts.length===4 && opts.every(t22OnlyRoadOption116)){
+    const used=new Set();
+    for(const opt of opts){
+      const keys=t22Roads116(opt);
+      if(!keys.length)continue;
+      const set=[...keys].sort().join('|');
+      if(used.has(set))return 'itinerarios_equivalentes_por_permutacion';
+      used.add(set);
+    }
+  }
+  return null;
+}
 function geo114QuestionIssue(q){
   const normalize=x=>String(x??'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
   if(normalize(q?.topic_block)!=='geografia')return null;
+  const t22Issue=t22QuestionIssue116(q);
+  if(t22Issue)return t22Issue;
   const stem=normalize(q?.stem);
   const opts=Array.isArray(q?.options)?q.options:[];
   if(coverageTopicNumber(q?.topic_name)===22 &&
@@ -12950,7 +13065,7 @@ app.post('/api/generate',async(req,res)=>{
     if(questions.some((q,i)=>!q||resetShape136(q))){
       throw Error('Pregunta malformada detectada antes de guardar.');
     }
-    const invalidGeo=questions.findIndex((q,i)=>geo114QuestionIssue({...q,topic_block:targets[i]?.topic_block}));
+    const invalidGeo=questions.findIndex((q,i)=>geo114QuestionIssue({...q,topic_block:targets[i]?.topic_block,topic_name:targets[i]?.topic_name,concept:targets[i]?.concept}));
     if(invalidGeo>=0)throw Error('GEO114: pregunta geográfica no apta antes de guardar.');
     const unique=new Set(questions.map(q=>R136_NORM(q.stem)));
     if(unique.size!==questions.length)throw Error('Preguntas duplicadas; no se guardó test.');
