@@ -8032,6 +8032,69 @@ Responde solo con el JSON existente; no adjuntes esta revisión interna.
 `;
 }
 
+function iiff126HighGenerationRules(group=[]){
+  const paired=group.length>0&&group.length%2===0&&
+    group.every(iiff91Topic)&&group.every((t,i)=>
+      i%2===0||Number(t.id)===Number(group[i-1].id));
+  const allowed=(group||[]).flatMap((t,i)=>
+    iiff91Topic(t)&&iiff92EvidenceCanSupportNegative(t.source_evidence)&&
+    (!paired||i%2===1)?[i+1]:[]);
+  return `
+# TAREA FINAL — SOLO MANUAL IIFF DE NAVARRA 2026, MUY ALTA
+Los OBJETIVOS inmediatamente anteriores son la ÚNICA fuente de hechos;
+los exámenes oficiales 2024/2026 marcan SOLO el estilo de redacción.
+Devuelve las ${group.length} preguntas, una por slot y en orden, con la
+estructura JSON pedida: stem, options[4], correctIndex, explanation.
+
+# REDACCIÓN Y DIFICULTAD
+- Enunciado cerrado, breve y natural de oposición. Pregunta qué valor,
+  combinación, paso, condición, relación o componente corresponde. No copies
+  el título de la ficha ni anticipes la clave («ganancia activa», etc.).
+- Decide PRIMERO qué hecho exacto demuestra el fragmento y construye la clave.
+  Diseña DESPUÉS tres errores realistas de un opositor que confunde un dato:
+  cifras/umbrales próximos, componentes comparables, orden de maniobra o
+  condición de aplicación. Los cuatro deben responder a LA MISMA pregunta,
+  usando unidad, escala, categoría y extensión semejantes.
+- Para hacer difícil una pregunta, exige conocer el fragmento; no añadas
+  teoría externa, excepciones inventadas, escalas absurdas ni enunciados largos.
+  Una cifra exacta con tres valores cercanos SÍ puede ser Muy alta.
+- Comprueba antes de emitir: sin estudiar, ¿se descartan DOS opciones por
+  sentido común, gramática, longitud o palabras absolutas? Sustitúyelas.
+  Con el fragmento, ¿otra opción también es correcta? Corrige o cambia el
+  detalle evaluado. No uses sinónimos equivalentes ni rangos solapados.
+- Respeta modalidades de evidencia: «unos X» no es «mínimo X»; «puede» no
+  es «debe». No uses un supuesto operativo no contenido en el fragmento.
+- Se permiten datos de tablas/figuras originales SI el fragmento los aporta;
+  nunca preguntes qué se ve en una imagen que no se adjunta al examen.
+
+# DOS VARIANTES POR FICHA (SOLO UNA SERÁ ELEGIDA POR EL AUDITOR)
+${paired ? `Slots impares 1,3,5...: SIEMPRE POSITIVA. Los slots pares son una
+SEGUNDA pregunta POSITIVA por defecto, con otra formulación/distractores.
+Puede ser INCORRECTA/FALSA solo si el slot está en
+${JSON.stringify(allowed)} Y el fragmento contiene tres afirmaciones
+verdaderas explícitas MÁS una contradicción literal para la cuarta.
+Si no puedes acreditar las CUATRO por separado, escribe POSITIVA.
+No hagas dos INCORRECTA sobre una misma ficha.` : `Preferir POSITIVA; solo
+INCORRECTA en slots ${JSON.stringify(allowed)} cuando sus cuatro
+alternativas se puedan demostrar literalmente.`}
+
+# DOS EJEMPLOS DE FORMATO, NO DE HECHOS PARA OTROS SLOTS
+1) «¿Qué caudales corresponden a rastrojo y cereal sin cosechar,
+   respectivamente?» A) 50 y 90 l/min. B) 50 y 70 l/min.
+   C) 70 y 90 l/min. D) 90 y 50 l/min. Clave: A.
+2) «Durante el trabajo con autobomba en marcha, ¿qué disposición es
+   correcta?» A) 5 m delante y tendido recto. B) 5 m detrás, en lateral,
+   visible por retrovisor y con reserva. C) 5 m detrás, sin reserva.
+   D) 5 m delante y sin reserva. Clave: B.
+Ambos ejemplos solo muestran homogeneidad y estilo, NUNCA sirven para
+justificar datos de otra ficha. No copies sus cifras salvo evidencia propia.
+
+# SALIDA
+No muestres análisis ni pruebas intermedias. Devuelve SOLO el JSON del
+esquema; cada clave y explicación debe sustentarse en el FRAGMENTO de su slot.
+`;
+}
+
 // La calificación se agrega a la auditoría YA EXISTENTE: cero llamadas nuevas
 // a Gemini. La validación de contenido (answer + cita) continúa obligatoria.
 // REVISIÓN 92R: si Google detiene una salida por límite, seguridad o
@@ -12586,33 +12649,9 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   // La salida al usuario tiene el mismo número original de preguntas.
   const paired118=difficulty==='muy alta'&&group.length>0&&group.every(iiff91Topic);
   if(paired118)group=group.flatMap(t=>[t,t]);
-  // SERVER123: un cambio de prompt exclusivo para IIFF Muy alta.
-  const pairInstructions118=paired118?`IIFF MUY ALTA (estilo Navarra 2024/2026).
-Cada DOS posiciones son LA MISMA FICHA: redacta DOS VARIANTES distintas,
-pero solo UNA sobrevivirá a la auditoría. Entrega únicamente el JSON previsto.
-MÉTODO INTERNO DE CONSTRUCCIÓN Y AUTOEXAMEN:
-1) Identifica en el FRAGMENTO el detalle discriminante: dato, comparación,
-   condición, orden, función o parámetro. Si hay varios, prioriza la relación
-   técnica; si solo existe uno, una cifra exacta puede ser exigente.
-2) Escribe una pregunta breve, cerrada y natural, como el tribunal. NO
-   reveles la clave en el enunciado: si preguntas por el efecto sobre la
-   humedad, evita añadir «ganancia activa» o sinónimos que lo anticipen.
-3) Redacta la clave literalmente documentada. Produce tres distractores
-   como ERRORES CREÍBLES de quien ha estudiado: valor cercano, inversión de
-   dos pasos, confusión entre piezas comparables o una condición alterada.
-   Todas las opciones deben contestar LA MISMA variable/acción, con unidad,
-   escala, detalle y gramática homogéneos. Ningún efecto o equipo inconexo.
-4) PRUEBA A CIEGAS: sin la ficha, ¿se eliminan dos opciones por lógica,
-   extravagancia o pistas formales? Entonces reescríbelas. Con la ficha,
-   ¿dos opciones podrían ser válidas? Cambia el enfoque. Si los rangos
-   solapan, pregunta por el intervalo EXACTO del manual.
-5) Para INCORRECTA/FALSA: tres afirmaciones expresamente verdaderas y una
-   contradicha literalmente, con las CUATRO pruebas; ausencia no es prueba.
-6) No copies el título del concepto, no inventes hechos, normas o supuestos,
-   ni uses los ejemplos de estilo como fuente. Diferencia las dos variantes
-   cuando la ficha lo permita, sin forzar largas preguntas compuestas.
-Sin llamadas, campos ni pasos adicionales.`:'';
-  const iiffGenerationRules=iiffScope?iiff92GenerationRules(difficulty,group):'';
+  const iiffGenerationRules=iiffScope?
+    (paired118?iiff126HighGenerationRules(group):
+      iiff92GenerationRules(difficulty,group)):' '; 
   // SERVER112 — SOLO preguntas territoriales T22. La unidad compartida de
   // mando NO es una única dotación física. No altera las preguntas sobre la
   // organización administrativa del tema jurídico T21.
@@ -12628,8 +12667,7 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+
-      pairInstructions118+(repair118?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+(repair118?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
       geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
