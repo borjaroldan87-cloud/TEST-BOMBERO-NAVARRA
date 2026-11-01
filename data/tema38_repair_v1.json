@@ -1,210 +1,39 @@
 {
-  "version": "t38-pdf-manual-2026-11-01-v2",
+  "version": "t38-pdf-manual-2026-11-01-v3",
   "topicId": 48,
   "topicName": "TEMA 38. TEORIA DEL FUEGO",
   "topicOrder": 38,
-  "originalCount": 333,
+  "originalCount": 353,
   "sourcePdfSha256": "7a024f2d43498f565498f376ccf13b19a6051cdab6e5aaf320525044a791a440",
-  "updates": [
-    {
-      "id": 22973,
-      "oldSource": 28,
-      "oldManual": "44",
-      "sourcePage": 28,
-      "manualPage": "44",
-      "concept": "Fórmula de transferencia de calor por conducción: H = G × (Tc − Tf); G = k × A/L, donde G es la conductancia, k la conductividad térmica, A la superficie y L el espesor.",
-      "sourceEvidence": "Ley de transferencia de calor por conducción, imagen 22: H = G · (Tc − Tf); G = k · (A/L)."
-    },
-    {
-      "id": 22947,
-      "oldSource": 24,
-      "oldManual": "40",
-      "sourcePage": 24,
-      "manualPage": "40",
-      "sourceEvidence": "Tabla 6, clasificación por superficie afectada: I hasta 4 m², pequeño; II de 4 a 10 m², mediano; III de 10 a 100 m², grande; IV de 100 a 1.000 m², de envergadura; V de 1.000 a 5.000 m², de envergadura; VI de 5.000 a 10.000 m² (1 ha), de envergadura; VII de 1 a 25 ha, de envergadura; VIII de 12 a 100 ha, de envergadura; IX de 100 a 500 ha, de envergadura; X más de 5.000 ha, de envergadura. Intervalos reproducidos literalmente del manual, incluidos sus solapamientos y discontinuidades."
-    }
-  ],
+  "updates": [],
   "additions": [
     {
-      "manualPage": "36",
-      "sourcePage": 20,
-      "section": "5.1.2. Rangos de inflamabilidad",
-      "concept": "Gasolina: límite inferior de inflamabilidad 1,5 % en volumen y límite superior 7,6 % en volumen, según la tabla 3.",
-      "sourceEvidence": "GASOLINA 1,5 7,6",
-      "itemType": "dato_numerico",
-      "evaluationType": "literal"
-    },
-    {
-      "manualPage": "38",
-      "sourcePage": 22,
-      "section": "5.4. Reacciones en cadena",
-      "concept": "Según el manual, la reacción en cadena se automantiene por eliminación de los radicales libres (hidroxilos) y provoca sucesivas roturas de enlaces de carbono y oxígeno.",
-      "sourceEvidence": "La reacción en cadena consiste en el automantenimiento de la combustión por la eliminación de los radicales libres (hidroxilos).",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "38",
-      "sourcePage": 22,
-      "section": "5.4. Reacciones en cadena",
-      "concept": "La reacción en cadena solo aparece cuando hay combustión con llama, siempre que exista mezcla combustible-comburente y aporte energético suficiente.",
-      "sourceEvidence": "reacciones químicas complejas que sólo aparecen cuando hay combustión con llama. La reacción en cadena está asegurada",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "38",
-      "sourcePage": 22,
-      "section": "5.4. Reacciones en cadena",
-      "concept": "Para que la velocidad de la reacción en cadena pueda aumentar en las proporciones indicadas en el manual deben existir grandes cantidades de combustible y oxígeno.",
-      "sourceEvidence": "Para que esto ocurra deben existir grandes cantidades de combustible y de oxígeno.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "52",
-      "sourcePage": 36,
-      "section": "2.2.4. Espumas: componentes",
-      "concept": "Las espumas fluorosintéticas utilizan tensioactivos sintéticos fluorados y son generalmente de baja expansión.",
-      "sourceEvidence": "Fluorosintéticos: sus tensoactivos son sintéticos fluorados. Son generalmente de baja expansión.",
-      "itemType": "clasificacion",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "53",
-      "sourcePage": 37,
-      "section": "2.3. Agentes extintores sólidos",
-      "concept": "Los polvos extintores pueden aplicarse mediante extintores portátiles, monitores, mangueras manuales o sistemas fijos.",
-      "sourceEvidence": "La mezcla de polvos que se emplea como agente extintor se aplica por medio de extintores portátiles, monitores, mangueras manuales o sistemas fijos.",
-      "itemType": "procedimiento",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "53",
-      "sourcePage": 37,
-      "section": "2.3.1. Polvos BC",
-      "concept": "Tras apagar un fuego de líquido inflamable con polvo BC, la proximidad de focos de ignición puede causar una reignición porque el polvo no mantiene atmósferas inertes duraderas.",
-      "sourceEvidence": "Los polvos secos no producen atmósferas inertes duraderas por encima de la superficie de los líquidos inflamables. Por esta razón debe preverse que si persisten fuentes de ignición",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "54",
-      "sourcePage": 38,
-      "section": "2.3.3. Polvos especiales",
-      "concept": "Un agente extintor adecuado para el incendio de un metal de clase D puede ser peligroso al aplicarse al fuego de otro metal.",
-      "sourceEvidence": "Incluso un agente adecuado para ciertos fuegos Clase D puede resultar peligroso cuando se emplea sobre el fuego de otro metal.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "54",
-      "sourcePage": 38,
-      "section": "2.4.1. Nitrógeno N₂",
-      "concept": "El manual indica que históricamente se utilizaba poco el nitrógeno como extintor porque durante la extinción se podían producir cianógeno y peróxido de nitrógeno, ambos muy tóxicos.",
-      "sourceEvidence": "Antes apenas se utilizaba, principalmente porque al extinguir los fuegos producía cianógeno y peróxido de nitrógeno, ambos muy tóxicos",
+      "manualPage": "49",
+      "sourcePage": 33,
+      "section": "2.2.1. Agua (características y mecanismos de extinción)",
+      "concept": "El agua es el agente extintor más conocido, más abundante, más empleado y más barato.",
+      "sourceEvidence": "Es el agente extintor más conocido, más abundante, más empleado y más barato. Su uso es muy sencillo y se remonta a tiempos muy antiguos.",
       "itemType": "concepto",
       "evaluationType": "literal"
     },
     {
-      "manualPage": "55",
-      "sourcePage": 39,
-      "section": "2.4.3. Halones: mecanismos de extinción",
-      "concept": "Los halones extinguen primariamente por inhibición de la reacción en cadena y por sofocación; secundariamente, por enfriamiento.",
-      "sourceEvidence": "El mecanismo primario es inhibición, por acción catalítica negativa (rompe la reacción en cadena), y sofocación, por desplazamiento del oxígeno del aire. De forma secundaria extingue por enfriamiento.",
-      "itemType": "concepto",
-      "evaluationType": "comparacion"
-    },
-    {
-      "manualPage": "55",
-      "sourcePage": 39,
-      "section": "3.1. Agua: aplicaciones",
-      "concept": "Según el manual, el agua es muy eficaz para extinguir fuegos de clase A, pero en fuegos B y C se utiliza para su control, no para su extinción.",
-      "sourceEvidence": "El agua es muy efectiva en fuegos tipo A por su gran poder de enfriamiento y se utiliza en fuegos B y C para su control, no para su extinción.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.1. Agua: aplicación",
-      "concept": "En instalaciones fijas el agua pulverizada se aplica mediante rociadores o sprinklers, y su grado de pulverización depende de la cabeza rociadora.",
-      "sourceEvidence": "Su uso en instalaciones fijas se hace por medio de rociadores o sprinklers y en función del tipo de cabeza rociadora se logra más o menos pulverización.",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: aplicaciones",
-      "concept": "Las espumas pueden emplearse en incendios forestales como agente humectante.",
-      "sourceEvidence": "Forestales, en forma de humectante.",
-      "itemType": "concepto",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: aplicaciones",
-      "concept": "En sótanos de muy difícil acceso se puede inundar el recinto de espuma para extinguir por sofocación.",
-      "sourceEvidence": "Sótanos de muy difícil acceso, inundándolos de espuma y extinguiendo el incendio por sofocación pura.",
+      "manualPage": "49",
+      "sourcePage": 33,
+      "section": "2.1. Definición y características de los agentes extintores",
+      "concept": "La táctica y el agente extintor adecuados no pueden determinarse a priori: dependen del estudio de los factores presentes en el incendio y de la experiencia.",
+      "sourceEvidence": "Hay que tener presente que en la extinción de un incendio inciden numerosos y variados factores, por lo que no se puede decir a priori cuál es la táctica y el agente adecuado. Será la experiencia y el estudio de todos esos factores lo que indicará los objetivos a perseguir.",
       "itemType": "concepto",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: aplicaciones",
-      "concept": "Las espumas sirven para cubrir preventivamente derrames de hidrocarburos y se emplean en almacenamientos de combustibles líquidos, aeropuertos y determinadas plantas químicas.",
-      "sourceEvidence": "Fuegos de hidrocarburos, que incluyen la cubrición preventiva de derrames. Es el mejor agente extintor para almacenamientos de combustibles líquidos, en aeropuertos y en ciertas plantas químicas.",
+      "manualPage": "51",
+      "sourcePage": 35,
+      "section": "2.2.4. Espuma (características y mecanismos de extinción)",
+      "concept": "Las espumas físicas tienen una densidad relativa inferior a la del más ligero de los líquidos inflamables.",
+      "sourceEvidence": "Las espumas son masas de burbujas rellenas de gas (aire) que se forman al combinar un espumógeno (estabilizador), agua y aire y cuya densidad relativa es menor a la del más ligero de los líquidos inflamables.",
       "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: aplicaciones",
-      "concept": "En operaciones aeroportuarias se puede aplicar espuma sobre una pista de aterrizaje antes de que tome tierra una aeronave en dificultades.",
-      "sourceEvidence": "los aeroportuarios, que utilizan la espuma como agente extintor básico e incluso la emplean sobre una pista de aterrizaje antes de que aterrice una aeronave en dificultades.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: aplicaciones",
-      "concept": "La espuma es eficaz también en fuegos de clase A, pero el manual considera más conveniente utilizar agua por su menor coste.",
-      "sourceEvidence": "Es el agente más eficaz para fuegos de clase B. Es eficaz también en los de clase A, aunque por su precio es más conveniente la utilización del agua.",
-      "itemType": "excepcion",
-      "evaluationType": "comparacion"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: mezcla",
-      "concept": "Usar más espumógeno del porcentaje indicado por el fabricante produce espuma demasiado espesa, de peor fluidez y menor autonomía sin mejorar sustancialmente sus propiedades.",
-      "sourceEvidence": "La utilización de espumógeno en un porcentaje mayor que el recomendado no sólo resulta antieconómico, sino que da lugar a espumas excesivamente espesas, con peor fluidez y con menor autonomía",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: mezcla",
-      "concept": "Usar una mezcla de agua y espumógeno demasiado diluida produce espuma menos estable y resistente al calor, que se deteriora antes y puede no formar capa protectora.",
-      "sourceEvidence": "si la mezcla agua-espumógeno (espumante) resulta muy diluida se obtendrá una espuma menos estable y menos resistente al calor",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "56",
-      "sourcePage": 40,
-      "section": "3.2. Espumas: mezcla",
-      "concept": "Utilizar un espumógeno de media o alta expansión para generar espuma de baja expansión provoca una resistencia deficiente a la contaminación.",
-      "sourceEvidence": "La utilización de un espumógeno de media y alta expansión para generar espumas de baja expansión implica que la espuma resultante suele tener una pobre resistencia a la contaminación.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
+      "evaluationType": "literal"
     }
   ],
-  "finalCount": 353
+  "finalCount": 356
 }
