@@ -1,560 +1,210 @@
 {
-  "version": "t38-pdf-manual-2026-11-01-v1",
+  "version": "t38-pdf-manual-2026-11-01-v2",
   "topicId": 48,
   "topicName": "TEMA 38. TEORIA DEL FUEGO",
   "topicOrder": 38,
-  "originalCount": 281,
+  "originalCount": 333,
   "sourcePdfSha256": "7a024f2d43498f565498f376ccf13b19a6051cdab6e5aaf320525044a791a440",
   "updates": [
     {
-      "id": 22861,
-      "oldSource": 11,
-      "oldManual": "28",
-      "sourcePage": 11,
-      "manualPage": "27"
+      "id": 22973,
+      "oldSource": 28,
+      "oldManual": "44",
+      "sourcePage": 28,
+      "manualPage": "44",
+      "concept": "Fórmula de transferencia de calor por conducción: H = G × (Tc − Tf); G = k × A/L, donde G es la conductancia, k la conductividad térmica, A la superficie y L el espesor.",
+      "sourceEvidence": "Ley de transferencia de calor por conducción, imagen 22: H = G · (Tc − Tf); G = k · (A/L)."
     },
     {
-      "id": 22918,
-      "oldSource": 19,
-      "oldManual": "35",
-      "sourcePage": 18,
-      "manualPage": "34"
-    },
-    {
-      "id": 22942,
-      "oldSource": 22,
-      "oldManual": "38",
-      "sourcePage": 22,
-      "manualPage": "38",
-      "concept": "Definición general de pirólisis como descomposición de una sustancia por el calor",
-      "sourceEvidence": "Se define la pirólisis como la descomposición de una sustancia por el calor."
-    },
-    {
-      "id": 22946,
-      "oldSource": 4,
+      "id": 22947,
+      "oldSource": 24,
       "oldManual": "40",
       "sourcePage": 24,
-      "manualPage": "40"
-    },
-    {
-      "id": 22994,
-      "oldSource": 33,
-      "oldManual": "49",
-      "sourcePage": 32,
-      "manualPage": "48"
-    },
-    {
-      "id": 23078,
-      "oldSource": 34,
-      "oldManual": "34",
-      "sourcePage": 18,
-      "manualPage": "34"
-    },
-    {
-      "id": 23079,
-      "oldSource": 34,
-      "oldManual": "34",
-      "sourcePage": 18,
-      "manualPage": "34"
-    },
-    {
-      "id": 23080,
-      "oldSource": 35,
-      "oldManual": "35",
-      "sourcePage": 19,
-      "manualPage": "35"
-    },
-    {
-      "id": 23081,
-      "oldSource": 35,
-      "oldManual": "35",
-      "sourcePage": 19,
-      "manualPage": "35"
-    },
-    {
-      "id": 23082,
-      "oldSource": 36,
-      "oldManual": "36",
-      "sourcePage": 20,
-      "manualPage": "36"
-    },
-    {
-      "id": 23083,
-      "oldSource": 36,
-      "oldManual": "36",
-      "sourcePage": 20,
-      "manualPage": "36"
+      "manualPage": "40",
+      "sourceEvidence": "Tabla 6, clasificación por superficie afectada: I hasta 4 m², pequeño; II de 4 a 10 m², mediano; III de 10 a 100 m², grande; IV de 100 a 1.000 m², de envergadura; V de 1.000 a 5.000 m², de envergadura; VI de 5.000 a 10.000 m² (1 ha), de envergadura; VII de 1 a 25 ha, de envergadura; VIII de 12 a 100 ha, de envergadura; IX de 100 a 500 ha, de envergadura; X más de 5.000 ha, de envergadura. Intervalos reproducidos literalmente del manual, incluidos sus solapamientos y discontinuidades."
     }
   ],
   "additions": [
     {
-      "manualPage": "22",
-      "sourcePage": 6,
-      "section": "1.2.3. Reacciones nucleares",
-      "concept": "Las partículas con carga eléctrica pueden acelerarse con campos eléctricos y magnéticos; los neutrones y otras partículas neutras no pueden acelerarse por su carácter neutro.",
-      "sourceEvidence": "Las partículas con carga eléctrica se pueden acelerar con campos eléctricos y magnéticos; los neutrones, así como otras partículas neutras, no se pueden acelerar dado su carácter neutro.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "22",
-      "sourcePage": 6,
-      "section": "1.2.3. Reacciones nucleares",
-      "concept": "En la fisión nuclear, un núcleo pesado bombardeado con neutrones se vuelve inestable y se divide en dos núcleos, con emisión de dos o tres neutrones y gran desprendimiento de energía.",
-      "sourceEvidence": "La fisión nuclear es una reacción en la que un núcleo pesado, al ser bombardeado con neutrones, se convierte en inestable y se descompone en dos núcleos de un tamaño del mismo orden de magnitud, con gran desprendimiento de energía y la emisión de dos o tres neutrones.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "22",
-      "sourcePage": 6,
-      "section": "1.2.3. Reacciones nucleares",
-      "concept": "La reacción nuclear en cadena durante la fisión se produce cuando los neutrones emitidos originan nuevas fisiones en otros núcleos.",
-      "sourceEvidence": "Estos neutrones, a su vez, pueden ocasionar más fisiones al interaccionar con nuevos núcleos fisionables, que emitirán nuevos neutrones y así sucesivamente. Este efecto multiplicador se conoce con el nombre de reacción en cadena.",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "22",
-      "sourcePage": 6,
-      "section": "1.2.3. Reacciones nucleares",
-      "concept": "El manual compara la energía liberada en una fracción de segundo por fisión con un millón de veces la obtenida al quemar carbón o explotar dinamita de igual masa.",
-      "sourceEvidence": "En una fracción de segundo, el número de núcleos que se han fisionado libera una energía un millón de veces mayor que la obtenida al quemar un bloque de carbón o explotar un bloque de dinamita de la misma masa.",
+      "manualPage": "36",
+      "sourcePage": 20,
+      "section": "5.1.2. Rangos de inflamabilidad",
+      "concept": "Gasolina: límite inferior de inflamabilidad 1,5 % en volumen y límite superior 7,6 % en volumen, según la tabla 3.",
+      "sourceEvidence": "GASOLINA 1,5 7,6",
       "itemType": "dato_numerico",
       "evaluationType": "literal"
-    },
-    {
-      "manualPage": "22",
-      "sourcePage": 6,
-      "section": "1.2.3. Reacciones nucleares",
-      "concept": "En la fusión nuclear se unen dos núcleos ligeros para formar otro más pesado, con emisión habitual de partículas y gran energía en rayos gamma y energía cinética.",
-      "sourceEvidence": "La fusión nuclear es una reacción en la que dos núcleos de átomos ligeros se unen para formar otro núcleo más pesado. Generalmente esta unión va acompañada de la emisión de partículas. Esta reacción nuclear libera o absorbe gran cantidad de energía en forma de rayos gamma y también de energía cinética de las partículas emitidas.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "26",
-      "sourcePage": 10,
-      "section": "3.3.1. Humo",
-      "concept": "El humo, en proporción adecuada de calor y oxígeno, puede ser inflamable; en condiciones apropiadas también puede resultar explosivo.",
-      "sourceEvidence": "A la adecuada proporción de calor y oxígeno el humo es inflamable. Además puede llegar a ser inflamable y/o explosivo cuando se dan las condiciones adecuadas.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "26",
-      "sourcePage": 10,
-      "section": "3.3.1. Humo",
-      "concept": "Diferencia entre hollín, cenizas y escorias: hollín rico en carbono de combustión incompleta; cenizas como residuos inorgánicos en polvo de combustión completa; escorias como aglomerado sólido de residuos.",
-      "sourceEvidence": "Dentro del humo también se encuentran otras partículas además del hollín, como las cenizas (residuos inorgánicos en polvo, resultado de una combustión completa) o las escorias (aglomerado sólido de residuos provenientes de una combustión total o parcial",
-      "itemType": "clasificacion",
-      "evaluationType": "comparacion"
-    },
-    {
-      "manualPage": "26",
-      "sourcePage": 10,
-      "section": "3.3.1. Humo",
-      "concept": "El color del humo no permite identificar con seguridad qué está ardiendo, porque la percepción luminosa depende de múltiples factores externos.",
-      "sourceEvidence": "Es muy difícil saber qué está ardiendo por el color del humo, ya que la percepción luminosa depende de múltiples factores externos ajenos al proceso de combustión.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "27",
-      "sourcePage": 11,
-      "section": "3.3.2. Llamas",
-      "concept": "Las llamas pueden provocar histeria y nerviosismo en víctimas y deslumbramiento que dificulta al bombero percibir correctamente el entorno del fuego.",
-      "sourceEvidence": "Las llamas provocan principalmente reacciones de histeria y nerviosismo en las víctimas. En ocasiones producen deslumbramientos en el trabajo propio del bombero",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "28",
-      "sourcePage": 12,
-      "section": "3.3.3. Calor",
-      "concept": "Para elevar un litro de agua de 20 °C a 100 °C el manual calcula 80.000 calorías (80 kilocalorías) con 1 cal/g por 1.000 g por 80 °C.",
-      "sourceEvidence": "1 cal/gr x 1000 gr x 80 ºC = 80.000 calorías = 80 kilocalorías.",
-      "itemType": "dato_numerico",
-      "evaluationType": "calculo"
-    },
-    {
-      "manualPage": "30",
-      "sourcePage": 14,
-      "section": "3.3.3. Calor",
-      "concept": "La dilatación superficial es un aumento de superficie al calentar un cuerpo, con variación en largo y ancho.",
-      "sourceEvidence": "Es el aumento de superficie de un cuerpo al ser calentado. En ella predomina la variación en dos dimensiones de un cuerpo; es decir: el largo y el ancho.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "30",
-      "sourcePage": 14,
-      "section": "3.3.3. Calor",
-      "concept": "La dilatación cúbica o volumétrica es el aumento de volumen por calentamiento de un sólido de tres dimensiones, como una esfera, prisma o cubo.",
-      "sourceEvidence": "Es el aumento de volumen de un cuerpo al ser calentado. Se da en aquellos sólidos que tienen tres dimensiones (alto, ancho, profundo), por ejemplo esferas, prismas y cubos.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "37",
-      "sourcePage": 21,
-      "section": "5.2. Comburente",
-      "concept": "La nitrocelulosa puede experimentar combustión sin aporte externo distinto de la energía de activación porque incorpora tanto el agente oxidante como el reductor.",
-      "sourceEvidence": "algunos compuestos tales como la nitrocelulosa, al contener en su composición ambos agentes oxidante y reductor, pueden sufrir combustión sin más aporte externo que la energía de activación.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "37",
-      "sourcePage": 21,
-      "section": "5.2. Comburente",
-      "concept": "Los ácidos fuertes oxidantes, como el sulfúrico o nítrico, pueden provocar incendio al contactar materia orgánica sin fuente adicional de ignición.",
-      "sourceEvidence": "En contacto con materias orgánicas ciertos ácidos fuertes oxidantes (por ejemplo, ácido sulfúrico o nítrico) pueden causar combustiones y provocar incendios sin necesidad de una fuente de ignición adicional.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "37",
-      "sourcePage": 21,
-      "section": "5.2. Comburente",
-      "concept": "Un comburente alcanzado directamente por el fuego puede liberar oxígeno y sostener combustión incluso en una atmósfera sin oxígeno.",
-      "sourceEvidence": "Cuando se encuentra directamente afectada por el fuego la materia comburente libera oxígeno y da como resultado una combustión autosostenida, incluso en una atmósfera sin oxígeno.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "37",
-      "sourcePage": 21,
-      "section": "5.2. Comburente",
-      "concept": "Composición porcentual del aire en peso según tabla 5: nitrógeno 75,45% real y 76,8% de uso; oxígeno 23,2%; argón 1,3%; CO₂ 0,05%.",
-      "sourceEvidence": "Tabla 5. Comburente: nitrógeno 75,45 76,8; oxígeno 23,2 23,2; argón 1,3 0; CO2 0,05 0.",
-      "itemType": "tabla",
-      "evaluationType": "identificacion"
     },
     {
       "manualPage": "38",
       "sourcePage": 22,
       "section": "5.4. Reacciones en cadena",
-      "concept": "La reacción en cadena se considera asegurada a escala molecular cuando la energía liberada al reaccionar un número de moléculas activa otro número igual o mayor.",
-      "sourceEvidence": "La reacción en cadena está asegurada a nivel molecular cuando la energía desprendida por la reacción de un número de moléculas es suficiente para activar un número igual o mayor de ellas.",
+      "concept": "Según el manual, la reacción en cadena se automantiene por eliminación de los radicales libres (hidroxilos) y provoca sucesivas roturas de enlaces de carbono y oxígeno.",
+      "sourceEvidence": "La reacción en cadena consiste en el automantenimiento de la combustión por la eliminación de los radicales libres (hidroxilos).",
       "itemType": "concepto",
       "evaluationType": "comprension"
     },
     {
       "manualPage": "38",
       "sourcePage": 22,
-      "section": "5.5. Agentes pasivos",
-      "concept": "Los agentes pasivos no participan químicamente en la combustión, pero absorben o roban energía y modifican el comportamiento del fuego.",
-      "sourceEvidence": "Los agentes pasivos o pasivos, como comúnmente se los denomina, están presentes en cualquier proceso de combustión y no toman parte en la reacción química de combustión. Pero el hecho de que absorban o roben la energía (calor) afecta al comportamiento del fuego.",
+      "section": "5.4. Reacciones en cadena",
+      "concept": "La reacción en cadena solo aparece cuando hay combustión con llama, siempre que exista mezcla combustible-comburente y aporte energético suficiente.",
+      "sourceEvidence": "reacciones químicas complejas que sólo aparecen cuando hay combustión con llama. La reacción en cadena está asegurada",
       "itemType": "concepto",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6. Tipos de los incendios",
-      "concept": "La norma EN 2 clasifica los incendios según la naturaleza del combustible, la forma del foco, la superficie afectada y la situación o forma de manifestarse.",
-      "sourceEvidence": "la EN 2 (antigua norma derogada UNE- 23010), y los clasifica: Según la naturaleza del combustible. Por la forma del foco. Por la superficie afectada. Por la situación o forma de manifestarse.",
-      "itemType": "enumeracion",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6.1.1. Fuegos clase A",
-      "concept": "En los fuegos de clase A arden los vapores producidos por pirólisis del sólido; la propia pirólisis es descomposición por calor sin reacción con oxígeno.",
-      "sourceEvidence": "La pirólisis es una descomposición química de una materia producida por una elevación de la temperatura, sin reacción con el oxígeno. En la pirólisis no interviene el oxígeno, ya que no hay todavía combustión.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6.1.2. Fuegos clase B",
-      "concept": "Los fuegos de clase B proceden de líquidos o sólidos que se licuan antes de la ignición; arden sus vapores tras la vaporización y no producen brasas.",
-      "sourceEvidence": "Previamente debe tener lugar la evaporación. Se consideran líquidos también aquellos combustibles que, aun siendo sólidos, se licuan antes de alcanzar su temperatura de ignición (algunos plásticos). No producen brasas.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6.1.3. Fuegos clase C",
-      "concept": "Los fuegos de clase C son de combustibles en fase gaseosa y excluyen los gases producidos por evaporación de sólidos o líquidos.",
-      "sourceEvidence": "Son los fuegos de gases; es decir, combustibles en fase gaseosa (no las combustiones de los gases producidos en la evaporación de los combustibles sólidos o líquidos).",
+      "manualPage": "38",
+      "sourcePage": 22,
+      "section": "5.4. Reacciones en cadena",
+      "concept": "Para que la velocidad de la reacción en cadena pueda aumentar en las proporciones indicadas en el manual deben existir grandes cantidades de combustible y oxígeno.",
+      "sourceEvidence": "Para que esto ocurra deben existir grandes cantidades de combustible y de oxígeno.",
       "itemType": "excepcion",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6.1.4. Fuegos clase D",
-      "concept": "Los fuegos de metales clase D pueden desplazar el hidrógeno del agua y provocar explosiones; requieren agentes específicos y generalmente prohíben emplear agua.",
-      "sourceEvidence": "normalmente el fuego de este tipo de metales es capaz de desplazar el hidrógeno del agua, lo que provoca explosiones por combustión de este gas. Su extinción necesita agentes extintores específicos, ya que el uso del agua está prohibido en casi todos los casos.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "40",
-      "sourcePage": 24,
-      "section": "Clases de fuego",
-      "concept": "La antigua clase E para fuegos eléctricos no se reconoce como clase de fuego porque la electricidad no es combustible; al cortar la corriente se clasifica por el material que arde.",
-      "sourceEvidence": "Se extingue la antigua clase E (fuegos eléctricos), no reconocida por la normativa vigente debido a que la electricidad no es un combustible.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "40",
-      "sourcePage": 24,
-      "section": "6.2.1. Foco plano",
-      "concept": "Un foco plano se manifiesta sobre un plano horizontal con producto combustible visible desde cualquier punto; puede darse con líquidos en charcas o sólidos dispersos.",
-      "sourceEvidence": "Cuando el incendio se manifiesta sobre el plano horizontal con predominio dimensional sobre el vértice y la disposición del producto que arde no queda oculta a la observación directa",
-      "itemType": "concepto",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "40",
-      "sourcePage": 24,
-      "section": "6.2.2. Foco vertical",
-      "concept": "Un foco vertical se manifiesta en varios planos horizontales, inclinados o verticales, o tiene zonas en combustión ocultas a la observación, como en apilamientos.",
-      "sourceEvidence": "Cuando el incendio se manifiesta en varios planos horizontales o inclinados y verticales, o cuando varias zonas en combustión quedan ocultas a la observación (pacas de paja, apilamientos, etc.).",
-      "itemType": "concepto",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "40",
-      "sourcePage": 24,
-      "section": "6.2.3. Foco alimentado",
-      "concept": "Un foco alimentado se mantiene por aporte de combustible procedente de depósitos o tuberías todavía no afectados, como en una fuga de gas.",
-      "sourceEvidence": "Cuando el incendio plano o vertical es mantenido por la aportación de combustibles procedentes de depósitos no afectados, aljibes, pozos, tuberías, etc. (escapes de gas).",
-      "itemType": "concepto",
-      "evaluationType": "identificacion"
-    },
-    {
-      "manualPage": "48",
-      "sourcePage": 32,
-      "section": "1.2.2. Dilución del oxígeno",
-      "concept": "La inertización crea una zona de comburente diluido; la sofocación crea una zona sin renovación de comburente.",
-      "sourceEvidence": "Se considera como inertización el mecanismo de extinción que genera una zona de comburente diluido y sofocación al que genera una zona sin renovación de comburente.",
-      "itemType": "concepto",
-      "evaluationType": "comparacion"
-    },
-    {
-      "manualPage": "48",
-      "sourcePage": 32,
-      "section": "1.2.2. Dilución del oxígeno",
-      "concept": "La dilución del oxígeno no resulta eficaz si durante la combustión se está produciendo oxígeno.",
-      "sourceEvidence": "Si durante la combustión hay producción de oxígeno, este método no es efectivo.",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "48",
-      "sourcePage": 32,
-      "section": "1.3. Enfriamiento",
-      "concept": "El enfriamiento puede acompañarse de ventilación controlada si la entrada de aire contribuye a bajar temperatura y evacuar humo y gases sin agravar el incendio.",
-      "sourceEvidence": "Es el método más empleado y suele ir acompañado de ventilación controlada, siempre y cuando el aporte de comburente sirva para rebajar la temperatura y eliminar humo y gases en la atmósfera",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "49",
-      "sourcePage": 33,
-      "section": "2.2.1. Agua",
-      "concept": "El agua disuelve muchos productos de combustión como cenizas, permitiéndole alcanzar el núcleo de la combustión.",
-      "sourceEvidence": "Su gran capacidad como disolvente. El agua es capaz de disolver muchos productos de combustión (cenizas) de forma que puede alcanzar el núcleo de la combustión.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "49",
-      "sourcePage": 33,
-      "section": "2.2.1. Agua",
-      "concept": "La elevada tensión superficial del agua permite proyectarla como chorro sólido o gotas finas (niebla).",
-      "sourceEvidence": "Su elevada tensión superficial a temperatura ordinaria le permite comportarse como un chorro sólido o como gotas finas, llamadas también niebla.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "49",
-      "sourcePage": 33,
-      "section": "2.2.1. Agua",
-      "concept": "La densidad del agua confiere masa a los chorros y mejora su penetración al proyectarla con boquillas.",
-      "sourceEvidence": "Su densidad razonablemente elevada confiere una cierta masa a los chorros proyectados con boquillas, lo que consigue una gran penetración.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "49",
-      "sourcePage": 33,
-      "section": "2.2.1. Agua",
-      "concept": "Con el mismo volumen de agua, cuanto más pequeñas son las gotas mayor es la superficie de contacto, el enfriamiento y menor la conductividad eléctrica.",
-      "sourceEvidence": "A menor tamaño de gota e igualdad de volumen, mayor será la superficie de contacto de sus moléculas, y por tanto su capacidad de enfriamiento, a la par que disminuirá su conductividad eléctrica.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "49",
-      "sourcePage": 33,
-      "section": "2.2.1. Agua",
-      "concept": "El agua actúa también por sofocación al desplazar oxígeno al vaporizarse y por desalimentación al diluir combustibles líquidos hidrosolubles.",
-      "sourceEvidence": "Sofocación: actúa por sofocación y logra desplazar el oxígeno que rodea al fuego debido al aumento de volumen que experimenta. Desalimentación: en el caso de combustibles líquidos hidrosolubles actúa también por dilución del combustible.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "50",
-      "sourcePage": 34,
-      "section": "2.2.3. Agua con boratos",
-      "concept": "Al evaporarse el agua con boratos, sus cristales pierden hidratación, se expanden y forman una capa vidriosa dura que retiene agua y evita el escurrimiento.",
-      "sourceEvidence": "Al calentarse el agua se evapora, tras lo cual los cristales de borato restantes pierden su agua de hidratación y se esponjan mientras se escapa el vapor.",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "50",
-      "sourcePage": 34,
-      "section": "2.2.3. Agua con boratos",
-      "concept": "El agua con boratos retarda las llamas y forma recubrimiento aislante; su inconveniente es que asienta rápido y requiere uso inmediato.",
-      "sourceEvidence": "Los boratos poseen propiedades químicas de retardo de la llama, además de proporcionar un recubrimiento aislante térmico. Presentan el inconveniente de que asientan muy deprisa, por lo que es conveniente usarla rápidamente tras su elaboración.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.3. Agua con aditivos",
-      "concept": "Los detergentes en suspensión de combustible reducen la presión de vapor hasta que los vapores emitidos quedan por debajo del límite inferior de inflamabilidad.",
-      "sourceEvidence": "Esto disminuye la presión de vapor del combustible hasta un punto en el que la cantidad de vapor desprendida es menor que el límite inferior de inflamabilidad, lo que detiene su combustión.",
-      "itemType": "procedimiento",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "Las espumas necesitan cohesión entre burbujas, estabilidad o retención del agua —medida con tiempo de drenaje— y fluidez.",
-      "sourceEvidence": "Estabilidad o capacidad de retención del agua con el fin de conseguir el adecuado grado de enfriamiento. Se expresa mediante el tiempo de drenaje.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "La resistencia de una espuma al calor y a la contaminación del combustible evita que se degrade o se destruya la capa espumosa.",
-      "sourceEvidence": "Resistencia al calor que le permite resistir los efectos del propio fuego o elementos calientes. Resistencia a ser contaminada por el propio combustible, lo que podría llevar a la destrucción de la capa",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "Los combustibles líquidos polares pueden extraer agua y destruir las espumas ordinarias; se necesitan tipos especiales.",
-      "sourceEvidence": "La mayoría de las espumas, excepto tipos especiales como la AFFF, se ven afectadas por los combustibles líquidos de tipo polar",
-      "itemType": "excepcion",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "Las espumas presentan conductividad eléctrica, normalmente mayor cuanto menor es su expansión, por lo que no se usan sobre equipos energizados salvo aplicaciones especiales.",
-      "sourceEvidence": "Todas las espumas presentan una cierta conductividad eléctrica, normalmente mayor cuanto menor es su grado de expansión",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "Los espumógenos presentan toxicidad nula o muy ligera; algunos pueden provocar irritación que suele eliminarse lavando con agua.",
-      "sourceEvidence": "Toxicidad nula o muy ligera. Determinados espumógenos pueden producir irritación que se suele eliminar por simple lavado con agua.",
-      "itemType": "concepto",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "La espuma es el principal agente extintor para combustibles líquidos inflamables de clase B.",
-      "sourceEvidence": "La espuma es el principal agente extintor para líquidos inflamables o combustibles B.",
+      "manualPage": "52",
+      "sourcePage": 36,
+      "section": "2.2.4. Espumas: componentes",
+      "concept": "Las espumas fluorosintéticas utilizan tensioactivos sintéticos fluorados y son generalmente de baja expansión.",
+      "sourceEvidence": "Fluorosintéticos: sus tensoactivos son sintéticos fluorados. Son generalmente de baja expansión.",
       "itemType": "clasificacion",
       "evaluationType": "identificacion"
     },
     {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "El mecanismo principal de las espumas es sofocar: aíslan el combustible del oxígeno y evitan la emisión de vapores inflamables y tóxicos.",
-      "sourceEvidence": "el principal efecto que consiguen las espumas es separar el combustible del oxígeno en la superficie del combustible.",
-      "itemType": "concepto",
+      "manualPage": "53",
+      "sourcePage": 37,
+      "section": "2.3. Agentes extintores sólidos",
+      "concept": "Los polvos extintores pueden aplicarse mediante extintores portátiles, monitores, mangueras manuales o sistemas fijos.",
+      "sourceEvidence": "La mezcla de polvos que se emplea como agente extintor se aplica por medio de extintores portátiles, monitores, mangueras manuales o sistemas fijos.",
+      "itemType": "procedimiento",
+      "evaluationType": "identificacion"
+    },
+    {
+      "manualPage": "53",
+      "sourcePage": 37,
+      "section": "2.3.1. Polvos BC",
+      "concept": "Tras apagar un fuego de líquido inflamable con polvo BC, la proximidad de focos de ignición puede causar una reignición porque el polvo no mantiene atmósferas inertes duraderas.",
+      "sourceEvidence": "Los polvos secos no producen atmósferas inertes duraderas por encima de la superficie de los líquidos inflamables. Por esta razón debe preverse que si persisten fuentes de ignición",
+      "itemType": "excepcion",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "En espumas de alta expansión, la sofocación se produce cuando la espuma ocupa el volumen del recinto y desplaza completamente el aire.",
-      "sourceEvidence": "En el caso de las espumas de alta expansión el efecto de sofocación se consigue porque desplaza totalmente el aire, al ocupar la espuma todo el volumen del recinto.",
-      "itemType": "concepto",
+      "manualPage": "54",
+      "sourcePage": 38,
+      "section": "2.3.3. Polvos especiales",
+      "concept": "Un agente extintor adecuado para el incendio de un metal de clase D puede ser peligroso al aplicarse al fuego de otro metal.",
+      "sourceEvidence": "Incluso un agente adecuado para ciertos fuegos Clase D puede resultar peligroso cuando se emplea sobre el fuego de otro metal.",
+      "itemType": "excepcion",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "51",
-      "sourcePage": 35,
-      "section": "2.2.4. Espumas físicas",
-      "concept": "Las espumas también enfrían por su contenido en agua; una estabilidad suficiente evita la reignición del combustible.",
-      "sourceEvidence": "Si la espuma posee suficiente estabilidad (capacidad de retención del agua) evita que el combustible vuelva a incendiarse.",
+      "manualPage": "54",
+      "sourcePage": 38,
+      "section": "2.4.1. Nitrógeno N₂",
+      "concept": "El manual indica que históricamente se utilizaba poco el nitrógeno como extintor porque durante la extinción se podían producir cianógeno y peróxido de nitrógeno, ambos muy tóxicos.",
+      "sourceEvidence": "Antes apenas se utilizaba, principalmente porque al extinguir los fuegos producía cianógeno y peróxido de nitrógeno, ambos muy tóxicos",
       "itemType": "concepto",
+      "evaluationType": "literal"
+    },
+    {
+      "manualPage": "55",
+      "sourcePage": 39,
+      "section": "2.4.3. Halones: mecanismos de extinción",
+      "concept": "Los halones extinguen primariamente por inhibición de la reacción en cadena y por sofocación; secundariamente, por enfriamiento.",
+      "sourceEvidence": "El mecanismo primario es inhibición, por acción catalítica negativa (rompe la reacción en cadena), y sofocación, por desplazamiento del oxígeno del aire. De forma secundaria extingue por enfriamiento.",
+      "itemType": "concepto",
+      "evaluationType": "comparacion"
+    },
+    {
+      "manualPage": "55",
+      "sourcePage": 39,
+      "section": "3.1. Agua: aplicaciones",
+      "concept": "Según el manual, el agua es muy eficaz para extinguir fuegos de clase A, pero en fuegos B y C se utiliza para su control, no para su extinción.",
+      "sourceEvidence": "El agua es muy efectiva en fuegos tipo A por su gran poder de enfriamiento y se utiliza en fuegos B y C para su control, no para su extinción.",
+      "itemType": "excepcion",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "57",
-      "sourcePage": 41,
-      "section": "3.2. Espumas (aplicaciones)",
-      "concept": "Antes de usar espuma debe disponerse del espumógeno necesario para neutralizar el siniestro; el mando intermedio debe calcularlo.",
-      "sourceEvidence": "Como regla general de uso no se debe utilizar la espuma hasta que no se disponga del espumógeno necesario para neutralizar el siniestro.",
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.1. Agua: aplicación",
+      "concept": "En instalaciones fijas el agua pulverizada se aplica mediante rociadores o sprinklers, y su grado de pulverización depende de la cabeza rociadora.",
+      "sourceEvidence": "Su uso en instalaciones fijas se hace por medio de rociadores o sprinklers y en función del tipo de cabeza rociadora se logra más o menos pulverización.",
       "itemType": "procedimiento",
       "evaluationType": "comprension"
     },
     {
-      "manualPage": "57",
-      "sourcePage": 41,
-      "section": "3.2. Espumas (aplicaciones)",
-      "concept": "Como la espuma contiene más de un 95% de agua, sus limitaciones son similares a las del agua; además tiene coste elevado y requiere gran almacenamiento.",
-      "sourceEvidence": "Como en su composición interviene el agua en más de un 95% las limitaciones son prácticamente las mismas que las del agua. Es de precio elevado y hay que prever gran cantidad en almacenamiento.",
-      "itemType": "dato_numerico",
-      "evaluationType": "comprension"
-    },
-    {
-      "manualPage": "57",
-      "sourcePage": 41,
-      "section": "3.2. Espumas (aplicaciones)",
-      "concept": "Para producir espuma se necesitan proporcionadores, lanzas de media y baja presión y generadores de alta expansión, además de los equipos de agua.",
-      "sourceEvidence": "Para la producción de espuma se necesitan equipos especiales, además de los del agua. Estos equipos son los proporcionadores, las lanzas de media y baja presión y los generadores de alta expansión.",
-      "itemType": "enumeracion",
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: aplicaciones",
+      "concept": "Las espumas pueden emplearse en incendios forestales como agente humectante.",
+      "sourceEvidence": "Forestales, en forma de humectante.",
+      "itemType": "concepto",
       "evaluationType": "identificacion"
     },
     {
-      "manualPage": "57",
-      "sourcePage": 41,
-      "section": "3.4.2. CO₂ (aplicaciones)",
-      "concept": "El CO₂ se emplea también en extintores portátiles y en sistemas automáticos de inundación total con instalaciones de 3 o 4 toneladas.",
-      "sourceEvidence": "También se utiliza en extintores de todos los tamaños y en grandes instalaciones automáticas con 3 o 4 toneladas de dióxido de carbono",
-      "itemType": "dato_numerico",
-      "evaluationType": "literal"
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: aplicaciones",
+      "concept": "En sótanos de muy difícil acceso se puede inundar el recinto de espuma para extinguir por sofocación.",
+      "sourceEvidence": "Sótanos de muy difícil acceso, inundándolos de espuma y extinguiendo el incendio por sofocación pura.",
+      "itemType": "concepto",
+      "evaluationType": "comprension"
     },
     {
-      "manualPage": "39",
-      "sourcePage": 23,
-      "section": "6.1.1. Fuegos clase A",
-      "concept": "Definición de pirólisis de la norma ISO 13943 como descomposición química irreversible debida al aumento de temperatura",
-      "sourceEvidence": "La norma ISO 13943 define la pirólisis como aquella parte del proceso de descomposición química irreversible causado por el incremento de la temperatura.",
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: aplicaciones",
+      "concept": "Las espumas sirven para cubrir preventivamente derrames de hidrocarburos y se emplean en almacenamientos de combustibles líquidos, aeropuertos y determinadas plantas químicas.",
+      "sourceEvidence": "Fuegos de hidrocarburos, que incluyen la cubrición preventiva de derrames. Es el mejor agente extintor para almacenamientos de combustibles líquidos, en aeropuertos y en ciertas plantas químicas.",
       "itemType": "concepto",
-      "evaluationType": "literal"
+      "evaluationType": "comprension"
+    },
+    {
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: aplicaciones",
+      "concept": "En operaciones aeroportuarias se puede aplicar espuma sobre una pista de aterrizaje antes de que tome tierra una aeronave en dificultades.",
+      "sourceEvidence": "los aeroportuarios, que utilizan la espuma como agente extintor básico e incluso la emplean sobre una pista de aterrizaje antes de que aterrice una aeronave en dificultades.",
+      "itemType": "concepto",
+      "evaluationType": "comprension"
+    },
+    {
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: aplicaciones",
+      "concept": "La espuma es eficaz también en fuegos de clase A, pero el manual considera más conveniente utilizar agua por su menor coste.",
+      "sourceEvidence": "Es el agente más eficaz para fuegos de clase B. Es eficaz también en los de clase A, aunque por su precio es más conveniente la utilización del agua.",
+      "itemType": "excepcion",
+      "evaluationType": "comparacion"
+    },
+    {
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: mezcla",
+      "concept": "Usar más espumógeno del porcentaje indicado por el fabricante produce espuma demasiado espesa, de peor fluidez y menor autonomía sin mejorar sustancialmente sus propiedades.",
+      "sourceEvidence": "La utilización de espumógeno en un porcentaje mayor que el recomendado no sólo resulta antieconómico, sino que da lugar a espumas excesivamente espesas, con peor fluidez y con menor autonomía",
+      "itemType": "procedimiento",
+      "evaluationType": "comprension"
+    },
+    {
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: mezcla",
+      "concept": "Usar una mezcla de agua y espumógeno demasiado diluida produce espuma menos estable y resistente al calor, que se deteriora antes y puede no formar capa protectora.",
+      "sourceEvidence": "si la mezcla agua-espumógeno (espumante) resulta muy diluida se obtendrá una espuma menos estable y menos resistente al calor",
+      "itemType": "procedimiento",
+      "evaluationType": "comprension"
+    },
+    {
+      "manualPage": "56",
+      "sourcePage": 40,
+      "section": "3.2. Espumas: mezcla",
+      "concept": "Utilizar un espumógeno de media o alta expansión para generar espuma de baja expansión provoca una resistencia deficiente a la contaminación.",
+      "sourceEvidence": "La utilización de un espumógeno de media y alta expansión para generar espumas de baja expansión implica que la espuma resultante suele tener una pobre resistencia a la contaminación.",
+      "itemType": "excepcion",
+      "evaluationType": "comprension"
     }
   ],
-  "finalCount": 333
+  "finalCount": 353
 }
