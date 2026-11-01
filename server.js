@@ -3187,15 +3187,91 @@ ${JSON.stringify(pairs)}
     ? parsed.decisions
     : [];
 }
-async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5){
+// TEMA 39 HIDRÁULICA: reglas de ingesta y control, exclusivas del PDF CEIS
+// unificado ya verificado. No añade fases API; solo bloques menores en T39.
+const T39_CEIS_PDF_SHA256='a8722d6b34c5d5c75a91f60cfbaf5670e7e60099f2ad0ce225bf655cd12faa1e';
+function isT39CoverageSource(topic){
+  return String(topic?.block||'').toLowerCase()==='especifico' &&
+    coverageTopicNumber(topic?.name)===39 &&
+    /hidr[aá]ulica/i.test(String(topic?.name||''));
+}
+const T39_COVERAGE_EXTRACTION_GUIDE=String.raw`
+EXTRACCIÓN ESPECÍFICA DEL TEMA 39 — HIDRÁULICA CEIS GUADALAJARA:
+- Lee la fuente visual REAL del PDF; la representación de ecuaciones no siempre aparece en el texto extraíble. Respeta subíndices, exponentes, letras griegas, fracciones, intervalos, unidades y signos.
+- Solo son examinables las páginas impresas 64–71 y 74–80. La portada y la página impresa 81 «CONVIENE RECORDAR» son material auxiliar: NO extraigas fichas de esas dos páginas ni de pies de foto puramente editoriales. No conviertas títulos de tablas, ilustraciones o epígrafes en un conocimiento sin hecho técnico.
+- TABLAS: cada pareja/combinación NUMÉRICA verificable es una unidad autónoma; usa una sección que identifique inequívocamente la tabla, el nombre de la fila y TODAS las condiciones de sus columnas. No sustituyas 14 correspondencias de presión de vapor por «la presión aumenta con la temperatura» ni 21 celdas de pérdida de carga por «depende de caudal y diámetro». Nunca inventes celdas, interpolaciones ni valores fuera del rango impreso.
+- Tabla 1 (p. 64): 6 densidades relativas. Tabla 2 (p. 66): 14 parejas temperatura-presión de vapor. Tabla 3 (p. 67): cinco filas numéricas impresas, pero la fila «1 ATM = 1,013 kg/cm²» contradice la primera fila y NO debe guardarse como conocimiento examinable correcto ni generar preguntas a partir de ella. Conservar intacto el PDF original y registrar SOLO las otras cuatro equivalencias no contradictorias. No extraer la fila ajena «Madera 0,5» de esta tabla (ya está en la Tabla 1).
+- Tabla 4 (p. 71): por cada uno de los tres tipos de lanza, distinguir mínimos y máximos de diámetro y de caudal nominal, 12 extremos numéricos con las condiciones h=70 m.c.a. y K=0,9. Tabla 8 (p. 79) reproduce la Tabla 4: NO DUPLICAR esos doce conocimientos.
+- Tabla 5 (p. 75): 12 parejas altitud-presión atmosférica. Tabla 6 (p. 75): 7 parejas temperatura-pérdida de aspiración. Tabla 7 (p. 78): exactamente 21 triples válidos CAUDAL + DIÁMETRO + PÉRDIDA; NO registrar las 11 casillas con asterisco ni la casilla vacía (NO son valores). Tabla 9 (p. 79): 12 triples tipo de lanza + presión + alcance. Referencia: 89 valores/correspondencias numéricas impresas, de los cuales 88 son examinables sin contradicción; la fila contradictoria de la Tabla 3 NO se publicará como hecho correcto. No confundas recuento de celdas con número de tablas.
+- FÓRMULAS: revisa una por una todas las ecuaciones visibles, incluidas las de densidad, peso específico, presión absoluta/relativa, hidrostática, Pascal, Arquímedes, Reynolds, caudal, continuidad, Bernoulli, Torricelli, caudal teórico/real, bombas serie/paralelo, ecuación de línea, pérdidas y reacción en lanza. Como referencia hay 33 familias distintas (41 apariciones con repeticiones): registra por separado la expresión, magnitudes/condiciones y los conocimientos numéricos independientes, pero no multipliques despejes equivalentes sin contenido adicional. Usa itemType «formula» y sourceEvidence autosuficiente con la expresión EXACTA y la página impresa. No confundir la letra η de Reynolds con el rendimiento de una bomba.
+- GRÁFICAS: examina sus ejes, variables, trazos, sentido, intersecciones y relaciones cualitativas demostrables, sin inventar valores por lectura aproximada. Revisa las imágenes 2, 19, 20, 21, 22, 24, 25 y 26. Incluye en sourceEvidence «Imagen N» y la relación técnica legible. En la imagen 22 (p. 77) el título superior y la etiqueta de la curva roja dicen ERRÓNEAMENTE «paralelo»: representan bombas EN SERIE, según teoría, fórmula, esquema y pie; no alterar estos últimos ni confundir con la imagen 21 (paralelo).
+- REGLA FÍSICA CONFIRMADA: la densidad (p. 64) es magnitud ESCALAR aunque en el PDF figure «vectorial»; no copies ese error a las fichas. El caudal es Q=V/t y Q=S·v, no solo velocidad. El resto del PDF debe permanecer intacto.
+- FIGURAS: no generes ni inventes imágenes nuevas. Si para contestar es imprescindible ver la figura, la posterior pregunta deberá mostrar la figura original o quedar descartada.
+- Revisa también el texto técnico de esas páginas: conceptos, condiciones, riesgos, procedimientos, unidades, ejemplos de pérdidas singulares (dos en p. 78), detalles de máquinas y variables. El subtotal documental 89+33+8+2 NO es el total del tema: no descuides la teoría para alcanzar una cifra.
+- DEVUELVE en section «Tabla N. ...» para unidades de una tabla y «Imagen N. ...» para gráficas; para fórmulas usa el epígrafe real. Cada valor del PDF debe aparecer ligado a su clave completa, no en una enumeración sin trazabilidad.
+`;
+function t39IsDuplicatedTable8Numeric(item){
+  return Number(item?.sourcePage)===15 && item?.itemType==='dato_numerico' &&
+    /\btabla\s*8\b/i.test(String(item?.section||'')+' '+String(item?.concept||'')+' '+String(item?.sourceEvidence||''));
+}
+function t39IsContradictoryTable3Numeric(item){
+  if(Number(item?.sourcePage)!==5 || item?.itemType!=='dato_numerico')return false;
+  const text=String(item?.section||'')+' '+String(item?.concept||'')+' '+String(item?.sourceEvidence||'');
+  return /\btabla\s*3\b/i.test(text) &&
+    /1\s*atm/i.test(text) && /1[,\.]013\s*(?:kg|kgf)/i.test(text);
+}
+function t39CoverageQualityGate(items){
+  // No se publica una nueva cobertura si omite por completo una tabla/figura
+  // o si se cuelan portada y resumen. Evita comprometer material previo.
+  const list=Array.isArray(items)?items:[];
+  if(list.some(x=>!Number.isInteger(Number(x.sourcePage)) ||
+      Number(x.sourcePage)<2 || Number(x.sourcePage)>16))
+    throw new Error('T39: página fuera de 2–16 (portada/resumen excluidos). No se guarda cobertura.');
+  const tables=new Map([[1,[6,2]],[2,[14,4]],[3,[4,5]],
+    [4,[12,9]],[5,[12,11]],[6,[7,11]],[7,[21,14]],[9,[12,15]]]);
+  const normalized=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const gaps=[];
+  for(const [no,[expected,physicalPage]] of tables){
+    const matches=list.filter(x=>Number(x.sourcePage)===physicalPage &&
+      new RegExp(`\\btabla\\s*${no}\\b`,'i').test(
+        normalized(String(x.section||'')+' '+String(x.concept||'')+' '+String(x.sourceEvidence||''))) &&
+      x.itemType==='dato_numerico' && /\d/.test(String(x.sourceEvidence||'')));
+    const distinct=new Set(matches.map(x=>
+      normalized(String(x.concept||'')+' '+String(x.sourceEvidence||'')))).size;
+    if(distinct<expected)gaps.push(`Tabla ${no}: ${distinct}/${expected}`);
+  }
+  // La figura debe identificarse en su página REAL, no por una mención
+  // casual en otro apartado. No se infieren datos de la gráfica.
+  for(const [number,physicalPage] of [[2,3],[19,10],[20,10],[21,12],
+    [22,13],[24,14],[25,14],[26,15]]){
+    if(!list.some(x=>Number(x.sourcePage)===physicalPage &&
+      new RegExp(`\\bimagen\\s*${number}\\b`,'i').test(
+        normalized(String(x.section||'')+' '+String(x.concept||'')+' '+String(x.sourceEvidence||'')))))
+      gaps.push(`Imagen ${number} ausente o en página incorrecta`);
+  }
+  const formulaCount=new Set(list.filter(x=>x.itemType==='formula' &&
+    /[=√÷×·/]/.test(String(x.sourceEvidence||''))).map(x=>
+      normalized(String(x.concept||'')+' '+String(x.sourceEvidence||'')))).size;
+  if(formulaCount<33)gaps.push(`Fórmulas distintas con expresión visible: ${formulaCount}/33 de referencia`);
+  if(gaps.length)throw new Error('T39: inventario estructural incompleto: '+
+    gaps.join('; ')+'. No se sustituye la cobertura anterior.');
+  return {tablasExaminables:88,filasNumericasImpresas:89,
+    formulas:formulaCount,graficas:8};
+}
+async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5, physicalRange=null){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
 
   const totalPages=sourcePdf.getPageCount();
+  const firstIndex=physicalRange?physicalRange.first-1:0;
+  const lastExclusive=physicalRange?physicalRange.last:totalPages;
+  if(!Number.isInteger(firstIndex)||!Number.isInteger(lastExclusive)||
+     firstIndex<0||lastExclusive>totalPages||firstIndex>=lastExclusive)
+    throw new Error('PDF: intervalo de páginas físicas inválido.');
   const chunks=[];
 
-  for(let start=0; start<totalPages; start+=pagesPerChunk){
-    const end=Math.min(start+pagesPerChunk,totalPages);
+  for(let start=firstIndex; start<lastExclusive; start+=pagesPerChunk){
+    const end=Math.min(start+pagesPerChunk,lastExclusive);
 
     const chunkPdf=await PDFDocument.create();
     const pageIndexes=[];
@@ -5569,6 +5645,12 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       }
     );
     const iiffManual86=isIiffManual86(topic);
+    const t39HydraulicCoverage=isT39CoverageSource(topic);
+    if(t39HydraulicCoverage){
+      const hash=createHash('sha256').update(fs.readFileSync(pdfPath)).digest('hex');
+      if(hash!==T39_CEIS_PDF_SHA256)
+        throw new Error('T39: este PDF no coincide con el Tema 39 CEIS verificado. No se descartan páginas ni se modifica la cobertura.');
+    }
     const iiffPdfHash86=iiffManual86
       ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
       : null;
@@ -5620,6 +5702,7 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     // El PDF antiguo sigue activo si el procesamiento fracasa.
 const coverageChunkPages=
   coverageTopicNumber(topic.name)===22 ? 1 :
+  t39HydraulicCoverage ? 3 :
   structuredSource ? 2 : 5;
 
 const literalItems=structuredSource?.literalItems || null;
@@ -5627,7 +5710,10 @@ const literalItems=structuredSource?.literalItems || null;
 // Evitar dividir páginas y llamar dos veces a Gemini sin necesidad.
 const {totalPages,chunks}=literalItems
   ? {totalPages:structuredSource.recordPages,chunks:[]}
-  : await splitPdfIntoChunks(pdfPath,coverageChunkPages);
+  : await splitPdfIntoChunks(pdfPath,coverageChunkPages,
+      t39HydraulicCoverage?{first:2,last:16}:null);
+if(t39HydraulicCoverage && totalPages!==17)
+  throw new Error('T39: el PDF esperado debe tener 17 páginas físicas. No se sustituye cobertura.');
 if(literalItems){
   console.log(`[coverage] Extracción literal PDF: ${literalItems.length} registros, `+
     `${new Set(literalItems.map(x=>x.section)).size} secciones; sin llamadas a Gemini.`);
@@ -5730,7 +5816,7 @@ manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
     coverageAnalysisPrompt(
   topic.name,
   allItems
-)+
+)+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')+
           `
 
 IMPORTANTE:
@@ -5876,7 +5962,7 @@ allItems.filter(item=>{
     sourcePage >= 1 &&
     sourcePage < chunk.startPage;
 })
-        )
+        )+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')
       },
       {
         inlineData:{
@@ -5916,7 +6002,9 @@ allItems.push(...auditItems);
 console.log(
   `COVERAGE AUDIT: completada. Añadidos ${auditItems.length} elementos. Total: ${allItems.length}`
 );
-const deduplicatedItems=deduplicateCoverageItems(allItems);
+const deduplicatedItems=deduplicateCoverageItems(allItems).filter(item=>
+  !t39HydraulicCoverage ||
+  !(t39IsDuplicatedTable8Numeric(item)||t39IsContradictoryTable3Numeric(item)));
 
 console.log(
   `COVERAGE: deduplicación exacta/normalizada: ${allItems.length} -> ${deduplicatedItems.length}`
@@ -6032,6 +6120,12 @@ const parsed={
       throw new Error(
         `COVERAGE TEMA 27 incompleta: ${validItems.length} elementos válidos; mínimo estructural esperado: 86.`
       );
+    }
+    // Tema 39: solo publicar si las tablas, fórmulas y gráficas están
+    // representadas como unidades independientes; no pagar otra ronda Gemini.
+    if(t39HydraulicCoverage){
+      const qc=t39CoverageQualityGate(validItems);
+      console.log('[coverage][T39] estructura validada',JSON.stringify(qc));
     }
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
