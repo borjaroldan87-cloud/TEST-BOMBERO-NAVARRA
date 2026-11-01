@@ -1,0 +1,5 @@
+Tema 38 — complemento V3, tres conocimientos.
+Solo sustituir el archivo data/tema38_repair_v1.json en GitHub.
+No subir PDF, no tocar server.js.
+Estado previo exigido: 353 conocimientos, sin preguntas ni actividad en tema 48.
+Esperado: 356. Marcador v3 para ejecución única.
