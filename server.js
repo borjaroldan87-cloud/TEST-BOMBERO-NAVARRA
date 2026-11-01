@@ -3258,6 +3258,75 @@ function t39CoverageQualityGate(items){
   return {tablasExaminables:88,filasNumericasImpresas:89,
     formulas:formulaCount,graficas:8};
 }
+// T39: la misma página puede llegar como física, impresa o relativa al PDF
+// de tres páginas enviado a Gemini. Solo admitimos localizaciones verificables
+// dentro del bloque actual; jamás asignamos páginas por proximidad.
+function t39NormalizePageReferences(items,chunk){
+  const input=Array.isArray(items)?items:[];
+  const size=chunk.endPage-chunk.startPage+1;
+  const printedToPhysical=p=>
+    p>=64&&p<=71?p-62:(p>=74&&p<=80?p-64:null);
+  const physicalToPrinted=p=>
+    p>=2&&p<=9?p+62:(p>=10&&p<=16?p+64:null);
+  const reportedPages=input.map(x=>x?.sourcePage===null||x?.sourcePage===undefined
+    ?null:Number(x.sourcePage)).filter(Number.isInteger);
+  const relativeBlock=reportedPages.length>0 &&
+    reportedPages.every(p=>p>=1 && p<=size) &&
+    reportedPages.some(p=>p<chunk.startPage);
+  let corrected=0,excluded=0;
+  const output=[];
+  for(const item of input){
+    if(!item || typeof item!=='object'){excluded++;continue;}
+    const source=item.sourcePage===null||item.sourcePage===undefined
+      ?null:Number(item.sourcePage);
+    const printedText=String(item.manualPage??'').trim();
+    const asciiPrinted=printedText.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const printed=/^(?:p(?:ag(?:ina)?)?\.?\s*)?(\d{2,3})$/i.exec(asciiPrinted);
+    const manual=printed?Number(printed[1]):null;
+    const mappedManual=manual===null?null:printedToPhysical(manual);
+    let physical=null;
+    // La numeración impresa conocida del PDF unificado es un ancla inequívoca.
+    if(mappedManual!==null && mappedManual>=chunk.startPage &&
+       mappedManual<=chunk.endPage){
+      physical=mappedManual;
+    }else if(manual!==null){
+      // Metadato de otra página, fuera de rango, o resumen: no falsear procedencia.
+      excluded++;
+      console.warn(`[T39] Registro descartado: página impresa incompatible `+
+        `${printedText}; bloque ${chunk.startPage}-${chunk.endPage}`);
+      continue;
+    }else if(Number.isInteger(source)){
+      if(relativeBlock && source>=1 && source<=size){
+        physical=chunk.startPage+source-1;
+      }else if(source>=chunk.startPage && source<=chunk.endPage){
+        physical=source;
+      }else{
+        const mappedSource=printedToPhysical(source);
+        if(mappedSource!==null && mappedSource>=chunk.startPage &&
+           mappedSource<=chunk.endPage){
+          physical=mappedSource;
+        }else if(source>=1 && source<=size){
+          physical=chunk.startPage+source-1;
+        }
+      }
+    }
+    if(physical===null){
+      excluded++;
+      console.warn(`[T39] Registro descartado: referencia no verificable `+
+        `sourcePage=${String(item.sourcePage)}, `+
+        `manualPage=${printedText||'null'}, bloque `+
+        `${chunk.startPage}-${chunk.endPage}; concepto=`+
+        `${String(item.concept||'').slice(0,75)}`);
+      continue;
+    }
+    const canonicalManual=physicalToPrinted(physical);
+    if(source!==physical || String(item.manualPage??'')!==String(canonicalManual))corrected++;
+    output.push({...item,sourcePage:physical,manualPage:canonicalManual});
+  }
+  console.log(`[T39] Referencias de bloque ${chunk.startPage}-${chunk.endPage}: `+
+    `${output.length} válidas, ${corrected} normalizadas, ${excluded} descartadas`);
+  return output;
+}
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5, physicalRange=null){
   const sourceBytes=fs.readFileSync(pdfPath);
   const sourcePdf=await PDFDocument.load(sourceBytes);
@@ -5724,6 +5793,7 @@ console.log(
   `COVERAGE: ${totalPages} páginas divididas en ${chunks.length} bloques`
 );
 const normalizeChunkSourcePages=(items,chunk)=>{
+  if(t39HydraulicCoverage)return t39NormalizePageReferences(items,chunk);
   const list=
     Array.isArray(items)
       ? items
