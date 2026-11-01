@@ -6625,8 +6625,8 @@ function buildQuestionFamilyPlan(targets){
       "2026_INCORRECTA",
       "2026_INCORRECTA",
       "2026_RAZONAMIENTO",
-      "2024_NUMERICA",
-      "2024_NUMERICA",
+      "2024_TEXTO",
+      "2024_TEXTO",
       "2024_TEXTO",
       "CALCULO_FORMULACION",
       "GRAFICA"
@@ -8732,6 +8732,54 @@ function specificNumericReady128(t){
   return /\d+(?:[.,]\d+)?\s*(?:%|º\s*c|°\s*c|kg|g\/|kpa|mpa|bar(?:es)?|km\/h|m\/s|l\/min|litros?|metros?|mm|cm|kwh|kw|julios?|calor[ií]as?)(?![a-z0-9])/i.test(
     String(t?.source_evidence||''));
 }
+// ESPECÍFICO 129: recuperación de una plaza rechazada sin perder su familia.
+// Ordena SOLO el grupo de candidatos ya elegibles por la SQL SRS vigente;
+// prioriza fórmulas documentadas y páginas que aún no aparecen en el examen.
+function specificRecoveryOrder129(candidates,original,targets,index){
+  if(String(original?.topic_block||'').toLowerCase()!=='especifico'||
+     iiff91Topic(original))return candidates;
+  const topic=Number(original.topic_id),family=original.questionFamily;
+  const used=targets.filter((t,j)=>j!==index&&Number(t.topic_id)===topic);
+  const usedPageNums=used.filter(t=>t.source_page!=null&&String(t.source_page).trim()!=='')
+    .map(t=>Number(t.source_page)).filter(Number.isFinite);
+  const pages=new Map(),sections=new Map();
+  for(const t of used){
+    const p=String(t.source_page??'');pages.set(p,(pages.get(p)||0)+1);
+    const section=String(t.section||'');sections.set(section,(sections.get(section)||0)+1);
+  }
+  const distance=c=>{
+    if(c.source_page==null||String(c.source_page).trim()==='')return 0;
+    const page=Number(c.source_page);
+    return Number.isFinite(page)&&usedPageNums.length?
+      Math.min(...usedPageNums.map(p=>Math.abs(p-page))):0;
+  };
+  return candidates.filter(c=>Number(c.topic_id)===topic).sort((a,b)=>
+    (family==='CALCULO_FORMULACION'?
+      Number(!specificFormulaReady128(a))-Number(!specificFormulaReady128(b)):0)||
+    Number(Number(a.adaptive_priority||4)!==Number(original.adaptive_priority||4))-
+      Number(Number(b.adaptive_priority||4)!==Number(original.adaptive_priority||4))||
+    (pages.get(String(a.source_page??''))||0)-(pages.get(String(b.source_page??''))||0)||
+    (sections.get(String(a.section||''))||0)-(sections.get(String(b.section||''))||0)||
+    distance(b)-distance(a)||Number(a.id)-Number(b.id));
+}
+function specificFallbackFamily129(targets,index){
+  const families=['2026_CORRECTA','2026_INCORRECTA','2026_RAZONAMIENTO'];
+  const counts=new Map(families.map(f=>[f,0]));
+  for(let i=0;i<targets.length;i++)if(i!==index&&counts.has(targets[i].questionFamily))
+    counts.set(targets[i].questionFamily,counts.get(targets[i].questionFamily)+1);
+  return families.sort((a,b)=>counts.get(a)-counts.get(b))[0];
+}
+function specificLiteralStem129(stem,target){
+  if(String(target?.topic_block||'').toLowerCase()!=='especifico'||
+     iiff91Topic(target)||!['2024_TEXTO','2024_NUMERICA'].includes(target.questionFamily))
+    return stem;
+  const page=String(target.manual_page??'').trim();
+  if(!/^\d+$/.test(page))return stem;
+  const name=String(target.topic_name||'').replace(/^\s*TEMA\s+\d+\s*[.:-]?\s*/i,'').trim();
+  const text=String(stem||'').trim().replace(
+    /^(?:seg[uú]n|conforme|de acuerdo con)[^?]{0,170}?p[aá]gina\s*\d+\s*[,.:;–-]?\s*/i,'').trim();
+  return `Según el manual del CEIS Guadalajara, ${name}, página ${page}, ${text}`;
+}
 function specificAlignFormula128(selected,candidates){
   if(!selected.length||!selected.every(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)))return;
@@ -9486,14 +9534,14 @@ for (let i = 0; i < selected.length; i++) {
     if (!calculationCompatible) {
       item.questionFamily =
         String(item.topic_block||'').toLowerCase()==='especifico'
-          ? '2026_CORRECTA' : '2024_TEXTO';
+          ? specificFallbackFamily129(selected,i) : '2024_TEXTO';
 
       console.log(
         "FAMILY_COMPATIBILITY_FALLBACK",
         JSON.stringify({
           coverageId: item.id,
           from: "CALCULO_FORMULACION",
-          to: "2024_TEXTO",
+          to: item.questionFamily,
           reason: "coverage_sin_capacidad_de_calculo"
         })
       );
@@ -9708,7 +9756,7 @@ for(let i = 0; i < selected.length; i++){
   }else if(String(originalGraphicSlot.topic_block||'').toLowerCase()==='especifico'){
     selected[i] = {
       ...originalGraphicSlot,
-      questionFamily: '2026_CORRECTA'
+      questionFamily: specificFallbackFamily129(selected,i)
     };
   }else if(hasNumericData){
     selected[i] = {
@@ -12572,7 +12620,7 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
     targets.every(iiff91Topic) ? [] :
     targets.every(t=>String(t.topic_block||'').toLowerCase()==='especifico') ? [
     'ESTILO 2026: «Durante [actuación técnica documentada], señale la afirmación INCORRECTA». Tres opciones literalmente verdaderas y una contradicha por el fragmento; todas de la misma clase.',
-    'ESTILO CEIS/2024: «¿Qué expresión permite calcular [magnitud documentada]?» o «¿Cuál es la relación correcta entre [variables presentes]?»; pregunta directa y cuatro fórmulas o relaciones próximas.'
+    'ESTILO CEIS/2024 LITERAL: «¿Cuál es la característica de [concepto documentado]?» o «¿Qué valor/procedimiento se recoge para [caso]?»; pregunta directa de precisión, sin escribir CORRECTA/INCORRECTA y sin inventar cifras.'
   ] : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
@@ -12582,6 +12630,9 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO',
+    ...(String(t.topic_block||'').toLowerCase()==='especifico'&&!iiff91Topic(t)&&
+       ['2024_TEXTO','2024_NUMERICA'].includes(t.questionFamily)?
+      {paginaImpresa:String(t.manual_page??'')}:{ }),
     ...(t.questionFamily==='GRAFICA'&&t.graphicAsset?
       {figuraOriginal:{concepto:String(t.graphicAsset.concept||''),
         descripcion:String(t.graphicAsset.description||'').slice(0,450)}}:{}),
@@ -12596,7 +12647,7 @@ ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territ
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 ${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
-2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En preguntas literales puedes citar de forma natural el manual CEIS Guadalajara cuando proceda, sin pedir el número de página. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
+2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, [título real], página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
 Las cuatro opciones serán homogéneas y próximas sin aportar hechos externos. MUY ALTA requiere discriminación técnica, no longitud. En INCORRECTA, tres opciones deben ser verdaderas y una falsa con una sola solución. La explicación debe identificar correctamente la afirmación que se evalúa; no usar letras A/B/C/D en la explicación porque las opciones se barajan después. Redactar como examen 2026, literalidad CEIS/2024 donde proceda. Ninguna regla añade rondas de generación ni permite inventar datos.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
@@ -12678,7 +12729,7 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+(repair118?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
       geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
@@ -12828,7 +12879,8 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
       :(iiff91Topic(group[i]) && a.explanationOk!==true
         ?`El manual establece: «${evidence}».`
         :q.explanation);
-    return {...q,explanation,sourceEvidence:evidence,sourcePage:group[i].source_page??null,
+    return {...q,stem:specificLiteralStem129(q.stem,group[i]),explanation,
+      sourceEvidence:evidence,sourcePage:group[i].source_page??null,
       manualPage:group[i].manual_page??null,
       iiffNegativeVerified:negative,
       // Unicamente esta auditoría puede marcar una pregunta como Muy alta.
@@ -13613,7 +13665,8 @@ app.post('/api/generate',async(req,res)=>{
               [...recoveryCandidates119].sort((a,b)=>
                 (iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a))*4+
                 (Number(iiff91Band(b)===iiff91Band(slot.t))-
-                 Number(iiff91Band(a)===iiff91Band(slot.t)))*10):recoveryCandidates119;
+                 Number(iiff91Band(a)===iiff91Band(slot.t)))*10):
+              specificRecoveryOrder129(recoveryCandidates119,slot.t,targets,slot.index);
             const other=pool119.find(candidate=>
               Number(candidate.topic_id)===Number(slot.t.topic_id)&&
               !occupied.has(Number(candidate.id))&&
@@ -13622,12 +13675,19 @@ app.post('/api/generate',async(req,res)=>{
                 (!high119||iiff105TechnicalMerit(candidate)>=6)&&
                 !iiff102CandidateRepetition(candidate,blockedFacts119)))&&
               iiff106ReplacementAllowed(candidate,targets,slot.index,examMode==='simulation')&&
-              (String(candidate.source_evidence||'').trim().length>=55||
-                geographyTableRecord135(candidate)));
+              (specificEvidenceReady128(candidate)||geographyTableRecord135(candidate)));
             if(!other)continue;
-            targets[slot.index]=other;
+            const desiredFamily=String(slot.t.questionFamily||'');
+            const specific=String(slot.t.topic_block||'').toLowerCase()==='especifico'&&
+              !iiff91Topic(slot.t);
+            const recoveredFamily=specific ?
+              ((desiredFamily==='CALCULO_FORMULACION'&&!specificFormulaReady128(other))||
+               desiredFamily==='GRAFICA'
+                ?specificFallbackFamily129(targets,slot.index)
+                :(desiredFamily||'2026_CORRECTA')):desiredFamily;
+            targets[slot.index]=specific?{...other,questionFamily:recoveredFamily}:other;
             occupied.add(Number(other.id));tried119.add(Number(other.id));
-            slot.t=other;
+            slot.t=targets[slot.index];
             // Los formatos geográficos deterministas mantienen su ruta normal.
             // Reutilizar la construcción local IIFF previamente acordada SOLO
             // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
