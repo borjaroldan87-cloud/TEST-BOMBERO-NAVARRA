@@ -8647,6 +8647,118 @@ async function getIiffTargets91(count,topicIds,simulation=false,difficulty="alta
   return assigned;
 }
 
+// ESPECÍFICO 128: misma selección en todos los manuales (excepto el
+// selector IIFF ya validado). No modifica elegibilidad, SRS ni cuotas Anki.
+// La rotación trabaja SOLO sobre el conjunto previamente elegible por SQL.
+function specificSpread128(rows,count){
+  if(!Array.isArray(rows)||rows.length<2||
+     !rows.every(x=>String(x.topic_block||'').toLowerCase()==='especifico'))return rows;
+  const bands=Math.min(8,Math.max(4,Math.ceil(count/2)));
+  const ranges=new Map(),priorities=new Map();
+  for(const r of rows){
+    const topic=Number(r.topic_id),page=Number(r.source_page);
+    if(r.source_page!=null && String(r.source_page).trim()!=='' && Number.isFinite(page)){
+      const range=ranges.get(topic)||{min:page,max:page};
+      range.min=Math.min(range.min,page);range.max=Math.max(range.max,page);
+      ranges.set(topic,range);
+    }
+    const priority=Math.max(1,Math.min(5,Number(r.adaptive_priority)||4));
+    if(!priorities.has(priority))priorities.set(priority,[]);
+    priorities.get(priority).push(r);
+  }
+  const result=[];
+  // No se entremezclan prioridades: los repasos SRS vencidos siguen delante.
+  for(const priority of [...priorities.keys()].sort((a,b)=>a-b)){
+    const byBand=new Map();
+    for(const r of priorities.get(priority)){
+      const topic=Number(r.topic_id),range=ranges.get(topic);
+      const page=Number(r.source_page),valid=r.source_page!=null&&
+        String(r.source_page).trim()!==''&&Number.isFinite(page)&&range;
+      const band=valid?Math.min(bands-1,Math.floor(
+        (page-range.min)*bands/(range.max-range.min+1))):0;
+      const key=`${band}:${topic}`;
+      if(!byBand.has(key))byBand.set(key,{band,topic,pages:new Map(),keys:[],pos:0,remaining:0});
+      const bucket=byBand.get(key),pageKey=valid?page:'sin_pagina';
+      if(!bucket.pages.has(pageKey)){
+        bucket.pages.set(pageKey,{items:[],pos:0});bucket.keys.push(pageKey);
+      }
+      bucket.pages.get(pageKey).items.push(r);bucket.remaining++;
+    }
+    const buckets=[...byBand.values()].sort((a,b)=>a.band-b.band||a.topic-b.topic);
+    let remaining=priorities.get(priority).length;
+    while(remaining){
+      for(const bucket of buckets){
+        if(!bucket.remaining)continue;
+        for(let n=0;n<bucket.keys.length;n++){
+          const idx=(bucket.pos+n)%bucket.keys.length;
+          const slot=bucket.pages.get(bucket.keys[idx]);
+          if(slot.pos>=slot.items.length)continue;
+          result.push(slot.items[slot.pos++]);bucket.remaining--;remaining--;
+          bucket.pos=(idx+1)%bucket.keys.length;
+          break;
+        }
+      }
+    }
+  }
+  return result;
+}
+// La identificación de fórmulas cuenta también como formulación; no es
+// obligatorio realizar operaciones. La evidencia debe estar íntegra.
+function specificFormulaReady128(t){
+  const type=String(t?.item_type||'').toLowerCase();
+  const evaluation=String(t?.evaluation_type||'').toLowerCase();
+  const evidence=String(t?.source_evidence||'').trim();
+  // Fórmulas explícitas cortas (p. ej. Volumen = 3,14 · radio² · altura)
+  // son suficientes para una pregunta de IDENTIFICACIÓN, sin operar.
+  const label=String(t?.concept||'');
+  const explicitExpression=/=|\b(?:f[oó]rmula\s+qu[ií]mica|ecuaci[oó]n|expresi[oó]n\s+(?:matem[aá]tica|qu[ií]mica))\b/i.test(label+' '+evidence);
+  // El nombre de una variable aislada o una etiqueta «formula» no implica
+  // que el fragmento contenga una expresión examinable.
+  if(type==='formula'&&evidence.length>=20&&explicitExpression)return true;
+  // Cálculos documentados con magnitudes y relaciones cuantitativas también
+  // son aptos, aunque el manual no escriba el signo igual.
+  const numericRelation=/\d+(?:[.,]\d+)?\s*(?:%|kg|kN|N|l|litros?|m|cm|mm|bar|Pa|ºC|°C)\b|\b(?:doble|mitad|tercio|cu[aá]druple|proporci[oó]n|porcentaje)\b/i;
+  if(evaluation==='calculo'&&evidence.length>=55&&numericRelation.test(evidence))return true;
+  return evidence.length>=55 && evaluation==='relacion_variables'&&
+    /(?:f[oó]rmula|ecuaci[oó]n|coeficiente|proporciona[ld]|\b[a-zA-Z]\s*=)/i.test(label+' '+evidence);
+}
+function specificEvidenceReady128(t){
+  return String(t?.source_evidence||'').trim().length>=55||
+    (String(t?.topic_block||'').toLowerCase()==='especifico'&&specificFormulaReady128(t));
+}
+function specificNumericReady128(t){
+  if(String(t?.item_type||'').toLowerCase()==='dato_numerico')return true;
+  // El identificador ISO/UNE de una norma no es una magnitud examinable.
+  return /\d+(?:[.,]\d+)?\s*(?:%|º\s*c|°\s*c|kg|g\/|kpa|mpa|bar(?:es)?|km\/h|m\/s|l\/min|litros?|metros?|mm|cm|kwh|kw|julios?|calor[ií]as?)(?![a-z0-9])/i.test(
+    String(t?.source_evidence||''));
+}
+function specificAlignFormula128(selected,candidates){
+  if(!selected.length||!selected.every(t=>
+    String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)))return;
+  const occupied=new Set(selected.map(t=>Number(t.id)));
+  for(let index=8;index<selected.length;index+=10){
+    if(specificFormulaReady128(selected[index]))continue;
+    // Primero permutar una fórmula ya seleccionada: SRS y cobertura inalterados.
+    const internal=selected.findIndex((t,j)=>j!==index&&
+      ![2,3,8].includes(j%10)&&specificFormulaReady128(t));
+    if(internal>=0){
+      [selected[index],selected[internal]]=[selected[internal],selected[index]];
+      continue;
+    }
+    // Después, sustituir por una fórmula ya elegible con la MISMA prioridad,
+    // del mismo tema y sin duplicar un objetivo. No existe rescate ni nueva SQL.
+    const old=selected[index];
+    const replacement=candidates.find(t=>
+      Number(t.topic_id)===Number(old.topic_id)&&
+      Number(t.adaptive_priority||4)===Number(old.adaptive_priority||4)&&
+      !occupied.has(Number(t.id))&&specificFormulaReady128(t));
+    if(replacement){
+      occupied.delete(Number(old.id));occupied.add(Number(replacement.id));
+      selected[index]=replacement;
+    }
+  }
+}
+
 async function getCoverageTargetsForGeneration(
   count,
   ai,
@@ -8673,14 +8785,14 @@ const nucleusCandidateLimit =
   Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
     ? Math.max(count * 100, 1400)
     : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
-const adaptiveCandidates = geographyDiverseCandidates115(
+const adaptiveCandidates = specificSpread128(geographyDiverseCandidates115(
   await getAdaptiveCoverageCandidates(
     nucleusCandidateLimit,
     allowedTopicIds,
     selectionStrategy,
     freshOnly111
   )
-);
+),count);
 
 if(adaptiveCandidates.length < count){
   throw new Error(
@@ -9317,6 +9429,9 @@ if(selectedAdaptive.length < count){
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
   );
 }
+// Aplicar una sola vez antes de asignar familias. No fuerza matemáticas
+// inexistentes ni desplaza preguntas de distinta prioridad SRS.
+specificAlignFormula128(selectedAdaptive,adaptiveCandidates);
 const result = {
   rows: selectedAdaptive
 };
@@ -9362,12 +9477,16 @@ for (let i = 0; i < selected.length; i++) {
 
   if (item.questionFamily === "CALCULO_FORMULACION") {
     const calculationCompatible =
-      item.item_type === "formula" ||
-      item.evaluation_type === "calculo" ||
-      item.evaluation_type === "relacion_variables";
+      String(item.topic_block||'').toLowerCase()==='especifico'
+        ? specificFormulaReady128(item)
+        : (item.item_type === "formula" ||
+           item.evaluation_type === "calculo" ||
+           item.evaluation_type === "relacion_variables");
 
     if (!calculationCompatible) {
-      item.questionFamily = "2024_TEXTO";
+      item.questionFamily =
+        String(item.topic_block||'').toLowerCase()==='especifico'
+          ? '2026_CORRECTA' : '2024_TEXTO';
 
       console.log(
         "FAMILY_COMPATIBILITY_FALLBACK",
@@ -9383,8 +9502,9 @@ for (let i = 0; i < selected.length; i++) {
 
   if (item.questionFamily === "2024_NUMERICA") {
     const numericCompatible =
-      item.item_type === "dato_numerico" ||
-      /\d/.test(evidenceText);
+      String(item.topic_block||'').toLowerCase()==='especifico'
+        ? specificNumericReady128(item)
+        : (item.item_type === 'dato_numerico' || /\d/.test(evidenceText));
 
     if (!numericCompatible) {
       item.questionFamily = "2024_TEXTO";
@@ -9431,60 +9551,13 @@ for(let i = 0; i < selected.length; i++){
     .filter((_, index) => index !== i)
     .map(item => Number(item.id));
 
-  const graphicCoverageResult = await db.query(
-    `
-    SELECT
-      ci.id,
-      t.name AS topic_name,
-      t.block AS topic_block,
-      ci.section,
-      ci.concept,
-      ci.item_type,
-      ci.evaluation_type,
-      ci.source_page,
-      ci.manual_page,
-      ci.source_evidence
-    FROM coverage_items ci
-    JOIN topics t ON t.id = ci.topic_id
-    WHERE
-  ci.exam_relevant = TRUE
-  AND ${GEOGRAPHY_EXAMINABLE_SQL_125}
-  AND (
-    $3::text = 'simulation'
-    OR ci.worked = FALSE
-  )
-  AND NOT (ci.id = ANY($1::int[]))
-  AND (
-    $2::int[] IS NULL
-    OR ci.topic_id = ANY($2::int[])
-  )
-    ORDER BY
-      ci.times_asked ASC,
-      ci.last_asked_at ASC NULLS FIRST,
-      ci.id ASC
-    LIMIT 120
-    `,
-    [
-  occupiedCoverageIds,
-  Array.isArray(allowedTopicIds)
-    ? allowedTopicIds
-    : null,
-  selectionStrategy
-]
-  );
-
-  /*
-  Solo conservamos coverage perteneciente a temas que tienen
-  una carpeta gráfica conocida.
-  */
-  const graphicCoverageCandidates =
-    graphicCoverageResult.rows
-      .map(item => ({
-        ...item,
-        topic_folder:
-          graphicTopicFolderFromTopicName(item.topic_name)
-      }))
-      .filter(item => item.topic_folder);
+  // Reutiliza el pool filtrado previamente por SRS/FRESH111; la consulta
+  // histórica omitía ese filtro y podía escoger fichas aún no vencidas.
+  const graphicCoverageCandidates = adaptiveCandidates
+    .filter(item => !occupiedCoverageIds.includes(Number(item.id)))
+    .map(item=>({...item,topic_folder:graphicTopicFolderFromTopicName(item.topic_name)}))
+    .filter(item=>item.topic_folder)
+    .slice(0,120);
 
   const topicFolders = [
     ...new Set(
@@ -9625,10 +9698,17 @@ for(let i = 0; i < selected.length; i++){
     originalGraphicSlot.evaluation_type === "calculo" ||
     originalGraphicSlot.evaluation_type === "relacion_variables";
 
-  if(hasCalculationPotential){
+  if(hasCalculationPotential &&
+     (String(originalGraphicSlot.topic_block||'').toLowerCase()!=='especifico'||
+      specificFormulaReady128(originalGraphicSlot))){
     selected[i] = {
       ...originalGraphicSlot,
       questionFamily: "CALCULO_FORMULACION"
+    };
+  }else if(String(originalGraphicSlot.topic_block||'').toLowerCase()==='especifico'){
+    selected[i] = {
+      ...originalGraphicSlot,
+      questionFamily: '2026_CORRECTA'
     };
   }else if(hasNumericData){
     selected[i] = {
@@ -12473,6 +12553,7 @@ En explanation, explica de forma breve el dato territorial y cita interna en sou
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
+  const spec=targets.every(t=>String(t.topic_block||'').toLowerCase()==='especifico');
   const soloPoligonos=geo && targets.length>0 && targets.every(t=>coverageTopicNumber(t.topic_name)===22);
   const incluyeTema22Nuevo=geo && targets.some(t=>t22NewTopic116(t));
   const soloConexiones=geo && targets.length>0 && targets.every(esTemaConexiones2026);
@@ -12488,7 +12569,11 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
     soloFerrocarril ? FERROCARRIL_ESTILO_EJEMPLOS_2026 :
     soloCamino ? CAMINO_ESTILO_EJEMPLOS_2026 :
     geo ? pickGeografiaExamples73(targets,3) :
-    targets.every(iiff91Topic) ? [] : [
+    targets.every(iiff91Topic) ? [] :
+    targets.every(t=>String(t.topic_block||'').toLowerCase()==='especifico') ? [
+    'ESTILO 2026: «Durante [actuación técnica documentada], señale la afirmación INCORRECTA». Tres opciones literalmente verdaderas y una contradicha por el fragmento; todas de la misma clase.',
+    'ESTILO CEIS/2024: «¿Qué expresión permite calcular [magnitud documentada]?» o «¿Cuál es la relación correcta entre [variables presentes]?»; pregunta directa y cuatro fórmulas o relaciones próximas.'
+  ] : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
     'Ríos: afluente directo o cadena indirecta sólo si todos los eslabones constan en el PDF.',
@@ -12497,6 +12582,9 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO',
+    ...(t.questionFamily==='GRAFICA'&&t.graphicAsset?
+      {figuraOriginal:{concepto:String(t.graphicAsset.concept||''),
+        descripcion:String(t.graphicAsset.description||'').slice(0,450)}}:{}),
     }));
   const styleTitle=geo
     ? 'MODELOS DE REDACCIÓN BASADOS EN LAS PREGUNTAS 26-50 DE GEOGRAFÍA 2026 (SOLO ESTILO, NO FUENTE FACTUAL)'
@@ -12507,7 +12595,9 @@ Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una
 ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo||targets.every(iiff91Topic)?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
-${reglasCalidadTransversal81(difficulty,leg,geo)}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
+${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
+2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En preguntas literales puedes citar de forma natural el manual CEIS Guadalajara cuando proceda, sin pedir el número de página. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
+Las cuatro opciones serán homogéneas y próximas sin aportar hechos externos. MUY ALTA requiere discriminación técnica, no longitud. En INCORRECTA, tres opciones deben ser verdaderas y una falsa con una sola solución. La explicación debe identificar correctamente la afirmación que se evalúa; no usar letras A/B/C/D en la explicación porque las opciones se barajan después. Redactar como examen 2026, literalidad CEIS/2024 donde proceda. Ninguna regla añade rondas de generación ni permite inventar datos.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
@@ -12556,7 +12646,7 @@ async function resetGeminiCall139(ai,phase,opts){
   }
 }
 async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[],repair118=false){
-  const requiresSearch=group.some(t=>String(t.source_evidence||'').trim().length<55);
+  const requiresSearch=group.some(t=>!specificEvidenceReady128(t));
   if(requiresSearch)throw Error('Objetivo sin extracto PDF suficiente. No se realizan llamadas pagadas para adivinar hechos.');
   // El número exigido en JSON debe coincidir con los objetivos del lote.
   // Reduce la posibilidad de lotes incompletos sin agregar llamadas ni auditorías.
@@ -12709,7 +12799,30 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
     // otra letra a la falsedad después de auditar y barajar las opciones.
     // El contenido literal procede de la prueba del auditor ya validada.
     const negative=iiff91Topic(group[i])&&iiff92IsNegativeStem(q);
-    const explanation=negative
+    const otherSpecific=String(group[i].topic_block||'').toLowerCase()==='especifico' &&
+      !iiff91Topic(group[i]);
+    // El texto de la explicación no depende de la letra de opción ni de la
+    // explicación libre del generador (fue contradictoria en el T38).
+    // El seleccionador gráfico ya ha emparejado una figura original.
+    // Se propaga al banco en el formato que consume renderGraphic() del
+    // frontend; nunca se genera ni modifica una imagen.
+    const asset=group[i].questionFamily==='GRAFICA' ? group[i].graphicAsset:null;
+    const picture=asset&&String(asset.public_url||'').startsWith('/graphics/')
+      ?{assetId:Number(asset.id),sourceId:asset.source_id||null,
+        publicUrl:asset.public_url,assetType:asset.asset_type||null,
+        concept:asset.concept||'',description:asset.description||'',
+        crop:{x:Number(asset.crop_x??0),y:Number(asset.crop_y??0),
+          width:Number(asset.crop_width??1),height:Number(asset.crop_height??1)},
+        maskRegions:Array.isArray(asset.mask_regions)?asset.mask_regions:[]}
+      :null;
+    if(group[i].questionFamily==='GRAFICA'&&!picture)return null;
+    const explanation=otherSpecific
+      ?(iiff92IsNegativeStem(q)
+        ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
+         `El manual establece: «${evidence}».`
+        :`Respuesta correcta: «${String(q.options[q.correctIndex]).trim()}». `+
+         `El manual establece: «${evidence}».`)
+      :negative
       ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
        `El manual establece: «${String(a.optionProofs[q.correctIndex].quote).trim()}».`
       :(iiff91Topic(group[i]) && a.explanationOk!==true
@@ -12720,7 +12833,7 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
       iiffNegativeVerified:negative,
       // Unicamente esta auditoría puede marcar una pregunta como Muy alta.
       iiffHighVerified:iiff91Topic(group[i])&&difficulty==='muy alta'&&a.calidad===2,
-      questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:null};
+      questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:picture};
   });
   if(iiffScope){
     const negativeIndices=questions.map((q,i)=>iiff92IsNegativeStem(q)?i:-1).filter(i=>i>=0);
@@ -13373,7 +13486,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&String(t.source_evidence||'').trim().length<55&&
+        !direct.has(i)&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -13384,8 +13497,16 @@ app.post('/api/generate',async(req,res)=>{
             !occupied.has(Number(a.id))&&
             (!iiff91Topic(a)||!iiff91Editorial(a))&&
             iiff106ReplacementAllowed(a,targets,i,examMode==='simulation')&&
-            (String(a.source_evidence||'').trim().length>=55||geographyTableRecord135(a)));
-          if(substitute){targets[i]=substitute;occupied.add(Number(substitute.id));}
+            (specificEvidenceReady128(a)||geographyTableRecord135(a)));
+          if(substitute){
+            const desiredFamily=String(t.topic_block||'').toLowerCase()==='especifico'
+              ?String(t.questionFamily||'') : '';
+            targets[i]={...substitute,
+              ...(desiredFamily?{questionFamily:
+                desiredFamily==='CALCULO_FORMULACION'&&!specificFormulaReady128(substitute)
+                  ?'2026_CORRECTA':desiredFamily}:{})};
+            occupied.add(Number(substitute.id));
+          }
         }
       }
     }
