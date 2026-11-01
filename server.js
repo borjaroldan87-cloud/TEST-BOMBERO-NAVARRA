@@ -12599,6 +12599,57 @@ El «primer apoyo» se interpreta únicamente como posible apoyo por proximidad 
 Prioriza 2026: escenarios de intervención y relaciones compuestas (parque territorial, posible apoyo e itinerario). Incluye diversidad 2024: polígono a municipio, a parque o a carretera cuando consten los datos. No convertir cada pregunta en una enumeración de toda la ficha.
 En explanation, explica de forma breve el dato territorial y cita interna en sourceEvidence, pero sin fórmulas «según la ficha» o «según los apuntes». La evidencia no forma parte del enunciado.
 `;
+// TEMA 39 HIDRÁULICA — fe de erratas y criterios de lectura localizados.
+// No se modifica el PDF ni se reescribe PostgreSQL. Sólo se normaliza la
+// evidencia de los objetivos T39 al pasarla a la generación y a la auditoría.
+function t39Hydraulica(item){
+  return /^espec[ií]fico$/i.test(String(item?.topic_block||'').trim()) &&
+    coverageTopicNumber(item?.topic_name)===39 &&
+    /hidr[aá]ulica/i.test(String(item?.topic_name||''));
+}
+function t39Evidence(item){
+  const raw=String(item?.source_evidence||'');
+  if(!t39Hydraulica(item))return raw;
+  const page=String(item?.manual_page??'').trim();
+  let text=raw;
+  if(page==='64' || /la densidad es una magnitud vectorial/i.test(text)){
+    text=text.replace(/la densidad es una magnitud vectorial/gi,
+      'la densidad es una magnitud escalar');
+  }
+  if(page==='77'){
+    text=text.replace(/Acoplamiento paralelo de dos bombas/gi,
+      'Acoplamiento en serie de dos bombas');
+    text=text.replace(/Curva caracter[ií]stica del acoplamiento en paralelo de dos bombas/gi,
+      'Curva característica del acoplamiento en serie de dos bombas');
+  }
+  return text;
+}
+function t39TargetForGeneration(item){
+  if(!t39Hydraulica(item))return item;
+  const source_evidence=t39Evidence(item);
+  const concept=t39Evidence({...item,source_evidence:String(item?.concept||'')});
+  const original=String(item?.graphicAsset?.description||'');
+  const page=String(item?.manual_page??'').trim();
+  const description=page==='77'
+    ?original.replace(/Acoplamiento paralelo de dos bombas/gi,
+      'Acoplamiento en serie de dos bombas')
+      .replace(/Curva caracter[ií]stica del acoplamiento en paralelo de dos bombas/gi,
+        'Curva característica del acoplamiento en serie de dos bombas')
+    :original;
+  if(source_evidence===String(item.source_evidence||'') &&
+     concept===String(item.concept||'') && description===original)return item;
+  return {...item,source_evidence,concept,
+    ...(item.graphicAsset?{graphicAsset:{...item.graphicAsset,description}}:{})};
+}
+const T39_REGLAS_HIDRAULICA = String.raw`REGLAS EXCLUSIVAS TEMA 39 HIDRÁULICA (CEIS Guadalajara):
+1. El PDF original se conserva sin editar. FE DE ERRATAS autorizada: pág. impresa 64, la densidad es una magnitud ESCALAR (no vectorial). Sólo se corrige esa frase, no el resto de la página.
+2. Pág. impresa 77, IMAGEN 22, arriba a la derecha: el encabezado «Acoplamiento paralelo de dos bombas» y la flecha/etiqueta de la curva roja «Curva característica del acoplamiento en paralelo de dos bombas» están mal escritos. AMBOS se refieren a BOMBAS EN SERIE. El título inferior, esquema, teoría y fórmulas de esa imagen YA están bien; no los corrijas. Serie: mismo caudal por cada bomba, alturas de impulsión sumadas. No confundir con el montaje REAL en paralelo de la imagen 21, pág. 76.
+3. Pág. 69: el caudal es volumen por tiempo y también sección por velocidad media: Q=V/t y Q=S·v. No afirmar que Q sea solo la velocidad; esa frase aislada es una simplificación que se lee junto con las ecuaciones correctas. Mantén la tabla de equivalencias de presión (pág. 67) SIN correcciones añadidas.
+4. Matemática: conserva subíndices, fracciones, paréntesis, exponentes, igualdad, signos, letras griegas y unidades. Distingue Q (caudal), V (volumen), v (velocidad), S (sección), H_m (altura manométrica), p o P (presión según contexto), ρ (densidad), μ/η según la variable y convención usada en cada fórmula original. No intercambiar η de viscosidad con η de rendimiento si el contexto los diferencia. Si no se puede confirmar un símbolo en el material disponible, NO generar una pregunta sobre esa ecuación.
+5. El frontend admite KaTeX; cuando una expresión requiera fracciones, subíndices o griegas, usa matemáticas en delimitadores \( ... \) (en texto JSON una sola barra invertida debe escaparse adecuadamente) con comandos KaTeX válidos como \frac, \rho, \mu, \eta, \Delta. No generes pseudo-LaTeX con errores o símbolos ilegibles. Conserva correctamente unidades SI y no mezcles magnitudes dimensionalmente distintas.
+6. Gráficas originales: pág. 74, curva característica y curvas a distintas revoluciones: no confundir altura, caudal, potencia y rendimiento; pág. 76, imagen 21 PARALELO: se suman caudales a igual altura; pág. 77, imagen 22 SERIE: se suman alturas a igual caudal; pág. 78, imagen 24: pérdida de carga y caudal para distintos diámetros, y 25: curva creciente de pérdidas/instalación frente al caudal; pág. 79, imagen 26: el punto de funcionamiento es intersección de curva de bomba y curva de instalación, y se desplaza al cambiar régimen de bomba o condiciones de instalación. No leer valores numéricos exactos por estimación visual cuando no son explícitos.
+7. Si una figura original no está adjunta o su descripción no permite una deducción inequívoca, no hagas pregunta que necesite verla. Nunca crear, reconstruir o editar figuras originales. Nunca preguntes por las dos etiquetas erróneas como si fueran hechos.
+Estas excepciones sólo rigen objetivos etiquetados «Tema 39. Hidráulica», sin contaminar otros temas del mismo lote. Para citas de la densidad y de la imagen 22, la evidencia presentada ha sido normalizada con las dos correcciones autorizadas.`;
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
@@ -12698,6 +12749,7 @@ async function resetGeminiCall139(ai,phase,opts){
   }
 }
 async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[],repair118=false){
+  group=group.map(t39TargetForGeneration);
   const requiresSearch=group.some(t=>!specificEvidenceReady128(t));
   if(requiresSearch)throw Error('Objetivo sin extracto PDF suficiente. No se realizan llamadas pagadas para adivinar hechos.');
   // El número exigido en JSON debe coincidir con los objetivos del lote.
@@ -12730,7 +12782,7 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
       geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
@@ -12819,7 +12871,7 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
   const auditModel120=iiffScope&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
-    contents:auditPrompt82+iiffAuditRules+geoPhysical112,
+    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
