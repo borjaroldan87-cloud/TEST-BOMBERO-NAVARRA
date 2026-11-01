@@ -3372,17 +3372,6 @@ function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
 
-  if(topicNumber===38){
-    return `LECTURA PRECISA — TEMA 38 (estas instrucciones NO son conocimientos examinables):
-- No mezcles datos de sustancias o agentes diferentes (polvos especiales, nitrógeno, CO2, agua, espumas), ni confundas columnas o apartados vecinos.
-- Una ficha por conocimiento independiente. No unas aplicaciones o técnicas distintas, ni afirmaciones de páginas diferentes, en una ficha con una sola cita.
-- Extrae fielmente cifras, intervalos, unidades, tablas y fórmulas, incluso las dibujadas. Si una expresión no se distingue, no completes ni deduzcas símbolos.
-- Cada sourceEvidence debe demostrar TODOS los datos del concept, incluyendo sustancia, condiciones y límites; si no puede demostrarlos, reduce o descarta esa ficha.
-- sourcePage es la página física; manualPage es SOLO el número visible al pie de la hoja original. No uses offsets.
-- No dupliques en 'Conviene recordar' hechos ya representados. Omite anécdotas sin valor objetivo de oposición, pero conserva cualquier dato técnico examinable.
-- No corrijas ni completes el manual con datos externos.
-`;
-  }
 
    if(topicNumber===21){
   return `
@@ -13778,9 +13767,86 @@ app.get("/api/graphics/inspect-latest", async (req,res)=>{
     });
   }
 });
+// Reparación documental puntual del tema 38; sin IA, reindexación ni borrados.
+// Fuente: PDF CEIS Guadalajara original, 38 páginas técnicas verificadas.
+async function applyVerifiedFireTheoryRepairV1(){
+  const plan=JSON.parse(fs.readFileSync(new URL('./data/tema38_repair_v1.json',import.meta.url),'utf8'));
+  const marker='verified_repair:'+plan.version;
+  const prior=await db.query('SELECT value FROM app_state WHERE key=$1',[marker]);
+  if(prior.rows.length){
+    console.log('T38 REPARACIÓN: ya aplicada; no repetir');
+    return;
+  }
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const t=await client.query(
+      `SELECT id,name,block,topic_order,total_items,worked_items
+       FROM topics WHERE id=$1 FOR UPDATE`,[plan.topicId]);
+    if(t.rows.length!==1 || t.rows[0].name!==plan.topicName ||
+       t.rows[0].block!=='especifico' ||
+       Number(t.rows[0].topic_order)!==plan.topicOrder){
+      throw new Error('T38: identidad del tema distinta de la auditada');
+    }
+    const already=await client.query('SELECT value FROM app_state WHERE key=$1',[marker]);
+    if(already.rows.length){
+      await client.query('COMMIT');
+      console.log('T38 REPARACIÓN: ya aplicada; no repetir');
+      return;
+    }
+    const before=await client.query('SELECT count(*)::int AS n FROM coverage_items WHERE topic_id=$1',[plan.topicId]);
+    const dependencies=await client.query(`
+      SELECT
+        (SELECT count(*)::int FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id WHERE ci.topic_id=$1) AS questions,
+        (SELECT count(*)::int FROM coverage_review_state r JOIN coverage_items ci ON ci.id=r.coverage_item_id WHERE ci.topic_id=$1) AS reviews,
+        (SELECT count(*)::int FROM test_session_questions sq JOIN coverage_items ci ON ci.id=sq.coverage_item_id WHERE ci.topic_id=$1) AS session_links`,[plan.topicId]);
+    if(before.rows[0].n!==plan.originalCount ||
+       Number(t.rows[0].total_items)!==plan.originalCount ||
+       Number(t.rows[0].worked_items)!==0 ||
+       Number(dependencies.rows[0].questions)!==0 ||
+       Number(dependencies.rows[0].reviews)!==0 ||
+       Number(dependencies.rows[0].session_links)!==0){
+      throw new Error('T38: cambió la cobertura o hay actividad; ninguna modificación aplicada');
+    }
+    for(const change of plan.updates){
+      const replacements=['source_page=$1','manual_page=$2'];
+      const vals=[change.sourcePage,change.manualPage];
+      if(change.concept){replacements.push(`concept=$${vals.length+1}`);vals.push(change.concept);}
+      if(change.sourceEvidence){replacements.push(`source_evidence=$${vals.length+1}`);vals.push(change.sourceEvidence);}
+      vals.push(change.id,plan.topicId,change.oldSource,change.oldManual);
+      const len=vals.length;
+      const result=await client.query(`UPDATE coverage_items SET ${replacements.join(', ')}
+        WHERE id=$${len-3} AND topic_id=$${len-2} AND source_page=$${len-1} AND manual_page=$${len}`,
+        vals);
+      if(result.rowCount!==1)throw new Error('T38: estado inesperado de la ficha '+change.id);
+    }
+    for(const item of plan.additions){
+      const result=await client.query(`INSERT INTO coverage_items
+        (topic_id,section,concept,item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,TRUE) RETURNING id`,
+        [plan.topicId,item.section,item.concept,item.itemType,item.evaluationType,
+         item.sourcePage,item.manualPage,item.sourceEvidence]);
+      if(result.rowCount!==1)throw new Error('T38: no se pudo añadir una ficha');
+    }
+    const after=await client.query('SELECT count(*)::int AS n FROM coverage_items WHERE topic_id=$1',[plan.topicId]);
+    if(after.rows[0].n!==plan.finalCount)throw new Error('T38: total posterior distinto del validado');
+    await client.query('UPDATE topics SET total_items=$1 WHERE id=$2',[plan.finalCount,plan.topicId]);
+    await client.query('INSERT INTO app_state(key,value) VALUES($1,$2)',
+      [marker,JSON.stringify({topicId:plan.topicId,updates:plan.updates.length,
+        added:plan.additions.length,total:plan.finalCount})]);
+    await client.query('COMMIT');
+    console.log('T38 REPARACIÓN: aplicada una vez; total='+plan.finalCount+
+      ', incorporados='+plan.additions.length+', referencias corregidas='+plan.updates.length);
+  }catch(e){
+    try{await client.query('ROLLBACK');}catch{}
+    throw e;
+  }finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  await applyVerifiedFireTheoryRepairV1();
   console.log("STARTUP 1/4 OK");
   // SERVER 80: desactivar SOLO preguntas locales antiguas de tablas de
   // solares/eólicos. Sus territorios estaban desactualizados. No borra tests,
