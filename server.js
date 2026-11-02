@@ -14401,10 +14401,105 @@ async function applyVerifiedFireTheoryRepairV1(){
   }finally{client.release();}
 }
 
+
+// T39: depuración documentada de conocimientos repetidos, SIN usar Gemini.
+// Se ejecuta como máximo una vez, exclusivamente sobre el tema 49.
+// En caso de duda o cambio en la base de datos, revierte sin afectar al arranque.
+async function applyT39DedupOnce(){
+  const marker='maintenance:t39:dedup62:20261102:v1';
+  const removeIds=[23392, 23396, 23397, 23398, 23404, 23406, 23470, 23471, 23503, 23504, 23505, 23518, 23545, 23546, 23567, 23568, 23569, 23570, 23602, 23603, 23604, 23605, 23606, 23607, 23608, 23609, 23610, 23611, 23612, 23613, 23614, 23615, 23616, 23617, 23618, 23619, 23620, 23621, 23622, 23623, 23624, 23625, 23626, 23627, 23628, 23629, 23630, 23631, 23632, 23633, 23634, 23657, 23660, 23661, 23662, 23663, 23664, 23670, 23671, 23672, 23673, 23674];
+  const preserveIds=[23356, 23357, 23358, 23359, 23403, 23405, 23407, 23436, 23437, 23439, 23441, 23442, 23444, 23446, 23467, 23468, 23482, 23483, 23484, 23485, 23486, 23487, 23488, 23489, 23490, 23491, 23492, 23493, 23494, 23495, 23496, 23497, 23498, 23499, 23500, 23501, 23502, 23506, 23507, 23508, 23509, 23510, 23511, 23512, 23513, 23514, 23515, 23516, 23517, 23520, 23521, 23522, 23571, 23572, 23573, 23574, 23575, 23576, 23577, 23578, 23579, 23580, 23581, 23582, 23652, 23654, 23655, 23656, 23658, 23659, 23666];
+  const client=await db.connect();
+  let inTransaction=false;
+  try{
+    await client.query('BEGIN');
+    inTransaction=true;
+    await client.query("SET LOCAL lock_timeout='5s'");
+    await client.query("SET LOCAL statement_timeout='30s'");
+    const topic=await client.query(
+      'SELECT id,name,block,total_items,worked_items FROM topics WHERE id=49 FOR UPDATE');
+    if(topic.rows.length!==1 ||
+       topic.rows[0].name!=='TEMA 39 HIDRAULICA CEIS GUADALAJARA COMPLETO' ||
+       topic.rows[0].block!=='especifico'){
+      throw new Error('T39: identidad del tema distinta de la auditada');
+    }
+    const already=await client.query('SELECT value FROM app_state WHERE key=$1',[marker]);
+    if(already.rows.length){
+      await client.query('COMMIT');
+      inTransaction=false;
+      console.log('T39 DEDUP: operación ya aplicada, sin modificaciones');
+      return;
+    }
+    await client.query('LOCK TABLE coverage_items IN SHARE ROW EXCLUSIVE MODE');
+    const original=await client.query(
+      'SELECT count(*)::int AS n FROM coverage_items WHERE topic_id=49');
+    if(original.rows[0]?.n!==368 || Number(topic.rows[0].total_items)!==368 ||
+       Number(topic.rows[0].worked_items)!==0){
+      throw new Error('T39: cantidad o progreso diferente; no se elimina nada');
+    }
+    const b=await client.query(
+      'SELECT to_regclass($1) AS backup',["public.coverage_items_t39_backup_20261102"]);
+    if(b.rows[0]?.backup!==null){
+      throw new Error('T39: ya existe la copia de seguridad; operación cancelada');
+    }
+    const candidates=await client.query(`SELECT count(*)::int AS n,
+       md5(string_agg(id::text||':'||source_evidence||':'||source_page::text,'|' ORDER BY id)) AS digest,
+       count(*) FILTER (WHERE worked OR times_asked>0 OR times_correct>0 OR
+                              times_wrong>0 OR times_blank>0)::int AS used
+       FROM coverage_items WHERE topic_id=49 AND id=ANY($1::int[])`,[removeIds]);
+    if(candidates.rows[0]?.n!==62 ||
+       candidates.rows[0]?.digest!=='2230320acb513675f978d8b527c6f5fa' ||
+       candidates.rows[0]?.used!==0){
+      throw new Error('T39: candidatos alterados, abortada depuración');
+    }
+    const anchors=await client.query(
+      'SELECT count(*)::int AS n FROM coverage_items WHERE topic_id=49 AND id=ANY($1::int[])',
+      [preserveIds]);
+    if(anchors.rows[0]?.n!==71)throw new Error('T39: falta una referencia conservada');
+    const links=await client.query(`SELECT
+      (SELECT count(*) FROM question_bank WHERE coverage_item_id=ANY($1::int[]))+
+      (SELECT count(*) FROM coverage_review_state WHERE coverage_item_id=ANY($1::int[]))+
+      (SELECT count(*) FROM test_session_questions WHERE coverage_item_id=ANY($1::int[]))+
+      (SELECT count(*) FROM legislation_anki_questions WHERE validated_coverage_item_id=ANY($1::int[])) AS n`,[removeIds]);
+    if(Number(links.rows[0]?.n)!==0)throw new Error('T39: referencias en tests o repasos; cancelar');
+
+    await client.query('CREATE TABLE coverage_items_t39_backup_20261102 AS SELECT * FROM coverage_items WHERE topic_id=49');
+    await client.query('ALTER TABLE coverage_items_t39_backup_20261102 ADD PRIMARY KEY (id)');
+    const deleted=await client.query(
+      'DELETE FROM coverage_items WHERE topic_id=49 AND id=ANY($1::int[])',[removeIds]);
+    if(deleted.rowCount!==62)throw new Error('T39: borrado incompleto; revertir');
+    const final=await client.query(`SELECT count(*)::int AS n,
+       count(DISTINCT source_evidence)::int AS distinct_n,
+       count(*) FILTER (WHERE source_page NOT BETWEEN 2 AND 16 OR
+           source_evidence IS NULL OR btrim(source_evidence)='')::int AS bad
+       FROM coverage_items WHERE topic_id=49`);
+    const survivorCheck=await client.query(
+      'SELECT count(*)::int AS n FROM coverage_items WHERE topic_id=49 AND id=ANY($1::int[])',
+      [preserveIds]);
+    if(final.rows[0]?.n!==306 || final.rows[0]?.distinct_n!==306 ||
+       final.rows[0]?.bad!==0 || survivorCheck.rows[0]?.n!==71){
+      throw new Error('T39: comprobación final fallida; revertir');
+    }
+    await client.query('UPDATE topics SET total_items=306, worked_items=0 WHERE id=49');
+    await client.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[
+      marker,JSON.stringify({topicId:49,removed:62,total:306,backup:'coverage_items_t39_backup_20261102'})
+    ]);
+    await client.query('COMMIT');
+    inTransaction=false;
+    console.log('T39 DEDUP OK: 368 -> 306; copia de seguridad preservada; 62 duplicados eliminados');
+  }catch(e){
+    if(inTransaction){try{await client.query('ROLLBACK')}catch{}}
+    throw e;
+  }finally{client.release()}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
   await applyVerifiedFireTheoryRepairV1();
+  // Depuración puntual T39: cualquier preflight fallido preserva el servidor operativo.
+  try{await applyT39DedupOnce()}
+  catch(e){console.error('T39 DEDUP CANCELADA sin cambios:',String(e?.message||e))}
   console.log("STARTUP 1/4 OK");
   // SERVER 80: desactivar SOLO preguntas locales antiguas de tablas de
   // solares/eólicos. Sus territorios estaban desactualizados. No borra tests,
