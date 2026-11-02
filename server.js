@@ -13228,6 +13228,26 @@ cuatro pruebas, answer=-1. En positivas, omite optionProofs.
 Copia la cita literal de la respuesta en quote, mínimo 18 caracteres;
 si no existe, answer=-1. No aportes explicaciones fuera del JSON.
 ` : '';
+  // SERVER132: el fragmento PDF demuestra la LEY, no los números ficticios
+  // del supuesto. Se mantiene la auditoría independiente en la MISMA llamada.
+  const t39AuditNumerical132=group.some(t39Hydraulica)?String.raw`
+TEMA 39 HIDRÁULICA — AUDITORÍA DE PROBLEMAS CON CIFRAS NUEVAS:
+Para cada FILA cuyo enunciado contenga un problema aritmético, separa dos comprobaciones:
+(A) PROCEDENCIA: la fórmula y la relación física empleadas deben figurar de
+forma inequívoca en fragmento; quote es una cita LITERAL de 18 o más caracteres
+sobre ESA fórmula o relación, nunca una cifra nueva del enunciado.
+(B) SOLUCIÓN: recalcula por tu cuenta con las cifras del enunciado. Convierte
+TODOS los datos a SI antes de operar (incluidas áreas cuadradas, volúmenes
+cúbicos, L/min, bar, cm, mm). Comprueba dimensiones, despeje, redondeo y
+las cuatro opciones. answer=índice correcto solo si una opción coincide
+numéricamente y tiene la unidad SI pedida; de lo contrario answer=-1.
+NO exijas que el resultado numérico inventado aparezca literalmente en el PDF.
+NO apruebes una respuesta por parecer plausible ni sustituyas el cálculo
+por una identificación de fórmula. No inventes coeficientes, alturas ni
+constantes ausentes; si faltan datos, answer=-1.
+Bernoulli: teoría, interpretación y formulación sí; ejercicios aritméticos no.
+Para preguntas NO numéricas, conserva sin cambios la auditoría literal general.
+` : '';
   const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
     ' quote: transcribe',
     ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
@@ -13239,7 +13259,7 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
   const auditModel120=iiffScope&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
-    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+iiffAuditRules+geoPhysical112,
+    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
@@ -13308,6 +13328,16 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
       iiffHighVerified:iiff91Topic(group[i])&&difficulty==='muy alta'&&a.calidad===2,
       questionFamily:group[i].questionFamily||'2024_TEXTO',difficulty,graphic:picture};
   });
+  if(group.some(t39Hydraulica)){
+    const rejected=group.map((t,i)=>t39Hydraulica(t)&&!validated[i]?{
+      slot:i,concept:String(t.concept||'').slice(0,110),
+      generated:Boolean(questions[i]),
+      audited:Boolean(audits.find(a=>a.index===i)),
+      answerMatches:Boolean(questions[i]&&audits.find(a=>a.index===i)?.answer===questions[i].correctIndex),
+      quoteMatches:Boolean(audits.find(a=>a.index===i)&&resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence))
+    }:null).filter(Boolean);
+    if(rejected.length)console.warn('T39_132_RECHAZOS_AUDITORIA:',JSON.stringify(rejected));
+  }
   if(iiffScope){
     const negativeIndices=questions.map((q,i)=>iiff92IsNegativeStem(q)?i:-1).filter(i=>i>=0);
     if(negativeIndices.length)console.log('IIFF_92T_NEGATIVAS:',JSON.stringify({
