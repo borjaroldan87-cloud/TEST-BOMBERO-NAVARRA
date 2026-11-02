@@ -12966,7 +12966,7 @@ function t39TargetForGeneration(item){
     ...(item.graphicAsset?{graphicAsset:{...item.graphicAsset,description}}:{})};
 }
 const T39_REGLAS_HIDRAULICA = String.raw`REGLAS EXCLUSIVAS TEMA 39 HIDRÁULICA (CEIS Guadalajara):
-FUENTE ÚNICA: el PDF original de Hidráulica; ningún dato, fórmula, despeje, constante o interpretación procedente de conocimiento general puede incorporarse si no figura en la fuente. No preguntar si la densidad es vectorial/escalar, por errata documental. Para TABLAS, tratar cada combinación (fila, columna, unidades, valor y condiciones) como conocimiento indivisible y no interpolar. Las expresiones del manual sólo pueden reconocerse literalmente en caso de ambigüedad; no presentar como teoría externa. La línea de p.70 «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud» es un literal del manual, NO una igualdad que defina la presión ni autoriza E=pV. Arquímedes: preguntar el principio EN PALABRAS tal como consta en el PDF; prohibido E=ρgV u otras fórmulas externas. Viscosidad: se admite reconocer μ_ap=τ/γ con su explicación textual. Formato y dificultad según familias de los modelos 2024/2026, conservando las normas comunes del bloque Específico.
+FUENTES AUTORIZADAS: (1) el fragmento del PDF original de Hidráulica y (2) las aclaraciones y correcciones expresamente aportadas por el usuario en estas reglas. AMBAS tienen la misma autoridad. No incorpores por iniciativa propia datos, leyes o constantes de fuentes externas. No preguntar si la densidad es vectorial/escalar, por errata documental. Para TABLAS, tratar cada combinación (fila, columna, unidades, valor y condiciones) como conocimiento indivisible y no interpolar. Las expresiones del manual sólo pueden reconocerse literalmente en caso de ambigüedad; no presentar como teoría externa. La línea de p.70 «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud» es un literal del manual, NO una igualdad que defina la presión ni autoriza E=pV. Arquímedes: preguntar el principio EN PALABRAS tal como consta en el PDF; prohibido E=ρgV u otras fórmulas externas. Viscosidad: se admite reconocer μ_ap=τ/γ con su explicación textual. Formato y dificultad según familias de los modelos 2024/2026, conservando las normas comunes del bloque Específico.
 
 1. El PDF original se conserva sin editar. La frase sobre densidad «vectorial» (pág. 64) es una errata marcada para NO PREGUNTAR ese atributo. No sustituir el texto con un conocimiento externo; examina los demás datos de densidad que figuran en el documento.
 2. Pág. impresa 77, IMAGEN 22, arriba a la derecha: el encabezado «Acoplamiento paralelo de dos bombas» y la flecha/etiqueta de la curva roja «Curva característica del acoplamiento en paralelo de dos bombas» están mal escritos. AMBOS se refieren a BOMBAS EN SERIE. El título inferior, esquema, teoría y fórmulas de esa imagen YA están bien; no los corrijas. Serie: mismo caudal por cada bomba, alturas de impulsión sumadas. No confundir con el montaje REAL en paralelo de la imagen 21, pág. 76.
@@ -13009,7 +13009,7 @@ function t39Prompt131(targets,difficulty){
   });
   if(!items.length)return '';
   return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
-  FUENTE: únicamente el fragmento PDF de CADA objetivo para leyes, fórmulas, constantes, tablas y relaciones. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
+  FUENTES: fragmento PDF de CADA objetivo y aclaraciones expresamente aportadas por el usuario en las reglas T39, con idéntica autoridad. Ninguna otra fuente factual. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
   PROCEDIMIENTO: primero identifica la relación autorizada por la evidencia; elige la incógnita; asigna datos completos y coherentes; convierte al SI; calcula la solución antes de escribir las opciones; redacta tres distractores numéricos plausibles; comprueba que solo una opción coincide con el resultado. No incluyas pasos internos extensos, solo una solución breve verificable.\n  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
   Alta: 1-2 conversiones relevantes y 1-2 operaciones. Muy alta: 2-3 conversiones de magnitudes diferentes, un despeje y/o dos relaciones compatibles del mismo PDF. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
   REDACCIÓN: si es imprescindible citar una página, escribir únicamente «Según el manual del CEIS Guadalajara, página XX, ...». Nunca incorporar el nombre del tema al enunciado.\n  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
@@ -13260,18 +13260,18 @@ la cita. El texto citado debe aparecer literalmente en fragmento.
 TEMA 39 HIDRÁULICA — AUDITORÍA DE PROBLEMAS CON CIFRAS NUEVAS:
 Para cada FILA cuyo enunciado contenga un problema aritmético, separa dos comprobaciones:
 (A) PROCEDENCIA: la ley o relación física empleada debe estar respaldada
-por el fragmento PDF o por una aclaración expresamente autorizada que figure
-en estas instrucciones del Tema 39. quote debe copiar literalmente una
-secuencia CONTIGUA del fragmento, de al menos 3 caracteres si es una fórmula
-breve y de 18 o más si hay texto suficiente. No exijas que las cifras nuevas
-del supuesto ni el resultado calculado figuren en el PDF. Una aclaración
-autorizada interpreta el PDF; no autoriza inventar leyes o constantes.
+por el fragmento PDF o por una aclaración del usuario expresamente incluida
+en las reglas T39, con IGUAL AUTORIDAD. quote debe copiar literalmente una
+secuencia CONTIGUA de UNA de esas dos fuentes, de al menos 3 caracteres si
+es una fórmula breve y de 18 o más si hay texto suficiente. No exijas que las cifras nuevas
+del supuesto ni el resultado calculado figuren en el PDF. Las aclaraciones del usuario precisan o completan el PDF y son fuente
+autorizada; no permiten a Gemini incorporar hechos externos por iniciativa propia.
 (B) SOLUCIÓN: recalcula por tu cuenta con las cifras del enunciado. Convierte
 TODOS los datos a SI antes de operar (incluidas áreas cuadradas, volúmenes
 cúbicos, L/min, bar, cm, mm). Comprueba dimensiones, despeje, redondeo y
 las cuatro opciones. answer=índice correcto solo si una opción coincide
 numéricamente y tiene la unidad SI pedida; de lo contrario answer=-1.
-NO exijas que el resultado numérico inventado aparezca literalmente en el PDF.
+NO exijas que los números del supuesto, las conversiones aritméticas ni el resultado calculado aparezcan literalmente en el PDF. La cita respalda la LEY, no los valores elegidos para el ejercicio.
 NO apruebes una respuesta por parecer plausible ni sustituyas el cálculo
 por una identificación de fórmula. No inventes coeficientes, alturas ni
 constantes ausentes; si faltan datos, answer=-1.
@@ -13296,7 +13296,7 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
   const auditModel120=iiffScope&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
-    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112,
+    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+"\nT39: el campo fragmento de cada fila y las ACLARACIONES DEL USUARIO anteriores son fuentes factuales de igual autoridad. Para problemas, cita la ley o relación; NO busques en ninguna fuente los valores numéricos inventados para el supuesto.\n":"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112,
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
@@ -13322,7 +13322,8 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
       (iiff91Topic(group[i])&&difficulty==='muy alta'&&
         (iiff118ObviousWeakDistractors(q)||iiff122DistractorOutlier(q)||
          /que intervalo cuantitativo recoge el manual para/i.test(iiff91Norm(q.stem))))||
-      !resetQuote136(a.quote,group[i].source_evidence,t39Hydraulica(group[i])))return null;
+      !resetQuote136(a.quote,group[i].source_evidence,t39Hydraulica(group[i])) &&
+      !(t39Hydraulica(group[i])&&resetQuote136(a.quote,T39_REGLAS_HIDRAULICA,true)))return null;
     const evidence=String(a.quote);
     // Para INCORRECTA se evita una explicación libre que pueda asignar
     // otra letra a la falsedad después de auditar y barajar las opciones.
@@ -13371,7 +13372,7 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
       generated:Boolean(questions[i]),
       audited:Boolean(audits.find(a=>a.index===i)),
       answerMatches:Boolean(questions[i]&&audits.find(a=>a.index===i)?.answer===questions[i].correctIndex),
-      quoteMatches:Boolean(audits.find(a=>a.index===i)&&resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,t39Hydraulica(t)))
+      quoteMatches:Boolean(audits.find(a=>a.index===i)&&(resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,true)||resetQuote136(audits.find(a=>a.index===i).quote,T39_REGLAS_HIDRAULICA,true)))
     }:null).filter(Boolean);
     if(rejected.length)console.warn('T39_132_RECHAZOS_AUDITORIA:',JSON.stringify(rejected));
   }
