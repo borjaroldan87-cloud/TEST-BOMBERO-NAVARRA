@@ -13295,8 +13295,34 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
   const auditModel120=iiffScope&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
+  // SERVER138: una única política de auditoría para lotes exclusivamente T39.
+  // Sustituye, no acumula, las instrucciones generales de citas incompatibles
+  // con ejercicios que usan datos numéricos nuevos.
+  const onlyT39=group.length>0 && group.every(t39Hydraulica);
+  const t39Audit138=onlyT39 ? `AUDITORÍA ÚNICA — TEMA 39 HIDRÁULICA.
+Para cada fila, evalúa EXCLUSIVAMENTE su fragmento PDF y las aclaraciones
+expresas del usuario incluidas a continuación. Ambas son fuentes autorizadas.
+No incorpores hechos externos ni utilices ejemplos de examen como fuente.
+
+1. Identifica la ley, fórmula o relación autorizada por esas fuentes.
+2. Si es un ejercicio, considera los números del enunciado datos HIPOTÉTICOS
+   elegidos para practicar: NO tienen que aparecer en las fuentes. Resuelve
+   desde cero, convierte unidades y comprueba las cuatro alternativas.
+3. Si es teoría, verifica la respuesta completa frente a las fuentes.
+4. answer es el índice 0..3 únicamente si hay una sola opción correcta,
+   sustentada por las fuentes y por el cálculo cuando corresponda.
+   Si hay ambigüedad, datos necesarios ausentes o error matemático, answer=-1.
+5. quote es una COPIA LITERAL CONTIGUA de la fórmula o afirmación de la
+   fuente autorizada que respalda la LEY; no cites los números del supuesto.
+   Si es fórmula breve, bastan 3 caracteres; si es texto, usa 18 o más.
+   La cita puede proceder del fragmento o de las aclaraciones expresas.
+6. No rechaces por no encontrar en el PDF cifras inventadas para el problema.
+7. Bernoulli: teoría y fórmula permitidas, cálculos numéricos prohibidos.
+No añadas explicaciones fuera del JSON exigido.
+ACLARACIONES AUTORIZADAS: ${T39_REGLAS_HIDRAULICA}
+FILAS: ${JSON.stringify(blind)}` : null;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
-    contents:auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+"\nT39: el campo fragmento de cada fila y las ACLARACIONES DEL USUARIO anteriores son fuentes factuales de igual autoridad. Para problemas, cita la ley o relación; NO busques en ninguna fuente los valores numéricos inventados para el supuesto.\n":"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112,
+    contents:onlyT39?t39Audit138:(auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
