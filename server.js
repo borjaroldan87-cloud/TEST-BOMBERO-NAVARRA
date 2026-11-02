@@ -13008,23 +13008,21 @@ function t39Prompt131(targets,difficulty){
   if(!items.length)return '';
   return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
   FUENTE: únicamente el fragmento PDF de CADA objetivo para leyes, fórmulas, constantes, tablas y relaciones. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
-  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
+  PROCEDIMIENTO: primero identifica la relación autorizada por la evidencia; elige la incógnita; asigna datos completos y coherentes; convierte al SI; calcula la solución antes de escribir las opciones; redacta tres distractores numéricos plausibles; comprueba que solo una opción coincide con el resultado. No incluyas pasos internos extensos, solo una solución breve verificable.\n  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
   Alta: 1-2 conversiones relevantes y 1-2 operaciones. Muy alta: 2-3 conversiones de magnitudes diferentes, un despeje y/o dos relaciones compatibles del mismo PDF. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
-  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
+  REDACCIÓN: si es imprescindible citar una página, escribir únicamente «Según el manual del CEIS Guadalajara, página XX, ...». Nunca incorporar el nombre del tema al enunciado.\n  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
   Modelos seleccionados por SLOT (no son hechos): ${JSON.stringify(items)}\n`;
 }
 // SERVER133: un ejercicio requiere datos numéricos y respuesta numérica; reconocer una fórmula no sirve.
 function t39StrictNumeric133(q){
+  // Solo verificar estructura cuantitativa, no palabras exactas ni formato de unidades.
   const stem=String(q?.stem||'');
   const options=Array.isArray(q?.options)?q.options:[];
   if(options.length!==4)return false;
-  // Debe existir un supuesto con cifras, una incógnita y resultados cuantitativos.
-  const data=(stem.match(/\d+(?:[.,]\d+)?/g)||[]).length;
-  const units=/(?:\b(?:mm|cm|m|km|Pa|kPa|MPa|bar|N|kN|kg|g|L|l|s|min|h)\b|m[²³]|m\^?[23]|cm[²³]|mm[²³]|\/s|\/min)/i;
-  const question=/(?:calcul|determina|obt[eé]n|cu[aá]nt|valor|resultad|presi[oó]n|caudal|velocidad|di[aá]metro|altura|fuerza|volumen|densidad)/i;
-  const numericAnswers=options.every(x=>/\d/.test(String(x))&&units.test(String(x)));
-  const formulaOnly=/(?:cu[aá]l es la (?:expresi[oó]n|f[oó]rmula)|qu[eé] (?:f[oó]rmula|ecuaci[oó]n)|se define|principio de)/i.test(stem);
-  return data>=2&&units.test(stem)&&question.test(stem)&&numericAnswers&&!formulaOnly;
+  const numbers=(stem.match(/\\d+(?:[.,]\\d+)?/g)||[]);
+  const quantitative=options.every(o=>/\\d/.test(String(o)));
+  const formulaRecognition=/(?:cu[aá]l es la (?:expresi[oó]n|f[oó]rmula)|qu[eé] (?:f[oó]rmula|ecuaci[oó]n)|se define|principio de)/i.test(stem);
+  return numbers.length>=2 && quantitative && !formulaRecognition;
 }
 function t39CalculationCandidate133(t){
   if(!t39Hydraulica(t)||!specificEvidenceReady128(t))return false;
