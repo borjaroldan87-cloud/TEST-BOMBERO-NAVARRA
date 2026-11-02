@@ -12974,6 +12974,50 @@ FUENTE ÚNICA: el PDF original de Hidráulica; ningún dato, fórmula, despeje, 
 6. Gráficas originales: pág. 74, curva característica y curvas a distintas revoluciones: no confundir altura, caudal, potencia y rendimiento; pág. 76, imagen 21 PARALELO: se suman caudales a igual altura; pág. 77, imagen 22 SERIE: se suman alturas a igual caudal; pág. 78, imagen 24: pérdida de carga y caudal para distintos diámetros, y 25: curva creciente de pérdidas/instalación frente al caudal; pág. 79, imagen 26: el punto de funcionamiento es intersección de curva de bomba y curva de instalación, y se desplaza al cambiar régimen de bomba o condiciones de instalación. No leer valores numéricos exactos por estimación visual cuando no son explícitos.
 7. Si una figura original no está adjunta o su descripción no permite una deducción inequívoca, no hagas pregunta que necesite verla. Nunca crear, reconstruir o editar figuras originales. Nunca preguntes por las dos etiquetas erróneas como si fueran hechos.
 Estas excepciones sólo rigen objetivos etiquetados «Tema 39. Hidráulica», sin contaminar otros temas del mismo lote. La afirmación errónea de densidad se excluye de preguntas; la imagen 22 se interpreta como serie conforme a la figura y el texto del propio manual.`;
+// SERVER131 — T39: plantillas exigentes de cálculo, SIN motor nuevo ni llamadas adicionales.
+// Los ejemplos del cuadernillo y exámenes son ESTRUCTURAS, nunca fuente factual.
+const T39_CALCULO_MODELOS_131=Object.freeze([
+  ['hidrostat','010: presión hidrostática de una columna + fuerza sobre superficie; densidad kg/L, altura cm, superficie cm²; Pa y N'],
+  ['absolut|relativ|manom[eé]tr','020: aceite sobre agua, atmósfera en kPa y alturas cm; presión relativa y absoluta en Pa'],
+  ['pascal|prensa|[eé]mbolo|pist[oó]n','030: prensa con fuerza, masa, diámetros mm/cm; despejar diámetro en m; oficial Navarra 2026 pregunta 52: cociente de áreas de dos radios'],
+  ['caudal|ramal','040: dos ramales, sección cm²/m² y velocidad cm/s/m/s; sumar caudales en m³/s'],
+  ['continuidad|bifurca|confluy','050: L/min + m³/h confluyen en tubería diámetro mm; velocidad final m/s'],
+  ['torricelli|orificio|descarga','057/107: orificio circular, altura, tiempo y caudal; convertir mm, cm, min y L/s; despejar altura o volumen en SI'],
+  ['densidad relativa|peso espec[ií]fico','080: dos capas de líquidos con densidades relativas y alturas diferentes; presión Pa'],
+  ['densidad|volumen|masa','067: masa y volumen geométrico con longitudes mm/cm/m; densidad kg/m³'],
+  ['p[eé]rdida|bomba|l[ií]nea|lanza|impulsi[oó]n','Oficial Navarra 2026 pregunta 150: presión de bomba = presión en lanza + pérdidas + desnivel NUMÉRICO; solicitar Pa. Usar solo ecuación de línea acreditada por evidencia PDF'],
+  ['serie|paralelo','Bombas en serie: sumar alturas con caudal constante; en paralelo: sumar caudales con altura constante; unidades SI'],
+]);
+function t39NumericModel131(t){
+  if(!t39Hydraulica(t))return null;
+  const text=String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'');
+  if(/bernoulli/i.test(text))return null;
+  const match=T39_CALCULO_MODELOS_131.find(([pattern])=>new RegExp(pattern,'i').test(text));
+  return match?match[1]:null;
+}
+function t39Prompt131(targets,difficulty){
+  const items=targets.flatMap((t,i)=>{
+    if(!t39Hydraulica(t))return [];
+    const text=String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'');
+    const model=t39NumericModel131(t);
+    const bernoulli=/bernoulli/i.test(text);
+    return [{slot:i+1,modo:bernoulli?'BERNOULLI_TEORIA_FORMULACION_SIN_CALCULO':
+      (model && (t.questionFamily==='CALCULO_FORMULACION'||t.evaluation_type==='calculo'))?'CALCULO_NUMERICO_REAL':'TEORIA_O_FORMULACION',
+      ...(model?{modeloEstructural:model}:{})}];
+  });
+  if(!items.length)return '';
+  return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
+  FUENTE: únicamente el fragmento PDF de CADA objetivo para leyes, fórmulas, constantes, tablas y relaciones. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
+  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, formular teoría fiel al fragmento en lugar de inventar fórmula.
+  Alta: 1-2 conversiones relevantes y 1-2 operaciones. Muy alta: 2-3 conversiones de magnitudes diferentes, un despeje y/o dos relaciones compatibles del mismo PDF. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
+  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
+  Modelos seleccionados por SLOT (no son hechos): ${JSON.stringify(items)}\n`;
+}
+function t39BernoulliNumeric131(q,t){
+  if(!t39Hydraulica(t)||!/bernoulli/i.test(String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'')))return false;
+  const stem=String(q?.stem||'');
+  return /(?:calcul[ae]|determin[ae]|obt[eé]n|cu[aá]nt[oa]|resultado|valor num[eé]rico)/i.test(stem)&&/\d/.test(stem);
+}
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
@@ -13106,7 +13150,7 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
+    contents:resetPrompt136(group,difficulty,mode,comparisons)+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):"")+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
       geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
@@ -13131,7 +13175,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // Comprueba evidencia y calidad de distractores: Muy alta exige calidad=2
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
-    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
+    if(resetShape136(q)||t39BernoulliNumeric131(q,group[i])||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
       console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
       return [];
