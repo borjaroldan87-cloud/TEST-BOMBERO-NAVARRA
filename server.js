@@ -13398,7 +13398,11 @@ FILAS: ${JSON.stringify(blind)}` : null;
       generated:Boolean(questions[i]),
       audited:Boolean(audits.find(a=>a.index===i)),
       answerMatches:Boolean(questions[i]&&audits.find(a=>a.index===i)?.answer===questions[i].correctIndex),
-      quoteMatches:Boolean(audits.find(a=>a.index===i)&&(resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,true)||resetQuote136(audits.find(a=>a.index===i).quote,T39_REGLAS_HIDRAULICA,true)))
+      quoteMatches:Boolean(audits.find(a=>a.index===i)&&(resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,true)||resetQuote136(audits.find(a=>a.index===i).quote,T39_REGLAS_HIDRAULICA,true))),
+      shape:resetShape136(questions[i]),
+      auditorAnswer:audits.find(a=>a.index===i)?.answer??null,
+      generatedAnswer:questions[i]?.correctIndex??null,
+      auditorQuote:String(audits.find(a=>a.index===i)?.quote||'').slice(0,120)
     }:null).filter(Boolean);
     if(rejected.length)console.warn('T39_132_RECHAZOS_AUDITORIA:',JSON.stringify(rejected));
   }
@@ -14167,7 +14171,7 @@ app.post('/api/generate',async(req,res)=>{
       // fabricar hechos y sin tocar el resto de materias. Cada ronda usa
       // nuevos objetivos elegibles, preserva lo ya validado y el SRS.
       const high119=difficulty==='muy alta'&&targets.length>0&&targets.every(iiff91Topic);
-      const maxRounds119=1; // SERVER120: no repetir tres tandas caras idénticas.
+      const maxRounds119=(targets.length>0&&targets.every(t39Hydraulica))?2:1; // T39: una recuperación adicional acotada; otros temas sin cambios.
       const tried119=new Set(targets.map(t=>Number(t.id)));
       const blocked119=high119?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
