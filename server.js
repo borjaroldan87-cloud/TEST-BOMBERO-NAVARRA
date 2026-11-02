@@ -9105,7 +9105,7 @@ function specificLiteralStem129(stem,target){
   const name=String(target.topic_name||'').replace(/^\s*TEMA\s+\d+\s*[.:-]?\s*/i,'').trim();
   const text=String(stem||'').trim().replace(
     /^(?:seg[uú]n|conforme|de acuerdo con)[^?]{0,170}?p[aá]gina\s*\d+\s*[,.:;–-]?\s*/i,'').trim();
-  return `Según el manual del CEIS Guadalajara, ${name}, página ${page}, ${text}`;
+  return `Según el manual del CEIS Guadalajara, página ${page}, ${text}`;
 }
 function specificAlignFormula128(selected,candidates){
   if(!selected.length||!selected.every(t=>
@@ -13002,16 +13002,37 @@ function t39Prompt131(targets,difficulty){
     const model=t39NumericModel131(t);
     const bernoulli=/bernoulli/i.test(text);
     return [{slot:i+1,modo:bernoulli?'BERNOULLI_TEORIA_FORMULACION_SIN_CALCULO':
-      (model && (t.questionFamily==='CALCULO_FORMULACION'||t.evaluation_type==='calculo'))?'CALCULO_NUMERICO_REAL':'TEORIA_O_FORMULACION',
+      (t.t39StrictCalculation133 || (model && (t.questionFamily==='CALCULO_FORMULACION'||t.evaluation_type==='calculo')))?'CALCULO_NUMERICO_REAL':'TEORIA_O_FORMULACION',
       ...(model?{modeloEstructural:model}:{})}];
   });
   if(!items.length)return '';
   return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
   FUENTE: únicamente el fragmento PDF de CADA objetivo para leyes, fórmulas, constantes, tablas y relaciones. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
-  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, formular teoría fiel al fragmento en lugar de inventar fórmula.
+  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
   Alta: 1-2 conversiones relevantes y 1-2 operaciones. Muy alta: 2-3 conversiones de magnitudes diferentes, un despeje y/o dos relaciones compatibles del mismo PDF. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
   Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
   Modelos seleccionados por SLOT (no son hechos): ${JSON.stringify(items)}\n`;
+}
+// SERVER133: un ejercicio requiere datos numéricos y respuesta numérica; reconocer una fórmula no sirve.
+function t39StrictNumeric133(q){
+  const stem=String(q?.stem||'');
+  const options=Array.isArray(q?.options)?q.options:[];
+  if(options.length!==4)return false;
+  // Debe existir un supuesto con cifras, una incógnita y resultados cuantitativos.
+  const data=(stem.match(/\d+(?:[.,]\d+)?/g)||[]).length;
+  const units=/(?:\b(?:mm|cm|m|km|Pa|kPa|MPa|bar|N|kN|kg|g|L|l|s|min|h)\b|m[²³]|m\^?[23]|cm[²³]|mm[²³]|\/s|\/min)/i;
+  const question=/(?:calcul|determina|obt[eé]n|cu[aá]nt|valor|resultad|presi[oó]n|caudal|velocidad|di[aá]metro|altura|fuerza|volumen|densidad)/i;
+  const numericAnswers=options.every(x=>/\d/.test(String(x))&&units.test(String(x)));
+  const formulaOnly=/(?:cu[aá]l es la (?:expresi[oó]n|f[oó]rmula)|qu[eé] (?:f[oó]rmula|ecuaci[oó]n)|se define|principio de)/i.test(stem);
+  return data>=2&&units.test(stem)&&question.test(stem)&&numericAnswers&&!formulaOnly;
+}
+function t39CalculationCandidate133(t){
+  if(!t39Hydraulica(t)||!specificEvidenceReady128(t))return false;
+  const text=String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'');
+  if(/bernoulli/i.test(text))return false;
+  return !!t39NumericModel131(t) &&
+    (String(t.item_type||'')==='formula'||String(t.evaluation_type||'')==='calculo'||
+      /(?:Q\s*=|P\s*=|p\s*=|F\s*=|S\s*=|v\s*=|H_m|ρ|densidad|presi[oó]n hidrost[aá]tica)/i.test(text));
 }
 function t39BernoulliNumeric131(q,t){
   if(!t39Hydraulica(t)||!/bernoulli/i.test(String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'')))return false;
@@ -13067,7 +13088,7 @@ ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territ
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 ${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
-2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, [título real], página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
+2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION en modo cálculos T39 exige cálculo numérico REAL; en otros modos permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
 MUY ALTA: escribe primero una clave respaldada y tres distractores plausibles sobre LA MISMA variable técnica (magnitud con unidad y escala comparables, condición, paso, componente o relación); evita disparates, absolutos gratuitos y categorías distintas. Si el fragmento solo ofrece un dato sencillo, mantén la precisión literal: nunca inventes otra condición para fingir dificultad. Enunciado breve y de examen, sin escenificaciones («un equipo analiza...») ni referencias genéricas al temario fuera de las literales CEIS; un supuesto operativo solo si está documentado. Cuatro opciones homogéneas, no solapadas y una única solución. INCORRECTA: tres opciones verdaderas y una falsa inequívoca. Explicación consistente con la clave, sin letras A/B/C/D porque se barajan después. Sin hechos externos, filtros ni nuevas rondas.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
@@ -13175,7 +13196,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // Comprueba evidencia y calidad de distractores: Muy alta exige calidad=2
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
-    if(resetShape136(q)||t39BernoulliNumeric131(q,group[i])||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
+    if((group[i].t39StrictCalculation133&&!t39StrictNumeric133(q))||resetShape136(q)||t39BernoulliNumeric131(q,group[i])||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
       console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
       return [];
@@ -13958,6 +13979,23 @@ app.post('/api/generate',async(req,res)=>{
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
           aiClient().models.generateContent(...args)}},topicIds,examMode,freshOnly111);
       })())));
+    // SERVER133: modo CÁLCULOS del T39 es exclusivo, nunca una selección mixta.
+    // Selección en una única consulta existente de candidatos, sin Gemini adicional.
+    const onlyT39Calcs133=mode==='calculos' && Array.isArray(topicIds)&&topicIds.length===1 &&
+      targets.length>0 && targets.every(t39Hydraulica);
+    if(onlyT39Calcs133&&!resume136){
+      const pool=await getAdaptiveCoverageCandidates(Math.max(1000,count*50),topicIds,examMode,freshOnly111);
+      const ordered=[...targets,...pool];
+      const seen=new Set();
+      const eligible=ordered.filter(t=>{
+        const id=Number(t.id);
+        if(seen.has(id)||!t39CalculationCandidate133(t))return false;
+        seen.add(id);return true;
+      });
+      if(eligible.length<count)throw Error(`Modo Cálculos T39: solo ${eligible.length} objetivos numéricos verificables para ${count} preguntas. No se sustituirán por teoría.`);
+      targets=eligible.slice(0,count).map(t=>({...t,questionFamily:'CALCULO_FORMULACION',t39StrictCalculation133:true}));
+      console.log('T39_133_CALCULOS_SELECCION:',JSON.stringify({requested:count,eligible:eligible.length,selected:targets.map(t=>t.id)}));
+    }
     if(!resume136 && testType==='normal' && count<=40 &&
        targets.some(t=>iiff91Topic(t)&&iiff91Editorial(t))){
       const affected=[...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))];
@@ -14131,12 +14169,13 @@ app.post('/api/generate',async(req,res)=>{
             const desiredFamily=String(slot.t.questionFamily||'');
             const specific=String(slot.t.topic_block||'').toLowerCase()==='especifico'&&
               !iiff91Topic(slot.t);
+            if(slot.t.t39StrictCalculation133&&!t39CalculationCandidate133(other))continue;
             const recoveredFamily=specific ?
               ((desiredFamily==='CALCULO_FORMULACION'&&!specificFormulaReady128(other))||
                desiredFamily==='GRAFICA'
                 ?specificFallbackFamily129(targets,slot.index)
                 :(desiredFamily||'2026_CORRECTA')):desiredFamily;
-            targets[slot.index]=specific?{...other,questionFamily:recoveredFamily}:other;
+            targets[slot.index]=specific?{...other,questionFamily:slot.t.t39StrictCalculation133?'CALCULO_FORMULACION':recoveredFamily,...(slot.t.t39StrictCalculation133?{t39StrictCalculation133:true}:{})}:other;
             occupied.add(Number(other.id));tried119.add(Number(other.id));
             slot.t=targets[slot.index];
             // Los formatos geográficos deterministas mantienen su ruta normal.
