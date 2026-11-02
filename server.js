@@ -2723,6 +2723,24 @@ async function replaceIiffDocument90(topic,pdfPath,items){
     `conocimientos guardados en PostgreSQL. File Search sin cambios.`);
 }
 
+// T39: usar el procedimiento transaccional local ya empleado por IIFF.
+// No altera el documento de otros temas ni modifica la indexación de Google.
+async function replaceT39Document(topic,pdfPath,items){
+  if(!isT39CoverageSource(topic))throw new Error('T39: tema incorrecto');
+  const bytes=fs.readFileSync(pdfPath);
+  if(bytes.length<1000 || bytes.length>20*1024*1024 ||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw new Error('T39: PDF inválido. Se conserva la cobertura anterior.');
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==T39_CEIS_PDF_SHA256)throw new Error('T39: SHA del PDF no coincide.');
+  const pdf=await PDFDocument.load(bytes);
+  if(pdf.getPageCount()!==17)throw new Error('T39: se esperaban 17 páginas físicas.');
+  t39CoverageQualityGate(items);
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages:17,bytes});
+  console.log(`[T39] PDF original y ${items.length} conocimientos guardados en una transacción local.`);
+}
+
 // SERVER115 R2 — nuevo Tema 22: PDF completo, 197 fichas confirmadas
 // en PostgreSQL, sin indexación Google ni reextracción AI de cobertura.
 async function replaceGeo22Document115(topic,pdfPath,items){
@@ -3203,13 +3221,63 @@ EXTRACCIÓN ESPECÍFICA DEL TEMA 39 — HIDRÁULICA CEIS GUADALAJARA:
 - Tabla 1 (p. 64): 6 densidades relativas. Tabla 2 (p. 66): 14 parejas temperatura-presión de vapor. Tabla 3 (p. 67): cinco filas numéricas impresas, pero la fila «1 ATM = 1,013 kg/cm²» contradice la primera fila y NO debe guardarse como conocimiento examinable correcto ni generar preguntas a partir de ella. Conservar intacto el PDF original y registrar SOLO las otras cuatro equivalencias no contradictorias. No extraer la fila ajena «Madera 0,5» de esta tabla (ya está en la Tabla 1).
 - Tabla 4 (p. 71): por cada uno de los tres tipos de lanza, distinguir mínimos y máximos de diámetro y de caudal nominal, 12 extremos numéricos con las condiciones h=70 m.c.a. y K=0,9. Tabla 8 (p. 79) reproduce la Tabla 4: NO DUPLICAR esos doce conocimientos.
 - Tabla 5 (p. 75): 12 parejas altitud-presión atmosférica. Tabla 6 (p. 75): 7 parejas temperatura-pérdida de aspiración. Tabla 7 (p. 78): exactamente 21 triples válidos CAUDAL + DIÁMETRO + PÉRDIDA; NO registrar las 11 casillas con asterisco ni la casilla vacía (NO son valores). Tabla 9 (p. 79): 12 triples tipo de lanza + presión + alcance. Referencia: 89 valores/correspondencias numéricas impresas, de los cuales 88 son examinables sin contradicción; la fila contradictoria de la Tabla 3 NO se publicará como hecho correcto. No confundas recuento de celdas con número de tablas.
-- FÓRMULAS: revisa una por una todas las ecuaciones visibles, incluidas las de densidad, peso específico, presión absoluta/relativa, hidrostática, Pascal, Arquímedes, Reynolds, caudal, continuidad, Bernoulli, Torricelli, caudal teórico/real, bombas serie/paralelo, ecuación de línea, pérdidas y reacción en lanza. Como referencia hay 33 familias distintas (41 apariciones con repeticiones): registra por separado la expresión, magnitudes/condiciones y los conocimientos numéricos independientes, pero no multipliques despejes equivalentes sin contenido adicional. Usa itemType «formula» y sourceEvidence autosuficiente con la expresión EXACTA y la página impresa. No confundir la letra η de Reynolds con el rendimiento de una bomba.
+- FÓRMULAS: revisa una por una todas las ecuaciones visibles, incluidas las de densidad, peso específico, presión absoluta/relativa, hidrostática, Pascal, Reynolds, caudal, continuidad, Bernoulli, Torricelli, caudal teórico/real, bombas serie/paralelo, ecuación de línea, pérdidas y reacción en lanza. El inventario incorpora las expresiones examinables verificadas; no deduzcas fórmulas externas: registra por separado la expresión, magnitudes/condiciones y los conocimientos numéricos independientes, pero no multipliques despejes equivalentes sin contenido adicional. Usa itemType «formula» y sourceEvidence autosuficiente con la expresión EXACTA y la página impresa. No confundir la letra η de Reynolds con el rendimiento de una bomba.
 - GRÁFICAS: examina sus ejes, variables, trazos, sentido, intersecciones y relaciones cualitativas demostrables, sin inventar valores por lectura aproximada. Revisa las imágenes 2, 19, 20, 21, 22, 24, 25 y 26. Incluye en sourceEvidence «Imagen N» y la relación técnica legible. En la imagen 22 (p. 77) el título superior y la etiqueta de la curva roja dicen ERRÓNEAMENTE «paralelo»: representan bombas EN SERIE, según teoría, fórmula, esquema y pie; no alterar estos últimos ni confundir con la imagen 21 (paralelo).
-- REGLA FÍSICA CONFIRMADA: la densidad (p. 64) es magnitud ESCALAR aunque en el PDF figure «vectorial»; no copies ese error a las fichas. El caudal es Q=V/t y Q=S·v, no solo velocidad. El resto del PDF debe permanecer intacto.
+- ERRATA DE LA FUENTE: el PDF usa «vectorial» para densidad (p. 64). No crear conocimiento ni pregunta sobre la clasificación vectorial/escalar; conservar las fórmulas y datos de densidad literalmente. El caudal aparece como Q=V/t y Q=S·v. No añadir contenido externo.
 - FIGURAS: no generes ni inventes imágenes nuevas. Si para contestar es imprescindible ver la figura, la posterior pregunta deberá mostrar la figura original o quedar descartada.
 - Revisa también el texto técnico de esas páginas: conceptos, condiciones, riesgos, procedimientos, unidades, ejemplos de pérdidas singulares (dos en p. 78), detalles de máquinas y variables. El subtotal documental 89+33+8+2 NO es el total del tema: no descuides la teoría para alcanzar una cifra.
+- ARQUÍMEDES: solo su definición y las consecuencias EXPRESAMENTE presentes en el PDF. No generar la fórmula E=ρgV, ni equivalentes que no figuren escritas; la expresión anteriormente atribuida a Arquímedes en la p. 69 no figura allí y no puede utilizarse.
+- BERNOULLI: página 70, conservar la ecuación y la explicación textual de las tres formas de energía. La línea literal «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud» se puede identificar COMO TEXTO DEL MANUAL, pero NO afirmar que la presión sea esa energía, ni inventar E=pV. La fórmula μ_ap=τ/γ de p. 64 sí puede preguntarse como identificación literal.
+- Cada resultado de tabla debe vincular fila, columna, unidad, condiciones y tabla; el servidor ya incorpora las celdas correctas. En este paso Gemini analiza el texto restante, sin volver a reinterpretar ni rellenar celdas. Si un bloque contiene principalmente datos numéricos, no fuerces un mínimo artificial de párrafos: describe las relaciones y condiciones documentadas.
+- No introducir ninguna expresión calculada, definición física o magnitud que no aparezca en el PDF original. Si la fuente presenta una igualdad dudosa, puede citarse literalmente como redacción del manual, nunca ampliarse con una derivación externa.
 - DEVUELVE en section «Tabla N. ...» para unidades de una tabla y «Imagen N. ...» para gráficas; para fórmulas usa el epígrafe real. Cada valor del PDF debe aparecer ligado a su clave completa, no en una enumeración sin trazabilidad.
 `;
+// Lista de epígrafes para VERIFICAR EN EL PDF, no para convertir automáticamente en hechos.
+const T39_THEORY_READING_CHECKLIST=Object.freeze({"2":["Fuerzas moleculares de cohesión responsables de viscosidad","Definición de densidad relativa","Definición de masa","Definición de peso específico relativo","Densidad: cantidad de masa por unidad de volumen","Modelo de fluido ideal de viscosidad nula","Objeto de estudio de la hidráulica","Peso específico: peso dividido por volumen","Viscosidad: oposición a deformaciones tangenciales","Existencia de viscosidad en los fluidos reales","Agua a 4 grados y 1 atm como patrón","Interpretación de capas paralelas de fluido con distintas velocidades","Símbolo de densidad rho","Símbolo gamma de peso específico","Símbolo mu para viscosidad dinámica","Unidad SI de masa: kilogramo","Unidad de densidad kg/m3","Unidad del peso específico N/m3"],"3":["Variación opuesta con temperatura en gases y líquidos","Condición de no deslizamiento en pared sólida","Presión de vapor como equilibrio dinámico líquido-gas","Sublimación de sólido a gas","Sublimación inversa de gas a sólido","Presión de vapor independiente de cantidades relativas en equilibrio bifásico","Simplificación de fórmulas de pérdidas sin cambios de viscosidad del agua ambiente","Interpretación de presión de vapor del agua frente a temperatura","Perfil de velocidades en capa límite: cero en pared","Perfil de velocidades en capa límite: máximo fuera de espesor delta","Igualación de velocidades de evaporación y condensación en equilibrio","A igual temperatura, presión de vapor y peso molecular para líquidos de naturaleza similar","Efecto secundario de presión en viscosidad","La resistencia viscosa aumenta con la velocidad de deformación","Mayor viscosidad implica mayor resistencia y pérdida de presión","Naturaleza y fuerzas intermoleculares condicionan presión de vapor","Superficie de intercambio afecta a rapidez de alcanzar equilibrio, no valor final de presión","Variación principal de viscosidad con temperatura","Significado del espesor delta de capa límite"],"4":["Presión de vapor relevante al aspirar con bomba y evitar cavitación","Puentes de hidrógeno vinculados a tensión superficial elevada del agua","Resultante molecular interior nula y superficial dirigida al interior","Capilaridad produce elevación o depresión del líquido","Capilaridad por tensión superficial e interacción con sólido","Hidrostática estudia fluidos en equilibrio","Pascal y Arquímedes como principios de hidrostática","Presión como fuerza normal por superficie","Presión de vapor condiciona evaporación al bajar presión exterior","Tensión superficial como energía por incremento de superficie","Ebullición cuando presión de vapor iguala la exterior","Presión de vapor del agua a 100 grados según texto","Presión de vapor del agua a 15 grados según texto","Gota aproximadamente esférica minimiza área por volumen","Mayor presión exterior incrementa temperatura de ebullición","Mayor tensión superficial exige mayor energía para expandir área","Menor presión exterior reduce temperatura de ebullición"],"5":["Manómetros ordinarios suelen medir presión relativa","Diferencia de presión hidrostática por peso de columna líquida","Presión absoluta referida al cero absoluto","Presión atmosférica como peso de columna de aire por superficie","Presión dinámica dependiente de velocidad","Presión estática independiente de velocidad","Presión relativa referida a la atmósfera","Vacío como extracción total o parcial de fluido","Vacío perfecto no realizable en práctica","Atmósfera al nivel del mar igual a columna de mercurio de 760 mm","Variación de presión atmosférica con altitud","Variación de presión atmosférica con condiciones meteorológicas","Pascal igual newton por metro cuadrado"],"6":["Aplicaciones de Pascal: prensa, elevador, freno y puente hidráulico","Corte y separación hidráulica por principio de Pascal","Principio de Arquímedes: empuje igual al peso de fluido desalojado","Principio de Pascal y transmisión uniforme de presión","Empuje no depende directamente de presión existente","Pascal aplicado a fluido poco compresible en recipiente indeformable en equilibrio","Empuje de Arquímedes dirigido de abajo hacia arriba","Fuerza de presión en reposo es perpendicular a superficie","Prensa con dos cilindros de diferente sección comunicados por líquido","A igual profundidad, presiones iguales","Empuje depende de densidad del fluido y volumen desplazado","Pequeña fuerza en sección menor permite gran fuerza en mayor sección","Presión hidrostática aumenta con profundidad","Presión hidrostática no depende de la forma del recipiente","Empuje en newtons"],"7":["Mayoría de sistemas de distribución de bomberos trabajan en turbulento","Dominio de fuerzas viscosas en laminar frente a inerciales en turbulento","Caudal como volumen transversal por unidad de tiempo","Flujo laminar de trayectorias uniformes y paralelas","Flujo turbulento de trayectorias irregulares y cruzadas","Hidrodinámica estudia dinámica de líquidos","Reynolds de 2000 a 4000 clasifica transición en manual","Reynolds mayor de 4000 clasifica turbulento en manual","Reynolds menor de 2000 clasifica laminar en manual","Interpretación de sección y velocidad en imagen de caudal","Aumento de velocidad o cambios bruscos de dirección originan turbulencias","Régimen laminar asociado a velocidades bajas","Fluido incompresible como hipótesis de hidrodinámica ideal","Flujo estacionario con velocidad local constante en el tiempo","Pérdida por viscosidad despreciable como hipótesis de hidrodinámica","Viscosidad, densidad, diámetro y geometría influyen en régimen"],"8":["Bernoulli y conservación energética para fluido ideal","Continuidad del caudal entre puntos sin entradas ni salidas","Torricelli como aplicación de Bernoulli a orificio de depósito","Condiciones de presión atmosférica y velocidad superficial despreciable en Torricelli","A sección constante, elevar altura consume energía de presión","Menor sección con caudal constante implica mayor velocidad","Tubo horizontal estrechado: mayor velocidad y menor presión"],"9":["Aspiración secundaria de fluido por efecto Venturi","Pulverizadores y dosificadores se basan en Venturi","Golpe de ariete como sobrepresión y depresión por cambio brusco de caudal","Venturi: estrechamiento eleva velocidad y reduce presión","Factor K entre 0,9 y 0,98","Depresión puede formar burbuja por vaporización","Onda comprime fluido y dilata tubería","Retorno de fluido contra válvula cerrada crea depresión","Cierre brusco genera onda de sobrepresión que avanza por tubería","Ondas reflejadas y disipación progresiva por elasticidad y resistencia","Parada total y recuperación elástica producen onda inversa","Caudal en lanza depende de presión de entrada","Contracción de vena reduce caudal real frente al teórico","Venturi combina continuidad y Bernoulli","Golpe de ariete puede romper conducciones","Factor K del surtidor en caudal real","Golpe de ariete también llamado pulso de Zhukowski"],"10":["Altura manométrica Hm como incremento de energía hidráulica","Bomba centrífuga transforma energía mecánica en energía hidráulica","Bomba incrementa energía entre aspiración e impulsión","Potencia útil de bomba como potencia transferida al fluido","Punto óptimo de bomba donde rendimiento es máximo","Valores nominales Q y presión se definen en punto óptimo","Curvas características a distintas revoluciones del rodete","Curvas características de la bomba: Q en abscisas","Curvas de bomba: Hm como salida dependiente de Q","Curvas de bomba: potencia consumida como salida dependiente de Q","Curvas de bomba: rendimiento eta como salida dependiente de Q","Difusor convierte parte de velocidad en presión","Álabes giratorios incrementan velocidad del fluido","Altura manométrica máxima a caudal cero, disminuye al abrir caudal"],"11":["Aspiración se logra por empuje de presión atmosférica exterior","Bombas de bomberos tienen régimen de rodete ajustable por aceleración","Cebado: llenado previo de cuerpo de bomba y entrada de aspiración","Cebado no exigible si nivel del agua supera el de la bomba","Altura máxima teórica de aspiración es 10,33 m","Altura práctica de aspiración entre siete y ocho metros","Límite habitual de revoluciones no suele exceder 5000 rpm","Cebado mediante depresor de vacío","Cebado mediante eyector de gases y efecto Venturi","Curvas características se obtienen variando salida con válvula","Medición de Q, presión y potencia en cada posición de válvula","Altura de aspiración disminuye con mayor presión de vapor","Altura de aspiración disminuye con menor presión atmosférica","Altura de aspiración disminuye por pérdidas en mangotes y alcachofa","Altura de aspiración disminuye por vacío imperfecto","Variar rpm desplaza familias de curvas características","Funcionamiento en seco de bomba ocasiona problemas de lubricación y refrigeración"],"12":["Gran demanda de caudal puede cavitar incluso alimentando del depósito","Grandes alturas de aspiración y caudales favorecen cavitación","Cavitación por caída local bajo presión de vapor y condensación posterior","Las bombas pueden conectarse en paralelo o serie","Paralelo une entradas y salidas de varias bombas","Altura geométrica máxima para prevenir cavitación 8-8,5 metros según manual","Expansión de volumen por vaporización del agua unas 1700 veces","Presiones locales de cavitación pueden llegar a 1000 kg/cm2 según manual","Cavitación de rodete deteriora equilibrio y rodamientos","Cavitación produce erosión de álabes y daño mecánico","Superficies dañadas facilitan cavitaciones posteriores","Cavitación produce ruido y vibración semejantes a grava","Cebado mediante bomba autocebante con depósito","Cebado mediante bomba de anillo de agua","Cebado mediante bomba de pistones","Aumentar sección de mangotes para reducir pérdidas y cavitación","Disminuir altura de aspiración para reducir cavitación","Disminuir caudal de trabajo para reducir cavitación","Cebado finaliza al entrar agua en contacto con rodete y se desconecta sistema","Burbujas implosionan cuando pasan a regiones de mayor presión","Burbujas se forman en regiones de baja presión del rodete"],"13":["Serie aumenta altura manométrica para impulsiones a gran altura","Pérdidas continuas entre corriente fluida y pared de conducción","Instalación básica: bomba, manguera y lanza","Pérdida de carga como pérdida energética por rozamiento o turbulencia","En serie salida de bomba conectada con entrada siguiente","Llevar agente extintor de suministro a foco con Q y velocidad adecuados","HG representa desnivel geométrico con signo","PB representa presión en bomba","PC representa pérdidas de carga","PL representa presión en punta de lanza","Diferencia entre pérdidas continuas y singulares"],"14":["Pérdidas locales generalmente menores que continuas","Curva de instalación representa pérdidas y altura geométrica según caudal","Punto de funcionamiento es intersección curva de bomba y sistema","Pérdidas locales en cambios de sección, dirección, bifurcaciones y válvulas","Curva de instalación y efecto de componente geométrica","Gráfica de pérdidas de carga más usuales","Impulsión ascendente resta presión por cada 10 metros","Impulsión descendente añade presión por cada 10 metros","Pérdida continua crece al disminuir diámetro según quinta potencia","Pérdida continua crece con cuadrado del caudal o velocidad","Pérdida continua crece con rugosidad y viscosidad","Pérdida continua crece linealmente con longitud del tendido"],"15":["En punto de funcionamiento se igualan aporte bomba y demanda instalación","Reacción en lanza como retroceso por acción y reacción","Para lanza concreta máximo alcance con chorro y caudal máximo","En gráfica de instalación punto A expresa caudal QA y presión HA","Abrir más sección de lanza desplaza punto hacia C: Q sube y P baja","Acelerar bomba con lanza fija desplaza punto hacia B y aumenta caudal","Alcance depende de presión en punta y diámetro de lanza","Mayor diámetro eleva alcance a igual presión","Mayor presión eleva velocidad de salida y alcance","E denota empuje, P presión y S sección de salida"],"16":["Cono alrededor de 180 grados anula aproximadamente empuje","Apertura y cierre de válvulas lentos reducen golpe de ariete","Dejar lanza en cortina en espera reduce impulso inicial y daños","A igual diámetro, más presión aumenta reacción de lanza","A igual presión, más diámetro aumenta reacción de lanza","Aumentar apertura del cono reduce empuje hacia atrás"]});
+function t39KnownFactsForBlock(chunk){
+  const present=T39_CANONICAL_ITEMS.filter(item=>
+    item.sourcePage>=chunk.startPage && item.sourcePage<=chunk.endPage);
+  const checklist=[];
+  for(let page=chunk.startPage;page<=chunk.endPage;page++){
+    const labels=T39_THEORY_READING_CHECKLIST[String(page)]||[];
+    if(labels.length)checklist.push(`Página física ${page}: `+labels.join(' | '));
+  }
+  return `
+PISTAS PARA COMPROBAR EXHAUSTIVIDAD DE LA LECTURA (NO SON FUENTE FACTUAL):
+${checklist.join('\n')}
+Usa estas referencias para revisar los epígrafes, pero comprueba SIEMPRE su
+contenido exacto en el PDF visual adjunto. Si algún término no consta en
+esta página, NO lo añadas, ni lo corrijas con conocimiento externo.
+DATOS DOCUMENTALES YA INDIVIDUALIZADOS EN EL SERVIDOR PARA ESTE BLOQUE:
+${present.map(item=>`- ${item.concept}: ${item.sourceEvidence}`).join('\n')}
+Cada asociación anterior está fijada a su condición completa (tabla, fila,
+columna, unidad y valor). No la reconstruyas ni completes celdas sin valor.
+Si el bloque contiene tablas y pocos párrafos, extrae los conocimientos que
+sí estén impresos sin fabricar teoría para superar umbrales.
+No los sustituyas por resúmenes ni los repitas artificialmente: el servidor los
+incorporará por separado. Busca especialmente los conocimientos de la PROSA que
+no figuran en esta lista, sus condiciones, magnitudes y procedimientos.\n`;
+}
+function t39RequireTextPerPage(items,chunk){
+  // Gemini no puede declarar leído un bloque vacío. Los datos tabulares
+  // ya verificados se conservan por separado, con sus ejes y unidades.
+  // Si Gemini devuelve vacío se divide/reintenta sólo el bloque afectado.
+  if(Array.isArray(items) && items.some(item=>
+      String(item?.concept||'').trim() && String(item?.sourceEvidence||'').trim()))return;
+  const error=new Error(`T39: bloque ${chunk.startPage}-${chunk.endPage} sin hechos extraídos del texto o figuras.`);
+  error.coverageResponse86=true;
+  throw error;
+}
+function t39RequireTextCoverage(items){
+  // Esta comprobación se ejecuta ANTES de incorporar el catálogo de tablas.
+  // Nunca dar por leído un manual si Gemini ha devuelto casi nada, pero no
+  // discriminar las páginas cuyo contenido es numérico o visual.
+  const substantive=(Array.isArray(items)?items:[]).filter(item=>
+    String(item?.concept||'').trim() && String(item?.sourceEvidence||'').trim() &&
+    !/^\s*tabla\s*(?:[1-9])\b/i.test(String(item?.section||'')));
+  if(substantive.length<20)
+    throw new Error(`T39: lectura incompleta, ${substantive.length} conocimientos ajenos a las tablas. No se publica cobertura; los bloques válidos quedan guardados.`);
+}
 function t39IsDuplicatedTable8Numeric(item){
   return Number(item?.sourcePage)===15 && item?.itemType==='dato_numerico' &&
     /\btabla\s*8\b/i.test(String(item?.section||'')+' '+String(item?.concept||'')+' '+String(item?.sourceEvidence||''));
@@ -3220,43 +3288,48 @@ function t39IsContradictoryTable3Numeric(item){
   return /\btabla\s*3\b/i.test(text) &&
     /1\s*atm/i.test(text) && /1[,\.]013\s*(?:kg|kgf)/i.test(text);
 }
+// Inventario documental: 88 datos tabulares, 32 expresiones del PDF, 8 gráficas y 2 ejemplos. Nunca se añade la fórmula externa de Arquímedes.
+const T39_CANONICAL_ITEMS=Object.freeze([{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Mercurio","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Mercurio = 13,6 densidad relativa"},{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Hierro","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Hierro = 7,8 densidad relativa"},{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Grava","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Grava = 2,2 densidad relativa"},{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Hielo","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Hielo = 0,85 densidad relativa"},{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Aceite","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Aceite = 0,8 densidad relativa"},{"section":"Tabla 1. Densidades relativas","concept":"Tabla 1: Madera","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":2,"manualPage":64,"sourceEvidence":"Tabla 1 (Densidades relativas, pág. 64): Madera = 0,5 densidad relativa"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=0 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=0 °C = 0,006 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=10 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=10 °C = 0,012 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=20 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=20 °C = 0,023 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=30 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=30 °C = 0,043 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=40 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=40 °C = 0,075 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=50 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=50 °C = 0,125 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=60 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=60 °C = 0,203 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=70 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=70 °C = 0,317 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=80 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=80 °C = 0,482 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=90 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=90 °C = 0,714 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=100 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=100 °C = 1,033 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=110 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=110 °C = 1,46 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=120 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=120 °C = 2,024 kg/cm²"},{"section":"Tabla 2. Presión de vapor del agua","concept":"Tabla 2: T=130 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":4,"manualPage":66,"sourceEvidence":"Tabla 2 (Presión de vapor del agua, pág. 66): T=130 °C = 2,754 kg/cm²"},{"section":"Tabla 3. Equivalencia de unidades","concept":"Tabla 3: Fila 1: 1 ATM","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":5,"manualPage":67,"sourceEvidence":"Tabla 3 (Equivalencia de unidades, pág. 67): Fila 1: 1 ATM = 1,033 kg/cm²"},{"section":"Tabla 3. Equivalencia de unidades","concept":"Tabla 3: Fila 2: 1 bar","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":5,"manualPage":67,"sourceEvidence":"Tabla 3 (Equivalencia de unidades, pág. 67): Fila 2: 1 bar = 1,019 kg/cm²"},{"section":"Tabla 3. Equivalencia de unidades","concept":"Tabla 3: Fila 4: 1 ATM","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":5,"manualPage":67,"sourceEvidence":"Tabla 3 (Equivalencia de unidades, pág. 67): Fila 4: 1 ATM = 10,33 m.c.a."},{"section":"Tabla 3. Equivalencia de unidades","concept":"Tabla 3: Fila 5: 1 bar","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":5,"manualPage":67,"sourceEvidence":"Tabla 3 (Equivalencia de unidades, pág. 67): Fila 5: 1 bar = 100000 Pa"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 25 boquilla min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 25 boquilla min = 5,5 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 25 boquilla max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 25 boquilla max = 12 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 25 caudal min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 25 caudal min = 50 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 25 caudal max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 25 caudal max = 230 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 45 boquilla min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 45 boquilla min = 9,75 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 45 boquilla max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 45 boquilla max = 17,75 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 45 caudal min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 45 caudal min = 150 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 45 caudal max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 45 caudal max = 500 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 70 boquilla min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 70 boquilla min = 13,75 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 70 boquilla max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 70 boquilla max = 21,75 mm; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 70 caudal min","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 70 caudal min = 300 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 4. Equivalencia de lanzas","concept":"Tabla 4: Lanza 70 caudal max","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":9,"manualPage":71,"sourceEvidence":"Tabla 4 (Equivalencia de lanzas, pág. 71): Lanza 70 caudal max = 750 l/min; Condiciones de tabla: h=70 m.c.a. (=7 kg/cm²), K=0,9"},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 0 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 0 m = 10,33 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 200 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 200 m = 10,08 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 400 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 400 m = 9,83 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 600 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 600 m = 9,58 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 800 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 800 m = 9,34 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 1000 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 1000 m = 9,11 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 1200 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 1200 m = 8,89 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 1400 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 1400 m = 8,67 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 1600 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 1600 m = 8,45 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 1800 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 1800 m = 8,24 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 2000 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 2000 m = 8,04 m.c.a."},{"section":"Tabla 5. Presión atmosférica por altitud","concept":"Tabla 5: Altitud 2500 m","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 5 (Presión atmosférica por altitud, pág. 75): Altitud 2500 m = 7,56 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=10 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=10 °C = 0,125 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=15 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=15 °C = 0,173 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=20 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=20 °C = 0,236 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=25 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=25 °C = 0,32 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=30 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=30 °C = 0,43 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=35 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=35 °C = 0,57 m.c.a."},{"section":"Tabla 6. Pérdidas de aspiración","concept":"Tabla 6: T=40 °C","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":11,"manualPage":75,"sourceEvidence":"Tabla 6 (Pérdidas de aspiración, pág. 75): T=40 °C = 0,745 m.c.a."},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 100 l/min; diámetro 25","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 100 l/min; diámetro 25 = 2,5 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 100 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 100 l/min; diámetro 45 = 0,15 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 200 l/min; diámetro 25","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 200 l/min; diámetro 25 = 9 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 200 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 200 l/min; diámetro 45 = 0,37 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 300 l/min; diámetro 25","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 300 l/min; diámetro 25 = 20 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 300 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 300 l/min; diámetro 45 = 0,85 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 300 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 300 l/min; diámetro 70 = 0,15 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 400 l/min; diámetro 25","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 400 l/min; diámetro 25 = 36 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 400 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 400 l/min; diámetro 45 = 1,7 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 400 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 400 l/min; diámetro 70 = 0,2 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 500 l/min; diámetro 25","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 500 l/min; diámetro 25 = 55 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 500 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 500 l/min; diámetro 45 = 2,5 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 500 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 500 l/min; diámetro 70 = 0,35 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 700 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 700 l/min; diámetro 45 = 5 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 700 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 700 l/min; diámetro 70 = 0,6 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 1000 l/min; diámetro 45","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 1000 l/min; diámetro 45 = 10 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 1000 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 1000 l/min; diámetro 70 = 1,2 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 1500 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 1500 l/min; diámetro 70 = 2,6 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 2000 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 2000 l/min; diámetro 70 = 4 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 3000 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 3000 l/min; diámetro 70 = 8,5 bar"},{"section":"Tabla 7. Pérdidas de carga según caudal y diámetro","concept":"Tabla 7: Caudal 4000 l/min; diámetro 70","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Tabla 7 (Pérdidas de carga según caudal y diámetro, pág. 78): Caudal 4000 l/min; diámetro 70 = 15 bar"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 25; presión 5 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 25; presión 5 kg/cm² = 29 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 25; presión 7 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 25; presión 7 kg/cm² = 31 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 25; presión 10 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 25; presión 10 kg/cm² = 33 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 25; presión 12 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 25; presión 12 kg/cm² = 35 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 45; presión 5 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 45; presión 5 kg/cm² = 34 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 45; presión 7 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 45; presión 7 kg/cm² = 38 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 45; presión 10 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 45; presión 10 kg/cm² = 42 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 45; presión 12 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 45; presión 12 kg/cm² = 45 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 70; presión 5 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 70; presión 5 kg/cm² = 36 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 70; presión 7 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 70; presión 7 kg/cm² = 39 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 70; presión 10 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 70; presión 10 kg/cm² = 44 m"},{"section":"Tabla 9. Alcances de lanzas","concept":"Tabla 9: Lanza 70; presión 12 kg/cm²","itemType":"dato_numerico","evaluationType":"identificacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Tabla 9 (Alcances de lanzas, pág. 79): Lanza 70; presión 12 kg/cm² = 50 m"},{"section":"Fórmulas · página 64","concept":"F1: ρ=m/V","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: ρ=m/V; la densidad es ESCALAR aunque el texto del original la denomine vectorial."},{"section":"Fórmulas · página 64","concept":"F2: γ=P/V","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: γ=P/V"},{"section":"Fórmulas · página 64","concept":"F3: γ=ρ·g","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: γ=ρ·g"},{"section":"Fórmulas · página 64","concept":"F4: ρ_relativa=ρ_absoluta/ρ_agua","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: ρ_relativa=ρ_absoluta/ρ_agua"},{"section":"Fórmulas · página 64","concept":"F5: γ_relativo=γ_absoluto/γ_agua","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: γ_relativo=γ_absoluto/γ_agua"},{"section":"Fórmulas · página 64","concept":"F6: μ_ap=τ/γ (notación original)","itemType":"formula","evaluationType":"calculo","sourcePage":2,"manualPage":64,"sourceEvidence":"Página impresa 64. Expresión original: μ_ap=τ/γ (notación original); la letra del denominador identifica el gradiente de deformación, no el peso específico del apartado 1.3."},{"section":"Fórmulas · página 67","concept":"F7: P=F/S","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: P=F/S"},{"section":"Fórmulas · página 67","concept":"F8: P₀=Pₛ+Pᵈ","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: P₀=Pₛ+Pᵈ"},{"section":"Fórmulas · página 67","concept":"F9: P_absoluta=P_atmosférica+P_relativa","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: P_absoluta=P_atmosférica+P_relativa"},{"section":"Fórmulas · página 67","concept":"F10: Pₐ=F/S=ρgYₐ","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: Pₐ=F/S=ρgYₐ"},{"section":"Fórmulas · página 67","concept":"F11: Pₐ−P_b=ρg(Yₐ−Y_b)","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: Pₐ−P_b=ρg(Yₐ−Y_b)"},{"section":"Fórmulas · página 67","concept":"F12: P=P_atm+ρgh","itemType":"formula","evaluationType":"calculo","sourcePage":5,"manualPage":67,"sourceEvidence":"Página impresa 67. Expresión original: P=P_atm+ρgh"},{"section":"Fórmulas · página 68","concept":"F13: p₁=p₂","itemType":"formula","evaluationType":"calculo","sourcePage":6,"manualPage":68,"sourceEvidence":"Página impresa 68. Expresión original: p₁=p₂"},{"section":"Fórmulas · página 68","concept":"F14: F₁=F₂(S₁/S₂)","itemType":"formula","evaluationType":"calculo","sourcePage":6,"manualPage":68,"sourceEvidence":"Página impresa 68. Expresión original: F₁=F₂(S₁/S₂)"},{"section":"Fórmulas · página 69","concept":"F16: R=ρDv/η","itemType":"formula","evaluationType":"calculo","sourcePage":7,"manualPage":69,"sourceEvidence":"Página impresa 69. Expresión original: R=ρDv/η"},{"section":"Fórmulas · página 69","concept":"F17: Q=V/t","itemType":"formula","evaluationType":"calculo","sourcePage":7,"manualPage":69,"sourceEvidence":"Página impresa 69. Expresión original: Q=V/t"},{"section":"Fórmulas · página 69","concept":"F18: Q=vS","itemType":"formula","evaluationType":"calculo","sourcePage":7,"manualPage":69,"sourceEvidence":"Página impresa 69. Expresión original: Q=vS"},{"section":"Fórmulas · página 70","concept":"F19: Q=S·v=cte.","itemType":"formula","evaluationType":"calculo","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70. Expresión original: Q=S·v=cte."},{"section":"Fórmulas · página 70","concept":"F20: Bernoulli: ½ρv₁²+ρgh₁+P₁=½ρv₂²+ρgh₂+P₂","itemType":"formula","evaluationType":"calculo","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70. Expresión original: Bernoulli: ½ρv₁²+ρgh₁+P₁=½ρv₂²+ρgh₂+P₂"},{"section":"Fórmulas · página 70","concept":"F21: Energía cinética=½mv²","itemType":"formula","evaluationType":"calculo","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70. Expresión original: Energía cinética=½mv²"},{"section":"Fórmulas · página 70","concept":"F22: Energía potencial=peso×altura","itemType":"formula","evaluationType":"calculo","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70. Expresión original: Energía potencial=peso×altura"},{"section":"Fórmulas · página 70","concept":"F23: Energía de presión = Fuerza · espacio = Fuerza · Superficie · Longitud (expresión literal del manual)","itemType":"formula","evaluationType":"identificacion","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70, apartado 3.4: «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud». Conservar como reconocimiento LITERAL de lo escrito en el manual, no convertirlo en una fórmula general de presión ni inventar expresiones."},{"section":"Fórmulas · página 70","concept":"F24: v_salida²/(2g)=h","itemType":"formula","evaluationType":"calculo","sourcePage":8,"manualPage":70,"sourceEvidence":"Página impresa 70. Expresión original: v_salida²/(2g)=h"},{"section":"Fórmulas · página 71","concept":"F25: Q_teórico=S·v_salida=S√(2gh)","itemType":"formula","evaluationType":"calculo","sourcePage":9,"manualPage":71,"sourceEvidence":"Página impresa 71. Expresión original: Q_teórico=S·v_salida=S√(2gh)"},{"section":"Fórmulas · página 71","concept":"F26: Q_real=K·S√(2gh)","itemType":"formula","evaluationType":"calculo","sourcePage":9,"manualPage":71,"sourceEvidence":"Página impresa 71. Expresión original: Q_real=K·S√(2gh)"},{"section":"Fórmulas · página 76","concept":"F27: En paralelo: H_m=H_m1=H_m2=…","itemType":"formula","evaluationType":"calculo","sourcePage":12,"manualPage":76,"sourceEvidence":"Página impresa 76. Expresión original: En paralelo: H_m=H_m1=H_m2=…"},{"section":"Fórmulas · página 76","concept":"F28: En paralelo: Q=Q₁+Q₂+…","itemType":"formula","evaluationType":"calculo","sourcePage":12,"manualPage":76,"sourceEvidence":"Página impresa 76. Expresión original: En paralelo: Q=Q₁+Q₂+…"},{"section":"Fórmulas · página 77","concept":"F29: En serie: H_m=H_m1+H_m2+…","itemType":"formula","evaluationType":"calculo","sourcePage":13,"manualPage":77,"sourceEvidence":"Página impresa 77. Expresión original: En serie: H_m=H_m1+H_m2+…"},{"section":"Fórmulas · página 77","concept":"F30: En serie: Q=Q₁=Q₂=…","itemType":"formula","evaluationType":"calculo","sourcePage":13,"manualPage":77,"sourceEvidence":"Página impresa 77. Expresión original: En serie: Q=Q₁=Q₂=…"},{"section":"Fórmulas · página 77","concept":"F31: PB=PL+HG+PC","itemType":"formula","evaluationType":"calculo","sourcePage":13,"manualPage":77,"sourceEvidence":"Página impresa 77. Expresión original: PB=PL+HG+PC"},{"section":"Fórmulas · página 78","concept":"F32: ΔP=H_g+ΔP_continua+ΔP_local","itemType":"formula","evaluationType":"calculo","sourcePage":14,"manualPage":78,"sourceEvidence":"Página impresa 78. Expresión original: ΔP=H_g+ΔP_continua+ΔP_local"},{"section":"Fórmulas · página 79","concept":"F33: E=2·P·S (reacción en lanza)","itemType":"formula","evaluationType":"calculo","sourcePage":15,"manualPage":79,"sourceEvidence":"Página impresa 79. Expresión original: E=2·P·S (reacción en lanza)"},{"section":"Imagen 2. Gráfica del manual","concept":"Imagen 2: Curva de presión de vapor del agua","itemType":"relacion","evaluationType":"interpretacion","sourcePage":3,"manualPage":65,"sourceEvidence":"Imagen 2, página impresa 65: Presión de vapor frente a temperatura; seguir únicamente las escalas y relaciones visibles de la gráfica. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 19. Gráfica del manual","concept":"Imagen 19: Curvas características: altura, rendimiento y potencia frente a caudal","itemType":"relacion","evaluationType":"interpretacion","sourcePage":10,"manualPage":74,"sourceEvidence":"Imagen 19, página impresa 74: Curvas características de bomba: altura de impulsión, potencia y rendimiento frente al caudal. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 20. Gráfica del manual","concept":"Imagen 20: Familias de curvas a diferente régimen de revoluciones","itemType":"relacion","evaluationType":"interpretacion","sourcePage":10,"manualPage":74,"sourceEvidence":"Imagen 20, página impresa 74: Familias de curvas características para distintos regímenes de giro: conservar el eje y las revoluciones indicados. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 21. Gráfica del manual","concept":"Imagen 21: Bombas en paralelo","itemType":"relacion","evaluationType":"interpretacion","sourcePage":12,"manualPage":76,"sourceEvidence":"Imagen 21, página impresa 76: Acoplamiento de bombas centrífugas en paralelo: caudales sumados a la misma altura de impulsión. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 22. Gráfica del manual","concept":"Imagen 22: Bombas en serie; dos etiquetas erróneas indican paralelo","itemType":"relacion","evaluationType":"interpretacion","sourcePage":13,"manualPage":77,"sourceEvidence":"Imagen 22, página impresa 77: Acoplamiento de bombas centrífugas en SERIE: alturas de impulsión sumadas para un mismo caudal; las dos etiquetas que dicen paralelo son erróneas. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 24. Gráfica del manual","concept":"Imagen 24: Pérdidas de carga según caudal y diámetro","itemType":"relacion","evaluationType":"interpretacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Imagen 24, página impresa 78: Pérdidas de carga en función del caudal y el diámetro, con unidades originales en ejes; no interpolar valores. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 25. Gráfica del manual","concept":"Imagen 25: Curva característica de la instalación","itemType":"relacion","evaluationType":"interpretacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Imagen 25, página impresa 78: Curva característica creciente de la instalación: se compone de altura geométrica y pérdidas de carga. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Imagen 26. Gráfica del manual","concept":"Imagen 26: Puntos de funcionamiento de bomba e instalación A, B y C","itemType":"relacion","evaluationType":"interpretacion","sourcePage":15,"manualPage":79,"sourceEvidence":"Imagen 26, página impresa 79: Punto de funcionamiento como intersección de la curva de bomba y la de instalación; puntos A, B y C según cambios de giro o apertura de lanza. No inventar valores por inspección aproximada ni generar imágenes nuevas."},{"section":"Ejemplos de pérdidas locales (pág. 78)","concept":"Ejemplo E1: 235 l/min, reducción 45/25","itemType":"dato_numerico","evaluationType":"aplicacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Ejemplo de pérdida local, página 78: 235 l/min, reducción 45/25 produce 0,17 kg/cm²."},{"section":"Ejemplos de pérdidas locales (pág. 78)","concept":"Ejemplo E2: 235 l/min, bifurcación 45/2×25","itemType":"dato_numerico","evaluationType":"aplicacion","sourcePage":14,"manualPage":78,"sourceEvidence":"Ejemplo de pérdida local, página 78: 235 l/min, bifurcación 45/2×25 produce 0,031 kg/cm²."}]);
+function t39ManifestComplete(items){
+  const found=new Map(items.map(x=>[String(x.concept||''),x]));
+  const faults=[];
+  for(const expected of T39_CANONICAL_ITEMS){
+    const actual=found.get(expected.concept);
+    if(!actual || actual.sourcePage!==expected.sourcePage ||
+       String(actual.sourceEvidence||'')!==expected.sourceEvidence ||
+       actual.itemType!==expected.itemType){
+      faults.push(expected.concept);
+    }
+  }
+  if(faults.length)throw new Error(`T39: faltan ${faults.length} registros del inventario determinista (${faults.slice(0,4).join('; ')}). Cobertura anterior intacta.`);
+  return {referenceItems:T39_CANONICAL_ITEMS.length,tablas:88,formulas:32,graficas:8,ejemplos:2};
+}
+function t39MergeCanon(items){
+  // Retirar únicamente los datos numéricos que Gemini haya identificado
+  // EXPLÍCITAMENTE como filas de nuestras tablas; no retirar otras cifras
+  // del texto de esas páginas ni fórmulas o relaciones nuevas.
+  const selected=(Array.isArray(items)?items:[]).filter(x=>{
+    if(x.itemType!=='dato_numerico')return true;
+    const section=String(x.section||'');
+    return !/^\s*tabla\s*(?:[1-7]|9)\b/i.test(section);
+  });
+  for(const record of T39_CANONICAL_ITEMS){
+    const index=selected.findIndex(x=>String(x.concept||'')===record.concept);
+    if(index>=0)selected[index]=record;
+    else selected.push(record);
+  }
+  return deduplicateCoverageItems(selected);
+}
 function t39CoverageQualityGate(items){
-  // No se publica una nueva cobertura si omite por completo una tabla/figura
-  // o si se cuelan portada y resumen. Evita comprometer material previo.
+  // Solo esta fuente SHA fija: garantizar la presencia y exactitud de cada
+  // registro documental, sin confundir etiquetas que Gemini puede variar.
   const list=Array.isArray(items)?items:[];
   if(list.some(x=>!Number.isInteger(Number(x.sourcePage)) ||
       Number(x.sourcePage)<2 || Number(x.sourcePage)>16))
-    throw new Error('T39: página fuera de 2–16 (portada/resumen excluidos). No se guarda cobertura.');
-  const tables=new Map([[1,[6,2]],[2,[14,4]],[3,[4,5]],
-    [4,[12,9]],[5,[12,11]],[6,[7,11]],[7,[21,14]],[9,[12,15]]]);
-  const normalized=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  const gaps=[];
-  for(const [no,[expected,physicalPage]] of tables){
-    const matches=list.filter(x=>Number(x.sourcePage)===physicalPage &&
-      new RegExp(`\\btabla\\s*${no}\\b`,'i').test(
-        normalized(String(x.section||'')+' '+String(x.concept||'')+' '+String(x.sourceEvidence||''))) &&
-      x.itemType==='dato_numerico' && /\d/.test(String(x.sourceEvidence||'')));
-    const distinct=new Set(matches.map(x=>
-      normalized(String(x.concept||'')+' '+String(x.sourceEvidence||'')))).size;
-    if(distinct<expected)gaps.push(`Tabla ${no}: ${distinct}/${expected}`);
-  }
-  // La figura debe identificarse en su página REAL, no por una mención
-  // casual en otro apartado. No se infieren datos de la gráfica.
-  for(const [number,physicalPage] of [[2,3],[19,10],[20,10],[21,12],
-    [22,13],[24,14],[25,14],[26,15]]){
-    if(!list.some(x=>Number(x.sourcePage)===physicalPage &&
-      new RegExp(`\\bimagen\\s*${number}\\b`,'i').test(
-        normalized(String(x.section||'')+' '+String(x.concept||'')+' '+String(x.sourceEvidence||'')))))
-      gaps.push(`Imagen ${number} ausente o en página incorrecta`);
-  }
-  const formulaCount=new Set(list.filter(x=>x.itemType==='formula' &&
-    /[=√÷×·/]/.test(String(x.sourceEvidence||''))).map(x=>
-      normalized(String(x.concept||'')+' '+String(x.sourceEvidence||'')))).size;
-  if(formulaCount<33)gaps.push(`Fórmulas distintas con expresión visible: ${formulaCount}/33 de referencia`);
-  if(gaps.length)throw new Error('T39: inventario estructural incompleto: '+
-    gaps.join('; ')+'. No se sustituye la cobertura anterior.');
-  return {tablasExaminables:88,filasNumericasImpresas:89,
-    formulas:formulaCount,graficas:8};
+    throw new Error('T39: referencia fuera de las páginas técnicas 2–16. No se sustituye la cobertura.');
+  const report=t39ManifestComplete(list);
+  console.log('[T39] Inventario documental contrastado',JSON.stringify(report));
+  return report;
 }
 // T39: la misma página puede llegar como física, impresa o relativa al PDF
 // de tres páginas enviado a Gemini. Solo admitimos localizaciones verificables
@@ -3268,11 +3341,6 @@ function t39NormalizePageReferences(items,chunk){
     p>=64&&p<=71?p-62:(p>=74&&p<=80?p-64:null);
   const physicalToPrinted=p=>
     p>=2&&p<=9?p+62:(p>=10&&p<=16?p+64:null);
-  const reportedPages=input.map(x=>x?.sourcePage===null||x?.sourcePage===undefined
-    ?null:Number(x.sourcePage)).filter(Number.isInteger);
-  const relativeBlock=reportedPages.length>0 &&
-    reportedPages.every(p=>p>=1 && p<=size) &&
-    reportedPages.some(p=>p<chunk.startPage);
   let corrected=0,excluded=0;
   const output=[];
   for(const item of input){
@@ -3286,7 +3354,14 @@ function t39NormalizePageReferences(items,chunk){
     const mappedManual=manual===null?null:printedToPhysical(manual);
     let physical=null;
     // La numeración impresa conocida del PDF unificado es un ancla inequívoca.
-    if(mappedManual!==null && mappedManual>=chunk.startPage &&
+    if(chunk.startPage===chunk.endPage){
+      // La hoja única identifica su ubicación; un número impreso distinto
+      // es una contradicción de la respuesta del modelo, no una evidencia.
+      if(manual!==null && mappedManual!==chunk.startPage){
+        excluded++;continue;
+      }
+      physical=chunk.startPage;
+    }else if(mappedManual!==null && mappedManual>=chunk.startPage &&
        mappedManual<=chunk.endPage){
       physical=mappedManual;
     }else if(manual!==null){
@@ -3296,17 +3371,22 @@ function t39NormalizePageReferences(items,chunk){
         `${printedText}; bloque ${chunk.startPage}-${chunk.endPage}`);
       continue;
     }else if(Number.isInteger(source)){
-      if(relativeBlock && source>=1 && source<=size){
-        physical=chunk.startPage+source-1;
-      }else if(source>=chunk.startPage && source<=chunk.endPage){
-        physical=source;
+      // Nunca convertir una referencia ambigua por suposición: en el primer
+      // bloque, «2» puede ser página física 2 o página relativa 2 (= física 3).
+      const printedCandidate=printedToPhysical(source);
+      if(printedCandidate!==null && printedCandidate>=chunk.startPage &&
+         printedCandidate<=chunk.endPage){
+        physical=printedCandidate;
       }else{
-        const mappedSource=printedToPhysical(source);
-        if(mappedSource!==null && mappedSource>=chunk.startPage &&
-           mappedSource<=chunk.endPage){
-          physical=mappedSource;
-        }else if(source>=1 && source<=size){
-          physical=chunk.startPage+source-1;
+        const absoluteCandidate=source>=chunk.startPage && source<=chunk.endPage
+          ?source:null;
+        const relativeCandidate=source>=1 && source<=size
+          ?chunk.startPage+source-1:null;
+        if(absoluteCandidate!==null && relativeCandidate!==null &&
+           absoluteCandidate!==relativeCandidate){
+          physical=null; // Provoca división del bloque, no una página inventada.
+        }else{
+          physical=absoluteCandidate??relativeCandidate;
         }
       }
     }
@@ -3325,6 +3405,12 @@ function t39NormalizePageReferences(items,chunk){
   }
   console.log(`[T39] Referencias de bloque ${chunk.startPage}-${chunk.endPage}: `+
     `${output.length} válidas, ${corrected} normalizadas, ${excluded} descartadas`);
+  if(excluded){
+    const error=new Error(`T39: ${excluded} conocimientos sin referencia verificable; `+
+      `dividiendo bloque ${chunk.startPage}-${chunk.endPage} si es posible.`);
+    error.coverageResponse86=true;
+    throw error;
+  }
   return output;
 }
 async function splitPdfIntoChunks(pdfPath, pagesPerChunk=5, physicalRange=null){
@@ -5491,6 +5577,8 @@ function sequentialPdfRecordIds(filePath){
 // SERVER 86 — SOLO MANUAL IIFF. Los checkpoints se guardan en app_state,
 // por documento SHA-256/tema/bloque. Nunca son cobertura publicada a medias.
 function iiffChunkKey86(topic,sha,stage,chunk){
+  if(isT39CoverageSource(topic))
+    return `t39_coverage130_v2:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
   return `iiff_coverage86:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
 }
 async function readIiffChunk86(topic,sha,stage,chunk){
@@ -5627,8 +5715,6 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       .trim()
       .slice(0,120);
   try{
-    if(!STORE) throw new Error("Primero indexa el PDF.");
-
     const ai=aiClient();
     const coverageGenerate=
       request =>
@@ -5720,10 +5806,15 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       if(hash!==T39_CEIS_PDF_SHA256)
         throw new Error('T39: este PDF no coincide con el Tema 39 CEIS verificado. No se descartan páginas ni se modifica la cobertura.');
     }
+    if(!STORE && !t39HydraulicCoverage)
+      throw new Error("Primero indexa el PDF.");
     const iiffPdfHash86=iiffManual86
       ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
       : null;
-    if(iiffManual86)console.log("COVERAGE IIFF: checkpoints reanudables activos");
+    const t39PdfHash=t39HydraulicCoverage?T39_CEIS_PDF_SHA256:null;
+    const reusableHash=iiffPdfHash86||t39PdfHash;
+    if(iiffManual86||t39HydraulicCoverage)
+      console.log(`COVERAGE: checkpoints por bloque habilitados para ${topic.name}`);
     if(iiffManual86){
       const found=await db.query(`SELECT t.total_items AS total,
         p.page_count AS pages, p.size_bytes AS size,
@@ -5747,6 +5838,44 @@ app.post("/api/analyze-coverage", async(req,res)=>{
           pendingItems:total-Number(topic.worked_items||0),
           coveragePercentage:total?Number((100*Number(topic.worked_items||0)/total).toFixed(1)):0,
           reused:true,source:'postgresql_pdf'});
+      }
+    }
+
+    // T39: reutilizar SOLO si los 130 conocimientos verificables y la teoría
+    // coinciden con la fuente; no aprobar por cantidad o SHA solamente.
+    if(t39HydraulicCoverage){
+      const existing=await db.query(`SELECT t.total_items AS total,
+        p.page_count AS pages, p.size_bytes AS size,
+        octet_length(p.pdf_bytes) AS actual_size,
+        encode(sha256(p.pdf_bytes),'hex') AS actual_sha
+        FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id
+        WHERE t.id=$1 AND p.pdf_sha256=$2 AND t.file_search_indexed=FALSE`,
+        [topic.id,t39PdfHash]);
+      const saved=existing.rows[0];
+      if(saved && Number(saved.pages)===17 &&
+         Number(saved.size)===Number(saved.actual_size) &&
+         String(saved.actual_sha)===t39PdfHash &&
+         Number(saved.total)>T39_CANONICAL_ITEMS.length){
+        const stored=await db.query(`SELECT section,concept,item_type AS "itemType",
+          evaluation_type AS "evaluationType",source_page AS "sourcePage",
+          manual_page AS "manualPage",source_evidence AS "sourceEvidence"
+          FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE`,[topic.id]);
+        try{
+          t39CoverageQualityGate(stored.rows);
+          t39RequireTextCoverage(stored.rows.filter(x=>
+            !T39_CANONICAL_ITEMS.some(y=>y.concept===x.concept)));
+          const total=Number(saved.total);
+          console.log(`[T39] PDF y conocimientos verificados: ${total}. Sin gasto Gemini.`);
+          await setCoverageRunState(coverageRunId,{status:'completed',topicId:Number(topic.id),
+            topic:topic.name,totalItems:total,reused:true});
+          return res.json({ok:true,topicId:Number(topic.id),topic:topic.name,
+            totalItems:total,workedItems:Number(topic.worked_items||0),
+            pendingItems:Math.max(0,total-Number(topic.worked_items||0)),
+            coveragePercentage:total?Number((100*Number(topic.worked_items||0)/total).toFixed(1)):0,
+            reused:true,source:'postgresql_pdf'});
+        }catch(e){
+          console.warn('[T39] Reutilización denegada: cobertura anterior incompleta:',e.message);
+        }
       }
     }
 
@@ -5849,12 +5978,16 @@ for(const chunk of (literalItems?[]:chunks)){
     `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  if(iiffManual86){
+  if(iiffManual86||t39HydraulicCoverage){
     const buildAnalysisRequest86=part=>({
       model:"gemini-3.5-flash-lite",
       contents:[
-        {text:coverageAnalysisPrompt(topic.name,allItems)+
-          coverageImageRulesIiff86(topic,part.startPage,part.endPage)+`
+        {text:(t39HydraulicCoverage?
+            coverageAnalysisPrompt(topic.name,allItems).replaceAll(
+              'documento recuperado mediante File Search','PDF adjunto en esta petición'):
+            coverageAnalysisPrompt(topic.name,allItems))+
+          (t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE+
+            t39KnownFactsForBlock(part):coverageImageRulesIiff86(topic,part.startPage,part.endPage))+`
 IMPORTANTE: analiza exhaustivamente sólo las páginas físicas
 ${part.startPage} a ${part.endPage} del PDF original.
 No omitas cifras, tablas, fórmulas, excepciones, clasificaciones,
@@ -5867,13 +6000,25 @@ manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
       ],
       config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
     });
-    let items=await readIiffChunk86(topic,iiffPdfHash86,"primary",chunk);
+    let items=await readIiffChunk86(topic,reusableHash,"primary",chunk);
+    if(items && t39HydraulicCoverage){
+      try{t39RequireTextPerPage(items,chunk);}catch{items=null;}
+    }
     if(items){
-      console.log(`COVERAGE IIFF: reutilizadas páginas ${chunk.startPage}-${chunk.endPage}; `+
+      console.log(`COVERAGE: reutilizadas páginas ${chunk.startPage}-${chunk.endPage}; `+
         `${items.length} elementos, sin llamada Gemini`);
     }else{
-      items=await analyzeIiffChunk86(ai,chunk,buildAnalysisRequest86,normalizeChunkSourcePages);
-      await saveIiffChunk86(topic,iiffPdfHash86,"primary",chunk,items);
+      const normalizePrimary=(raw,part)=>{
+        const normalized=normalizeChunkSourcePages(raw,part);
+        if(t39HydraulicCoverage){
+          try{t39RequireTextPerPage(normalized,part);}catch(error){
+            error.coverageResponse86=true;throw error;
+          }
+        }
+        return normalized;
+      };
+      items=await analyzeIiffChunk86(ai,chunk,buildAnalysisRequest86,normalizePrimary);
+      await saveIiffChunk86(topic,reusableHash,"primary",chunk,items);
     }
     allItems.push(...items);
     console.log(`COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${items.length} elementos`);
@@ -5946,6 +6091,16 @@ console.log("COVERAGE AUDIT: iniciando segunda pasada para detectar omisiones");
 
 let auditChunks=chunks;
 
+// T39: revisar cada página técnica por separado en la segunda pasada.
+// Reutiliza la fase de auditoría existente, sin servicio ni bucle nuevos.
+// Una página única tiene procedencia inequívoca y su checkpoint se reanuda.
+if(t39HydraulicCoverage){
+  const onePageAudit=await splitPdfIntoChunks(pdfPath,1,{first:2,last:16});
+  auditChunks=onePageAudit.chunks;
+  if(auditChunks.length!==15)throw new Error('T39: auditoría incompleta de páginas técnicas.');
+  console.log('[T39] Auditoría: 15 páginas individuales con contexto del catálogo.');
+}
+
 if(coverageTopicNumber(topic.name)===21){
   const fineAudit=
     await splitPdfIntoChunks(pdfPath,2);
@@ -5989,7 +6144,7 @@ for(const chunk of (literalItems?[]:auditChunks)){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  if(iiffManual86){
+  if(iiffManual86||t39HydraulicCoverage){
     const buildAuditRequest86=part=>({
       model:"gemini-3.5-flash-lite",
       contents:[
@@ -6001,17 +6156,18 @@ for(const chunk of (literalItems?[]:auditChunks)){
             const p=Number(item.sourcePage);
             return Number.isFinite(p) && p>=1 && p<part.startPage;
           })
-        )+coverageImageRulesIiff86(topic,part.startPage,part.endPage)},
+        )+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE+
+          t39KnownFactsForBlock(part):coverageImageRulesIiff86(topic,part.startPage,part.endPage))},
         {inlineData:{mimeType:"application/pdf",data:part.data}}
       ],
       config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
     });
-    let items=await readIiffChunk86(topic,iiffPdfHash86,"audit",chunk);
+    let items=await readIiffChunk86(topic,reusableHash,"audit",chunk);
     if(items){
-      console.log(`COVERAGE IIFF: auditoría reutilizada ${chunk.startPage}-${chunk.endPage}`);
+      console.log(`COVERAGE: auditoría reutilizada ${chunk.startPage}-${chunk.endPage}`);
     }else{
       items=await analyzeIiffChunk86(ai,chunk,buildAuditRequest86,normalizeChunkSourcePages);
-      await saveIiffChunk86(topic,iiffPdfHash86,"audit",chunk,items);
+      await saveIiffChunk86(topic,reusableHash,"audit",chunk,items);
     }
     auditItems.push(...items);
     console.log(`COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: `+
@@ -6072,9 +6228,14 @@ allItems.push(...auditItems);
 console.log(
   `COVERAGE AUDIT: completada. Añadidos ${auditItems.length} elementos. Total: ${allItems.length}`
 );
-const deduplicatedItems=deduplicateCoverageItems(allItems).filter(item=>
+let deduplicatedItems=deduplicateCoverageItems(allItems).filter(item=>
   !t39HydraulicCoverage ||
   !(t39IsDuplicatedTable8Numeric(item)||t39IsContradictoryTable3Numeric(item)));
+
+if(t39HydraulicCoverage){
+  t39RequireTextCoverage(deduplicatedItems);
+  deduplicatedItems=t39MergeCanon(deduplicatedItems);
+}
 
 console.log(
   `COVERAGE: deduplicación exacta/normalizada: ${allItems.length} -> ${deduplicatedItems.length}`
@@ -6200,6 +6361,7 @@ const parsed={
     // Un único procedimiento compartido por TODOS los temas. No utiliza
     // file_search_indexed como prueba de que exista una fuente antigua.
     if(iiffManual86) await replaceIiffDocument90(topic,pdfPath,validItems);
+    else if(t39HydraulicCoverage) await replaceT39Document(topic,pdfPath,validItems);
     else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
@@ -12776,10 +12938,6 @@ function t39Evidence(item){
   if(!t39Hydraulica(item))return raw;
   const page=String(item?.manual_page??'').trim();
   let text=raw;
-  if(page==='64' || /la densidad es una magnitud vectorial/i.test(text)){
-    text=text.replace(/la densidad es una magnitud vectorial/gi,
-      'la densidad es una magnitud escalar');
-  }
   if(page==='77'){
     text=text.replace(/Acoplamiento paralelo de dos bombas/gi,
       'Acoplamiento en serie de dos bombas');
@@ -12806,14 +12964,16 @@ function t39TargetForGeneration(item){
     ...(item.graphicAsset?{graphicAsset:{...item.graphicAsset,description}}:{})};
 }
 const T39_REGLAS_HIDRAULICA = String.raw`REGLAS EXCLUSIVAS TEMA 39 HIDRÁULICA (CEIS Guadalajara):
-1. El PDF original se conserva sin editar. FE DE ERRATAS autorizada: pág. impresa 64, la densidad es una magnitud ESCALAR (no vectorial). Sólo se corrige esa frase, no el resto de la página.
+FUENTE ÚNICA: el PDF original de Hidráulica; ningún dato, fórmula, despeje, constante o interpretación procedente de conocimiento general puede incorporarse si no figura en la fuente. No preguntar si la densidad es vectorial/escalar, por errata documental. Para TABLAS, tratar cada combinación (fila, columna, unidades, valor y condiciones) como conocimiento indivisible y no interpolar. Las expresiones del manual sólo pueden reconocerse literalmente en caso de ambigüedad; no presentar como teoría externa. La línea de p.70 «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud» es un literal del manual, NO una igualdad que defina la presión ni autoriza E=pV. Arquímedes: preguntar el principio EN PALABRAS tal como consta en el PDF; prohibido E=ρgV u otras fórmulas externas. Viscosidad: se admite reconocer μ_ap=τ/γ con su explicación textual. Formato y dificultad según familias de los modelos 2024/2026, conservando las normas comunes del bloque Específico.
+
+1. El PDF original se conserva sin editar. La frase sobre densidad «vectorial» (pág. 64) es una errata marcada para NO PREGUNTAR ese atributo. No sustituir el texto con un conocimiento externo; examina los demás datos de densidad que figuran en el documento.
 2. Pág. impresa 77, IMAGEN 22, arriba a la derecha: el encabezado «Acoplamiento paralelo de dos bombas» y la flecha/etiqueta de la curva roja «Curva característica del acoplamiento en paralelo de dos bombas» están mal escritos. AMBOS se refieren a BOMBAS EN SERIE. El título inferior, esquema, teoría y fórmulas de esa imagen YA están bien; no los corrijas. Serie: mismo caudal por cada bomba, alturas de impulsión sumadas. No confundir con el montaje REAL en paralelo de la imagen 21, pág. 76.
 3. Pág. 69: el caudal es volumen por tiempo y también sección por velocidad media: Q=V/t y Q=S·v. No afirmar que Q sea solo la velocidad; esa frase aislada es una simplificación que se lee junto con las ecuaciones correctas. Mantén la tabla de equivalencias de presión (pág. 67) SIN correcciones añadidas.
 4. Matemática: conserva subíndices, fracciones, paréntesis, exponentes, igualdad, signos, letras griegas y unidades. Distingue Q (caudal), V (volumen), v (velocidad), S (sección), H_m (altura manométrica), p o P (presión según contexto), ρ (densidad), μ/η según la variable y convención usada en cada fórmula original. No intercambiar η de viscosidad con η de rendimiento si el contexto los diferencia. Si no se puede confirmar un símbolo en el material disponible, NO generar una pregunta sobre esa ecuación.
 5. El frontend admite KaTeX; cuando una expresión requiera fracciones, subíndices o griegas, usa matemáticas en delimitadores \( ... \) (en texto JSON una sola barra invertida debe escaparse adecuadamente) con comandos KaTeX válidos como \frac, \rho, \mu, \eta, \Delta. No generes pseudo-LaTeX con errores o símbolos ilegibles. Conserva correctamente unidades SI y no mezcles magnitudes dimensionalmente distintas.
 6. Gráficas originales: pág. 74, curva característica y curvas a distintas revoluciones: no confundir altura, caudal, potencia y rendimiento; pág. 76, imagen 21 PARALELO: se suman caudales a igual altura; pág. 77, imagen 22 SERIE: se suman alturas a igual caudal; pág. 78, imagen 24: pérdida de carga y caudal para distintos diámetros, y 25: curva creciente de pérdidas/instalación frente al caudal; pág. 79, imagen 26: el punto de funcionamiento es intersección de curva de bomba y curva de instalación, y se desplaza al cambiar régimen de bomba o condiciones de instalación. No leer valores numéricos exactos por estimación visual cuando no son explícitos.
 7. Si una figura original no está adjunta o su descripción no permite una deducción inequívoca, no hagas pregunta que necesite verla. Nunca crear, reconstruir o editar figuras originales. Nunca preguntes por las dos etiquetas erróneas como si fueran hechos.
-Estas excepciones sólo rigen objetivos etiquetados «Tema 39. Hidráulica», sin contaminar otros temas del mismo lote. Para citas de la densidad y de la imagen 22, la evidencia presentada ha sido normalizada con las dos correcciones autorizadas.`;
+Estas excepciones sólo rigen objetivos etiquetados «Tema 39. Hidráulica», sin contaminar otros temas del mismo lote. La afirmación errónea de densidad se excluye de preguntas; la imagen 22 se interpreta como serie conforme a la figura y el texto del propio manual.`;
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
   const geo=targets.every(t=>String(t.topic_block).toLowerCase()==='geografia');
