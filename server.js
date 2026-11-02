@@ -12622,9 +12622,11 @@ function resetShape136(q){
      q.correctIndex>=q.options.length)return 'Índice incorrecto';
   return null;
 }
-function resetQuote136(quote, excerpt){
+function resetQuote136(quote, excerpt, allowShortLiteral=false){
   const norm=R136_NORM(quote),text=R136_NORM(excerpt);
-  return norm.length>=18 && text.includes(norm);
+  // T39: las fórmulas originales pueden ocupar menos de 18 caracteres.
+  // Sigue siendo obligatorio citar literalmente la evidencia autorizada.
+  return norm.length>=(allowShortLiteral?3:18) && text.includes(norm);
 }
 // No crear preguntas locales para parques solares/eólicos a partir de tablas
 // antiguas: ambas materias pasan por la generación + auditoría documental.
@@ -13250,11 +13252,20 @@ si no existe, answer=-1. No aportes explicaciones fuera del JSON.
   // SERVER132: el fragmento PDF demuestra la LEY, no los números ficticios
   // del supuesto. Se mantiene la auditoría independiente en la MISMA llamada.
   const t39AuditNumerical132=group.some(t39Hydraulica)?String.raw`
+REGLA DE CITA T39 (prevalece sobre el mínimo general de 18 caracteres):
+Si la relación original es una fórmula corta, transcribe la fórmula exacta
+aunque tenga menos de 18 caracteres (mínimo 3). No inventes ni alargues
+la cita. El texto citado debe aparecer literalmente en fragmento.
+
 TEMA 39 HIDRÁULICA — AUDITORÍA DE PROBLEMAS CON CIFRAS NUEVAS:
 Para cada FILA cuyo enunciado contenga un problema aritmético, separa dos comprobaciones:
-(A) PROCEDENCIA: la fórmula y la relación física empleadas deben figurar de
-forma inequívoca en fragmento; quote es una cita LITERAL de 18 o más caracteres
-sobre ESA fórmula o relación, nunca una cifra nueva del enunciado.
+(A) PROCEDENCIA: la ley o relación física empleada debe estar respaldada
+por el fragmento PDF o por una aclaración expresamente autorizada que figure
+en estas instrucciones del Tema 39. quote debe copiar literalmente una
+secuencia CONTIGUA del fragmento, de al menos 3 caracteres si es una fórmula
+breve y de 18 o más si hay texto suficiente. No exijas que las cifras nuevas
+del supuesto ni el resultado calculado figuren en el PDF. Una aclaración
+autorizada interpreta el PDF; no autoriza inventar leyes o constantes.
 (B) SOLUCIÓN: recalcula por tu cuenta con las cifras del enunciado. Convierte
 TODOS los datos a SI antes de operar (incluidas áreas cuadradas, volúmenes
 cúbicos, L/min, bar, cm, mm). Comprueba dimensiones, despeje, redondeo y
@@ -13267,11 +13278,18 @@ constantes ausentes; si faltan datos, answer=-1.
 Bernoulli: teoría, interpretación y formulación sí; ejercicios aritméticos no.
 Para preguntas NO numéricas, conserva sin cambios la auditoría literal general.
 ` : '';
-  const auditPrompt82=comparisons.length?baselineAuditPrompt82.replace(
+  // T39: eliminar la orden general de 18 caracteres que contradice
+  // la excepción de fórmulas cortas. No cambia el resto de materias.
+  const auditBaseT39=group.some(t39Hydraulica)
+    ?baselineAuditPrompt82.replace(
+      'quote: transcribe un fragmento LITERAL del campo fragmento (18+ caracteres)',
+      'quote: transcribe un fragmento LITERAL CONTIGUO del campo fragmento (mínimo 3 caracteres para fórmulas breves, 18 para texto largo)')
+    :baselineAuditPrompt82;
+  const auditPrompt82=comparisons.length?auditBaseT39.replace(
     ' quote: transcribe',
     ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
-    :baselineAuditPrompt82;
+    :auditBaseT39;
   const auditSchema=iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136;
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
@@ -13304,7 +13322,7 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
       (iiff91Topic(group[i])&&difficulty==='muy alta'&&
         (iiff118ObviousWeakDistractors(q)||iiff122DistractorOutlier(q)||
          /que intervalo cuantitativo recoge el manual para/i.test(iiff91Norm(q.stem))))||
-      !resetQuote136(a.quote,group[i].source_evidence))return null;
+      !resetQuote136(a.quote,group[i].source_evidence,t39Hydraulica(group[i])))return null;
     const evidence=String(a.quote);
     // Para INCORRECTA se evita una explicación libre que pueda asignar
     // otra letra a la falsedad después de auditar y barajar las opciones.
@@ -13353,7 +13371,7 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
       generated:Boolean(questions[i]),
       audited:Boolean(audits.find(a=>a.index===i)),
       answerMatches:Boolean(questions[i]&&audits.find(a=>a.index===i)?.answer===questions[i].correctIndex),
-      quoteMatches:Boolean(audits.find(a=>a.index===i)&&resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence))
+      quoteMatches:Boolean(audits.find(a=>a.index===i)&&resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,t39Hydraulica(t)))
     }:null).filter(Boolean);
     if(rejected.length)console.warn('T39_132_RECHAZOS_AUDITORIA:',JSON.stringify(rejected));
   }
