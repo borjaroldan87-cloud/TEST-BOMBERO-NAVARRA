@@ -13101,6 +13101,30 @@ function t39Unit143(option){
   // Si el parser no reconoce la notación, no emitir un falso positivo.
   return null;
 }
+// SERVER149: canonicalización SI local y opcional para resultados numéricos.
+// Usa SOLO la magnitud solicitada (última pregunta); nunca infiere leyes ni datos.
+// No añade llamadas, auditorías ni un segundo recorrido de generación.
+function t39AnswerSI149(stem){
+  const question=String(stem||'').split('¿').pop().split('?')[0]
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(/(?:densidad relativa|peso especifico relativo|numero de reynolds|rendimiento|coeficiente|factor de multiplicacion|por que factor|cuantas veces|proporcion|relacion adimensional)/.test(question))return null;
+  const entries=[
+    [/peso especifico/,['N/m³','fuerza_volumen']],
+    [/presion|pascales?/,['Pa','presion']],
+    [/caudal/,['m³/s','caudal']],
+    [/velocidad/,['m/s','velocidad']],
+    [/densidad/,['kg/m³','densidad']],
+    [/fuerza|empuje|reaccion en (?:la )?lanza/,['N','n']],
+    [/seccion|superficie|area/,['m²','area']],
+    [/volumen/,['m³','volumen']],
+    [/potencia/,['W','w']],
+    [/energia|trabajo/,['J','j']],
+    [/masa/,['kg','kg']],
+    [/tiempo/,['s','s']],
+    [/altura|profundidad|longitud|diametro|radio|distancia/,['m','m']]
+  ];
+  return entries.find(([pattern])=>pattern.test(question))?.[1]||null;
+}
 // SERVER145: en un ejercicio de cálculo el opositor debe elegir la ley y la
 // unidad SI. No se prohíben asignaciones de DATOS (S=500 cm²), ni las
 // preguntas TEÓRICAS que examinan una expresión del manual.
@@ -13172,11 +13196,25 @@ function t39PreflightIssue143(q,t,difficulty,mode){
     const hint=t39StemHints145(stem);
     if(hint)return hint;
   }
+  const expectedSI=t39AnswerSI149(stem);
+  const units=q.options.map(t39Unit143);
+  // Un número desnudo no es una opción válida si la magnitud tiene dimensión.
+  // El generador ya ha intentado completar las cuatro opciones localmente.
+  if(expectedSI&&units.some(u=>u===''))return 'alternativa_numerica_sin_unidad';
+  if(expectedSI&&units[q.correctIndex]!==null&&
+     units[q.correctIndex]!==expectedSI[1])return 'respuesta_correcta_no_en_unidad_si';
   const caudalIssue=t39CaudalOptions145(q);
   if(caudalIssue)return caudalIssue;
-  const units=q.options.map(t39Unit143);
   if(units.every(u=>u!==null) && new Set(units).size>1)
     return 'alternativas_con_magnitudes_o_unidades_distintas';
+  // Tablas de densidades relativas de SÓLIDOS no son columnas líquidas.
+  // No aplicar presión hidrostática de fluidos a hierro, hielo, grava, etc.
+  const lower=stem.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(expectedSI?.[1]==='presion'&&(
+      /\b(?:columna|capa)\s+(?:de\s+)?(?:hielo|hierro|grava|madera)\b/.test(lower)||
+      /\b(?:contenedor|recipiente|deposito)\s+lleno\s+de\s+(?:hielo|hierro|grava|madera)\b/.test(lower)||
+      /\b(?:bloque|estructura|cuerpo)\s+(?:de\s+)?(?:hielo|hierro|grava|madera)\b/.test(lower)))
+    return 'presion_hidrostatica_aplicada_a_solido_sin_fundamento';
   const math=stem.replace(/\\rho/g,'ρ').replace(/\\cdot/g,'·')
     .replace(/\\(?:mathrm|text)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g,'$1')
     .replace(/[{}]/g,'').replace(/\\/g,'').replace(/\s+/g,'');
@@ -13290,10 +13328,20 @@ NO indicar la unidad del resultado ni «en unidades del Sistema Internacional»,
 «¿Cuál es el caudal total?» o «¿Cuál es la presión absoluta?».
 La fórmula y el análisis dimensional deben quedar en la RESOLUCIÓN y en
 las pruebas documentales del auditor, nunca adelantarse al opositor.
+En cálculo, escribe SIEMPRE el número Y la unidad junto a CADA una de
+las cuatro alternativas (ej.: «5 m/s», «351300 Pa», «600 N»). No entregues
+opciones numéricas desnudas; solo un resultado adimensional (densidad relativa,
+Reynolds, etc.) se escribe sin unidad. La unidad NO aparece en el enunciado.
 Las alternativas deben incluir una solución exacta en SI; permite distractores
 basados en conversiones mal realizadas, pero NUNCA un resultado físicamente
 equivalente al correcto bajo otras unidades. No des una pista visual dejando
 una sola opción en SI y todas las demás en unidades distintas.
+DIVERSIDAD EN UN MISMO TEST: usa operaciones y magnitudes distintas de una
+pregunta a la siguiente. No repitas cinco veces «presión absoluta de una columna»
+cambiando solo el material. Una fila de densidad relativa de un SÓLIDO
+(hierro, hielo, grava, madera) NO autoriza tratarlo como líquido ni aplicar
+su densidad a una columna hidrostática. Si una ficha carece de operación
+justificada, no inventes una ley física para fingir cálculo.
 DIFICULTAD COGNITIVA: en Alta y Muy alta los ejercicios DEBEN exigir
 identificar una relación física de la fuente, seleccionar qué magnitudes
 intervienen, transformar unidades, despejar una incógnita y/o relacionar
@@ -13531,6 +13579,16 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   const parsed=JSON.parse(String(response?.text||'{}'));
   if(!Array.isArray(parsed.questions))throw Error('Sin array de preguntas');
   const questions=Array.from({length:group.length},(_,i)=>parsed.questions[i]||null);
+  // SERVER149: sin una nueva llamada, completa la MISMA unidad SI en las
+  // cuatro opciones si Gemini devolvió solo cifras y la magnitud es inequívoca.
+  // No modifica datos del enunciado ni respuestas adimensionales.
+  for(let i=0;i<questions.length;i++){
+    const q=questions[i];
+    if(!t39Hydraulica(group[i])||!q||!t39StrictNumeric133(q))continue;
+    const si=t39AnswerSI149(q.stem);
+    if(!si||!q.options.every(v=>/^\s*[-+]?\d[\d.,]*(?:\s*[×·*]\s*10\s*\^?\s*[-+]?\d+)?\s*$/u.test(String(v))))continue;
+    q.options=q.options.map(v=>`${String(v).trim()} ${si[0]}`);
+  }
   // Evitar gastar además en auditar preguntas que ya figuran como
   // aprendidas/bloqueadas; una lectura SQL por lote, sin llamada Gemini.
   const priorQuestions=iiffScope?await iiff96BlockedHistory(group.find(iiff91Topic).topic_id):[];
@@ -13671,6 +13729,10 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
 2. Si es un ejercicio, considera los números del enunciado datos HIPOTÉTICOS
    elegidos para practicar: NO tienen que aparecer en las fuentes. Resuelve
    desde cero, convierte unidades y comprueba las cuatro alternativas.
+   Comprueba CADA igualdad intermedia de la solución: por ejemplo,
+   «100000+2000=120000» es matemáticamente FALSO; answer=-1.
+   No uses la densidad relativa de un sólido (grava, hierro, hielo, madera)
+   para fabricar presión hidrostática de una columna líquida.
 3. Si es teoría, verifica la respuesta completa frente a las fuentes.
 4. answer es el índice 0..3 únicamente si hay una sola opción correcta,
    sustentada por las fuentes y por el cálculo cuando corresponda.
@@ -13680,6 +13742,10 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    incompatibilidad dimensional; no se exige un resultado con unidades.
    Para ejercicios NUMÉRICOS, verdadero solo si la ley, el resultado y
    su dimensión están comprobados. La opción correcta usa SI. En las
+   cuatro opciones deben incluir número Y unidad cuando el resultado tenga
+   dimensión física; SOLO las magnitudes adimensionales carecen de unidad.
+   Las cifras sin unidad en las alternativas son inválidas aunque el lector
+   pueda adivinarla. Si falta unidad y no es adimensional, unitsOk=false.
    distractoras se permite excepcionalmente una unidad distinta de la MISMA
    magnitud si representa un error plausible de conversión; ninguna puede
    equivaler físicamente a la correcta. Por ejemplo 0,23 m³/s y 230 L/s
@@ -14539,7 +14605,24 @@ app.post('/api/generate',async(req,res)=>{
         seen.add(id);return true;
       });
       if(eligible.length<count)throw Error(`Modo Cálculos T39: solo ${eligible.length} objetivos numéricos verificables para ${count} preguntas. No se sustituirán por teoría.`);
-      targets=eligible.slice(0,count).map(t=>({...t,questionFamily:'CALCULO_FORMULACION',t39StrictCalculation133:true}));
+      // SERVER149: repartir familias del pool YA obtenido: 0 SQL, 0 Gemini.
+      // Evita diez fichas correlativas de una tabla/ecuación con números distintos.
+      const families=new Map();
+      for(const t of eligible){
+        const family=String(t39NumericModel131(t)||'sin_modelo').split(':')[0];
+        if(!families.has(family))families.set(family,[]);
+        families.get(family).push(t);
+      }
+      const balanced=[];
+      for(let turn=0;balanced.length<count;turn++){
+        let found=false;
+        for(const list of families.values())if(list[turn]){
+          balanced.push(list[turn]);found=true;
+          if(balanced.length===count)break;
+        }
+        if(!found)break;
+      }
+      targets=balanced.map(t=>({...t,questionFamily:'CALCULO_FORMULACION',t39StrictCalculation133:true}));
       console.log('T39_133_CALCULOS_SELECCION:',JSON.stringify({requested:count,eligible:eligible.length,selected:targets.map(t=>t.id)}));
     }
     if(!resume136 && testType==='normal' && count<=40 &&
