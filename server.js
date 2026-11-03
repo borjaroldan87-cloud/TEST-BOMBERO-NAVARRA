@@ -9106,8 +9106,17 @@ function specificLiteralStem129(stem,target){
   const page=String(target.manual_page??'').trim();
   if(!/^\d+$/.test(page))return stem;
   const name=String(target.topic_name||'').replace(/^\s*TEMA\s+\d+\s*[.:-]?\s*/i,'').trim();
-  const text=String(stem||'').trim().replace(
+  let text=String(stem||'').trim().replace(
     /^(?:seg[uú]n|conforme|de acuerdo con)[^?]{0,170}?p[aá]gina\s*\d+\s*[,.:;–-]?\s*/i,'').trim();
+  if(t39Hydraulica(target)){
+    // Algunos modelos repiten la cabecera o «Según el manual» tras la primera.
+    // Solo eliminar metadatos editoriales del principio, nunca datos técnicos.
+    for(let i=0;i<2;i++){
+      const clean=text.replace(/^(?:seg[uú]n|conforme|de acuerdo con)\s+(?:el\s+)?(?:texto\s+del\s+)?manual(?:\s+del\s+CEIS\s+Guadalajara)?(?:\s*,\s*|\s+en\s+el\s+ep[ií]grafe[^,]{0,75},\s*|\s+de\s+hidr[aá]ulica\s*,\s*)/i,'').trim();
+      if(clean===text)break;
+      text=clean;
+    }
+  }
   return `Según el manual del CEIS Guadalajara, página ${page}, ${text}`;
 }
 function specificAlignFormula128(selected,candidates){
@@ -12976,9 +12985,9 @@ const T39_CALCULO_MODELOS_131=Object.freeze([
   ['hidrostat','010: presión hidrostática de una columna + fuerza sobre superficie; densidad kg/L, altura cm, superficie cm²; Pa y N'],
   ['absolut|relativ|manom[eé]tr','020: aceite sobre agua, atmósfera en kPa y alturas cm; presión relativa y absoluta en Pa'],
   ['pascal|prensa|[eé]mbolo|pist[oó]n','030: prensa con fuerza, masa, diámetros mm/cm; despejar diámetro en m; oficial Navarra 2026 pregunta 52: cociente de áreas de dos radios'],
-  ['caudal|ramal','040: dos ramales, sección cm²/m² y velocidad cm/s/m/s; sumar caudales en m³/s'],
-  ['continuidad|bifurca|confluy','050: L/min + m³/h confluyen en tubería diámetro mm; velocidad final m/s'],
-  ['torricelli|orificio|descarga','057/107: orificio circular, altura, tiempo y caudal; convertir mm, cm, min y L/s; despejar altura o volumen en SI'],
+  ['caudal|ramal','040: dos ramales, sección cm²/m² y velocidad cm/s/m/s; preguntar únicamente por caudal total sin fórmula ni unidad final'],
+  ['continuidad|bifurca|confluy','050: L/min + m³/h confluyen en tubería diámetro mm; preguntar únicamente por velocidad final'],
+  ['torricelli|orificio|descarga','057/107: orificio circular, altura, tiempo y caudal; convertir mm, cm, min y L/s; despejar altura o volumen sin dar fórmula ni unidad final'],
   ['densidad relativa|peso espec[ií]fico','080: dos capas de líquidos con densidades relativas y alturas diferentes; presión Pa'],
   ['densidad|volumen|masa','067: masa y volumen geométrico con longitudes mm/cm/m; densidad kg/m³'],
   ['p[eé]rdida|bomba|l[ií]nea|lanza|impulsi[oó]n','Oficial Navarra 2026 pregunta 150: presión de bomba = presión en lanza + pérdidas + desnivel NUMÉRICO; solicitar Pa. Usar solo ecuación de línea acreditada por evidencia PDF'],
@@ -13004,8 +13013,8 @@ function t39Prompt131(targets,difficulty){
   if(!items.length)return '';
   return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
   FUENTES: fragmento PDF de CADA objetivo y aclaraciones expresamente aportadas por el usuario en las reglas T39, con idéntica autoridad. Ninguna otra fuente factual. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
-  PROCEDIMIENTO: primero identifica la relación autorizada por la evidencia; elige la incógnita; asigna datos completos y coherentes; convierte al SI; calcula la solución antes de escribir las opciones; redacta tres distractores numéricos plausibles; comprueba que solo una opción coincide con el resultado. No incluyas pasos internos extensos, solo una solución breve verificable.\n  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
-  Alta: exigir una decisión física REAL (identificar relación, escoger magnitudes, despejar, conversión significativa o combinar operaciones); no regalar fórmula completa, todos los datos en SI y resultado directo. Muy alta: dos decisiones relevantes como conversiones de magnitudes diferentes, despeje y/o dos relaciones compatibles del mismo PDF. Si los números solo adornan una afirmación teórica, NO calificarla de cálculo. Rechazar dimensiones incoherentes: rho*v² da Pa=N/m², no N/m³. Las cuatro opciones deben tener magnitud y unidades SI homogéneas. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
+  PROCEDIMIENTO: primero identifica la relación autorizada por la evidencia; elige la incógnita; asigna datos completos y coherentes; convierte al SI; calcula la solución antes de escribir las opciones; redacta tres distractores numéricos plausibles; comprueba que solo una opción coincide con el resultado. No incluyas pasos internos extensos, solo una solución breve verificable.\n  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. En el ENUNCIADO no escribas fórmulas de resolución, no indiques la unidad solicitada, ni digas 'en unidades del SI' o equivalentes. Pregunta SOLO por la magnitud: «¿Cuál es el caudal total?». En las OPCIONES y la RESOLUCIÓN usa la unidad SI correcta; las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
+  Alta: exigir una decisión física REAL (identificar relación, escoger magnitudes, despejar, conversión significativa o combinar operaciones); nunca dar la fórmula de resolución ni la unidad final en el enunciado. Se permiten símbolos de datos con valores, como S=500 cm²; prohibido escribir ecuaciones de leyes como Q=S·v o Q_total=Q_A+Q_B. No regalar todos los datos en SI y resultado directo. Muy alta: dos decisiones relevantes como conversiones de magnitudes diferentes, despeje y/o dos relaciones compatibles del mismo PDF. Si los números solo adornan una afirmación teórica, NO calificarla de cálculo. Rechazar dimensiones incoherentes: rho*v² da Pa=N/m², no N/m³. Las cuatro opciones deben tener magnitud y unidades SI homogéneas. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Preferir cuatro opciones en la unidad SI de la misma magnitud. Se permite que un distractor use una unidad alternativa solo si no regala la clave, no es dimensionalmente absurdo y no equivale físicamente a la respuesta correcta. Nunca dos opciones equivalentes, aunque usen unidades distintas. La correcta siempre en SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
   REDACCIÓN: si es imprescindible citar una página, escribir únicamente «Según el manual del CEIS Guadalajara, página XX, ...». Nunca incorporar el nombre del tema al enunciado.\n  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
   Modelos seleccionados por SLOT (no son hechos): ${JSON.stringify(items)}\n`;
 }
@@ -13088,11 +13097,79 @@ function t39Unit143(option){
   // Si el parser no reconoce la notación, no emitir un falso positivo.
   return null;
 }
+// SERVER145: en un ejercicio de cálculo el opositor debe elegir la ley y la
+// unidad SI. No se prohíben asignaciones de DATOS (S=500 cm²), ni las
+// preguntas TEÓRICAS que examinan una expresión del manual.
+function t39StemHints145(stem){
+  const raw=String(stem||'');
+  const plain=raw.replace(/\\\(|\\\)|\\\[|\\\]/g,' ')
+    .replace(/\\(?:cdot|times)/g,'·')
+    .replace(/\\(?:mathrm|text)\s*\{([^{}]*)\}/g,'$1')
+    .replace(/\\,/g,' ').replace(/\s+/g,' ');
+  const norm=plain.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  if(/\b(?:en|aplicando|mediante|usando|utilizando|segun|con)\s+(?:la\s+|el\s+)?(?:formula|ecuacion|relacion matematica|expresion|identidad)\b/.test(norm))
+    return 'formula_anunciada_en_el_enunciado';
+  // Detecta leyes algebraicas entre variables: Q=v·S, Qtotal=QA+QB, R=rho·D·v/eta.
+  // No coincide con S=500 cm² ni con p=1,5 bar (datos del problema).
+  if(/(?:^|[^\p{L}\d])(?:[\p{L}ρμ∆Δ][\p{L}\d_{}]*)\s*=\s*(?:[\p{L}ρμ∆Δ][\p{L}\d_{}]*\s*[·*×+\-/]\s*[\p{L}ρμ∆Δ][\p{L}\d_{}]*|\\frac\s*\{)/u.test(plain))
+    return 'formula_de_resolucion_en_el_enunciado';
+  const question=norm.lastIndexOf('¿')>=0?norm.slice(norm.lastIndexOf('¿')):norm;
+  if(/\b(?:expresad[oa]s?\s+en|en\s+unidades\s+(?:del?\s+)?(?:sistema internacional|si)|en\s+(?:el\s+)?si\b|en\s+(?:pascal(?:es)?|newton(?:s)?|kilogramos?|metros?\s+cubicos?\s+por\s+segundo|metros?\s+por\s+segundo|m3\/s|m³\/s|m\^\{?3\}?\/s|kg\/m3|kg\/m³|pa|kpa|bar|n|kg|m|m2|m²|m3|m³|m\/s|l\/s|l\/min|m3\/h|m³\/h|j|w))\b/i.test(question))
+    return 'unidad_final_regalada_en_el_enunciado';
+  // Con unidades KaTeX \(m^3/s\) y variantes «¿Cuál es ... (m³/s)?».
+  const rawQuestion=raw.lastIndexOf('¿')>=0?raw.slice(raw.lastIndexOf('¿')):raw;
+  if(/(?:\\\(\s*|\(\s*)(?:m\^\{?3\}?\s*\/\s*s|m[³3]\/s|kg\s*\/\s*m[³3]|n\s*\/\s*m[²2]|pa|kpa|bar)(?:\s*\\\)|\s*\))\s*\?\s*$/i.test(rawQuestion) ||
+     /(?:\ben\s*|\(\s*)(?:m\^\{?3\}?\s*\/\s*s|m[³3]\/s|kg\s*\/\s*m[³3]|n\s*\/\s*m[²2]|pa|kpa|bar)\b/i.test(question))
+    return 'unidad_final_regalada_en_el_enunciado';
+  return null;
+}
+// Al aceptar distractores con L/s o m³/h, jamás permitir que otro sea
+// realmente el mismo caudal que la respuesta SI. No es un conversor general.
+function t39CaudalOptions145(q){
+  if(!/caudal/i.test(String(q?.stem||'')))return null;
+  const units={'m3/s':1,'m³/s':1,'l/s':0.001,'l/min':1/60000,'m3/h':1/3600,'m³/h':1/3600};
+  const parsed=Array.isArray(q?.options)?q.options.map(opt=>{
+    const value=String(opt||'').replace(/\\\(|\\\)/g,'')
+      .replace(/\\(?:mathrm|text)\s*\{/g,'{')
+      .replace(/\\(?:mathrm|text)\s*\{([^{}]*)\}/g,'$1')
+      .replace(/\\,/g,'').replace(/\^\{?3\}?/g,'³')
+      .replace(/[{}]/g,'').replace(/\s+/g,'').trim().toLowerCase();
+    const m=value.match(/^([+-]?[\d.,]+)(m³\/s|m3\/s|l\/min|l\/s|m³\/h|m3\/h)$/);
+    if(!m)return null;
+    let num=m[1];
+    if(num.includes(',')&&num.includes('.'))num=num.lastIndexOf(',')>num.lastIndexOf('.')?num.replace(/\./g,'').replace(',','.'):num.replace(/,/g,'');
+    else if(num.includes(','))num=num.replace(',','.');
+    else if(/^\d{1,3}(?:\.\d{3})+$/.test(num))num=num.replace(/\./g,'');
+    const n=Number(num);
+    return Number.isFinite(n)?{si:n*units[m[2]],unit:m[2]}:null;
+  }):[];
+  const correct=parsed[q?.correctIndex];
+  if(!correct)return null; // Dejar lo no interpretable al auditor vigente.
+  if(!['m³/s','m3/s'].includes(correct.unit))return 'caudal_correcto_no_esta_en_si';
+  if(parsed.some((v,i)=>i!==q.correctIndex&&v&&Math.abs(v.si-correct.si)<=Math.max(1e-10,Math.abs(correct.si)*1e-8)))
+    return 'dos_alternativas_fisicamente_equivalentes';
+  return null;
+}
 function t39PreflightIssue143(q,t,difficulty,mode){
   if(!t39Hydraulica(t)||!q||!Array.isArray(q.options))return null;
   const stem=String(q.stem||'');
   const numeric=t39StrictNumeric133(q);
-  if(!numeric)return null; // No imponer cálculo a familias teóricas.
+  if(!numeric){
+    // No disfrazar un Verdadero/Falso de cuatro alternativas en Alta/Muy alta.
+    if(['alta','muy alta'].includes(String(difficulty||'').toLowerCase())){
+      const simple=q.options.map(v=>String(v).replace(/^\s*[A-D][).:]\s*/i,'')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase());
+      if(simple.includes('verdadero')&&simple.includes('falso'))
+        return 'verdadero_falso_disfrazado_de_cuatro_opciones';
+    }
+    return null; // Las fórmulas preguntadas como teoría siguen permitidas.
+  }
+  if(['alta','muy alta'].includes(String(difficulty||'').toLowerCase())){
+    const hint=t39StemHints145(stem);
+    if(hint)return hint;
+  }
+  const caudalIssue=t39CaudalOptions145(q);
+  if(caudalIssue)return caudalIssue;
   const units=q.options.map(t39Unit143);
   if(units.every(u=>u!==null) && new Set(units).size>1)
     return 'alternativas_con_magnitudes_o_unidades_distintas';
@@ -13200,15 +13277,29 @@ breve. No inventes leyes, constantes, tablas ni datos documentales.
 En cálculos sí puedes elegir números hipotéticos nuevos, unidades de entrada
 e incógnita. Resuelve primero a partir de una relación física AUTORIZADA;
 verifica después las cuatro opciones numéricas y su única respuesta en SI.
+REGLA DE ENUNCIADO NUMÉRICO ALTA/MUY ALTA (OBLIGATORIA):
+NO mostrar fórmulas ni relaciones de cálculo en el enunciado, tampoco
+aunque haya conversiones/despejes. Sí mostrar magnitudes y valores dados
+con su unidad, como «sección 500 cm² y velocidad 300 cm/s».
+NO indicar la unidad del resultado ni «en unidades del Sistema Internacional»,
+«en metros cúbicos por segundo» o «en pascales». Preguntar solamente
+«¿Cuál es el caudal total?» o «¿Cuál es la presión absoluta?».
+La fórmula y el análisis dimensional deben quedar en la RESOLUCIÓN y en
+las pruebas documentales del auditor, nunca adelantarse al opositor.
+Las alternativas deben incluir una solución exacta en SI; permite distractores
+basados en conversiones mal realizadas, pero NUNCA un resultado físicamente
+equivalente al correcto bajo otras unidades. No des una pista visual dejando
+una sola opción en SI y todas las demás en unidades distintas.
 DIFICULTAD COGNITIVA: en Alta y Muy alta los ejercicios DEBEN exigir
 identificar una relación física de la fuente, seleccionar qué magnitudes
 intervienen, transformar unidades, despejar una incógnita y/o relacionar
 DOS pasos conceptuales compatibles. Basta una combinación pertinente de
 esas decisiones; NO añadir dificultades artificiales. En Muy alta, combinar
 al menos dos decisiones no triviales sin hacer largo el enunciado.
-RECHAZA como ejercicios Alta/Muy alta los enunciados que REGALAN la fórmula
-completa, el valor de todas sus variables ya en SI y la incógnita que es
-exactamente su lado izquierdo, de modo que solo queda multiplicar/dividir.
+RECHAZA como ejercicios Alta/Muy alta cualquier enunciado que muestre
+la fórmula de resolución o anuncie la unidad final, aunque el ejercicio
+requiera conversiones. También rechaza sustituciones numéricas mecánicas
+sin una decisión real del opositor.
 No basta poner cifras, cambios de presión irrelevantes o varios símbolos
 para aparentar un problema. Si el resultado se conoce únicamente por una
 regla de conservación o igualdad (p. ej. empuje de Arquímedes inalterado,
@@ -13216,16 +13307,20 @@ bombas paralelas con igual altura), es teoría, no cálculo numérico exigente.
 No des simultáneamente la expresión final a evaluar y todas sus variables,
 como «calcula rho*v² con rho y v ya en SI»; pide identificar antes la
 relación y resolver un supuesto con conversiones o decisiones reales.
-SI SE APORTA UNA FÓRMULA (porque procede del PDF o lo exige el supuesto),
-esto NO es un defecto por sí solo: será válido si aún requiere un despeje,
-una conversión relevante, combinación de relaciones u otra decisión física.
-No introducir leyes, tablas, constantes o fórmulas ajenas al PDF y las
-aclaraciones del usuario. En Arquímedes mantener exclusivamente la
+DIFERENCIA: en preguntas TEÓRICAS sí se puede preguntar por una fórmula
+documentada. En ejercicios de CÁLCULO no se proporciona la fórmula en el
+enunciado; debe identificarla el opositor. No introducir leyes, tablas,
+constantes o fórmulas ajenas al PDF y las aclaraciones del usuario.
+PREGUNTAS TEÓRICAS ALTA/MUY ALTA: no fabricar tests de Verdadero/Falso
+con «Verdadero», «Falso» y dos opciones de relleno. Formula cuatro
+alternativas técnicamente comparables con una única correcta. En Arquímedes mantener exclusivamente la
 formulación verbal autorizada; no inventar una ecuación para subir nivel.
 COMPRUEBA DIMENSIONES: cada expresión debe tener las unidades de su
 magnitud; en particular rho*v² tiene dimensión de presión Pa = N/m²,
-NUNCA N/m³. Las cuatro alternativas deben compartir magnitud y unidad
-SI (o ser todas adimensionales), sin mezclar N con kg.
+NUNCA N/m³. La respuesta correcta debe ir en SI. Los distractores deben
+ser plausibles, sin mezclar magnitudes incomparables ni ofrecer resultados
+físicamente equivalentes en unidades diferentes (p. ej., 0,23 m³/s y
+230 L/s son EL MISMO caudal). En general usa una unidad común SI.
 No sustituir un cálculo por reconocimiento de fórmula o por teoría.
 No introducir altura, gravedad ni constantes
 sin que estén documentadas o expresamente dadas en el enunciado.
@@ -13299,7 +13394,11 @@ aportadas por el usuario. Un cálculo con nuevos datos puede despejar o
 combinar relaciones documentadas, pero NUNCA incorporar una ley física
 adicional. Si el PDF solo describe cualitativamente un fenómeno, NO
 inventar una fórmula que no aparece ni se deduce por puro álgebra de
-relaciones documentadas. Los ejemplos de examen son estilo, no fuente.
+relaciones documentadas. Los ejemplos de examen son estilo, no fuente. En ejercicios numéricos
+de Alta y Muy alta NO revelar la ley de cálculo ni la unidad final en el
+enunciado; reservar ambas para la resolución y opciones, respetando las
+unidades necesarias de los datos y evitando respuestas equivalentes.
+Las preguntas TEÓRICAS cuyo objeto es una fórmula literal no son cálculos.
 MUY ALTA: escribe primero una clave respaldada y tres distractores plausibles sobre LA MISMA variable técnica (magnitud con unidad y escala comparables, condición, paso, componente o relación); evita disparates, absolutos gratuitos y categorías distintas. Si el fragmento solo ofrece un dato sencillo, mantén la precisión literal: nunca inventes otra condición para fingir dificultad. Enunciado breve y de examen, sin escenificaciones («un equipo analiza...») ni referencias genéricas al temario fuera de las literales CEIS; un supuesto operativo solo si está documentado. Cuatro opciones homogéneas, no solapadas y una única solución. INCORRECTA: tres opciones verdaderas y una falsa inequívoca. Explicación consistente con la clave, sin letras A/B/C/D porque se barajan después. Sin hechos externos, filtros ni nuevas rondas.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
@@ -13551,8 +13650,13 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    sustentada por las fuentes y por el cálculo cuando corresponda.
    Si hay ambigüedad, datos necesarios ausentes o error matemático, answer=-1.
    Para cada FILA devuelve también estas cuatro propiedades OBLIGATORIAS:
-   unitsOk: verdadero solo si la ecuación, las dimensiones físicas y TODAS
-   las alternativas usan magnitudes homogéneas y la unidad SI correcta.
+   unitsOk: verdadero solo si la ley, el resultado correcto y su dimensión
+   están comprobados. La opción correcta debe usar unidades SI. En las
+   distractoras se permite excepcionalmente una unidad distinta de la MISMA
+   magnitud si representa un error plausible de conversión; ninguna puede
+   equivaler físicamente a la correcta. Por ejemplo 0,23 m³/s y 230 L/s
+   son equivalentes: si ambas aparecen, answer=-1. Una sola opción SI y
+   todas las demás fuera del SI sería una pista demasiado evidente.
    rho*v² tiene dimensión Pa=N/m², NO N/m³. Si falla, answer=-1.
    relationOk: verdadero solo si el fragmento o aclaración autoriza la
    relación EXACTA aplicada; una definición vaga de caudal o de inercia
@@ -13574,15 +13678,16 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    La expresión ½rho·v² aparece en la ecuación de Bernoulli de p.70,
    pero sus problemas numéricos están prohibidos por esta normativa.
    reasoningOk: en ejercicios numéricos Alta/Muy alta, verdadero solo si
-   exige identificar/selectar una ley, interpretar un supuesto, despejar,
-   convertir unidades de forma significativa o COMBINAR relaciones. Un
-   enunciado que proporciona LA FÓRMULA, todas sus variables en SI y pide
-   multiplicar/dividir directamente tiene reasoningOk=false. También es
-   false si las cifras solo decoran una pregunta teórica o no intervienen.
-   NO rechaces una fórmula visible si aún requiere despeje, conversiones
-   relevantes, o varios pasos justificados. En preguntas exclusivamente
-   teóricas deja reasoningOk=true. Nunca metas una segunda relación sin
-   respaldo documental para crear dificultad.
+   el opositor debe identificar la ley y la unidad SI, interpretar el
+   supuesto, despejar, convertir y/o COMBINAR relaciones autorizadas.
+   Si el ENUNCIADO revela la fórmula para calcular (Q=v·S, por ejemplo),
+   aunque aún haya conversiones o despejes, reasoningOk=false y answer=-1.
+   También reasoningOk=false si el enunciado indica la UNIDAD FINAL requerida
+   (m³/s, Pa, kg/m³ o «en unidades del Sistema Internacional»). Las unidades
+   de los DATOS sí deben constar y no son pistas inválidas. Si las cifras
+   adornan una pregunta teórica, reasoningOk=false. En preguntas TEÓRICAS
+   cuyo objeto es reconocer una ecuación documentada deja reasoningOk=true.
+   Nunca metas una segunda relación sin respaldo documental.
    solution: para ejercicio numérico, 1-3 operaciones breves, con unidades
    que permitan comprobar independientemente el resultado; para teoría
    cadena vacía. Si no puedes resolver, answer=-1.
@@ -13603,7 +13708,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
     contents:onlyT39?t39Audit138:(auditPrompt82+
       (group.every(t=>String(t.topic_block||'').toLowerCase()==='especifico')?
-        '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual.':'')+
+        '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual. En ejercicio de cálculo Alta/Muy alta, el ENUNCIADO no debe dar la fórmula de resolución ni especificar la unidad de respuesta: si lo hace, answer=-1; la fórmula y SI deben figurar solo en explicación/opciones. Los datos sí conservan sus unidades. Evitar dos opciones físicamente equivalentes.':'')+
       (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
