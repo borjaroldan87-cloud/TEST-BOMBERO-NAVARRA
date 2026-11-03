@@ -13456,6 +13456,27 @@ async function resetGeminiCall139(ai,phase,opts){
     throw error;
   }
 }
+// SERVER146: guía breve EXCLUSIVA para las plazas rechazadas del Tema 39.
+// No añade rondas ni validadores: se adjunta al mismo prompt del rescate
+// ya existente, evitando repetir errores de opciones, SI y razonamiento.
+const T39_RESCATE_PRECISO_146 = String.raw`
+RESCATE T39 — sustituye solamente los objetivos pendientes del mismo examen.
+Las candidatas anteriores no cumplieron todas las condiciones; NO reduzcas
+el nivel para completar el test. Antes de responder comprueba por cada slot:
+- Cuatro respuestas realmente diferentes, incluso al convertir unidades.
+  Nunca dos caudales equivalentes (p.ej., 0,23 m³/s = 230 L/s).
+- La ÚNICA opción correcta va en unidades del SI; preferiblemente todas
+  las alternativas emplean la MISMA unidad SI, con distractores numéricos
+  derivados de errores plausibles de operación o conversión.
+- Si es cálculo: la ley aparece en el fragmento del PDF o en aclaraciones
+  explícitas, y se requieren decisiones reales para resolver. No des la
+  fórmula ni las unidades finales en el enunciado. No hagas una mera
+  sustitución obvia con todas las magnitudes ya en SI.
+- Si el objetivo es teórico: pregunta teoría sustentada, con cuatro
+  alternativas comparables. No fuerces un cálculo externo al manual.
+- Verifica internamente el valor, las unidades y la solución antes de
+  entregar el JSON. No atribuyas cifras hipotéticas al PDF.
+`;
 async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[],repair118=false){
   group=group.map(t39TargetForGeneration);
   const requiresSearch=group.some(t=>!specificEvidenceReady128(t));
@@ -13491,7 +13512,8 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
-      ? t39GenerationPrompt141(group,difficulty,mode)
+      ? t39GenerationPrompt141(group,difficulty,mode)+
+        (repair118?T39_RESCATE_PRECISO_146:'')
       : resetPrompt136(group,difficulty,mode,comparisons)+
         (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
         iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
@@ -14611,14 +14633,17 @@ app.post('/api/generate',async(req,res)=>{
       const ai=groups.length?aiClient():null;
       const run=await resetPool136(groups,async group=>{
         const items=group.map(x=>x.t);
-        return resetGenerateGroup136(ai,items,difficulty,mode,comparisonPool82);
+        // Reanudar un T39 fallido es también RESCATE: aplicar desde la
+        // primera llamada las instrucciones precisas y conservar el borrador.
+        return resetGenerateGroup136(ai,items,difficulty,mode,comparisonPool82,
+          Boolean(resume136&&items.length&&items.every(t39Hydraulica)));
       });
       const failures=[];
       for(let i=0;i<groups.length;i++){
         if(!run[i].ok){failures.push({batch:i,reason:run[i].error});continue;}
         for(let j=0;j<groups[i].length;j++){
           const slot=groups[i][j].index,q=run[i].value[j];
-          if(q)questions[slot]=q;else failures.push({slot,reason:iiff91Topic(groups[i][j].t)?'rechazada por auditoría: factual, formato o calidad insuficiente':'no verificable con PDF'});
+          if(q)questions[slot]=q;else failures.push({slot,reason:iiff91Topic(groups[i][j].t)?'rechazada por auditoría: factual, formato o calidad insuficiente':t39Hydraulica(groups[i][j].t)?'candidata rechazada: evidencia, respuesta, unidades o calidad':'no verificable con PDF'});
         }
       }
       // Depuración determinista ANTES del rescate: una pregunta con enunciado
@@ -14729,7 +14754,7 @@ app.post('/api/generate',async(req,res)=>{
         const valid=questions.filter(Boolean).length;
         console.warn('RESET_136_INCOMPLETO:',JSON.stringify({count,valid,
           failed:count-valid,failures:failures.slice(0,8),ms:Date.now()-started}));
-        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':'verificación PDF'}. No se guardó un examen incompleto.`);
+        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':targets.some(t39Hydraulica)?'los controles de evidencia, unidades o calidad':'verificación PDF'}. No se guardó un examen incompleto.`);
       }
     }
     if(questions.some((q,i)=>!q||resetShape136(q))){
