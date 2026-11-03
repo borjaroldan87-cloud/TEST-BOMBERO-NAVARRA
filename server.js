@@ -13155,6 +13155,110 @@ function t39BernoulliNumeric131(q,t){
     });
   return hasNumericalDatum&&numericResults;
 }
+// SERVER154: comprobación matemática LOCAL en la auditoría que ya existe.
+// No cambia la generación ni añade Gemini, consultas SQL o rondas.
+// Solo repara familias cuya incógnita puede reconstruirse íntegramente
+// con datos inequívocos del propio enunciado; en otras conserva el auditor.
+function t39Math154(q){
+  if(!q||!Array.isArray(q.options)||q.options.length!==4)return null;
+  const stem=String(q.stem||'');
+  const pattern=/([+-]?(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?))\s*(kg\/m[³3]|m\/s[²2]|m[³3]\/s|m[³3]\/h|L\/min|L\/s|cm\/s|m\/s|mm[²2]|cm[²2]|dm[²2]|m[²2]|kPa|bar|Pa|mm|cm|m)(?![\p{L}\p{N}])/giu;
+  const number=v=>{
+    const x=String(v).replace(/\s/g,'');
+    return Number(/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(x)&&!x.startsWith('0.')
+      ?x.replace(/\./g,'').replace(',','.') :x.replace(',','.'));
+  };
+  const entries=[...stem.matchAll(pattern)].map(m=>({value:number(m[1]),unit:m[2]}))
+    .filter(x=>Number.isFinite(x.value));
+  const factor=u=>u==='m/s²'||u==='m/s2'?1:(T39_FACTORES_SI_153[u]??T39_FACTORES_SI_153[u.replace(/3/g,'³').replace(/2/g,'²')]??null);
+  const si=x=>x.value*factor(x.unit);
+  const fmt=x=>Number(x.toPrecision(12)).toLocaleString('es-ES',{maximumFractionDigits:8});
+  let result=null,solution=null,unit=null;
+  // Tres bombas en paralelo: sección·velocidad de la primera y caudal
+  // declarado para las restantes. Evita tomar Q1 de la explicación Gemini.
+  if(/bombas?[\s\S]{0,100}paralelo|paralelo[\s\S]{0,100}bombas?/i.test(stem) &&
+     /caudal total|caudal total suministrado/i.test(stem)){
+    const areas=entries.filter(x=>/[²2]$/.test(x.unit));
+    const speeds=entries.filter(x=>/^(?:cm\/s|m\/s)$/i.test(x.unit));
+    const flows=entries.filter(x=>/^(?:m[³3]\/s|m[³3]\/h|L\/s|L\/min)$/i.test(x.unit));
+    if(areas.length===1&&speeds.length===1&&flows.length===2 &&
+       /(?:tres|3)\s+bombas/i.test(stem)){
+      if(![...areas,...speeds,...flows].every(x=>Number.isFinite(factor(x.unit))))return null;
+      const first=si(areas[0])*si(speeds[0]);
+      result=first+flows.reduce((sum,x)=>sum+si(x),0);
+      unit='m³/s';
+      solution=`Q₁=${fmt(si(areas[0]))} m² × ${fmt(si(speeds[0]))} m/s = ${fmt(first)} m³/s; `+
+        `Q₂=${fmt(si(flows[0]))} m³/s; Q₃=${fmt(si(flows[1]))} m³/s; `+
+        `Q_total=${fmt(first)}+${fmt(si(flows[0]))}+${fmt(si(flows[1]))}=${fmt(result)} m³/s.`;
+    }else if(areas.length===0&&speeds.length===0&&flows.length>=2){
+      if(!flows.every(x=>Number.isFinite(factor(x.unit))))return null;
+      result=flows.reduce((sum,x)=>sum+si(x),0);
+      unit='m³/s';
+      solution=`Caudales convertidos a m³/s: ${flows.map(x=>fmt(si(x))).join(' + ')} = ${fmt(result)} m³/s.`;
+    }
+  }
+  // Presión absoluta bajo una superficie con presión conocida, líquido
+  // en reposo, profundidad, densidad y gravedad explícitos.
+  if(result===null&&/presi[oó]n absoluta/i.test(stem) &&
+     /superficie libre/i.test(stem)&&/l[ií]quido/i.test(stem)&&/fondo/i.test(stem)){
+    const rhos=entries.filter(x=>/^kg\/m[³3]$/i.test(x.unit));
+    const gs=entries.filter(x=>/^m\/s[²2]$/i.test(x.unit));
+    const ps=entries.filter(x=>/^(?:Pa|kPa|bar)$/i.test(x.unit));
+    const hs=entries.filter(x=>/^(?:m|cm|mm)$/i.test(x.unit));
+    if(rhos.length===1&&gs.length===1&&ps.length===1&&hs.length===1&&
+       /(?:profundidad|altura)\s+de\s*\d/i.test(stem)){
+      if(![...rhos,...gs,...ps,...hs].every(x=>Number.isFinite(factor(x.unit))))return null;
+      const hydro=si(rhos[0])*si(gs[0])*si(hs[0]);
+      result=si(ps[0])+hydro;unit='Pa';
+      solution=`P_h=ρ·g·h=${fmt(si(rhos[0]))}×${fmt(si(gs[0]))}×${fmt(si(hs[0]))}=`+
+        `${fmt(hydro)} Pa; P_superficie=${fmt(si(ps[0]))} Pa; `+
+        `P_absoluta=${fmt(si(ps[0]))}+${fmt(hydro)}=${fmt(result)} Pa.`;
+    }
+  }
+  if(result===null||!Number.isFinite(result)||!unit)return null;
+  const expectedUnit=unit.replace(/3/g,'³');
+  const parsed=q.options.map(option=>{
+    const m=String(option).trim().replace(/^[A-D][.):]\s*/i,'').match(/^([+-]?\d[\d.,]*)\s*(Pa|kPa|bar|m[³3]\/s|m[³3]\/h|L\/s|L\/min)$/i);
+    return m?{value:number(m[1]),unit:m[2],decimals:(m[1].split(',')[1]||'').length}:null;
+  });
+  if(parsed.some(x=>!x))return null; // notación de opción desconocida: decide auditor existente
+  const equivalent=parsed.map((x,i)=>{
+    if(!x)return -1;
+    const f=factor(x.unit);if(!Number.isFinite(f))return -1;
+    const tol=Math.max(Math.abs(result)*1e-8,0.501*10**(-Math.min(x.decimals,8))*f);
+    return Math.abs(x.value*f-result)<=tol?i:-1;
+  }).filter(i=>i>=0);
+  const indices=equivalent.filter(i=>parsed[i].unit.replace(/3/g,'³')===expectedUnit);
+  // Una opción físicamente correcta, escrita en SI; nunca dos equivalentes.
+  if(equivalent.length!==1||indices.length!==1)return {invalid:true,reason:'sin_unica_respuesta_si',result};
+  return {index:indices[0],solution,result,unit};
+}
+// Detecta igualdades aritméticas simples incorrectas en la resolución
+// de la MISMA llamada de auditoría. No interpreta variables ni leyes.
+function t39Arithmetic154(solution){
+  const s=String(solution||'');
+  const num=v=>{const z=v.trim();return Number(/^[1-9]\d{0,2}(?:\.\d{3})+(?:,\d+)?$/.test(z)?z.replace(/\./g,'').replace(',','.'):z.replace(',','.'));};
+  const rx=/((?:\d[\d.,]*\s*[+×·*/-]\s*)+\d[\d.,]*)\s*=\s*(\d[\d.,]*)/g;
+  for(const m of s.matchAll(rx)){
+    // Solo expresiones numéricas, con precedencia de multiplicación/división.
+    const tokens=m[1].split(/\s*([+×·*/-])\s*/).filter(Boolean);
+    if(tokens.length<3||tokens.length%2!==1)continue;
+    let values=[num(tokens[0])],ops=[];
+    for(let i=1;i<tokens.length;i+=2){
+      const op=tokens[i],b=num(tokens[i+1]);
+      if(!Number.isFinite(b))return false;
+      if(op==='*'||op==='×'||op==='·'||op==='/'){
+        const a=values.pop();if(op==='/'&&b===0)return false;
+        values.push(op==='/'?a/b:a*b);
+      }else{ops.push(op);values.push(b);}
+    }
+    let calc=values[0];for(let i=0;i<ops.length;i++)calc=ops[i]==='+'?calc+values[i+1]:calc-values[i+1];
+    const shown=num(m[2]);
+    const digits=(m[2].split(',')[1]||'').length;
+    if(Math.abs(calc-shown)>Math.max(Math.abs(calc)*1e-8,0.501*10**(-Math.min(digits,8))))return false;
+  }
+  return true;
+}
 // SERVER143: comprobaciones PREEXISTENTES del mismo preflight T39,
 // sin llamada extra. Solo rechazan errores dimensionales o sustituciones
 // mecánicas inequívocas; los casos dudosos los decide el auditor actual.
@@ -13943,6 +14047,20 @@ FILAS: ${JSON.stringify(blind)}` : null;
   const validated=questions.map((q,i)=>{
     const a=auditByIndex142.get(i);
     const strictT39=onlyT39&&t39StrictNumeric133(q);
+    const math154=strictT39?t39Math154(q):null;
+    // Si la operación puede reconstruirse del enunciado, la verdad numérica
+    // prevalece sobre el índice erróneo del modelo. Los criterios documentales
+    // del MISMO auditor siguen siendo obligatorios.
+    if(math154?.invalid)return null;
+    if(math154 && a && Number.isInteger(a.answer) && a.answer>=0 &&
+       a.unitsOk===true && a.relationOk===true && a.reasoningOk===true){
+      if(math154.index!==q.correctIndex||math154.index!==a.answer)
+        console.warn('T39_154_CORRECCION_MATEMATICA:',JSON.stringify({
+          coverageId:Number(group[i].id),original:q.correctIndex,
+          auditor:a.answer,verified:math154.index}));
+      q.correctIndex=math154.index;a.answer=math154.index;
+    }
+    if(strictT39&&!math154&&!t39Arithmetic154(a?.solution))return null;
     // SERVER148: la validación dimensional es obligatoria para cálculos;
     // en teoría importa la correspondencia factual, no una unidad inexistente.
     const t39AuditFailure143=onlyT39&&(a?.relationOk!==true||
@@ -13987,7 +14105,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       :null;
     if(group[i].questionFamily==='GRAFICA'&&!picture)return null;
     const explanation=onlyT39&&strictT39
-      ?`Resolución: ${String(a.solution).trim()} Fundamento documental: «${evidence}».`
+      ?`Resolución: ${math154?.solution&&a?.answer>=0?math154.solution:String(a.solution).trim()} Fundamento documental: «${evidence}».`
       :otherSpecific
       ?(iiff92IsNegativeStem(q)
         ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
