@@ -9049,6 +9049,9 @@ function specificFormulaReady128(t){
     /(?:f[oó]rmula|ecuaci[oó]n|coeficiente|proporciona[ld]|\b[a-zA-Z]\s*=)/i.test(label+' '+evidence);
 }
 function specificEvidenceReady128(t){
+  // Una fórmula original breve (Q = S·v) es evidencia suficiente para T39.
+  if(t39Hydraulica(t) && String(t?.item_type||'').toLowerCase()==='formula' &&
+     /[A-Za-z\u0370-\u03ff](?:_[A-Za-z0-9]+)?\s*=\s*[^=\s]{1,}/.test(String(t?.source_evidence||'')))return true;
   return String(t?.source_evidence||'').trim().length>=55||
     (String(t?.topic_block||'').toLowerCase()==='especifico'&&specificFormulaReady128(t));
 }
@@ -12623,10 +12626,26 @@ function resetShape136(q){
   return null;
 }
 function resetQuote136(quote, excerpt, allowShortLiteral=false){
-  const norm=R136_NORM(quote),text=R136_NORM(excerpt);
-  // T39: las fórmulas originales pueden ocupar menos de 18 caracteres.
-  // Sigue siendo obligatorio citar literalmente la evidencia autorizada.
-  return norm.length>=(allowShortLiteral?3:18) && text.includes(norm);
+  // SERVER142: la excepción T39 solo se aplica a FÓRMULAS breves.
+  // Para otros bloques se preserva íntegra la comprobación histórica.
+  const literal = value => String(value ?? '').normalize('NFKC')
+    .replace(/\s+/g,' ').trim();
+  const norm=allowShortLiteral?literal(quote):R136_NORM(quote);
+  const text=allowShortLiteral?literal(excerpt):R136_NORM(excerpt);
+  if(!text.includes(norm))return false;
+  if(!allowShortLiteral)return norm.length>=18;
+  if(norm.length>=18)return true;
+  if(norm.length<3)return false;
+  // No aceptar palabras sueltas (p.ej. «con») ni fragmentos de prosa.
+  const expression=norm.replace(/\\\(|\\\)/g,'').replace(/\s+/g,'');
+  if(!/^[\p{L}\p{N}_{}()[\].\\=+*/·×÷^%−-]+$/u.test(expression))return false;
+  const operands=part=>/[\p{L}\p{N}]/u.test(part);
+  const sides=expression.split('=');
+  if(sides.length===2 && sides.every(operands))return true;
+  // Una razón puede ser fórmula completa sin el signo de igualdad.
+  return sides.length===1 && /[/÷]/.test(expression) &&
+    /[\p{Lu}\p{N}\p{Script=Greek}]/u.test(expression) &&
+    expression.split(/[/÷]/).length===2 && expression.split(/[/÷]/).every(operands);
 }
 // No crear preguntas locales para parques solares/eólicos a partir de tablas
 // antiguas: ambas materias pasan por la generación + auditoría documental.
@@ -12646,6 +12665,7 @@ function resetGroups139(rows,difficulty=null){
        // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
        // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
        iiff91Topic(last[0].t)===iiff91Topic(row.t) &&
+       t39Hydraulica(last[0].t)===t39Hydraulica(row.t) &&
        (coverageTopicNumber(last[0].t.topic_name)===22)===
          (coverageTopicNumber(row.t.topic_name)===22) &&
        current+bytes<=(difficulty==='muy alta'&&iiff91Topic(row.t)
@@ -12935,36 +12955,10 @@ function t39Hydraulica(item){
     coverageTopicNumber(item?.topic_name)===39 &&
     /hidr[aá]ulica/i.test(String(item?.topic_name||''));
 }
-function t39Evidence(item){
-  const raw=String(item?.source_evidence||'');
-  if(!t39Hydraulica(item))return raw;
-  const page=String(item?.manual_page??'').trim();
-  let text=raw;
-  if(page==='77'){
-    text=text.replace(/Acoplamiento paralelo de dos bombas/gi,
-      'Acoplamiento en serie de dos bombas');
-    text=text.replace(/Curva caracter[ií]stica del acoplamiento en paralelo de dos bombas/gi,
-      'Curva característica del acoplamiento en serie de dos bombas');
-  }
-  return text;
-}
-function t39TargetForGeneration(item){
-  if(!t39Hydraulica(item))return item;
-  const source_evidence=t39Evidence(item);
-  const concept=t39Evidence({...item,source_evidence:String(item?.concept||'')});
-  const original=String(item?.graphicAsset?.description||'');
-  const page=String(item?.manual_page??'').trim();
-  const description=page==='77'
-    ?original.replace(/Acoplamiento paralelo de dos bombas/gi,
-      'Acoplamiento en serie de dos bombas')
-      .replace(/Curva caracter[ií]stica del acoplamiento en paralelo de dos bombas/gi,
-        'Curva característica del acoplamiento en serie de dos bombas')
-    :original;
-  if(source_evidence===String(item.source_evidence||'') &&
-     concept===String(item.concept||'') && description===original)return item;
-  return {...item,source_evidence,concept,
-    ...(item.graphicAsset?{graphicAsset:{...item.graphicAsset,description}}:{})};
-}
+// Mantener la transcripción del PDF palabra por palabra. Las correcciones
+// del usuario se facilitan por separado en T39_REGLAS_HIDRAULICA, con igual
+// autoridad; no sustituir silenciosamente el texto de coverage_items.
+function t39TargetForGeneration(item){ return item; }
 const T39_REGLAS_HIDRAULICA = String.raw`REGLAS EXCLUSIVAS TEMA 39 HIDRÁULICA (CEIS Guadalajara):
 FUENTES AUTORIZADAS: (1) el fragmento del PDF original de Hidráulica y (2) las aclaraciones y correcciones expresamente aportadas por el usuario en estas reglas. AMBAS tienen la misma autoridad. No incorpores por iniciativa propia datos, leyes o constantes de fuentes externas. No preguntar si la densidad es vectorial/escalar, por errata documental. Para TABLAS, tratar cada combinación (fila, columna, unidades, valor y condiciones) como conocimiento indivisible y no interpolar. Las expresiones del manual sólo pueden reconocerse literalmente en caso de ambigüedad; no presentar como teoría externa. La línea de p.70 «Energía de presión: Fuerza · espacio = Fuerza · Superficie · Longitud» es un literal del manual, NO una igualdad que defina la presión ni autoriza E=pV. Arquímedes: preguntar el principio EN PALABRAS tal como consta en el PDF; prohibido E=ρgV u otras fórmulas externas. Viscosidad: se admite reconocer μ_ap=τ/γ con su explicación textual. Formato y dificultad según familias de los modelos 2024/2026, conservando las normas comunes del bloque Específico.
 
@@ -13017,27 +13011,94 @@ function t39Prompt131(targets,difficulty){
 }
 // SERVER133: un ejercicio requiere datos numéricos y respuesta numérica; reconocer una fórmula no sirve.
 function t39StrictNumeric133(q){
-  // Solo verificar estructura cuantitativa, no palabras exactas ni formato de unidades.
   const stem=String(q?.stem||'');
   const options=Array.isArray(q?.options)?q.options:[];
-  if(options.length!==4)return false;
-  const numbers=(stem.match(/\\d+(?:[.,]\\d+)?/g)||[]);
-  const quantitative=options.every(o=>/\\d/.test(String(o)));
-  const formulaRecognition=/(?:cu[aá]l es la (?:expresi[oó]n|f[oó]rmula)|qu[eé] (?:f[oó]rmula|ecuaci[oó]n)|se define|principio de)/i.test(stem);
-  return numbers.length>=2 && quantitative && !formulaRecognition;
+  // SERVER142: los ordinales «1. ...» no son por sí mismos soluciones.
+  if(options.length!==4 || !options.every(o=>{
+    const text=String(o).trim();
+    return /\d/.test(text) && !/^[1-4][.)]\s*[^\d\s]/.test(text);
+  }))return false;
+  const task=stem.replace(/\b(?:p[aá]gina|p[aá]g\.?|edici[oó]n|tema)\s*(?:n[úu]mero\s*)?\d+(?:[.,]\d+)?\b/gi,' ');
+  if(!/\d+(?:[.,]\d+)?/.test(task))return false;
+  const theory=/(?:cu[aá]ntos?\s+(?:tipos|clases|procesos|principios|f[oó]rmulas|ecuaciones)\b|qu[eé]\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto|enunciado|definici[oó]n)\b|cu[aá]l\s+(?:es|ser[ií]a)\s+(?:el|la)\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto)|se define|significado de|qu[eé] representa|c[oó]mo se denomina)/i.test(task);
+  if(theory)return false;
+  const operation=/(?:calcul\w*|hall\w*|determin\w*|obten\w*|obt[eé]n|resuelv\w*|despej\w*|conviert\w*|conversi[oó]n|transform\w*|expres\w*\s+en|equival\w*)/i.test(task);
+  const physicalResult=/(?:caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|superficie|masa|tiempo|distancia|di[aá]metro|radio|profundidad|empuje|energ[ií]a|potencia|valor|resultado|cantidad|pascal(?:es)?|litros?|metros?|\bPa\b|\bN\b|\bkg\b|\bm[²³]?\b)/i.test(task);
+  const questionAmount=/(?:cu[aá]nto(?:s|a|as)?\b|(?:a\s+)?qu[eé]\s+(?:valor|cantidad|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|distancia)|cu[aá]l\s+(?:ser[ií]a|ser[aá]|es|resulta|vale|corresponde)\s+(?:el|la|su)\s+(?:valor|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa))/i.test(task);
+  return physicalResult && (operation||questionAmount);
 }
 function t39CalculationCandidate133(t){
-  if(!t39Hydraulica(t)||!specificEvidenceReady128(t))return false;
-  const text=String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'');
+  if(!t39Hydraulica(t))return false;
+  // SERVER142: decidir con la MISMA evidencia que verá Gemini (3.000
+  // caracteres), no con una fórmula escondida después del truncamiento.
+  const visible=String(t.source_evidence||'').slice(0,3000);
+  const candidate={...t,source_evidence:visible};
+  if(!specificEvidenceReady128(candidate))return false;
+  const context=String(t.section||'')+' '+String(t.concept||'');
+  const text=context+' '+visible;
   if(/bernoulli/i.test(text))return false;
-  return !!t39NumericModel131(t) &&
+  const mathematical=/[\p{L}\p{Script=Greek}](?:_[\p{L}\p{N}]+)?\s*=\s*[\p{L}\p{N}\p{Script=Greek}\\(]|(?:proporcional(?:idad)?|inversamente|directamente|cociente|producto|se calcula|se obtiene|dividid[oa]|multiplicad[oa]|sum[an]|diferencia entre)/iu.test(visible);
+  return mathematical && !!t39NumericModel131(candidate) &&
     (String(t.item_type||'')==='formula'||String(t.evaluation_type||'')==='calculo'||
       /(?:Q\s*=|P\s*=|p\s*=|F\s*=|S\s*=|v\s*=|H_m|ρ|densidad|presi[oó]n hidrost[aá]tica)/i.test(text));
 }
 function t39BernoulliNumeric131(q,t){
-  if(!t39Hydraulica(t)||!/bernoulli/i.test(String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'')))return false;
+  if(!t39Hydraulica(t))return false;
   const stem=String(q?.stem||'');
-  return /(?:calcul[ae]|determin[ae]|obt[eé]n|cu[aá]nt[oa]|resultado|valor num[eé]rico)/i.test(stem)&&/\d/.test(stem);
+  const topic=String(t.section||'')+' '+String(t.concept||'')+' '+String(t.source_evidence||'');
+  if(!/bernoulli/i.test(topic+' '+stem))return false;
+  // SERVER142: detectar la TAREA o el patrón dato cuantitativo +
+  // alternativas de RESULTADO, sin un catálogo de unidades predeterminadas.
+  // Los subíndices v1/p2 y las alternativas con fórmulas no son resultados.
+  if(t39StrictNumeric133(q))return true;
+  const hasNumericalDatum=/(?<![\p{L}_])\d+(?:[.,]\d+)?\s*\p{L}+(?:\s*\/\s*\p{L}+)?/u.test(stem);
+  const numericResults=Array.isArray(q?.options)&&q.options.length===4&&
+    q.options.every(o=>{
+      const value=String(o).trim();
+      return !/^[1-4][.)]\s*[^\d\s]/.test(value)&&
+        /^[≈~]?[+-]?\s*\d+(?:[.,]\d+)?(?:\s|$|[%°\p{L}])/u.test(value);
+    });
+  return hasNumericalDatum&&numericResults;
+}
+// T39: un contrato, una generación, una auditoría. Los demás temas
+// conservan íntegra su lógica de selección y sus prompts históricos.
+function t39GenerationPrompt141(targets,difficulty,mode){
+  const objectives=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,
+    epigrafe:t.section,concepto:t.concept,
+    fragmento:String(t.source_evidence||'').slice(0,3000),
+    familia:t.questionFamily||'2024_TEXTO',
+    paginaImpresa:String(t.manual_page??''),
+    ...(t39NumericModel131(t)?{modeloSoloDeEstructura:t39NumericModel131(t)}:{})}));
+  return `Genera ${targets.length} preguntas NUEVAS de oposición de bombero de Navarra,
+Tema 39 Hidráulica, dificultad ${difficulty}, modalidad ${mode}.
+FUENTES: exclusivamente el fragmento PDF de CADA objetivo y las aclaraciones
+expresamente aportadas por el usuario, que tienen IGUAL AUTORIDAD.
+Estas aclaraciones corrigen o precisan el PDF. No uses conocimientos externos
+por iniciativa propia. Los ejemplos de problemas son MODELOS de resolución,
+no hechos que añadir al temario.
+Un OBJETIVO por pregunta y en su mismo orden; no cambies su familia.
+Da cuatro alternativas homogéneas, exactamente una correcta y explicación
+breve. No inventes leyes, constantes, tablas ni datos documentales.
+En cálculos sí puedes elegir números hipotéticos nuevos, unidades de entrada
+e incógnita. Resuelve primero a partir de una relación física AUTORIZADA;
+verifica después las cuatro opciones numéricas y su única respuesta en SI.
+Muy alta: conversiones de unidades, despeje y operaciones combinadas,
+resolubles en tiempo de examen. No sustituir un cálculo por reconocimiento
+de una fórmula o por teoría. No introducir altura, gravedad ni constantes
+sin que estén documentadas o expresamente dadas en el enunciado.
+MODO CÁLCULOS: cada pregunta debe exigir una operación numérica real.
+MODO MIXTO: respetar la familia del objetivo y combinar operaciones y teoría
+cuando la evidencia lo permita; no inventar cálculos para datos teóricos.
+MODO LITERAL: fidelidad al texto y tablas de la fuente autorizada.
+Bernoulli: teoría y formulación completas; PROHIBIDOS ejercicios numéricos.
+Para familias 2024_TEXTO/2024_NUMERICA NO escribas la cabecera en el stem:
+el servidor añade «Según el manual del CEIS Guadalajara, página XX, ...».
+Nunca pongas el nombre del tema en esa cabecera ni en el stem.
+Para tablas, mantener literalmente fila, columna, unidades, condiciones y valor.
+No traslades hechos entre objetivos. No generes gráficas ni uses gráficas
+sin imagen original suficiente. Formato JSON solicitado por el esquema.
+ACLARACIONES AUTORIZADAS: ${T39_REGLAS_HIDRAULICA}
+OBJETIVOS: ${JSON.stringify(objectives)}`;
 }
 function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const leg=targets.every(t=>String(t.topic_block).toLowerCase()==='legislacion');
@@ -13171,8 +13232,12 @@ agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
-    contents:resetPrompt136(group,difficulty,mode,comparisons)+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):"")+iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
-      geoPhysical112,config:{
+    contents:group.every(t39Hydraulica)
+      ? t39GenerationPrompt141(group,difficulty,mode)
+      : resetPrompt136(group,difficulty,mode,comparisons)+
+        (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
+        iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
+        geoPhysical112,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:(geoHighChallenge||(iiffScope&&difficulty==='muy alta'))?'medium':'low'}}:{}),
@@ -13196,7 +13261,19 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // Comprueba evidencia y calidad de distractores: Muy alta exige calidad=2
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
-    if((group[i].t39StrictCalculation133&&!t39StrictNumeric133(q))||resetShape136(q)||t39BernoulliNumeric131(q,group[i])||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept}))return [];
+    const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
+    const shapeIssue=resetShape136(q);
+    const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
+    const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
+      topic_name:group[i].topic_name,concept:group[i].concept});
+    if(numericRejected||shapeIssue||bernoulliRejected||geoIssue){
+      if(t39Hydraulica(group[i]))console.warn('T39_140_PREFLIGHT_REJECT:',JSON.stringify({
+        index:i,coverageId:Number(group[i].id),
+        reason:numericRejected?'no_ejercicio_numerico':
+          shapeIssue|| (bernoulliRejected?'bernoulli_numerico':String(geoIssue)),
+        strict:Boolean(group[i].t39StrictCalculation133)}));
+      return [];
+    }
     if(iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence)){
       console.warn('IIFF_107_MODAL_NO_SOSTENIDA:',JSON.stringify({slot:i}));
       return [];
@@ -13212,7 +13289,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
        /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
     return [{index:i,tema:group[i].topic_name,
       epigrafe:group[i].section,concepto:group[i].concept,
-      fragmento:String(group[i].source_evidence||'').slice(0,3500),
+      fragmento:String(group[i].source_evidence||'').slice(0,t39Hydraulica(group[i])?3000:3500),
       stem:q.stem,options:q.options,
       ...(iiff91Topic(group[i])?{explanation:q.explanation}:{})}];
   });
@@ -13314,7 +13391,8 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    Si hay ambigüedad, datos necesarios ausentes o error matemático, answer=-1.
 5. quote es una COPIA LITERAL CONTIGUA de la fórmula o afirmación de la
    fuente autorizada que respalda la LEY; no cites los números del supuesto.
-   Si es fórmula breve, bastan 3 caracteres; si es texto, usa 18 o más.
+   Solo si es una EXPRESIÓN MATEMÁTICA completa se admiten 3-17 caracteres;
+   palabras sueltas NO son prueba. En texto, usa 18 o más caracteres.
    La cita puede proceder del fragmento o de las aclaraciones expresas.
 6. No rechaces por no encontrar en el PDF cifras inventadas para el problema.
 7. Bernoulli: teoría y fórmula permitidas, cálculos numéricos prohibidos.
@@ -13331,12 +13409,31 @@ FILAS: ${JSON.stringify(blind)}` : null;
   if(iiffScope)iiff92RequireCompletedResponse(auditing,'auditoría');
   const audits=JSON.parse(String(auditing?.text||'{}'))?.results;
   if(!Array.isArray(audits))throw Error('Auditoría sin resultados');
+  // SERVER142: minItems/maxItems no garantizan índices únicos. Tratar
+  // duplicados como no verificables, sin atribuirlos al PDF ni recobrar
+  // silenciosamente solo la primera entrada.
+  const auditByIndex142=new Map(),duplicate142=new Set(),invalid142=[];
+  for(const result of audits){
+    const index=result?.index;
+    if(!Number.isInteger(index)||index<0||index>=group.length){
+      invalid142.push(index??null);continue;
+    }
+    if(auditByIndex142.has(index)){duplicate142.add(index);continue;}
+    auditByIndex142.set(index,result);
+  }
+  for(const index of duplicate142)auditByIndex142.delete(index);
+  const missing142=blind.map(x=>x.index).filter(i=>!auditByIndex142.has(i));
+  const unverifiable142=blind.map(x=>x.index).filter(i=>auditByIndex142.get(i)?.answer===-1);
+  if(duplicate142.size||invalid142.length||missing142.length||unverifiable142.length)
+    console.warn('RESET_142_AUDIT_INDICES:',JSON.stringify({
+      duplicated:[...duplicate142],invalid:invalid142,missing:missing142,
+      answerMinusOne:unverifiable142,expected:blind.length,received:audits.length}));
   if(iiffScope)console.log('IIFF_119_CALIDAD_AUDITOR:',JSON.stringify({
     nivel:difficulty,calidades:audits.map(x=>Number(x.calidad)),
     minAceptada:difficulty==='muy alta'?2:1,
     fichasOriginales:group.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
-    const a=audits.find(x=>x.index===i);
+    const a=auditByIndex142.get(i);
     if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
@@ -13348,7 +13445,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       (iiff91Topic(group[i])&&difficulty==='muy alta'&&
         (iiff118ObviousWeakDistractors(q)||iiff122DistractorOutlier(q)||
          /que intervalo cuantitativo recoge el manual para/i.test(iiff91Norm(q.stem))))||
-      !resetQuote136(a.quote,group[i].source_evidence,t39Hydraulica(group[i])) &&
+      !resetQuote136(a.quote,String(group[i].source_evidence||'').slice(0,t39Hydraulica(group[i])?3000:undefined),t39Hydraulica(group[i])) &&
       !(t39Hydraulica(group[i])&&resetQuote136(a.quote,T39_REGLAS_HIDRAULICA,true)))return null;
     const evidence=String(a.quote);
     // Para INCORRECTA se evita una explicación libre que pueda asignar
@@ -13396,13 +13493,13 @@ FILAS: ${JSON.stringify(blind)}` : null;
     const rejected=group.map((t,i)=>t39Hydraulica(t)&&!validated[i]?{
       slot:i,concept:String(t.concept||'').slice(0,110),
       generated:Boolean(questions[i]),
-      audited:Boolean(audits.find(a=>a.index===i)),
-      answerMatches:Boolean(questions[i]&&audits.find(a=>a.index===i)?.answer===questions[i].correctIndex),
-      quoteMatches:Boolean(audits.find(a=>a.index===i)&&(resetQuote136(audits.find(a=>a.index===i).quote,t.source_evidence,true)||resetQuote136(audits.find(a=>a.index===i).quote,T39_REGLAS_HIDRAULICA,true))),
+      audited:Boolean(auditByIndex142.get(i)),
+      answerMatches:Boolean(questions[i]&&auditByIndex142.get(i)?.answer===questions[i].correctIndex),
+      quoteMatches:Boolean(auditByIndex142.get(i)&&(resetQuote136(auditByIndex142.get(i).quote,String(t.source_evidence||'').slice(0,3000),true)||resetQuote136(auditByIndex142.get(i).quote,T39_REGLAS_HIDRAULICA,true))),
       shape:resetShape136(questions[i]),
-      auditorAnswer:audits.find(a=>a.index===i)?.answer??null,
+      auditorAnswer:auditByIndex142.get(i)?.answer??null,
       generatedAnswer:questions[i]?.correctIndex??null,
-      auditorQuote:String(audits.find(a=>a.index===i)?.quote||'').slice(0,120)
+      auditorQuote:String(auditByIndex142.get(i)?.quote||'').slice(0,120)
     }:null).filter(Boolean);
     if(rejected.length)console.warn('T39_132_RECHAZOS_AUDITORIA:',JSON.stringify(rejected));
   }
@@ -14014,6 +14111,27 @@ app.post('/api/generate',async(req,res)=>{
       if(!iiff91Topic({topic_name:sole?.name,topic_block:sole?.block}))
         throw Error('Primero indexa el PDF del temario.');
     }
+    // T39: al reanudar una generación de CÁLCULOS de versiones anteriores,
+    // no dar por buenos borradores teóricos ni objetivos no calculables.
+    // Se conserva cada ejercicio realmente numérico ya validado. Si el
+    // conjunto original no permite cálculo, se seleccionan objetivos nuevos.
+    if(resume136 && mode==='calculos' && Array.isArray(resume136.targets) &&
+       resume136.targets.length>0 && resume136.targets.every(t39Hydraulica)){
+      const oldTargets=resume136.targets;
+      const priorQuestions=Array.isArray(resume136.questions)?resume136.questions:[];
+      let discarded=0;
+      const numericQuestions=oldTargets.map((t,i)=>{
+        const q=priorQuestions[i];
+        if(q && t39StrictNumeric133(q) && !t39BernoulliNumeric131(q,t))return q;
+        if(q)discarded++;
+        return null;
+      });
+      resume136={targets:oldTargets.map(t=>({...t,
+        questionFamily:'CALCULO_FORMULACION',t39StrictCalculation133:true})),
+        questions:numericQuestions};
+      draft136=resume136;
+      if(discarded)console.warn('T39_141_RESUME_TEORIA_EXCLUIDA:',JSON.stringify({discarded}));
+    }
     let targets=resume136?.targets || (count>40?[]:(testType==='failed'
       ?await getFailedCoverageTargets(count,topicIds)
       :(await (async()=>{
@@ -14026,6 +14144,33 @@ app.post('/api/generate',async(req,res)=>{
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
           aiClient().models.generateContent(...args)}},topicIds,examMode,freshOnly111);
       })())));
+    // SERVER142: en reanudaciones de T39, sustituir ANTES de Gemini los
+    // objetivos vacíos que no contienen una relación calculable en el PDF
+    // visible. Las preguntas previamente aprobadas se conservan intactas.
+    if(resume136 && mode==='calculos' && targets.length>0 &&
+       targets.every(t39Hydraulica)){
+      const incomplete=targets.map((t,i)=>({t,i})).filter(({t,i})=>
+        !resume136.questions[i]&&!t39CalculationCandidate133(t));
+      if(incomplete.length){
+        const alternates=await getAdaptiveCoverageCandidates(
+          Math.max(1000,count*50),topicIds,examMode,freshOnly111);
+        const occupied=new Set(targets.map(t=>Number(t.id)));
+        const replacements=[];
+        for(const {t,i} of incomplete){
+          const other=alternates.find(candidate=>
+            Number(candidate.topic_id)===Number(t.topic_id)&&
+            !occupied.has(Number(candidate.id))&&
+            t39CalculationCandidate133(candidate));
+          if(!other)throw Error(`Modo Cálculos T39: no hay objetivo numérico verificable para reanudar la plaza ${i+1}. Se conservan las preguntas aprobadas sin llamadas a Gemini.`);
+          targets[i]={...other,questionFamily:'CALCULO_FORMULACION',
+            t39StrictCalculation133:true};
+          occupied.add(Number(other.id));replacements.push({slot:i,id:Number(other.id)});
+        }
+        resume136.targets=targets;
+        draft136={targets,questions:resume136.questions};
+        console.log('T39_142_RESUME_REEMPLAZOS:',JSON.stringify({replacements}));
+      }
+    }
     // SERVER133: modo CÁLCULOS del T39 es exclusivo, nunca una selección mixta.
     // Selección en una única consulta existente de candidatos, sin Gemini adicional.
     const onlyT39Calcs133=mode==='calculos' && Array.isArray(topicIds)&&topicIds.length===1 &&
@@ -14207,6 +14352,7 @@ app.post('/api/generate',async(req,res)=>{
               Number(candidate.topic_id)===Number(slot.t.topic_id)&&
               !occupied.has(Number(candidate.id))&&
               !tried119.has(Number(candidate.id))&&
+              (!slot.t.t39StrictCalculation133||t39CalculationCandidate133(candidate))&&
               (!iiff91Topic(candidate)||(!iiff91Editorial(candidate)&&
                 (!high119||iiff105TechnicalMerit(candidate)>=6)&&
                 !iiff102CandidateRepetition(candidate,blockedFacts119)))&&
@@ -14216,7 +14362,6 @@ app.post('/api/generate',async(req,res)=>{
             const desiredFamily=String(slot.t.questionFamily||'');
             const specific=String(slot.t.topic_block||'').toLowerCase()==='especifico'&&
               !iiff91Topic(slot.t);
-            if(slot.t.t39StrictCalculation133&&!t39CalculationCandidate133(other))continue;
             const recoveredFamily=specific ?
               ((desiredFamily==='CALCULO_FORMULACION'&&!specificFormulaReady128(other))||
                desiredFamily==='GRAFICA'
