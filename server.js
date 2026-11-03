@@ -13005,7 +13005,7 @@ function t39Prompt131(targets,difficulty){
   return `\nT39 — CONTRATO DE GENERACIÓN NUMÉRICA (solo slots indicados):
   FUENTES: fragmento PDF de CADA objetivo y aclaraciones expresamente aportadas por el usuario en las reglas T39, con idéntica autoridad. Ninguna otra fuente factual. Los modelos de ejercicios y exámenes 2023/2024/2026 son solo ejemplos de estilo; los datos de supuestos NUEVOS sí pueden cambiarse libremente. No copiar cifras originales de forma sistemática.
   PROCEDIMIENTO: primero identifica la relación autorizada por la evidencia; elige la incógnita; asigna datos completos y coherentes; convierte al SI; calcula la solución antes de escribir las opciones; redacta tres distractores numéricos plausibles; comprueba que solo una opción coincide con el resultado. No incluyas pasos internos extensos, solo una solución breve verificable.\n  Para modo CALCULO_NUMERICO_REAL: es OBLIGATORIO realizar al menos una operación aritmética con números nuevos; NO sustituir por identificación de fórmulas. Variar incógnita, datos, contexto y unidades de entrada. Preguntar SIEMPRE el resultado en unidad SI de la magnitud (Pa, N, m, m², m³, m³/s, m/s, kg/m³); las magnitudes adimensionales son excepción. Dar todos los datos, incluyendo gravedad o coeficientes cuando se necesiten y estén autorizados por el fragmento. Evitar cualquier conversión no definida y las tablas contradictorias. No asumir altura de una planta ni coeficiente de descarga. Si el fragmento no permite el modelo, RECHAZAR la pregunta: NUNCA sustituir un cálculo solicitado por teoría.
-  Alta: 1-2 conversiones relevantes y 1-2 operaciones. Muy alta: 2-3 conversiones de magnitudes diferentes, un despeje y/o dos relaciones compatibles del mismo PDF. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
+  Alta: exigir una decisión física REAL (identificar relación, escoger magnitudes, despejar, conversión significativa o combinar operaciones); no regalar fórmula completa, todos los datos en SI y resultado directo. Muy alta: dos decisiones relevantes como conversiones de magnitudes diferentes, despeje y/o dos relaciones compatibles del mismo PDF. Si los números solo adornan una afirmación teórica, NO calificarla de cálculo. Rechazar dimensiones incoherentes: rho*v² da Pa=N/m², no N/m³. Las cuatro opciones deben tener magnitud y unidades SI homogéneas. Mantener resolución plausible en aproximadamente un minuto de examen; no confundir dificultad con longitud. Distractores: errores de cm²/mm², diámetro frente a radio, L/min frente a m³/s, bar frente a Pa, presión absoluta frente a relativa. Cuatro opciones de la MISMA magnitud y unidad SI; exactamente una correcta. Calcular con precisión, redondear solo al final y explicar en pocas operaciones el resultado. No atribuir cifras de práctica al PDF.
   REDACCIÓN: si es imprescindible citar una página, escribir únicamente «Según el manual del CEIS Guadalajara, página XX, ...». Nunca incorporar el nombre del tema al enunciado.\n  Bernoulli: estudio COMPLETO de ecuación, términos, formulación e interpretación; NUNCA sustituir valores ni generar operaciones aritméticas con su ecuación.
   Modelos seleccionados por SLOT (no son hechos): ${JSON.stringify(items)}\n`;
 }
@@ -13024,7 +13024,7 @@ function t39StrictNumeric133(q){
   if(theory)return false;
   const operation=/(?:calcul\w*|hall\w*|determin\w*|obten\w*|obt[eé]n|resuelv\w*|despej\w*|conviert\w*|conversi[oó]n|transform\w*|expres\w*\s+en|equival\w*)/i.test(task);
   const physicalResult=/(?:caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|superficie|masa|tiempo|distancia|di[aá]metro|radio|profundidad|empuje|energ[ií]a|potencia|valor|resultado|cantidad|pascal(?:es)?|litros?|metros?|\bPa\b|\bN\b|\bkg\b|\bm[²³]?\b)/i.test(task);
-  const questionAmount=/(?:cu[aá]nto(?:s|a|as)?\b|(?:a\s+)?qu[eé]\s+(?:valor|cantidad|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|distancia)|cu[aá]l\s+(?:ser[ií]a|ser[aá]|es|resulta|vale|corresponde)\s+(?:el|la|su)\s+(?:valor|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa))/i.test(task);
+  const questionAmount=/(?:cu[aá]nto(?:s|a|as)?\b|(?:a\s+)?qu[eé]\s+(?:valor|cantidad|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|distancia)|cu[aá]l\s+(?:ser[ií]a|ser[aá]|es|resulta|vale|corresponde)\s+(?:el|la|su)\s+(?:(?:nuevo|nueva|total|final|resultante|actual)\s+)?(?:valor|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|empuje))/i.test(task);
   return physicalResult && (operation||questionAmount);
 }
 function t39CalculationCandidate133(t){
@@ -13038,7 +13038,8 @@ function t39CalculationCandidate133(t){
   const text=context+' '+visible;
   if(/bernoulli/i.test(text))return false;
   const mathematical=/[\p{L}\p{Script=Greek}](?:_[\p{L}\p{N}]+)?\s*=\s*[\p{L}\p{N}\p{Script=Greek}\\(]|(?:proporcional(?:idad)?|inversamente|directamente|cociente|producto|se calcula|se obtiene|dividid[oa]|multiplicad[oa]|sum[an]|diferencia entre)/iu.test(visible);
-  return mathematical && !!t39NumericModel131(candidate) &&
+  return mathematical && t39QuantitativeQuote144(visible) &&
+    !!t39NumericModel131(candidate) &&
     (String(t.item_type||'')==='formula'||String(t.evaluation_type||'')==='calculo'||
       /(?:Q\s*=|P\s*=|p\s*=|F\s*=|S\s*=|v\s*=|H_m|ρ|densidad|presi[oó]n hidrost[aá]tica)/i.test(text));
 }
@@ -13060,6 +13061,101 @@ function t39BernoulliNumeric131(q,t){
     });
   return hasNumericalDatum&&numericResults;
 }
+// SERVER143: comprobaciones PREEXISTENTES del mismo preflight T39,
+// sin llamada extra. Solo rechazan errores dimensionales o sustituciones
+// mecánicas inequívocas; los casos dudosos los decide el auditor actual.
+function t39Unit143(option){
+  const raw=String(option??'')
+    .replace(/\\(?:mathrm|text)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g,'$1')
+    .replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g,'$1/$2')
+    .replace(/\\(?:cdot|times)/g,'·')
+    .replace(/\\(?:,|;|!|quad|left|right)/g,'')
+    .replace(/\^\{?([23])\}?/g,(_,p)=>p==='2'?'²':'³')
+    .replace(/[{}]/g,'').replace(/\\/g,'')
+    .replace(/^\s*[A-D]\s*[).:]\s*/i,'').trim();
+  const match=raw.match(/^[≈~]?\s*[-+]?\s*\d[\d.,]*(?:\s*[×·]\s*10\s*[-+]?\d+)?\s*(.*)$/u);
+  if(!match)return null;
+  const u=match[1].replace(/\s+/g,'').replace(/\./g,'·').toLowerCase();
+  if(!u)return '';
+  if(['pa','n/m²','n·m⁻²','n/m2'].includes(u))return 'presion';
+  if(['n/m³','n/m3'].includes(u))return 'fuerza_volumen';
+  if(['kg/m³','kg/m3'].includes(u))return 'densidad';
+  if(['m³/s','m3/s'].includes(u))return 'caudal';
+  if(['m/s','m·s⁻¹'].includes(u))return 'velocidad';
+  if(['m²','m2'].includes(u))return 'area';
+  if(['m³','m3'].includes(u))return 'volumen';
+  if(['n','kg','m','s','j','w','kg/s'].includes(u))return u;
+  // Si el parser no reconoce la notación, no emitir un falso positivo.
+  return null;
+}
+function t39PreflightIssue143(q,t,difficulty,mode){
+  if(!t39Hydraulica(t)||!q||!Array.isArray(q.options))return null;
+  const stem=String(q.stem||'');
+  const numeric=t39StrictNumeric133(q);
+  if(!numeric)return null; // No imponer cálculo a familias teóricas.
+  const units=q.options.map(t39Unit143);
+  if(units.every(u=>u!==null) && new Set(units).size>1)
+    return 'alternativas_con_magnitudes_o_unidades_distintas';
+  const math=stem.replace(/\\rho/g,'ρ').replace(/\\cdot/g,'·')
+    .replace(/\\(?:mathrm|text)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g,'$1')
+    .replace(/[{}]/g,'').replace(/\\/g,'').replace(/\s+/g,'');
+  const rhoV2=/ρ[·*×]?v(?:\^?2|²)/iu.test(math);
+  if(rhoV2 && (units.some(u=>u==='fuerza_volumen') ||
+      /fuerza\s+de\s+inercia\s+por\s+unidad\s+de\s+volumen/i.test(stem)))
+    return 'dimension_rho_v2_debe_ser_presion';
+  // No permitir el cálculo aislado de rho·v²: no está dado como ley
+  // cuantitativa autónoma en el temario del Tema 39. El término ½rho·v²
+  // pertenece a Bernoulli, que ya se prohíbe para cálculos numéricos.
+  if(rhoV2)return 'rho_v2_aislada_no_documentada_como_formula_de_calculo';
+  if(!['alta','muy alta'].includes(String(difficulty||'').toLowerCase()))return null;
+  const norm=stem.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  // Altura de bombas en paralelo: una igualdad física, no una suma.
+  // Si solo se pide la «altura total» a partir de alturas individuales,
+  // no es un ejercicio de cálculo de dificultad alta.
+  if(/bombas?/.test(norm)&&/paralelo/.test(norm)&&
+     /altura\s+manometrica/.test(norm)&&
+     /(?:altura\s+manometrica\s+(?:total|del\s+sistema)|hm\s*\?)/.test(norm))
+    return 'igualdad_conceptual_altura_bombas_paralelo';
+  if(/arquimedes/.test(norm)&&/empuje/.test(norm))
+    return 'arquimedes_solo_principio_verbal_t39';
+  const explicit=/(?:\b(?:en|aplicando|mediante|usando)\s+(?:la\s+)?formula\b|\bcalcule\s+el\s+valor\s+de\s+(?:ρ|\\rho)\s*[·*×]?\s*v(?:\s*\^?2|²))/iu.test(norm);
+  const nonSI=/(?:\b(?:cm|mm|km|bar|mbar|kpa|mpa|atm|litros?|l\/min|l\/s|km\/h|minutos?|horas?)\b|cm[²³]|mm[²³]|\bkg\/l\b|m[³3]\/h)/i.test(norm);
+  const combining=/(?:dos|tres|varios)\s+(?:ramales|conductos|dep[oó]sitos|tramos|etapas|l[ií]quidos)|despej|entre dos|serie.*(?:dos|tres)|velocidad inicial.*final/i.test(norm);
+  if(explicit&&!nonSI&&!combining)
+    return 'sustitucion_directa_formula_y_datos_en_si';
+  return null;
+}
+// SERVER144: prueba textual cuantitativa mínima dentro del MISMO validador.
+// Un pasaje cualitativo sobre velocidad/inercia NO es autorización para
+// convertir esos conceptos en una ecuación matemática no documentada.
+// No es un solucionador simbólico: ante duda devuelve false.
+function t39QuantitativeQuote144(quote){
+  const raw=String(quote??'').trim();
+  if(!raw)return false;
+  const norm=raw.normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/\s+/g,' ');
+  // Fórmula/equivalencia literal con ambos miembros materialmente presentes.
+  if(/[=≈≃]/.test(raw) &&
+     /[\p{L}\p{N}\p{Script=Greek}]/u.test(raw.split(/[=≈≃]/)[0]||'') &&
+     /[\p{L}\p{N}\p{Script=Greek}]/u.test(raw.split(/[=≈≃]/)[1]||''))return true;
+  if(/[∝]/.test(raw) && /[\p{L}\p{Script=Greek}]/u.test(raw))return true;
+  // Enunciados verbales cuantitativos directamente operables: nunca
+  // basta que el fragmento mencione dos magnitudes en prosa.
+  return /(?:razon entre|cociente de|dividid[ao] por|divid(?:ir|e)|multiplicad[ao] por|producto de|suma (?:de|del)|se suman|sumando|se resta|diferencia entre|(?:doble|triple|mitad) de|por unidad de tiempo|cantidad de (?:liquido|agua|fluido) que pasa .* unidad de tiempo|(?:igual|equivalent) (?:al|a la|a un)|proporcional(?:mente)? a)/i.test(norm);
+}
+function t39BasisProof144(a,target,question){
+  if(!t39Hydraulica(target)||!t39StrictNumeric133(question))return true;
+  const snippets=Array.isArray(a?.basisQuotes)?a.basisQuotes:[];
+  if(!snippets.length||snippets.length>3)return false;
+  const evidence=String(target?.source_evidence||'').slice(0,3000);
+  for(const snippet of snippets){
+    if(typeof snippet!=='string'||
+       !(resetQuote136(snippet,evidence,true)||
+         resetQuote136(snippet,T39_REGLAS_HIDRAULICA,true)) ||
+       !t39QuantitativeQuote144(snippet))return false;
+  }
+  return String(a?.derivation||'').trim().length>=16;
+}
 // T39: un contrato, una generación, una auditoría. Los demás temas
 // conservan íntegra su lógica de selección y sus prompts históricos.
 function t39GenerationPrompt141(targets,difficulty,mode){
@@ -13076,15 +13172,62 @@ expresamente aportadas por el usuario, que tienen IGUAL AUTORIDAD.
 Estas aclaraciones corrigen o precisan el PDF. No uses conocimientos externos
 por iniciativa propia. Los ejemplos de problemas son MODELOS de resolución,
 no hechos que añadir al temario.
+REGLA DE EVALUABILIDAD OBLIGATORIA (no confundir con dificultad):
+A) Se pueden preguntar hechos y ecuaciones escritas explícitamente en las fuentes,
+   incluidas ecuaciones reproducidas fielmente de imágenes originales.
+B) También se permiten despejes algebraicos, conversiones de unidades y
+   combinaciones de relaciones CUYOS ESLABONES constan en dichas fuentes.
+   Elegir datos hipotéticos nuevos es válido; inventar otra ley física, no.
+C) Está PROHIBIDO presentar como deducción una fórmula física no escrita
+   en el manual si para llegar a ella hace falta introducir una relación
+   física adicional ausente de las fuentes. La semejanza conceptual NO basta.
+   Ejemplo RECHAZADO: extraer «rho·v²» de la frase de la página 69 que
+   menciona conjuntamente velocidad, densidad y fuerzas de inercia.
+   La página 70 incluye ½·rho·v² como término en Bernoulli, lo que no
+   autoriza un cálculo de rho·v² aislado por esa frase de la página 69.
+D) Antes de redactar un ejercicio identifica la cita LITERAL de cada
+   relación cuantitativa utilizada y comprueba que la resolución se obtiene
+   SOLO mediante ellas más aritmética/algebra y conversiones de unidades.
+   Si NO puedes aportar esas citas en el fragmento facilitado o las reglas
+   explícitas del usuario, CAMBIA la pregunta por otra que sí esté respaldada;
+   nunca la fuerces mediante conocimientos generales.
+E) La teoría sigue siendo evaluable sin convertirla artificialmente en
+   cálculo. Los ejercicios difíciles requieren razonamiento pero NUNCA una
+   fórmula externa para fabricar dificultad.
 Un OBJETIVO por pregunta y en su mismo orden; no cambies su familia.
 Da cuatro alternativas homogéneas, exactamente una correcta y explicación
 breve. No inventes leyes, constantes, tablas ni datos documentales.
 En cálculos sí puedes elegir números hipotéticos nuevos, unidades de entrada
 e incógnita. Resuelve primero a partir de una relación física AUTORIZADA;
 verifica después las cuatro opciones numéricas y su única respuesta en SI.
-Muy alta: conversiones de unidades, despeje y operaciones combinadas,
-resolubles en tiempo de examen. No sustituir un cálculo por reconocimiento
-de una fórmula o por teoría. No introducir altura, gravedad ni constantes
+DIFICULTAD COGNITIVA: en Alta y Muy alta los ejercicios DEBEN exigir
+identificar una relación física de la fuente, seleccionar qué magnitudes
+intervienen, transformar unidades, despejar una incógnita y/o relacionar
+DOS pasos conceptuales compatibles. Basta una combinación pertinente de
+esas decisiones; NO añadir dificultades artificiales. En Muy alta, combinar
+al menos dos decisiones no triviales sin hacer largo el enunciado.
+RECHAZA como ejercicios Alta/Muy alta los enunciados que REGALAN la fórmula
+completa, el valor de todas sus variables ya en SI y la incógnita que es
+exactamente su lado izquierdo, de modo que solo queda multiplicar/dividir.
+No basta poner cifras, cambios de presión irrelevantes o varios símbolos
+para aparentar un problema. Si el resultado se conoce únicamente por una
+regla de conservación o igualdad (p. ej. empuje de Arquímedes inalterado,
+bombas paralelas con igual altura), es teoría, no cálculo numérico exigente.
+No des simultáneamente la expresión final a evaluar y todas sus variables,
+como «calcula rho*v² con rho y v ya en SI»; pide identificar antes la
+relación y resolver un supuesto con conversiones o decisiones reales.
+SI SE APORTA UNA FÓRMULA (porque procede del PDF o lo exige el supuesto),
+esto NO es un defecto por sí solo: será válido si aún requiere un despeje,
+una conversión relevante, combinación de relaciones u otra decisión física.
+No introducir leyes, tablas, constantes o fórmulas ajenas al PDF y las
+aclaraciones del usuario. En Arquímedes mantener exclusivamente la
+formulación verbal autorizada; no inventar una ecuación para subir nivel.
+COMPRUEBA DIMENSIONES: cada expresión debe tener las unidades de su
+magnitud; en particular rho*v² tiene dimensión de presión Pa = N/m²,
+NUNCA N/m³. Las cuatro alternativas deben compartir magnitud y unidad
+SI (o ser todas adimensionales), sin mezclar N con kg.
+No sustituir un cálculo por reconocimiento de fórmula o por teoría.
+No introducir altura, gravedad ni constantes
 sin que estén documentadas o expresamente dadas en el enunciado.
 MODO CÁLCULOS: cada pregunta debe exigir una operación numérica real.
 MODO MIXTO: respetar la familia del objetivo y combinar operaciones y teoría
@@ -13150,6 +13293,13 @@ La auditoría independiente aportará la cita textual del PDF. Devuelve únicame
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 ${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
 2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION en modo cálculos T39 exige cálculo numérico REAL; en otros modos permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
+EVALUABILIDAD EN TODO EL BLOQUE ESPECÍFICO: preguntar únicamente hechos,
+relaciones y fórmulas presentes en el PDF original o aclaraciones expresas
+aportadas por el usuario. Un cálculo con nuevos datos puede despejar o
+combinar relaciones documentadas, pero NUNCA incorporar una ley física
+adicional. Si el PDF solo describe cualitativamente un fenómeno, NO
+inventar una fórmula que no aparece ni se deduce por puro álgebra de
+relaciones documentadas. Los ejemplos de examen son estilo, no fuente.
 MUY ALTA: escribe primero una clave respaldada y tres distractores plausibles sobre LA MISMA variable técnica (magnitud con unidad y escala comparables, condición, paso, componente o relación); evita disparates, absolutos gratuitos y categorías distintas. Si el fragmento solo ofrece un dato sencillo, mantén la precisión literal: nunca inventes otra condición para fingir dificultad. Enunciado breve y de examen, sin escenificaciones («un equipo analiza...») ni referencias genéricas al temario fuera de las literales CEIS; un supuesto operativo solo si está documentado. Cuatro opciones homogéneas, no solapadas y una única solución. INCORRECTA: tres opciones verdaderas y una falsa inequívoca. Explicación consistente con la clave, sin letras A/B/C/D porque se barajan después. Sin hechos externos, filtros ni nuevas rondas.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
@@ -13173,6 +13323,15 @@ const RESET_GENERATE_SCHEMA_137={type:'object',properties:{questions:{type:'arra
 const RESET_AUDIT_SCHEMA_136={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},quote:{type:'string'}},
   required:['index','answer','quote']}}},required:['results']};
+// SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
+const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
+  properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
+    quote:{type:'string'},unitsOk:{type:'boolean'},reasoningOk:{type:'boolean'},
+    relationOk:{type:'boolean'},solution:{type:'string'},
+    basisQuotes:{type:'array',items:{type:'string'},minItems:0,maxItems:3},
+    derivation:{type:'string'}},
+  required:['index','answer','quote','unitsOk','reasoningOk','relationOk','solution','basisQuotes','derivation']}}},
+  required:['results']};
 // Métricas reales observables sin registrar el texto curricular en los logs.
 // Una llamada de generación + una auditoría INDEPENDIENTE por lote.
 async function resetGeminiCall139(ai,phase,opts){
@@ -13264,13 +13423,14 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
     const shapeIssue=resetShape136(q);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
+    const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
       topic_name:group[i].topic_name,concept:group[i].concept});
-    if(numericRejected||shapeIssue||bernoulliRejected||geoIssue){
+    if(numericRejected||shapeIssue||bernoulliRejected||geoIssue||t39Issue143){
       if(t39Hydraulica(group[i]))console.warn('T39_140_PREFLIGHT_REJECT:',JSON.stringify({
         index:i,coverageId:Number(group[i].id),
         reason:numericRejected?'no_ejercicio_numerico':
-          shapeIssue|| (bernoulliRejected?'bernoulli_numerico':String(geoIssue)),
+          shapeIssue|| (bernoulliRejected?'bernoulli_numerico':t39Issue143||String(geoIssue)),
         strict:Boolean(group[i].t39StrictCalculation133)}));
       return [];
     }
@@ -13367,7 +13527,9 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
     ' Si los COMPARADORES del mismo PDF demuestran que otra alternativa también satisface el enunciado, answer=-1. Un comparador NO sustituye la evidencia de la fila auditada. quote: transcribe'
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
     :auditBaseT39;
-  const auditSchema=iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136;
+  const onlyT39=group.length>0 && group.every(t39Hydraulica);
+  const auditSchema=onlyT39?T39_AUDIT_SCHEMA_143:
+    (iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136);
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
   const auditModel120=iiffScope&&difficulty==='muy alta'
@@ -13375,7 +13537,6 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
   // SERVER138: una única política de auditoría para lotes exclusivamente T39.
   // Sustituye, no acumula, las instrucciones generales de citas incompatibles
   // con ejercicios que usan datos numéricos nuevos.
-  const onlyT39=group.length>0 && group.every(t39Hydraulica);
   const t39Audit138=onlyT39 ? `AUDITORÍA ÚNICA — TEMA 39 HIDRÁULICA.
 Para cada fila, evalúa EXCLUSIVAMENTE su fragmento PDF y las aclaraciones
 expresas del usuario incluidas a continuación. Ambas son fuentes autorizadas.
@@ -13389,6 +13550,46 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
 4. answer es el índice 0..3 únicamente si hay una sola opción correcta,
    sustentada por las fuentes y por el cálculo cuando corresponda.
    Si hay ambigüedad, datos necesarios ausentes o error matemático, answer=-1.
+   Para cada FILA devuelve también estas cuatro propiedades OBLIGATORIAS:
+   unitsOk: verdadero solo si la ecuación, las dimensiones físicas y TODAS
+   las alternativas usan magnitudes homogéneas y la unidad SI correcta.
+   rho*v² tiene dimensión Pa=N/m², NO N/m³. Si falla, answer=-1.
+   relationOk: verdadero solo si el fragmento o aclaración autoriza la
+   relación EXACTA aplicada; una definición vaga de caudal o de inercia
+   no demuestra por sí sola una ecuación que esa fila no aporta.
+   basisQuotes: ARRAY de 1 a 3 citas literales CONTIGUAS por ejercicio
+   numérico. CADA cita debe expresar una relación CUANTITATIVA que aporte
+   un eslabón para resolver el problema (ecuación o razón, producto,
+   suma, cociente o igualdad formulada en palabras). Debe encontrarse
+   LITERALMENTE en el fragmento o en las aclaraciones del usuario.
+   Nunca uses como basisQuotes un párrafo que solo mencione magnitudes
+   o un fenómeno cualitativo. Para teoría, basisQuotes=[].
+   derivation: en 1-2 frases indica exactamente cómo se pasa de las
+   relaciones citadas a los cálculos, sin añadir otra ley física.
+   Para teoría, derivation="". Si un paso necesita física no citada,
+   relationOk=false y answer=-1.
+   EJEMPLO DE RECHAZO OBLIGATORIO: en p.69 la frase que asocia
+   densidad y velocidad a las fuerzas de inercia NO proporciona
+   rho·v². No se puede inventar esa expresión para calcularla.
+   La expresión ½rho·v² aparece en la ecuación de Bernoulli de p.70,
+   pero sus problemas numéricos están prohibidos por esta normativa.
+   reasoningOk: en ejercicios numéricos Alta/Muy alta, verdadero solo si
+   exige identificar/selectar una ley, interpretar un supuesto, despejar,
+   convertir unidades de forma significativa o COMBINAR relaciones. Un
+   enunciado que proporciona LA FÓRMULA, todas sus variables en SI y pide
+   multiplicar/dividir directamente tiene reasoningOk=false. También es
+   false si las cifras solo decoran una pregunta teórica o no intervienen.
+   NO rechaces una fórmula visible si aún requiere despeje, conversiones
+   relevantes, o varios pasos justificados. En preguntas exclusivamente
+   teóricas deja reasoningOk=true. Nunca metas una segunda relación sin
+   respaldo documental para crear dificultad.
+   solution: para ejercicio numérico, 1-3 operaciones breves, con unidades
+   que permitan comprobar independientemente el resultado; para teoría
+   cadena vacía. Si no puedes resolver, answer=-1.
+   Si unitsOk o relationOk es false, answer=-1. Si el ejercicio numérico
+   es Alta/Muy alta y reasoningOk=false, answer=-1.
+   Si basisQuotes no contiene una relación CUANTITATIVA literal que
+   respalde el procedimiento, answer=-1 aunque quote cite algo verdadero.
 5. quote es una COPIA LITERAL CONTIGUA de la fórmula o afirmación de la
    fuente autorizada que respalda la LEY; no cites los números del supuesto.
    Solo si es una EXPRESIÓN MATEMÁTICA completa se admiten 3-17 caracteres;
@@ -13400,7 +13601,10 @@ No añadas explicaciones fuera del JSON exigido.
 ACLARACIONES AUTORIZADAS: ${T39_REGLAS_HIDRAULICA}
 FILAS: ${JSON.stringify(blind)}` : null;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
-    contents:onlyT39?t39Audit138:(auditPrompt82+(group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
+    contents:onlyT39?t39Audit138:(auditPrompt82+
+      (group.every(t=>String(t.topic_block||'').toLowerCase()==='especifico')?
+        '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual.':'')+
+      (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
@@ -13434,7 +13638,13 @@ FILAS: ${JSON.stringify(blind)}` : null;
     fichasOriginales:group.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
     const a=auditByIndex142.get(i);
-    if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
+    const strictT39=onlyT39&&t39StrictNumeric133(q);
+    const t39AuditFailure143=onlyT39&&(a?.unitsOk!==true||a?.relationOk!==true||
+      (strictT39&&['alta','muy alta'].includes(difficulty)&&a?.reasoningOk!==true)||
+      (strictT39&&(!String(a?.solution||'').trim()||
+        !t39BasisProof144(a,group[i],q)||
+        t39PreflightIssue143(q,group[i],difficulty,mode))));
+    if(t39AuditFailure143||resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -13469,7 +13679,9 @@ FILAS: ${JSON.stringify(blind)}` : null;
         maskRegions:Array.isArray(asset.mask_regions)?asset.mask_regions:[]}
       :null;
     if(group[i].questionFamily==='GRAFICA'&&!picture)return null;
-    const explanation=otherSpecific
+    const explanation=onlyT39&&strictT39
+      ?`Resolución: ${String(a.solution).trim()} Fundamento documental: «${evidence}».`
+      :otherSpecific
       ?(iiff92IsNegativeStem(q)
         ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
          `El manual establece: «${evidence}».`
@@ -13496,6 +13708,11 @@ FILAS: ${JSON.stringify(blind)}` : null;
       audited:Boolean(auditByIndex142.get(i)),
       answerMatches:Boolean(questions[i]&&auditByIndex142.get(i)?.answer===questions[i].correctIndex),
       quoteMatches:Boolean(auditByIndex142.get(i)&&(resetQuote136(auditByIndex142.get(i).quote,String(t.source_evidence||'').slice(0,3000),true)||resetQuote136(auditByIndex142.get(i).quote,T39_REGLAS_HIDRAULICA,true))),
+      unitsOk:auditByIndex142.get(i)?.unitsOk??null,
+      reasoningOk:auditByIndex142.get(i)?.reasoningOk??null,
+      relationOk:auditByIndex142.get(i)?.relationOk??null,
+      basisProofOk:t39BasisProof144(auditByIndex142.get(i),t,questions[i]),
+      preflightIssue:t39PreflightIssue143(questions[i],t,difficulty,mode),
       shape:resetShape136(questions[i]),
       auditorAnswer:auditByIndex142.get(i)?.answer??null,
       generatedAnswer:questions[i]?.correctIndex??null,
@@ -14633,7 +14850,12 @@ app.get("/api/graphics/inspect-latest", async (req,res)=>{
 // Reparación documental puntual del tema 38; sin IA, reindexación ni borrados.
 // Fuente: PDF CEIS Guadalajara original, 38 páginas técnicas verificadas.
 async function applyVerifiedFireTheoryRepairV1(){
-  const plan=JSON.parse(fs.readFileSync(new URL('./data/tema38_repair_v1.json',import.meta.url),'utf8'));
+  const repairPath=new URL('./data/tema38_repair_v1.json',import.meta.url);
+  if(!fs.existsSync(repairPath)){
+    console.warn('T38 REPARACIÓN: falta el JSON histórico. Se omite esta reparación opcional, sin alterar datos.');
+    return;
+  }
+  const plan=JSON.parse(fs.readFileSync(repairPath,'utf8'));
   const marker='verified_repair:'+plan.version;
   const prior=await db.query('SELECT value FROM app_state WHERE key=$1',[marker]);
   if(prior.rows.length){
