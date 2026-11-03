@@ -13046,8 +13046,12 @@ function t39CalculationCandidate133(t){
   const context=String(t.section||'')+' '+String(t.concept||'');
   const text=context+' '+visible;
   if(/bernoulli/i.test(text))return false;
-  const mathematical=/[\p{L}\p{Script=Greek}](?:_[\p{L}\p{N}]+)?\s*=\s*[\p{L}\p{N}\p{Script=Greek}\\(]|(?:proporcional(?:idad)?|inversamente|directamente|cociente|producto|se calcula|se obtiene|dividid[oa]|multiplicad[oa]|sum[an]|diferencia entre)/iu.test(visible);
-  return mathematical && t39QuantitativeQuote144(visible) &&
+  // SERVER148: Q=Q1=Q2 (igualdad de conservación en serie) no es,
+  // por sí misma, una operación numérica. Si hay OTRA relación operable
+  // en la misma evidencia se sigue permitiendo el ejercicio.
+  const operativeEvidence=visible.replace(/\b(Q|H_m|Hm)(?:_?\d+)?\s*=\s*\1_?(?:\d+|n)(?:\s*=\s*(?:\1_?(?:\d+|n)|\.{3}|…))*(?!\s*[\p{L}\p{N}_+\-*/×·=])/giu,' ');
+  const mathematical=/[\p{L}\p{Script=Greek}](?:_[\p{L}\p{N}]+)?\s*=\s*[\p{L}\p{N}\p{Script=Greek}\\(]|(?:proporcional(?:idad)?|inversamente|directamente|cociente|producto|se calcula|se obtiene|dividid[oa]|multiplicad[oa]|sum[an]|diferencia entre)/iu.test(operativeEvidence);
+  return mathematical && t39QuantitativeQuote144(operativeEvidence) &&
     !!t39NumericModel131(candidate) &&
     (String(t.item_type||'')==='formula'||String(t.evaluation_type||'')==='calculo'||
       /(?:Q\s*=|P\s*=|p\s*=|F\s*=|S\s*=|v\s*=|H_m|ρ|densidad|presi[oó]n hidrost[aá]tica)/i.test(text));
@@ -13672,8 +13676,10 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    sustentada por las fuentes y por el cálculo cuando corresponda.
    Si hay ambigüedad, datos necesarios ausentes o error matemático, answer=-1.
    Para cada FILA devuelve también estas cuatro propiedades OBLIGATORIAS:
-   unitsOk: verdadero solo si la ley, el resultado correcto y su dimensión
-   están comprobados. La opción correcta debe usar unidades SI. En las
+   unitsOk: para una pregunta TEÓRICA sin cálculo, verdadero si no hay
+   incompatibilidad dimensional; no se exige un resultado con unidades.
+   Para ejercicios NUMÉRICOS, verdadero solo si la ley, el resultado y
+   su dimensión están comprobados. La opción correcta usa SI. En las
    distractoras se permite excepcionalmente una unidad distinta de la MISMA
    magnitud si representa un error plausible de conversión; ninguna puede
    equivaler físicamente a la correcta. Por ejemplo 0,23 m³/s y 230 L/s
@@ -13713,8 +13719,9 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    solution: para ejercicio numérico, 1-3 operaciones breves, con unidades
    que permitan comprobar independientemente el resultado; para teoría
    cadena vacía. Si no puedes resolver, answer=-1.
-   Si unitsOk o relationOk es false, answer=-1. Si el ejercicio numérico
-   es Alta/Muy alta y reasoningOk=false, answer=-1.
+   Si relationOk es false, answer=-1. Si el ejercicio es NUMÉRICO y
+   unitsOk es false, answer=-1. Si es numérico de Alta/Muy alta y
+   reasoningOk=false, answer=-1.
    Si basisQuotes no contiene una relación CUANTITATIVA literal que
    respalde el procedimiento, answer=-1 aunque quote cite algo verdadero.
 5. quote es una COPIA LITERAL CONTIGUA de la fórmula o afirmación de la
@@ -13766,7 +13773,10 @@ FILAS: ${JSON.stringify(blind)}` : null;
   const validated=questions.map((q,i)=>{
     const a=auditByIndex142.get(i);
     const strictT39=onlyT39&&t39StrictNumeric133(q);
-    const t39AuditFailure143=onlyT39&&(a?.unitsOk!==true||a?.relationOk!==true||
+    // SERVER148: la validación dimensional es obligatoria para cálculos;
+    // en teoría importa la correspondencia factual, no una unidad inexistente.
+    const t39AuditFailure143=onlyT39&&(a?.relationOk!==true||
+      (strictT39&&a?.unitsOk!==true)||
       (strictT39&&['alta','muy alta'].includes(difficulty)&&a?.reasoningOk!==true)||
       (strictT39&&(!String(a?.solution||'').trim()||
         !t39BasisProof144(a,group[i],q)||
@@ -14629,8 +14639,13 @@ app.post('/api/generate',async(req,res)=>{
       // Lotes dinámicos: máximo 10; en IIFF Muy alta, hasta 5 fichas,
       // una candidata por objetivo y presupuesto de contexto reducido.
       // Cada pregunta conserva su objetivo individual aunque cambie el tema.
-      const groups=resetGroups139(remaining,difficulty);
-      const ai=groups.length?aiClient():null;
+      // SERVER147: al reanudar T39, la plaza pendiente pasa DIRECTAMENTE
+      // al rescate ya existente, que cambia de objetivo. No gastar una
+      // generación inicial repitiendo la ficha rechazada del borrador.
+      const resumeT39Rescue147=Boolean(resume136&&remaining.length&&
+        targets.length&&targets.every(t39Hydraulica));
+      const groups=resumeT39Rescue147?[]:resetGroups139(remaining,difficulty);
+      const ai=(groups.length||resumeT39Rescue147)?aiClient():null;
       const run=await resetPool136(groups,async group=>{
         const items=group.map(x=>x.t);
         // Reanudar un T39 fallido es también RESCATE: aplicar desde la
@@ -14684,6 +14699,9 @@ app.post('/api/generate',async(req,res)=>{
           console.warn('IIFF119_LIMITE_TIEMPO_REANUDABLE:',JSON.stringify({faltan:holes.length,round119}));
           break;
         }
+        // SERVER148: no reintentar una ficha T39 rechazada si no existe
+        // sustituto elegible. Las preguntas aprobadas permanecen intactas.
+        const noReplacementT39=new Set();
         if(testType==='normal'){
           if(!recoveryCandidates119)recoveryCandidates119=await getAdaptiveCoverageCandidates(
             Math.max(1000,count*50),topicIds,examMode,freshOnly111);
@@ -14705,12 +14723,21 @@ app.post('/api/generate',async(req,res)=>{
                 !iiff102CandidateRepetition(candidate,blockedFacts119)))&&
               iiff106ReplacementAllowed(candidate,targets,slot.index,examMode==='simulation')&&
               (specificEvidenceReady128(candidate)||geographyTableRecord135(candidate)));
-            if(!other)continue;
+            if(!other){
+              if(t39Hydraulica(slot.t)){
+                noReplacementT39.add(slot.index);
+                failures.push({slot:slot.index,reason:'sin_sustituto_elegible_t39'});
+              }
+              continue;
+            }
             const desiredFamily=String(slot.t.questionFamily||'');
             const specific=String(slot.t.topic_block||'').toLowerCase()==='especifico'&&
               !iiff91Topic(slot.t);
             const recoveredFamily=specific ?
-              ((desiredFamily==='CALCULO_FORMULACION'&&!specificFormulaReady128(other))||
+              ((desiredFamily==='CALCULO_FORMULACION'&&
+                t39Hydraulica(other)&&!t39CalculationCandidate133(other))||
+               (desiredFamily==='CALCULO_FORMULACION'&&
+                !t39Hydraulica(other)&&!specificFormulaReady128(other))||
                desiredFamily==='GRAFICA'
                 ?specificFallbackFamily129(targets,slot.index)
                 :(desiredFamily||'2026_CORRECTA')):desiredFamily;
@@ -14727,7 +14754,7 @@ app.post('/api/generate',async(req,res)=>{
             }
           }
         }
-        holes=holes.filter(x=>!questions[x.index]);
+        holes=holes.filter(x=>!questions[x.index]&&!noReplacementT39.has(x.index));
         if(!holes.length)break;
         const repairGroups=resetGroups139(holes,difficulty);
         if(!repairGroups.length)break;
