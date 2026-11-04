@@ -1215,7 +1215,8 @@ async function analyzePendingGraphicSources({ limit = 1 } = {}){
 }
 async function reanalyzeGraphicSourcesForSanitization({
   limit = 1,
-  retryErrors = false
+  retryErrors = false,
+  topicFolder = null
 } = {}){
   const ai = aiClient();
 
@@ -1227,6 +1228,7 @@ async function reanalyzeGraphicSourcesForSanitization({
        public_url
      FROM graphic_assets
           WHERE sanitization_version < 2
+       AND ($3::text IS NULL OR topic_folder = $3::text)
        AND (
          analysis_status IN ('analyzed','rejected','error')
          OR (
@@ -1236,7 +1238,7 @@ async function reanalyzeGraphicSourcesForSanitization({
        )
      ORDER BY source_id, asset_index ASC
      LIMIT $1`,
-    [limit,retryErrors]
+    [limit,retryErrors,topicFolder]
   );
 
   const results = [];
@@ -1293,18 +1295,23 @@ async function reanalyzeGraphicSourcesForSanitization({
     `SELECT COUNT(DISTINCT source_id)::int AS total
      FROM graphic_assets
      WHERE sanitization_version < 2
-       AND analysis_status IN ('analyzed','rejected','error')`
+       AND analysis_status IN ('analyzed','rejected','error')
+       AND ($1::text IS NULL OR topic_folder = $1::text)`
+    , [topicFolder]
   );
 
   const failedResult = await db.query(
     `SELECT COUNT(DISTINCT source_id)::int AS total
      FROM graphic_assets
      WHERE sanitization_version < 2
-       AND analysis_status = 'sanitization_error'`
+       AND analysis_status = 'sanitization_error'
+       AND ($1::text IS NULL OR topic_folder = $1::text)`
+    , [topicFolder]
   );
 
   return {
     requested:limit,
+    topicFolder,
     pendingFound:pending.rows.length,
     remainingSources:Number(remainingResult.rows[0]?.total || 0),
     failedSources:Number(failedResult.rows[0]?.total || 0),
@@ -15234,10 +15241,14 @@ app.get("/api/graphics/reanalyze-sanitization", async (req,res)=>{
       String(req.query?.retryErrors ?? "")
         .toLowerCase() === "true";
 
+    const topicFolder =
+      String(req.query?.topicFolder ?? "").trim() || null;
+
     const result =
       await reanalyzeGraphicSourcesForSanitization({
         limit,
-        retryErrors
+        retryErrors,
+        topicFolder
       });
 
     res.json({
