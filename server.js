@@ -13104,12 +13104,16 @@ function t39StrictNumeric133(q){
   }))return false;
   const task=stem.replace(/\b(?:p[aá]gina|p[aá]g\.?|edici[oó]n|tema)\s*(?:n[úu]mero\s*)?\d+(?:[.,]\d+)?\b/gi,' ');
   if(!/\d+(?:[.,]\d+)?/.test(task))return false;
-  const theory=/(?:cu[aá]ntos?\s+(?:tipos|clases|procesos|principios|f[oó]rmulas|ecuaciones)\b|qu[eé]\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto|enunciado|definici[oó]n)\b|cu[aá]l\s+(?:es|ser[ií]a)\s+(?:el|la)\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto)|se define|significado de|qu[eé] representa|c[oó]mo se denomina)/i.test(task);
+  const theory=/(?:cu[aá]nt(?:os?|as?)\s+(?:tipos|clases|procesos|principios|f[oó]rmulas|ecuaciones)\b|qu[eé]\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto|enunciado|definici[oó]n)\b|cu[aá]l\s+(?:es|ser[ií]a)\s+(?:el|la)\s+(?:proceso|principio|fen[oó]meno|tipo|f[oó]rmula|ecuaci[oó]n|concepto)|se define|significado de|qu[eé] representa|c[oó]mo se denomina)/i.test(task);
   if(theory)return false;
   const operation=/(?:calcul\w*|hall\w*|determin\w*|obten\w*|obt[eé]n|resuelv\w*|despej\w*|conviert\w*|conversi[oó]n|transform\w*|expres\w*\s+en|equival\w*)/i.test(task);
   const physicalResult=/(?:caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|superficie|masa|tiempo|distancia|di[aá]metro|radio|profundidad|empuje|energ[ií]a|potencia|valor|resultado|cantidad|pascal(?:es)?|litros?|metros?|\bPa\b|\bN\b|\bkg\b|\bm[²³]?\b)/i.test(task);
   const questionAmount=/(?:cu[aá]nto(?:s|a|as)?\b|(?:a\s+)?qu[eé]\s+(?:valor|cantidad|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|distancia)|cu[aá]l\s+(?:ser[ií]a|ser[aá]|es|resulta|vale|corresponde)\s+(?:el|la|su)\s+(?:(?:nuevo|nueva|total|final|resultante|actual)\s+)?(?:valor|caudal|volumen|fuerza|presi[oó]n|altura|velocidad|densidad|secci[oó]n|masa|empuje))/i.test(task);
-  return physicalResult && (operation||questionAmount);
+  // T39: incluir preguntas numéricas ya presentes en las plantillas completas.
+  // No se altera generación, evidencia, unidad SI, auditoría ni rescate.
+  const magnitudAdicional=/(?:peso|viscosidad|desnivel|rendimiento|reynolds|p[eé]rdida(?:s)?\b)/i.test(task);
+  const preguntaAdicional=/(?:cu[aá]nt[oa]s?\b|qu[eé]\s+(?:n[uú]mero\s+de\s+reynolds|peso|viscosidad|desnivel|p[eé]rdida(?:s)?(?:\s+de\s+carga)?|energ[ií]a|diferencia|incremento|disminuci[oó]n|variaci[oó]n|rendimiento)\b|cu[aá]l\s+(?:es|ser[ií]a|ser[aá])\s+(?:el|la|su)\s+(?:peso|viscosidad|desnivel|p[eé]rdida|energ[ií]a|incremento|rendimiento)\b)/i.test(task);
+  return (physicalResult||magnitudAdicional) && (operation||questionAmount||preguntaAdicional);
 }
 function t39CalculationCandidate133(t){
   if(!t39Hydraulica(t))return false;
