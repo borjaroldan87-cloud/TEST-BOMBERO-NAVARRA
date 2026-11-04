@@ -1417,11 +1417,41 @@ Una pregunta gráfica ya prefabricada se toma del banco y NUNCA se
 redacta o modifica mediante este prompt. Solo los objetivos textuales
 pendientes pasan a Gemini.\n`;
 }
+// SERVER159: el esquema existente puede conservar un CHECK heredado (0..2),
+// aunque el DDL actual permite 0..3. Sin corregirlo, 10 de las 45 preguntas
+// T40 con respuesta D fracasarían y se revertiría toda la importación.
+// Migración puntual y transaccional, sólo al importar T40; no cambia opciones.
+async function t40EnsureFourOptions159(){
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const c=await client.query(`SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid='question_bank'::regclass
+        AND conname='question_bank_correct_index_check' AND contype='c'
+      LIMIT 1`);
+    const definition=String(c.rows[0]?.definition||'');
+    if(!definition)throw Error('T40: no se ha encontrado la restricción de índice de respuesta.');
+    if(/correct_index\s*<\s*3\b/.test(definition)){
+      await client.query(`ALTER TABLE question_bank
+        DROP CONSTRAINT question_bank_correct_index_check`);
+      await client.query(`ALTER TABLE question_bank
+        ADD CONSTRAINT question_bank_correct_index_check
+        CHECK (correct_index BETWEEN 0 AND 3)`);
+      console.log('T40_159_CHECK_INDICE_RESPUESTA_0_A_3_CORREGIDO');
+    }
+    await client.query('COMMIT');
+  }catch(error){
+    await client.query('ROLLBACK');
+    throw error;
+  }finally{client.release();}
+}
 async function t40ImportOnce157(topic){
   if(!t40Topic157(topic))return {skipped:true};
   const pack=t40Resources157Load();
   if(!pack)throw Error('T40: falta t40_graphics_data.js.');
   t40WriteImages157();
+  await t40EnsureFourOptions159();
   const client=await db.connect();
   try{
     await client.query('BEGIN');
@@ -1429,7 +1459,12 @@ async function t40ImportOnce157(topic){
       'SELECT id,name,block,total_items,file_search_indexed FROM topics WHERE id=$1 FOR UPDATE',
       [Number(topic.id)]);
     const t=locked.rows[0];
-    if(!t40Topic157(t)||!t.file_search_indexed||Number(t.total_items)<1)
+    const source=await client.query(`SELECT 1 FROM topic_local_pdfs
+      WHERE topic_id=$1 AND TRIM(pdf_sha256)=$2 AND page_count=66
+        AND size_bytes=OCTET_LENGTH(pdf_bytes) LIMIT 1`,
+      [Number(topic.id),pack.pdf_sha256]);
+    if(!t40Topic157(t)||Number(t.total_items)<1||
+       (!t.file_search_indexed && !source.rows.length))
       throw Error('T40: antes hay que cargar el PDF y confirmar la cobertura.');
     let installed=0;
     const seen=new Set();
@@ -2966,6 +3001,29 @@ async function replaceT39Document(topic,pdfPath,items){
   await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
     {sha,pages:17,bytes});
   console.log(`[T39] PDF original y ${items.length} conocimientos guardados en una transacción local.`);
+}
+
+// SERVER159: Tema 40. Almacenar PDF original y cobertura en una transacción
+// local, como IIFF/T39. No depende de un proceso remoto largo de File Search.
+async function replaceT40Document159(topic,pdfPath,items){
+  if(!t40Topic157(topic))throw Error('T40: tema incorrecto.');
+  const data=t40Resources157Load();
+  if(!data)throw Error('T40: datos gráficos no disponibles.');
+  const bytes=fs.readFileSync(pdfPath);
+  if(bytes.length<1000 || bytes.length>20*1024*1024 ||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw Error('T40: PDF vacío o inválido; cobertura anterior intacta.');
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256)throw Error('T40: SHA-256 de fuente diferente.');
+  const pdf=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(pdf.getPageCount()!==66)throw Error('T40: se esperaban 66 páginas físicas.');
+  if(!Array.isArray(items)||!items.length||items.some(x=>
+    !Number.isInteger(x.sourcePage)||x.sourcePage<1||x.sourcePage>66||
+    !String(x.concept||'').trim()||!String(x.sourceEvidence||'').trim()))
+    throw Error('T40: inventario inválido; se conservan los checkpoints.');
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages:66,bytes});
+  console.log(`T40_159_PDF_Y_COBERTURA_LOCAL: ${items.length} conocimientos guardados`);
 }
 
 // SERVER115 R2 — nuevo Tema 22: PDF completo, 197 fichas confirmadas
@@ -5804,6 +5862,10 @@ function sequentialPdfRecordIds(filePath){
 // SERVER 86 — SOLO MANUAL IIFF. Los checkpoints se guardan en app_state,
 // por documento SHA-256/tema/bloque. Nunca son cobertura publicada a medias.
 function iiffChunkKey86(topic,sha,stage,chunk){
+  // SERVER159: Tema 40 reutiliza los checkpoints transaccionales existentes.
+  // Se aislan por tema, SHA de la fuente y fase, sin tocar T39 ni IIFF.
+  if(t40Topic157(topic))
+    return `t40_coverage159_v1:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
   if(isT39CoverageSource(topic))
     return `t39_coverage130_v2:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
   return `iiff_coverage86:${Number(topic.id)}:${sha}:${stage}:${chunk.startPage}-${chunk.endPage}`;
@@ -6028,6 +6090,7 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     );
     const iiffManual86=isIiffManual86(topic);
     const t39HydraulicCoverage=isT39CoverageSource(topic);
+    const t40Resumable159=t40Topic157(topic);
     // El único PDF que autoriza asociar las 45 imágenes del banco T40 es
     // la unión original de 66 páginas ya verificada, byte a byte.
     if(t40Topic157(topic)){
@@ -6043,14 +6106,15 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       if(hash!==T39_CEIS_PDF_SHA256)
         throw new Error('T39: este PDF no coincide con el Tema 39 CEIS verificado. No se descartan páginas ni se modifica la cobertura.');
     }
-    if(!STORE && !t39HydraulicCoverage)
+    if(!STORE && !t39HydraulicCoverage && !t40Resumable159)
       throw new Error("Primero indexa el PDF.");
     const iiffPdfHash86=iiffManual86
       ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
       : null;
     const t39PdfHash=t39HydraulicCoverage?T39_CEIS_PDF_SHA256:null;
-    const reusableHash=iiffPdfHash86||t39PdfHash;
-    if(iiffManual86||t39HydraulicCoverage)
+    const t40PdfHash=t40Resumable159?t40Resources157Load().pdf_sha256:null;
+    const reusableHash=iiffPdfHash86||t39PdfHash||t40PdfHash;
+    if(iiffManual86||t39HydraulicCoverage||t40Resumable159)
       console.log(`COVERAGE: checkpoints por bloque habilitados para ${topic.name}`);
     if(iiffManual86){
       const found=await db.query(`SELECT t.total_items AS total,
@@ -6113,6 +6177,32 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         }catch(e){
           console.warn('[T39] Reutilización denegada: cobertura anterior incompleta:',e.message);
         }
+      }
+    }
+
+    // T40: reintento idempotente tras pérdida de red o cierre del navegador.
+    // El PDF y la cobertura anteriores se guardan juntos y no se reextraen.
+    if(t40Resumable159){
+      const existing=await db.query(`SELECT t.total_items AS total,
+        p.page_count AS pages,p.size_bytes AS size,
+        OCTET_LENGTH(p.pdf_bytes) AS actual_size,
+        ENCODE(SHA256(p.pdf_bytes),'hex') AS actual_sha
+        FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id
+        WHERE t.id=$1 AND TRIM(p.pdf_sha256)=$2
+          AND t.file_search_indexed=FALSE`,[topic.id,t40PdfHash]);
+      const saved=existing.rows[0];
+      if(saved && Number(saved.pages)===66 &&
+         Number(saved.size)===Number(saved.actual_size) &&
+         saved.actual_sha===t40PdfHash && Number(saved.total)>0){
+        const seeded=await t40ImportOnce157(topic);
+        console.log('T40_159_COBERTURA_EXISTENTE_REUTILIZADA',JSON.stringify(seeded));
+        const worked=Number(topic.worked_items||0),total=Number(saved.total);
+        const state={status:'completed',topicId:Number(topic.id),topic:topic.name,
+          totalItems:total,workedItems:worked,pendingItems:Math.max(0,total-worked),
+          coveragePercentage:total?Number((100*worked/total).toFixed(1)):0,
+          reused:true,source:'postgresql_pdf'};
+        await setCoverageRunState(coverageRunId,state);
+        return res.json({ok:true,...state});
       }
     }
 
@@ -6208,6 +6298,23 @@ const normalizeChunkSourcePages=(items,chunk)=>{
     return item;
   });
 };
+// A cached block must be suitable for the final page-linked coverage.
+// The validator also runs BEFORE first saving, never blessing a truncated JSON.
+const t40CheckChunk159=(raw,chunk)=>{
+  if(!Array.isArray(raw))throw Error('T40: bloque sin matriz de conocimientos.');
+  for(const item of raw){
+    if(typeof item?.sourcePage==='string' && /^\d{1,3}$/.test(item.sourcePage))
+      item.sourcePage=Number(item.sourcePage);
+    if(!item || !Number.isInteger(item.sourcePage)||
+       item.sourcePage<chunk.startPage||item.sourcePage>chunk.endPage||
+       !String(item.concept||'').trim()||
+       !String(item.itemType||'').trim()||
+       !String(item.evaluationType||'').trim()||
+       !String(item.sourceEvidence||'').trim())
+      throw Error(`T40: bloque ${chunk.startPage}-${chunk.endPage} incompleto o página no demostrada.`);
+  }
+  return raw;
+};
 const allItems=literalItems?[...literalItems]:[];
 
 for(const chunk of (literalItems?[]:chunks)){
@@ -6260,6 +6367,11 @@ manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
     allItems.push(...items);
     console.log(`COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${items.length} elementos`);
   }else{
+  let normalizedChunkItems=t40Resumable159
+    ? await readIiffChunk86(topic,reusableHash,'primary',chunk) : null;
+  if(normalizedChunkItems!==null){
+    console.log(`T40_159_CHECKPOINT_PRIMARY_REUSADO ${chunk.startPage}-${chunk.endPage}`);
+  }else{
   const response=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -6305,20 +6417,21 @@ Cuando indiques manualPage, utiliza exclusivamente el número de página impreso
     );
   }
 
-  const normalizedChunkItems=
-  normalizeChunkSourcePages(
-    parsedChunk.items,
-    chunk
-  );
-
-allItems.push(
-  ...normalizedChunkItems
-);
-
+  normalizedChunkItems=normalizeChunkSourcePages(parsedChunk.items,chunk);
+  if(t40Resumable159){
+    t40CheckChunk159(normalizedChunkItems,chunk);
+    await saveIiffChunk86(topic,reusableHash,'primary',chunk,normalizedChunkItems);
+  }
+  }
+  allItems.push(...normalizedChunkItems);
   console.log(
-    `COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${parsedChunk.items.length} elementos`
+    `COVERAGE: páginas ${chunk.startPage}-${chunk.endPage} completadas: ${normalizedChunkItems.length} elementos`
   );
   }
+  if(t40Resumable159)await setCoverageRunState(coverageRunId,{
+    status:'processing',topicId:Number(topic.id),topic:topic.name,
+    phase:'primary',throughPage:chunk.endPage,totalPages
+  });
 }
 
 console.log(
@@ -6410,6 +6523,11 @@ for(const chunk of (literalItems?[]:auditChunks)){
     console.log(`COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: `+
       `${items.length} omisiones detectadas`);
   }else{
+    let normalizedAuditItems=t40Resumable159
+      ? await readIiffChunk86(topic,reusableHash,'audit',chunk) : null;
+    if(normalizedAuditItems!==null){
+      console.log(`T40_159_CHECKPOINT_AUDIT_REUSADO ${chunk.startPage}-${chunk.endPage}`);
+    }else{
     const auditResponse=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -6442,22 +6560,24 @@ allItems.filter(item=>{
 
   const parsedAudit=JSON.parse(auditResponse.text);
 
-  if(parsedAudit.items && Array.isArray(parsedAudit.items)){
-    const normalizedAuditItems=
-  normalizeChunkSourcePages(
-    parsedAudit.items,
-    chunk
+  if(t40Resumable159 && !Array.isArray(parsedAudit.items))
+    throw Error(`T40: auditoría incompleta en páginas ${chunk.startPage}-${chunk.endPage}`);
+  normalizedAuditItems=Array.isArray(parsedAudit.items)
+    ? normalizeChunkSourcePages(parsedAudit.items,chunk) : [];
+  if(t40Resumable159){
+    t40CheckChunk159(normalizedAuditItems,chunk);
+    await saveIiffChunk86(topic,reusableHash,'audit',chunk,normalizedAuditItems);
+  }
+  }
+  auditItems.push(...normalizedAuditItems);
+  console.log(
+    `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${normalizedAuditItems.length} omisiones detectadas`
   );
-
-auditItems.push(
-  ...normalizedAuditItems
-);
-
-    console.log(
-      `COVERAGE AUDIT: páginas ${chunk.startPage}-${chunk.endPage}: ${parsedAudit.items.length} omisiones detectadas`
-    );
   }
-  }
+  if(t40Resumable159)await setCoverageRunState(coverageRunId,{
+    status:'processing',topicId:Number(topic.id),topic:topic.name,
+    phase:'audit',throughPage:chunk.endPage,totalPages
+  });
 }
 
 allItems.push(...auditItems);
@@ -6599,6 +6719,7 @@ const parsed={
     // file_search_indexed como prueba de que exista una fuente antigua.
     if(iiffManual86) await replaceIiffDocument90(topic,pdfPath,validItems);
     else if(t39HydraulicCoverage) await replaceT39Document(topic,pdfPath,validItems);
+    else if(t40Resumable159) await replaceT40Document159(topic,pdfPath,validItems);
     else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
     // Importación opcional, ACOTADA y transaccional de las 45 preguntas
@@ -6770,6 +6891,25 @@ app.get("/api/coverage-run/:runId", async(req,res)=>{
       state={status:"unknown"};
     }
 
+    // SERVER159: no mantener "procesando" de T40 para siempre tras un reinicio.
+    // Si el estado es antiguo, verificar el advisory lock REAL antes de avisar.
+    if(state.status==='processing' && Number(state.topicId)>0 &&
+       Date.now()-Date.parse(state.updatedAt||'')>180000){
+      const related=await db.query('SELECT name,block FROM topics WHERE id=$1 LIMIT 1',
+        [Number(state.topicId)]);
+      if(t40Topic157(related.rows[0])){
+      const probe=await db.connect();
+      try{
+        const lockId=900000000000+Number(state.topicId);
+        const check=await probe.query('SELECT pg_try_advisory_lock($1::bigint) AS free',[lockId]);
+        if(check.rows[0]?.free===true){
+          await probe.query('SELECT pg_advisory_unlock($1::bigint)',[lockId]);
+          return res.json({ok:true,found:true,...state,status:'error',
+            error:'El análisis se interrumpió tras un reinicio. Si existen bloques guardados, se reutilizarán al volver a cargar el mismo PDF; no crees otro tema.'});
+        }
+      }finally{probe.release();}
+      }
+    }
     res.json({
       ok:true,
       found:true,
@@ -15508,6 +15648,9 @@ app.get('/api/t40-graphics-status',async(req,res)=>{
   try{
     const r=await db.query(`SELECT t.id AS topic_id,t.name,t.file_search_indexed,
        t.total_items,
+       EXISTS(SELECT 1 FROM topic_local_pdfs p WHERE p.topic_id=t.id
+         AND TRIM(p.pdf_sha256)='a6b160862513120b78c6a1a5ccc510adb15bd94bf6597c92a64f7f67a10a058d'
+         AND p.page_count=66 AND p.size_bytes=OCTET_LENGTH(p.pdf_bytes)) AS local_pdf_ready,
        (SELECT COUNT(*)::int FROM question_bank qb JOIN coverage_items c
          ON c.id=qb.coverage_item_id WHERE c.topic_id=t.id
            AND c.item_type='grafica_t40_original' AND qb.active=TRUE) AS questions,
@@ -15518,11 +15661,13 @@ app.get('/api/t40-graphics-status',async(req,res)=>{
          AND t.name ILIKE '%incendios de interior%'
        ORDER BY t.id DESC LIMIT 1`);
     const d=r.rows[0];
+    const sourceReady=Boolean(d?.file_search_indexed||d?.local_pdf_ready);
     res.json({ok:true,readonly:true,topicId:d?.topic_id??null,
-      coverageReady:Boolean(d?.file_search_indexed),
+      coverageReady:sourceReady,
+      source:d?.local_pdf_ready?'postgresql_pdf':(d?.file_search_indexed?'file_search':'pending'),
       totalItems:Number(d?.total_items||0),
       questions:Number(d?.questions||0),images:Number(d?.images||0),
-      ready:Number(d?.questions)===45&&Number(d?.images)===45&&Boolean(d?.file_search_indexed)});
+      ready:Number(d?.questions)===45&&Number(d?.images)===45&&sourceReady});
   }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)});}
 });
 
