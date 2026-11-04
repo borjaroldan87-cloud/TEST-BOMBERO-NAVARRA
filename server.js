@@ -1334,7 +1334,14 @@ function t40Resources157Load(){
   if(t40Resources157)return t40Resources157;
   const sourcePath=path.join(process.cwd(),'t40_graphics_data.js');
   if(!fs.existsSync(sourcePath))return null;
-  const data=require(sourcePath);
+  // El repositorio es ESM; t40_graphics_data.js contiene un objeto JSON
+  // precedido por 'module.exports ='. Leerlo como datos evita ejecutar
+  // CommonJS y no requiere cambiar las 45 imágenes ni las preguntas.
+  const raw=fs.readFileSync(sourcePath,'utf8');
+  const marker='module.exports = ';
+  const pos=raw.indexOf(marker);
+  if(pos<0)throw Error('T40: formato inesperado del archivo gráfico.');
+  const data=JSON.parse(raw.slice(pos+marker.length).trim().replace(/;\s*$/,''));
   if(data?.schema!==1 || !Array.isArray(data.images)||data.images.length!==45||
      !Array.isArray(data.questions)||data.questions.length!==45||
      !Array.isArray(data.tables)||data.tables.length!==22||
