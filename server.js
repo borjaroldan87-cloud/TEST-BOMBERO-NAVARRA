@@ -1318,6 +1318,219 @@ async function reanalyzeGraphicSourcesForSanitization({
     results
   };
 }
+
+/* T40 / 157 — banco gráfico prefabricado, únicamente material del PDF propio.
+ * Sin subprocesos ni llamadas a Gemini para las 45 figuras. No altera T39.
+ * Los recortes están incluidos en el archivo local t40_graphics_data.js.
+ */
+let t40Resources157 = null;
+function t40Topic157(topic){
+  const name=String(topic?.name||topic?.topic_name||'').replace(/[_-]+/g,' ');
+  return /^\s*tema\s*40\b/i.test(name) &&
+    /incendios?\s+de\s+interior/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t40Resources157Load(){
+  if(t40Resources157)return t40Resources157;
+  const sourcePath=path.join(process.cwd(),'t40_graphics_data.js');
+  if(!fs.existsSync(sourcePath))return null;
+  const data=require(sourcePath);
+  if(data?.schema!==1 || !Array.isArray(data.images)||data.images.length!==45||
+     !Array.isArray(data.questions)||data.questions.length!==45||
+     !Array.isArray(data.tables)||data.tables.length!==22||
+     data.tables.reduce((sum,t)=>sum+(t.conocimientos?.length||0),0)!==154)
+    throw Error('T40: paquete de imágenes, preguntas o tablas incompleto.');
+  if(new Set(data.images.map(x=>x.file)).size!==45||
+     new Set(data.questions.map(x=>x.external_key)).size!==45)
+    throw Error('T40: archivos o preguntas duplicados en el paquete.');
+  t40Resources157=data;
+  return data;
+}
+function t40WriteImages157(){
+  const data=t40Resources157Load();
+  if(!data)return {installed:0,missingBundle:true};
+  const dir=path.join(process.cwd(),'public','graphics','incendios-interior');
+  fs.mkdirSync(dir,{recursive:true});
+  let installed=0;
+  for(const im of data.images){
+    if(!/^T40_GRAF_\d{5}_FIG_\d{3}_P\d{3}\.png$/.test(im.file))
+      throw Error('T40: nombre de imagen no permitido.');
+    const dest=path.join(dir,im.file);
+    const bytes=Buffer.from(im.base64,'base64');
+    const sha=createHash('sha256').update(bytes).digest('hex');
+    if(sha!==im.sha256 || !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T40: PNG o checksum no coincide: '+im.file);
+    if(fs.existsSync(dest)){
+      const existing=createHash('sha256').update(fs.readFileSync(dest)).digest('hex');
+      if(existing!==sha)throw Error('T40: existe otra imagen distinta en '+im.file);
+    }else{fs.writeFileSync(dest,bytes);installed++;}
+  }
+  console.log('T40_157_IMAGENES_LOCALES',JSON.stringify({total:45,created:installed}));
+  return {total:45,created:installed};
+}
+function t40TablesInBlock157(topic,chunk){
+  if(!t40Topic157(topic))return '';
+  const b=t40Resources157Load();
+  const rows=b?.tables?.filter(t=>Number(t.pagina_pdf_unificado)>=chunk.startPage &&
+    Number(t.pagina_pdf_unificado)<=chunk.endPage)||[];
+  if(!rows.length)return '';
+  const conditions=`\nTEMA 40 — CONTROL DE TRANSCRIPCIÓN DE TABLAS, NO FUENTE SUPLETORIA:
+La única fuente factual es el PDF CEIS adjunto. La relación entre los datos de una
+misma fila/columna es obligatoria. Relaciona técnica, condición, magnitud, unidad,
+valor y página impresa. Conserva los dos rótulos «Rápido» de la tabla 3 con sus
+relaciones diferentes. En la tabla 1 conserva las celdas compartidas. La tabla 16
+recapitula fichas anteriores: NO contabilices repeticiones como hechos nuevos.
+Las tablas 18, 20 y 22 corresponden a magnitudes distintas aunque compartan r.
+Tabla 2: los valores y Hc [kJ/kg] se preguntan LITERALMENTE como se imprimen,
+sin corregir unidades ni inventar conversiones. Tabla 4: el valor impreso para
+25 m² es 224 kW/m²; por cálculo 6100/25=244 kW/m². No mezclarlos:
+224 solo como dato literal de la tabla; 244 solo como resultado del cálculo.
+Un registro que no se pueda cotejar con la página del PDF NO se incorpora.
+Cada relación verificada debe quedar con fuente y página; no redactar preguntas
+ni utilizar títulos, pies o número de figura como conocimiento examinable.\n`;
+  return conditions+rows.map(t=>{
+    const records=t.conocimientos.map(k=>
+      [k.id,'fila/entidad: '+(k.contexto||''),'atributo: '+(k.atributo||''),
+       'valor literal: '+(k.valor_literal||''),
+       k.duplicado_de?'duplicado de '+k.duplicado_de:'']
+        .filter(Boolean).join(' | ')).join('\n');
+    return `\nTABLA ${t.numero} — ${t.titulo} — página CEIS ${t.pagina_impresa}
+${records}`;
+  }).join('\n');
+}
+function t40QuestionGuide157(targets){
+  if(!targets?.some(t40Topic157))return '';
+  return `\nTEMA 40, CEIS Guadalajara: 4 opciones y UNA correcta;
+referir siempre la técnica, condición, tabla, magnitud y unidad pertinente.
+No confundir tablas 18/20/22 ni separar relaciones de fila/columna.
+Tabla 2: unidades y valores impresos literales (Hc kJ/kg); no corregirlos.
+Tabla 4: dato impreso 224 kW/m² frente a 244 kW/m² calculados;
+no ofrecer ambos como correctos para una misma pregunta.
+Una pregunta gráfica ya prefabricada se toma del banco y NUNCA se
+redacta o modifica mediante este prompt. Solo los objetivos textuales
+pendientes pasan a Gemini.\n`;
+}
+async function t40ImportOnce157(topic){
+  if(!t40Topic157(topic))return {skipped:true};
+  const pack=t40Resources157Load();
+  if(!pack)throw Error('T40: falta t40_graphics_data.js.');
+  t40WriteImages157();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const locked=await client.query(
+      'SELECT id,name,block,total_items,file_search_indexed FROM topics WHERE id=$1 FOR UPDATE',
+      [Number(topic.id)]);
+    const t=locked.rows[0];
+    if(!t40Topic157(t)||!t.file_search_indexed||Number(t.total_items)<1)
+      throw Error('T40: antes hay que cargar el PDF y confirmar la cobertura.');
+    let installed=0;
+    const seen=new Set();
+    for(const row of pack.questions){
+      const name=String(row.graphic?.publicUrl||'').split('/').pop();
+      const bytes=pack.images.find(im=>im.file===name);
+      if(!bytes||bytes.sha256!==row.graphic_image_source_sha256||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||row.question_family!=='GRAFICA'||
+         row.difficulty!=='muy alta'||row.source_page<1||row.source_page>66||
+         !/^T40-GRAF-\d{5}$/.test(row.external_key))
+        throw Error('T40: pregunta o imagen inválida: '+row.external_key);
+      const key=row.external_key;
+      if(seen.has(key))throw Error('T40: pregunta repetida: '+key);
+      seen.add(key);
+      const uri='/graphics/incendios-interior/'+name;
+      const sourceId='incendios-interior/'+name;
+      const picture=await client.query(`
+        INSERT INTO graphic_assets(source_id,topic_folder,source_file,public_url,
+          asset_index,asset_type,concept,description,source_evidence,crop_x,crop_y,
+          crop_width,crop_height,mask_regions,is_official_reference,is_usable,
+          analysis_status,sanitization_version)
+        VALUES($1,'incendios-interior',$2,$3,0,'individual',$4,$5,$6,
+          0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+          concept=EXCLUDED.concept,description=EXCLUDED.description,
+          source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+          crop_x=0,crop_y=0,crop_width=1,crop_height=1,mask_regions='[]'::jsonb,
+          is_usable=TRUE,analysis_status='analyzed',sanitization_version=2,
+          updated_at=NOW()
+        RETURNING id`,[sourceId,name,uri,row.coverage_concept,
+          `Figura ${Number(name.match(/_FIG_(\d+)_/)?.[1])}, página CEIS ${row.manual_page}; esquema sin pie editorial`,
+          row.source_evidence]);
+      const assetId=Number(picture.rows[0].id);
+      const concept=key+' · '+row.coverage_concept;
+      const target=await client.query(`
+        INSERT INTO coverage_items(topic_id,section,concept,item_type,evaluation_type,
+          source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t40_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+          exam_relevant=TRUE,section=EXCLUDED.section,
+          source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
+          source_evidence=EXCLUDED.source_evidence
+        RETURNING id`,[Number(topic.id),row.coverage_section,concept,
+          row.source_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(target.rows[0].id);
+      const graphic={...row.graphic,assetId,publicUrl:uri,
+        sourceId,assetType:'individual',concept:row.coverage_concept,
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const existing=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+         WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+         LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(existing.rows.length){
+        const prev=existing.rows[0];
+        if(String(prev.stem)!==String(row.stem)||
+           JSON.stringify(prev.options)!==JSON.stringify(row.options)||
+           Number(prev.correct_index)!==Number(row.correct_index))
+          throw Error('T40: pregunta ya existente distinta. No se sobrescribe '+key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[prev.id,JSON.stringify(graphic)]);
+      }else{
+        await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+          correct_index,explanation,source_evidence,source_page,manual_page,
+          question_family,difficulty,graphic,validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+          [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+           row.explanation,row.source_evidence,row.source_page,row.manual_page,
+           JSON.stringify(graphic)]);
+      }
+      installed++;
+    }
+    if(installed!==45)throw Error('T40: no se han importado las 45 preguntas.');
+    // Las capturas antiguas ya no se usan en este tema: sus recortes
+    // v1 podían contener títulos y pies. No toca imágenes de otros temas.
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='incendios-interior' AND source_file LIKE 'Screenshot_%'
+        AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*) FROM
+       coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,
+       [Number(topic.id)]);
+    await client.query('COMMIT');
+    console.log('T40_157_PREGUNTAS_SEMILLA',JSON.stringify({topicId:topic.id,installed}));
+    return {ok:true,topicId:Number(topic.id),questions:installed,images:45,geminiCalls:0};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t40GraphicBankPairs157(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t40_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC
+    LIMIT 50`,[topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
 function graphicTopicFolderFromTopicName(topicName){
   const text = String(topicName || "")
     .normalize("NFD")
@@ -5808,6 +6021,16 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     );
     const iiffManual86=isIiffManual86(topic);
     const t39HydraulicCoverage=isT39CoverageSource(topic);
+    // El único PDF que autoriza asociar las 45 imágenes del banco T40 es
+    // la unión original de 66 páginas ya verificada, byte a byte.
+    if(t40Topic157(topic)){
+      const data=t40Resources157Load();
+      if(!data)throw Error('T40: falta el paquete de figuras original.');
+      const sourceHash=createHash('sha256').update(fs.readFileSync(pdfPath)).digest('hex');
+      if(sourceHash!==data.pdf_sha256)
+        throw Error('T40: PDF distinto de la fuente CEIS auditada. No se crea cobertura ni se asignan figuras.');
+    }
+
     if(t39HydraulicCoverage){
       const hash=createHash('sha256').update(fs.readFileSync(pdfPath)).digest('hex');
       if(hash!==T39_CEIS_PDF_SHA256)
@@ -6038,7 +6261,7 @@ manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
     coverageAnalysisPrompt(
   topic.name,
   allItems
-)+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')+
+)+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')+t40TablesInBlock157(topic,chunk)+
           `
 
 IMPORTANTE:
@@ -6195,7 +6418,7 @@ allItems.filter(item=>{
     sourcePage >= 1 &&
     sourcePage < chunk.startPage;
 })
-        )+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')
+        )+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE:'')+t40TablesInBlock157(topic,chunk)
       },
       {
         inlineData:{
@@ -6371,6 +6594,17 @@ const parsed={
     else if(t39HydraulicCoverage) await replaceT39Document(topic,pdfPath,validItems);
     else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
+    // Importación opcional, ACOTADA y transaccional de las 45 preguntas
+    // prefabricadas de T40; la cobertura documental sigue siendo la fuente.
+    if(t40Topic157(topic)){
+      try{
+        const seeded=await t40ImportOnce157(topic);
+        console.log('T40_157_IMPORTACION_AUTOMATICA',JSON.stringify(seeded));
+      }catch(error){
+        console.error('T40_157_IMPORTACION_PENDIENTE:',String(error?.message||error));
+        // El PDF ya se guardó: no volver a pagar la extracción para este fallo.
+      }
+    }
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
 
@@ -9936,6 +10170,13 @@ for(let i = 0; i < selected.length; i++){
   }
 
   const originalGraphicSlot = selected[i];
+  // T40: la imagen y la pregunta están asociadas de antemano en PostgreSQL.
+  // No llamar a Gemini para un emparejamiento ya verificado.
+  if(t40Topic157(originalGraphicSlot) && t40Resources157Load()){
+    selected[i]={...originalGraphicSlot,t40PreparedGraphicSlot157:true};
+    continue;
+  }
+
 
   /*
   Coverage que ya está ocupado por las demás plazas del test.
@@ -13762,6 +14003,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
+  const t40Guide157=t40QuestionGuide157(group);
   // SERVER127: no duplicar cada objetivo. Una generación y una auditoría
   // independiente por lote. La comprobación factual y calidad=2 permanecen.
   const iiffGenerationRules=iiffScope?
@@ -13788,7 +14030,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       : resetPrompt136(group,difficulty,mode,comparisons)+
         (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
         iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
-        geoPhysical112,config:{
+        geoPhysical112+t40Guide157,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:(geoHighChallenge||(iiffScope&&difficulty==='muy alta'))?'medium':'low'}}:{}),
@@ -14889,7 +15131,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -14915,6 +15157,59 @@ app.post('/api/generate',async(req,res)=>{
     }
     let questions=resume136?.questions?.length===targets.length
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
+    // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
+    // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
+    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157)){
+      const slots=targets.map((t,i)=>t.t40PreparedGraphicSlot157?i:-1)
+        .filter(i=>i>=0);
+      const grouped=new Map();
+      for(const i of slots){
+        const topicId=Number(targets[i].topic_id);
+        if(!grouped.has(topicId))grouped.set(topicId,
+          mode==='mixto'
+            ?await t40GraphicBankPairs157(topicId,freshOnly111,difficulty)
+            :[]);
+      }
+      const seenAssets=new Set(),seenFigures=new Set();
+      for(const i of slots){
+        const pool=grouped.get(Number(targets[i].topic_id))||[];
+        const chosen=pool.find(r=>{
+          const picture=r.graphic||{};
+          const figure=String(picture.publicUrl||'').match(/_FIG_(\d+)/)?.[1];
+          return !seenAssets.has(Number(picture.assetId)) &&
+            (!figure || !seenFigures.has(figure)) &&
+            !targets.some((t,j)=>j!==i && Number(t.id)===Number(r.coverage_id));
+        });
+        if(chosen){
+          const fig=String(chosen.graphic?.publicUrl||'').match(/_FIG_(\d+)/)?.[1];
+          seenAssets.add(Number(chosen.graphic.assetId));
+          if(fig)seenFigures.add(fig);
+          targets[i]={id:Number(chosen.coverage_id),topic_id:Number(chosen.topic_id),
+            topic_name:chosen.topic_name,topic_block:chosen.topic_block,
+            section:chosen.section,concept:chosen.concept,
+            item_type:chosen.item_type,evaluation_type:chosen.evaluation_type,
+            exam_relevant:true,source_evidence:chosen.ci_evidence,
+            source_page:chosen.ci_page,manual_page:chosen.ci_manual,
+            questionFamily:'GRAFICA'};
+          questions[i]={stem:chosen.stem,options:chosen.options,
+            correctIndex:Number(chosen.correct_index),
+            explanation:chosen.explanation||'',
+            sourceEvidence:chosen.source_evidence||'',
+            sourcePage:chosen.source_page??null,
+            manualPage:chosen.manual_page||null,
+            questionFamily:'GRAFICA',difficulty:'muy alta',
+            graphic:chosen.graphic,reused:true,
+            questionId:Number(chosen.question_id)};
+          console.log('T40_157_REUTILIZACION_GRAFICA',JSON.stringify({
+            slot:i,questionId:chosen.question_id,assetId:chosen.graphic?.assetId}));
+        }else{
+          // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
+          targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
+            t40PreparedGraphicSlot157:false};
+          console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
+        }
+      }
+    }
     for(const [i,q] of direct)questions[i]=q;
     if(difficulty==='muy alta')for(let i=0;i<questions.length;i++){
       if(iiff91Topic(targets[i])&&questions[i]&&
@@ -15201,6 +15496,29 @@ app.get("/api/generate-status/:id", async(req,res)=>{
     });
   }
 });
+// Estado read-only: no dispara Gemini ni reanaliza otras carpetas.
+app.get('/api/t40-graphics-status',async(req,res)=>{
+  try{
+    const r=await db.query(`SELECT t.id AS topic_id,t.name,t.file_search_indexed,
+       t.total_items,
+       (SELECT COUNT(*)::int FROM question_bank qb JOIN coverage_items c
+         ON c.id=qb.coverage_item_id WHERE c.topic_id=t.id
+           AND c.item_type='grafica_t40_original' AND qb.active=TRUE) AS questions,
+       (SELECT COUNT(*)::int FROM graphic_assets ga WHERE ga.topic_folder='incendios-interior'
+           AND ga.source_file LIKE 'T40_GRAF_%' AND ga.is_usable=TRUE
+           AND ga.sanitization_version>=2) AS images
+       FROM topics t WHERE t.block='especifico' AND t.topic_order=40
+         AND t.name ILIKE '%incendios de interior%'
+       ORDER BY t.id DESC LIMIT 1`);
+    const d=r.rows[0];
+    res.json({ok:true,readonly:true,topicId:d?.topic_id??null,
+      coverageReady:Boolean(d?.file_search_indexed),
+      totalItems:Number(d?.total_items||0),
+      questions:Number(d?.questions||0),images:Number(d?.images||0),
+      ready:Number(d?.questions)===45&&Number(d?.images)===45&&Boolean(d?.file_search_indexed)});
+  }catch(e){res.status(500).json({ok:false,error:String(e?.message||e)});}
+});
+
 app.get("/api/graphics/analyze-pending", async (req,res)=>{
   try{
     const requestedLimit = Number(req.query?.limit ?? 10);
@@ -15529,6 +15847,9 @@ async function startServer(){
   console.log("COBERTURA 83: elementos mostrados pero no respondidos reparados:",cleanup83.rowCount);
   // 93K: la sincronización masiva Anki nunca debe bloquear
   // la apertura del puerto que Render utiliza para su health check.
+  try{t40WriteImages157();}catch(e){
+    console.error('T40_157_IMAGENES_NO_PREPARADAS:',e?.message||e);
+  }
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
