@@ -6315,6 +6315,35 @@ const t40CheckChunk159=(raw,chunk)=>{
   }
   return raw;
 };
+// SERVER160 — T40: el modelo puede confundir la página física con la impresa.
+// Si falla una respuesta de varias páginas, reutilizamos el biseccionador
+// que ya emplean IIFF y T39: SOLO se repite ese bloque, nunca los checkpoints.
+// En una hoja individual la página física queda demostrada por el propio PDF.
+const t40NormalizePage160=(raw,part)=>{
+  const normalized=normalizeChunkSourcePages(raw,part);
+  for(const item of normalized){
+    if(!item || typeof item!=='object'){
+      const error=Error(`T40: elemento ilegible en ${part.startPage}-${part.endPage}`);
+      error.coverageResponse86=true;throw error;
+    }
+    if(part.startPage===part.endPage){
+      // La única hoja adjunta es esta página; NO calcular manualPage impresa.
+      item.sourcePage=part.startPage;
+    }
+    if(typeof item.sourcePage==='string' && /^\d{1,3}$/.test(item.sourcePage))
+      item.sourcePage=Number(item.sourcePage);
+    if(!Number.isInteger(item.sourcePage)||
+       item.sourcePage<part.startPage||item.sourcePage>part.endPage||
+       !String(item.concept||'').trim()||
+       !String(item.itemType||'').trim()||
+       !String(item.evaluationType||'').trim()||
+       !String(item.sourceEvidence||'').trim()){
+      const error=Error(`T40: evidencia o página insuficiente en ${part.startPage}-${part.endPage}`);
+      error.coverageResponse86=true;throw error;
+    }
+  }
+  return normalized;
+};
 const allItems=literalItems?[...literalItems]:[];
 
 for(const chunk of (literalItems?[]:chunks)){
@@ -6372,6 +6401,31 @@ manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
   if(normalizedChunkItems!==null){
     console.log(`T40_159_CHECKPOINT_PRIMARY_REUSADO ${chunk.startPage}-${chunk.endPage}`);
   }else{
+  if(t40Resumable159){
+    const buildT40Primary160=part=>({
+      model:'gemini-3.5-flash-lite',
+      contents:[
+        {text:coverageAnalysisPrompt(topic.name,allItems)+
+          t40TablesInBlock157(topic,part)+`\nIMPORTANTE: analiza únicamente las páginas
+${part.startPage} a ${part.endPage} del PDF adjunto. Extrae TODO el
+contenido examinable (también tablas, cifras, fórmulas y procedimientos),
+con su evidencia literal. sourcePage es la PÁGINA FÍSICA del documento
+original: exclusivamente ${part.startPage}-${part.endPage}.
+manualPage es exclusivamente el número IMPRESO, leído sin inferir desplazamientos;
+si no es legible devuelve null. NO generes preguntas ni imágenes nuevas.`,
+        },
+        {inlineData:{mimeType:'application/pdf',data:part.data}}
+      ],
+      config:{responseMimeType:'application/json',responseJsonSchema:coverageSchema}
+    });
+    normalizedChunkItems=await analyzeIiffChunk86(
+      ai,chunk,buildT40Primary160,t40NormalizePage160);
+    if(normalizedChunkItems.length===0){
+      throw Error(`T40: bloque ${chunk.startPage}-${chunk.endPage} sin conocimientos.`);
+    }
+    t40CheckChunk159(normalizedChunkItems,chunk);
+    await saveIiffChunk86(topic,reusableHash,'primary',chunk,normalizedChunkItems);
+  }else{
   const response=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -6418,9 +6472,6 @@ Cuando indiques manualPage, utiliza exclusivamente el número de página impreso
   }
 
   normalizedChunkItems=normalizeChunkSourcePages(parsedChunk.items,chunk);
-  if(t40Resumable159){
-    t40CheckChunk159(normalizedChunkItems,chunk);
-    await saveIiffChunk86(topic,reusableHash,'primary',chunk,normalizedChunkItems);
   }
   }
   allItems.push(...normalizedChunkItems);
@@ -6528,6 +6579,30 @@ for(const chunk of (literalItems?[]:auditChunks)){
     if(normalizedAuditItems!==null){
       console.log(`T40_159_CHECKPOINT_AUDIT_REUSADO ${chunk.startPage}-${chunk.endPage}`);
     }else{
+    if(t40Resumable159){
+      const buildT40Audit160=part=>({
+        model:'gemini-3.5-flash-lite',
+        contents:[
+          {text:coverageGapPrompt(
+            allItems.filter(item=>Number(item.sourcePage)>=part.startPage &&
+              Number(item.sourcePage)<=part.endPage),
+            part.startPage,part.endPage,topic.name,
+            allItems.filter(item=>Number(item.sourcePage)>=1 &&
+              Number(item.sourcePage)<part.startPage)
+          )+t40TablesInBlock157(topic,part)+`\nPara cada omisión:
+sourcePage debe indicar únicamente la página FÍSICA ${part.startPage}-${part.endPage};
+manualPage es la impresa, nunca deducida (null si no se lee). Evidencia
+textual respaldada por el PDF adjunto. Si no existen omisiones, devuelve items: [].`,
+          },
+          {inlineData:{mimeType:'application/pdf',data:part.data}}
+        ],
+        config:{responseMimeType:'application/json',responseJsonSchema:coverageSchema}
+      });
+      normalizedAuditItems=await analyzeIiffChunk86(
+        ai,chunk,buildT40Audit160,t40NormalizePage160);
+      t40CheckChunk159(normalizedAuditItems,chunk);
+      await saveIiffChunk86(topic,reusableHash,'audit',chunk,normalizedAuditItems);
+    }else{
     const auditResponse=await coverageGenerate({
     model:"gemini-3.5-flash-lite",
     contents:[
@@ -6560,14 +6635,9 @@ allItems.filter(item=>{
 
   const parsedAudit=JSON.parse(auditResponse.text);
 
-  if(t40Resumable159 && !Array.isArray(parsedAudit.items))
-    throw Error(`T40: auditoría incompleta en páginas ${chunk.startPage}-${chunk.endPage}`);
   normalizedAuditItems=Array.isArray(parsedAudit.items)
     ? normalizeChunkSourcePages(parsedAudit.items,chunk) : [];
-  if(t40Resumable159){
-    t40CheckChunk159(normalizedAuditItems,chunk);
-    await saveIiffChunk86(topic,reusableHash,'audit',chunk,normalizedAuditItems);
-  }
+    }
   }
   auditItems.push(...normalizedAuditItems);
   console.log(
