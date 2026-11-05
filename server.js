@@ -1405,14 +1405,26 @@ ni utilizar títulos, pies o número de figura como conocimiento examinable.\n`;
 ${records}`;
   }).join('\n');
 }
-function t40QuestionGuide157(targets){
+function t40QuestionGuide157(targets,difficulty){
   if(!targets?.some(t40Topic157))return '';
+  const t40Difficulty163=targets.every(t40Topic157) && String(difficulty).toLowerCase()==='muy alta'?`
+T40 / MUY ALTA / CALIDAD DE DISTRACTORES (solo preguntas textuales nuevas):
+- Enunciado breve de estilo oposición. Cuatro alternativas paralelas en estructura, tecnicidad y longitud; ninguna claramente ajena al caso. Cada opción debe tratar la MISMA magnitud, técnica, condición o propiedad.
+- Para «señale la CORRECTA»: una afirmación respaldada por la fuente y tres falsas pero plausibles, basadas en cambios de UNA variable, condición, umbral, dirección, relación o paso de la propia evidencia. Para «señale la INCORRECTA»: tres afirmaciones verdaderas y sustentadas y una falsa plausible por una modificación mínima. No confundas la lógica de ambos tipos.
+- Prioriza confusiones reales entre conceptos próximos del manual (ILC/ILV, interior/confinado, aplicación de agua, caudales y ventilación). Solo contrapón conceptos y cifras cuando los datos proporcionados demuestren una única respuesta; no incorpores información ajena a la ficha ni inventes excepciones.
+- Los distractores de tablas han de conservar fila, atributo, unidad y contexto. Cambia un dato cada vez; no mezcles filas o unidades incompatibles. En fórmulas teóricas, altera términos y condiciones de esa misma relación, sin usar disparates de otras disciplinas.
+- Evita pistas por palabras absolutas arbitrarias, respuestas absurdas, opciones absurdamente largas o cortas y tecnicismos exclusivos de la correcta. No alargues el enunciado para fabricar dificultad.
+- Si la evidencia solo demuestra un dato aislado, no inventes tres hechos nuevos: usa comparaciones numéricas o conceptuales razonables que dejen una sola respuesta inequívoca. En explicaciones, nunca atribuyas un distractor falso al texto del manual.
+- Verifica las cuatro alternativas en la MISMA respuesta, sin rondas adicionales: exactamente una solución según la instrucción del enunciado. Ante ambigüedad, simplifica la redacción antes que añadir contenido no documentado.
+Este ajuste no afecta a las 45 preguntas gráficas prefabricadas ni a los cálculos deterministas del modo Cálculos.
+`:'';
   return `\nTEMA 40, CEIS Guadalajara: 4 opciones y UNA correcta;
 referir siempre la técnica, condición, tabla, magnitud y unidad pertinente.
 No confundir tablas 18/20/22 ni separar relaciones de fila/columna.
 Tabla 2: unidades y valores impresos literales (Hc kJ/kg); no corregirlos.
 Tabla 4: dato impreso 224 kW/m² frente a 244 kW/m² calculados;
 no ofrecer ambos como correctos para una misma pregunta.
+${t40Difficulty163}
 Una pregunta gráfica ya prefabricada se toma del banco y NUNCA se
 redacta o modifica mediante este prompt. Solo los objetivos textuales
 pendientes pasan a Gemini.
@@ -7873,6 +7885,7 @@ async function getAdaptiveCoverageCandidates(
       ci.source_page,
       ci.manual_page,
       ci.source_evidence,
+      ci.exam_relevant,
       ci.worked,
       ci.times_asked,
       ci.times_correct,
@@ -14225,7 +14238,7 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
   if(geoHighChallenge)console.log('RESET_82_COMPARACIONES:',JSON.stringify({
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
-  const t40Guide157=t40QuestionGuide157(group);
+  const t40Guide157=t40QuestionGuide157(group,difficulty);
   // SERVER127: no duplicar cada objetivo. Una generación y una auditoría
   // independiente por lote. La comprobación factual y calidad=2 permanecen.
   const iiffGenerationRules=iiffScope?
