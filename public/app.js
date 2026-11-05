@@ -349,6 +349,14 @@ async function uploadTopicBatch(){
 // SERVER/FRONT 112: recuperación de una generación larga SIN reenviar
 // peticiones pagadas. runId es idempotente en PostgreSQL.
 const GENERATION_PENDING_112='bombero_navarra_generation_112';
+// FRONT164: el identificador pendiente pertenece a una configuración concreta.
+// Nunca recuperar un test de otro tema ni otro modo por pulsar Generar.
+function generationIdentity164(b){
+  const blocks=[...new Set((Array.isArray(b?.selectedBlocks)?b.selectedBlocks:[]).map(String))].sort();
+  const topics=[...new Set((Array.isArray(b?.selectedTopicIds)?b.selectedTopicIds:[]).map(Number))].sort((a,b)=>a-b);
+  return JSON.stringify([Number(b?.count),String(b?.difficulty||''),String(b?.mode||''),
+    String(b?.testType||'normal'),String(b?.examMode||'training'),blocks,topics]);
+}
 function newGenerationId112(){
   if(globalThis.crypto?.randomUUID)return crypto.randomUUID().replace(/-/g,'');
   const bytes=new Uint8Array(20);
@@ -433,6 +441,38 @@ async function generate(){
     let stored=null;
     try{stored=JSON.parse(localStorage.getItem(GENERATION_PENDING_112)||'null');}
     catch{localStorage.removeItem(GENERATION_PENDING_112);}
+    // Identidad de la petición ACTUAL: no confundirla con el test
+    // almacenado por otro tema, modo o dificultad.
+    const allScope=$('scopeAll')?.checked===true;
+    const currentRequest164={
+      count:+$('count').value,
+      difficulty:$('difficulty').value,
+      mode:$('mode').value,
+      testType:$('testType')?.value||'normal',
+      examMode:$('examMode')?.value||'training',
+      selectedBlocks:allScope?[]:[...selectedBlocks],
+      selectedTopicIds:allScope?[]:[...selectedTopicIds]
+    };
+    if(stored?.runId&&stored?.body &&
+       generationIdentity164(stored.body)!==generationIdentity164(currentRequest164)){
+      if(!allScope&&selectedBlocks.size===0&&selectedTopicIds.size===0)
+        throw new Error('Selecciona al menos un bloque o tema.');
+      const allow=confirm('Hay un test anterior pendiente de OTRO tema o configuración.\n'+
+        'Aceptar: conservar su identificador en el historial local e iniciar SOLO el test que acabas de seleccionar.\n'+
+        'Cancelar: mantener el test anterior pendiente, sin generar ni cobrar nada.');
+      if(!allow)return;
+      // Conservar la referencia para una eventual recuperación sin perder
+      // el estado histórico que ya existe en PostgreSQL.
+      const archiveKey='bombero_navarra_generations_suspended_164';
+      let archive=[];
+      try{const old=JSON.parse(localStorage.getItem(archiveKey)||'[]');
+        if(Array.isArray(old))archive=old;}catch{}
+      archive=[stored,...archive.filter(x=>x?.runId!==stored.runId)].slice(0,10);
+      localStorage.setItem(archiveKey,JSON.stringify(archive));
+      localStorage.removeItem(GENERATION_PENDING_112);
+      stored=null;
+      generationProgress112('Test anterior archivado; iniciando la selección actual.');
+    }
     let runId,body,launch=null;
     // El reintento desde la interfaz recupera la petición anterior,
     // no la cobra de nuevo aunque el navegador haya perdido el HTTP POST.
@@ -470,21 +510,11 @@ async function generate(){
         generationProgress112('Consultando el test anterior sin volver a generarlo...');
       }
     }else{
-      const allScope=$('scopeAll')?.checked===true;
       if(!allScope && selectedBlocks.size===0 && selectedTopicIds.size===0)
         throw new Error('Selecciona al menos un bloque o tema.');
       currentTestLabel=buildSelectionLabel();
       runId=newGenerationId112();
-      body={
-        count:+$('count').value,
-        difficulty:$('difficulty').value,
-        mode:$('mode').value,
-        testType:$('testType')?.value||'normal',
-        examMode:$('examMode')?.value||'training',
-        selectedBlocks:allScope?[]:[...selectedBlocks],
-        selectedTopicIds:allScope?[]:[...selectedTopicIds],
-        runId
-      };
+      body={...currentRequest164,runId};
       localStorage.setItem(GENERATION_PENDING_112,
         JSON.stringify({runId,body,startedAt:Date.now()}));
       generationProgress112('Solicitando generación y verificación del PDF...');
@@ -519,11 +549,19 @@ async function startBankMode111(studyMode){
     srs:'Repasos programados SRS'
   };
   if(!names[studyMode])return;
-  if(localStorage.getItem(GENERATION_PENDING_112)){
-    alert('Hay una generación pendiente de recuperar. Usa primero el botón de nuevas para recuperar el mismo trabajo, sin generar otro.');
-    return;
-  }
   const scopeAll=$('scopeAll')?.checked===true;
+  let pending164=null;
+  try{pending164=JSON.parse(localStorage.getItem(GENERATION_PENDING_112)||'null');}catch{}
+  if(pending164?.runId&&pending164?.body){
+    const selectedNow164={...pending164.body,
+      selectedBlocks:scopeAll?[]:[...selectedBlocks],
+      selectedTopicIds:scopeAll?[]:[...selectedTopicIds]};
+    // Solo sigue bloqueado el repaso si coincide EXACTAMENTE el ámbito.
+    if(generationIdentity164(pending164.body)===generationIdentity164(selectedNow164)){
+      alert('Hay una generación pendiente de este mismo ámbito. Usa primero el botón de nuevas para recuperar ese trabajo, sin generar otro.');
+      return;
+    }
+  }
   if(!scopeAll&&selectedBlocks.size===0&&selectedTopicIds.size===0){
     alert('Selecciona un bloque o tema para repasar.');return;
   }
