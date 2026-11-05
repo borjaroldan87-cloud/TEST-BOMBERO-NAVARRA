@@ -15225,23 +15225,69 @@ function t40NumericFamily162(t){
 }
 // Crea 4 resultados inequívocos y homogéneos, con clave comprobada mediante
 // cálculo independiente del texto y sin respuestas redondeadas equivalentes.
-function t40Choices162(correct,unit,digits){
-  const key=t40Fmt162(correct,digits);
+// SERVER166 — conversión dimensional SOLO en parte de las preguntas del T40.
+// Primero se calculan cuatro magnitudes físicas distintas; después se elige
+// cómo expresarlas. No hay dobles soluciones MW/kW, kJ/MJ o L/m³.
+const T40_ALT_UNITS_166=Object.freeze({MW:['kW',1000],kJ:['MJ',0.001],L:['m³',0.001]});
+function t40CanonicalOption166(option,baseUnit){
+  const m=String(option).match(/^([0-9]+(?:,[0-9]+)?) (MW|kW|kJ|MJ|L|m³)$/);
+  if(!m)throw Error('T40_166: alternativa con unidad no reconocida');
+  const number=Number(m[1].replace(',','.'));
+  const alternate=T40_ALT_UNITS_166[baseUnit];
+  if(m[2]===baseUnit)return number;
+  if(m[2]!==alternate?.[0])throw Error('T40_166: dimensión no compatible');
+  return number/alternate[1];
+}
+function t40Choices162(correct,unit,digits,mixedUnits166=false){
   const multipliers=[0.75,0.8,0.85,0.9,1.1,1.15,1.2,1.25,1.3];
-  const pool=multipliers.map(f=>t40Fmt162(correct*f,digits));
-  const selected=[key];
-  for(const proposed of pool.sort(()=>Math.random()-.5)){
-    if(!selected.includes(proposed))selected.push(proposed);
+  const selected=[correct], keys=new Set([t40Fmt162(correct,digits)]);
+  for(const factor of multipliers.sort(()=>Math.random()-.5)){
+    const number=correct*factor, key=t40Fmt162(number,digits);
+    if(!keys.has(key)){selected.push(number);keys.add(key);}
     if(selected.length===4)break;
   }
   if(selected.length!==4)throw Error('T40_162: alternativas numéricas no distinguibles');
-  const options=selected.map(v=>`${v} ${unit}`);
+  // Exactamente dos opciones en unidad alternativa cuando se solicita
+  // mezcla; el valor correcto puede estar en cualquiera de las dos unidades.
+  const altIndices=new Set();
+  if(mixedUnits166){
+    const positions=[0,1,2,3];
+    for(let i=positions.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [positions[i],positions[j]]=[positions[j],positions[i]];
+    }
+    positions.slice(0,2).forEach(x=>altIndices.add(x));
+  }
+  const [altUnit,multiplier]=T40_ALT_UNITS_166[unit]||[];
+  const options=selected.map((num,i)=>{
+    if(altIndices.has(i)){
+      const precision=unit==='MW'?Math.max(0,digits-3):digits+3;
+      return `${t40Fmt162(num*multiplier,precision)} ${altUnit}`;
+    }
+    return `${t40Fmt162(num,digits)} ${unit}`;
+  });
+  const physical=options.map(opt=>t40CanonicalOption166(opt,unit));
+  const roundingTolerance=0.5*Math.pow(10,-digits)+1e-8;
+  if(physical.some(v=>!Number.isFinite(v)||v<=0) ||
+     Math.abs(physical[0]-correct)>roundingTolerance ||
+     physical.slice(1).some(v=>Math.abs(v-correct)<=roundingTolerance) ||
+     physical.some((v,i)=>physical.slice(i+1).some(v2=>Math.abs(v-v2)<=roundingTolerance*2)))
+    throw Error('T40_166: equivalencia entre alternativas o resultado impreciso');
   return {options,correctIndex:0};
 }
-function t40Exercise162(target,difficulty){
+function t40MixedUnitSlots166(count){
+  const positions=Array.from({length:count},(_,i)=>i);
+  for(let i=positions.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [positions[i],positions[j]]=[positions[j],positions[i]];
+  }
+  return new Set(positions.slice(0,Math.max(1,Math.floor(count*0.30))));
+}
+function t40Exercise162(target,difficulty,variantIndex166=0,mixedUnits166=false){
   const family=t40NumericFamily162(target);
   if(!family)throw Error(`T40_162: fuente no validada para ID ${target?.id}`);
   const high=difficulty==='muy alta';
+  const alternateInput166=variantIndex166%2===1;
   let stem='',value=0,unit='',digits=2,proof='';
   switch(family){
     case 'ILC':{
@@ -15249,9 +15295,11 @@ function t40Exercise162(target,difficulty){
       const grams=t40Pick162([25,40,50,75,100,125,150,200]);
       const rate=grams/1000;
       value=rate*heat; unit='MW';digits=2;
-      stem=high?
+      stem=alternateInput166?
+        `Durante la evaluación de un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con un poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`:
+        (high?
         `En la valoración de un incendio limitado por el combustible, la tasa de combustión es de ${grams} g/s y el poder calorífico considerado es ${heat} MJ/kg. ¿Cuál es la potencia del incendio?`:
-        `En un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`;
+        `En un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`);
       proof=`Q = ṁc · Hc = ${t40Fmt162(rate,3)} kg/s × ${heat} MJ/kg = ${t40Fmt162(value,2)} MW.`;
       break;
     }
@@ -15261,8 +15309,11 @@ function t40Exercise162(target,difficulty){
       const root=Math.sqrt(height);
       const area=t40Pick162([1,1.5,2,2.5,3]);
       value=0.092*heat*area*root;unit='MW';digits=3;
-      stem=`En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando la ecuación de Kawagoe recogida en el manual, ¿qué potencia se obtiene?`;
-      proof=`Q = k · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(value,3)} MW.`;
+      stem=alternateInput166?
+        `La dotación valora un incendio limitado por la ventilación con una abertura de ${t40Fmt162(area,1)} m² y ${t40Fmt162(height*100,0)} cm de altura. Considerando Hc = ${heat} MJ/kg, ¿qué potencia resulta de aplicar Kawagoe?`:
+        `En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando la ecuación de Kawagoe recogida en el manual, ¿qué potencia se obtiene?`;
+      proof=`Q = k · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(value,3)} MW.` +
+        (alternateInput166?` Altura: ${t40Fmt162(height*100,0)} cm = ${t40Fmt162(height,2)} m.`:'');
       break;
     }
     case 'THORNTON':{
@@ -15270,8 +15321,11 @@ function t40Exercise162(target,difficulty){
       const secs=t40Pick162([10,20,40,60]);
       const grams=perSecond*secs;
       value=0.0131*grams/secs;unit='MW';digits=3;
-      stem=`Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton recogida en el manual, ¿cuál es la potencia media?`;
-      proof=`Q = Et · mO₂ / t = 0,0131 MJ/g × ${grams} g / ${secs} s = ${t40Fmt162(value,3)} MW.`;
+      stem=alternateInput166?
+        `En una intervención se estima que se han consumido ${t40Fmt162(grams/1000,2)} kg de oxígeno durante ${secs} s. ¿Qué potencia media corresponde a la regla de Thornton?`:
+        `Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton recogida en el manual, ¿cuál es la potencia media?`;
+      proof=`Q = Et · mO₂ / t = 0,0131 MJ/g × ${grams} g / ${secs} s = ${t40Fmt162(value,3)} MW.`+
+        (alternateInput166?` Oxígeno: ${t40Fmt162(grams/1000,2)} kg = ${grams} g.`:'');
       break;
     }
     case 'AGUA_SENSIBLE':{
@@ -15279,15 +15333,21 @@ function t40Exercise162(target,difficulty){
       const mass=t40Pick162([1,2]);
       const delta=100-from;
       value=mass*4.183*delta;unit='kJ';digits=2;
-      stem=`En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. ¿Cuánta energía absorbe el agua durante ese calentamiento?`;
-      proof=`E = m · c · ΔT = ${mass} × 4,183 × (${100} − ${from}) = ${t40Fmt162(value,2)} kJ.`;
+      stem=alternateInput166?
+        `Durante el enfriamiento en una intervención se calientan ${mass*1000} g de agua líquida de ${from} °C a 100 °C sin llegar a evaporarse. ¿Qué energía absorbe el agua?`:
+        `En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. ¿Cuánta energía absorbe el agua durante ese calentamiento?`;
+      proof=`E = m · c · ΔT = ${mass} × 4,183 × (${100} − ${from}) = ${t40Fmt162(value,2)} kJ.`+
+        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
       break;
     }
     case 'AGUA_LATENTE':{
       const mass=t40Pick162([1,2,3,4]);
       value=mass*2257;unit='kJ';digits=0;
-      stem=`Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. ¿Qué energía absorbe el agua únicamente durante el cambio de fase?`;
-      proof=`E = m · Cv = ${mass} × 2.257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`;
+      stem=alternateInput166?
+        `En una intervención se transforman por completo en vapor ${mass*1000} g de agua que ya estaban a 100 °C. ¿Qué energía absorbe únicamente la vaporización?`:
+        `Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. ¿Qué energía absorbe el agua únicamente durante el cambio de fase?`;
+      proof=`E = m · Cv = ${mass} × 2.257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`+
+        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
       break;
     }
     case 'VAPOR_SENSIBLE':{
@@ -15295,8 +15355,11 @@ function t40Exercise162(target,difficulty){
       const delta=t40Pick162([50,100,200]);
       const until=100+delta;
       value=mass*4.09*delta;unit='kJ';digits=2;
-      stem=`En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía absorbe el vapor únicamente en ese calentamiento?`;
-      proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × ${delta} = ${t40Fmt162(value,2)} kJ.`;
+      stem=alternateInput166?
+        `Durante un incendio, ${mass*1000} g de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía requiere exclusivamente calentar ese vapor?`:
+        `En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía absorbe el vapor únicamente en ese calentamiento?`;
+      proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × ${delta} = ${t40Fmt162(value,2)} kJ.`+
+        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
       break;
     }
     case 'VOLUMEN_VAPOR':{
@@ -15306,21 +15369,25 @@ function t40Exercise162(target,difficulty){
       const efficiency=high?t40Pick162([50,100]):100;
       const evaporated=litres*efficiency/100;
       value=evaporated*factor;unit='L';digits=0;
-      stem=`En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Aplicando los valores de expansión del vapor recogidos en el manual CEIS, ¿qué volumen de vapor se produce?`;
+      stem=alternateInput166?
+        `En la refrigeración de gases de un local, la dotación aplica ${litres} L de agua y solo se evapora el ${efficiency} %. Si el vapor alcanza ${temp} °C, ¿qué volumen ocupa conforme a la expansión recogida en el CEIS?`:
+        `En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Aplicando los valores de expansión del vapor recogidos en el manual CEIS, ¿qué volumen de vapor se produce?`;
       proof=`Agua evaporada = ${litres} × ${efficiency}/100 = ${t40Fmt162(evaporated,2)} L; Vv = ${t40Fmt162(evaporated,2)} × ${t40Fmt162(factor,0)} = ${t40Fmt162(value,0)} L.`;
       break;
     }
     default:throw Error(`T40_162: familia desconocida ${family}`);
   }
   if(!Number.isFinite(value)||value<=0)throw Error('T40_162: resultado físico inválido');
-  const {options,correctIndex}=t40Choices162(value,unit,digits);
+  const {options,correctIndex}=t40Choices162(value,unit,digits,mixedUnits166);
   const question={stem,options,correctIndex,
     explanation:`${proof} Fórmula y dato de referencia: CEIS Guadalajara, p. ${target.manual_page}.`,
     sourceEvidence:String(target.source_evidence),sourcePage:Number(target.source_page),
     manualPage:String(target.manual_page),questionFamily:'CALCULO_FORMULACION',
     difficulty,graphic:null,resetLocal136:true,t40Deterministic162:true};
-  if(resetShape136(question) || !question.options[correctIndex].startsWith(t40Fmt162(value,digits)+' '))
-    throw Error('T40_162: cálculo/opciones inválidos');
+  if(resetShape136(question) ||
+     Math.abs(t40CanonicalOption166(question.options[correctIndex],unit)-value)>
+       0.5*Math.pow(10,-digits)+1e-8)
+    throw Error('T40_166: cálculo/opciones inválidos');
   return question;
 }
 function t40ChooseTargets162(pool,count){
@@ -15407,9 +15474,14 @@ app.post('/api/generate',async(req,res)=>{
       const pool=await getAdaptiveCoverageCandidates(1000,[50],examMode,freshOnly111);
       const chosen=t40ChooseTargets162(pool,count);
       const usedStems162=new Set();
-      let local=chosen.map(t=>{
+      const familyUses166=new Map();
+      const mixedSlots166=t40MixedUnitSlots166(chosen.length);
+      let local=chosen.map((t,i)=>{
+        const family=t40NumericFamily162(t);
+        const variant166=familyUses166.get(family)||0;
+        familyUses166.set(family,variant166+1);
         for(let attempt=0;attempt<100;attempt++){
-          const candidate=t40Exercise162(t,difficulty);
+          const candidate=t40Exercise162(t,difficulty,variant166,mixedSlots166.has(i));
           const key=R136_NORM(candidate.stem);
           if(!usedStems162.has(key)){usedStems162.add(key);return candidate;}
         }
