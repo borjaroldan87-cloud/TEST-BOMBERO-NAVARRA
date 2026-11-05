@@ -15261,7 +15261,7 @@ function t40Exercise162(target,difficulty){
       const root=Math.sqrt(height);
       const area=t40Pick162([1,1.5,2,2.5,3]);
       value=0.092*heat*area*root;unit='MW';digits=3;
-      stem=`En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando Kawagoe con k = 0,092, ¿qué potencia se obtiene?`;
+      stem=`En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando la ecuación de Kawagoe recogida en el manual, ¿qué potencia se obtiene?`;
       proof=`Q = k · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(value,3)} MW.`;
       break;
     }
@@ -15270,7 +15270,7 @@ function t40Exercise162(target,difficulty){
       const secs=t40Pick162([10,20,40,60]);
       const grams=perSecond*secs;
       value=0.0131*grams/secs;unit='MW';digits=3;
-      stem=`Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton, con 0,0131 MJ por gramo de oxígeno consumido, ¿cuál es la potencia media?`;
+      stem=`Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton recogida en el manual, ¿cuál es la potencia media?`;
       proof=`Q = Et · mO₂ / t = 0,0131 MJ/g × ${grams} g / ${secs} s = ${t40Fmt162(value,3)} MW.`;
       break;
     }
@@ -15279,14 +15279,14 @@ function t40Exercise162(target,difficulty){
       const mass=t40Pick162([1,2]);
       const delta=100-from;
       value=mass*4.183*delta;unit='kJ';digits=2;
-      stem=`En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. Tomando c = 4,183 kJ/(kg·°C), ¿cuánta energía absorbe?`;
+      stem=`En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. ¿Cuánta energía absorbe el agua durante ese calentamiento?`;
       proof=`E = m · c · ΔT = ${mass} × 4,183 × (${100} − ${from}) = ${t40Fmt162(value,2)} kJ.`;
       break;
     }
     case 'AGUA_LATENTE':{
       const mass=t40Pick162([1,2,3,4]);
       value=mass*2257;unit='kJ';digits=0;
-      stem=`Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. Si el calor latente de evaporación es 2.257 kJ/kg, ¿qué energía requiere únicamente el cambio de fase?`;
+      stem=`Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. ¿Qué energía absorbe el agua únicamente durante el cambio de fase?`;
       proof=`E = m · Cv = ${mass} × 2.257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`;
       break;
     }
@@ -15295,7 +15295,7 @@ function t40Exercise162(target,difficulty){
       const delta=t40Pick162([50,100,200]);
       const until=100+delta;
       value=mass*4.09*delta;unit='kJ';digits=2;
-      stem=`En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. Considerando c del vapor = 4,090 kJ/(kg·°C), ¿qué energía absorbe el vapor en ese calentamiento?`;
+      stem=`En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía absorbe el vapor únicamente en ese calentamiento?`;
       proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × ${delta} = ${t40Fmt162(value,2)} kJ.`;
       break;
     }
@@ -15306,7 +15306,7 @@ function t40Exercise162(target,difficulty){
       const efficiency=high?t40Pick162([50,100]):100;
       const evaporated=litres*efficiency/100;
       value=evaporated*factor;unit='L';digits=0;
-      stem=`En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Según la tabla de expansión del CEIS (${t40Fmt162(factor,0)} L de vapor por L evaporado), ¿qué volumen de vapor se produce?`;
+      stem=`En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Aplicando los valores de expansión del vapor recogidos en el manual CEIS, ¿qué volumen de vapor se produce?`;
       proof=`Agua evaporada = ${litres} × ${efficiency}/100 = ${t40Fmt162(evaporated,2)} L; Vv = ${t40Fmt162(evaporated,2)} × ${t40Fmt162(factor,0)} = ${t40Fmt162(value,0)} L.`;
       break;
     }
