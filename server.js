@@ -1407,16 +1407,25 @@ ${records}`;
 }
 function t40QuestionGuide157(targets,difficulty){
   if(!targets?.some(t40Topic157))return '';
-  const t40Difficulty163=targets.every(t40Topic157) && String(difficulty).toLowerCase()==='muy alta'?`
-T40 / MUY ALTA / CALIDAD DE DISTRACTORES (solo preguntas textuales nuevas):
-- Enunciado breve de estilo oposición. Cuatro alternativas paralelas en estructura, tecnicidad y longitud; ninguna claramente ajena al caso. Cada opción debe tratar la MISMA magnitud, técnica, condición o propiedad.
-- Para «señale la CORRECTA»: una afirmación respaldada por la fuente y tres falsas pero plausibles, basadas en cambios de UNA variable, condición, umbral, dirección, relación o paso de la propia evidencia. Para «señale la INCORRECTA»: tres afirmaciones verdaderas y sustentadas y una falsa plausible por una modificación mínima. No confundas la lógica de ambos tipos.
-- Prioriza confusiones reales entre conceptos próximos del manual (ILC/ILV, interior/confinado, aplicación de agua, caudales y ventilación). Solo contrapón conceptos y cifras cuando los datos proporcionados demuestren una única respuesta; no incorpores información ajena a la ficha ni inventes excepciones.
-- Los distractores de tablas han de conservar fila, atributo, unidad y contexto. Cambia un dato cada vez; no mezcles filas o unidades incompatibles. En fórmulas teóricas, altera términos y condiciones de esa misma relación, sin usar disparates de otras disciplinas.
-- Evita pistas por palabras absolutas arbitrarias, respuestas absurdas, opciones absurdamente largas o cortas y tecnicismos exclusivos de la correcta. No alargues el enunciado para fabricar dificultad.
-- Si la evidencia solo demuestra un dato aislado, no inventes tres hechos nuevos: usa comparaciones numéricas o conceptuales razonables que dejen una sola respuesta inequívoca. En explicaciones, nunca atribuyas un distractor falso al texto del manual.
-- Verifica las cuatro alternativas en la MISMA respuesta, sin rondas adicionales: exactamente una solución según la instrucción del enunciado. Ante ambigüedad, simplifica la redacción antes que añadir contenido no documentado.
-Este ajuste no afecta a las 45 preguntas gráficas prefabricadas ni a los cálculos deterministas del modo Cálculos.
+  // SERVER169: una sustitución de instrucciones de calidad, sin nuevas
+  // llamadas ni filtros. La restricción se hace por posición en lotes mixtos.
+  const t40Slots=targets.flatMap((t,i)=>t40Topic157(t)?[i+1]:[]);
+  const t40Difficulty163=String(difficulty).toLowerCase()==='muy alta'?`
+T40 — NIVEL MUY ALTO, EXCLUSIVAMENTE SLOTS ${t40Slots.join(', ')} (preguntas textuales nuevas):
+1. Antes de escribir opciones, identifica el dato, la condición o la relación EXACTA demostrada por el FRAGMENTO DE ESA FICHA. La dificultad consiste en discriminarlo, no en recitar generalidades ni añadir longitud.
+2. Redacta CUATRO alternativas del MISMO tipo técnico, estructura, unidad y extensión parecida. Cada distractor debe representar UN error de precisión diferente y plausible: confundir una condición, ubicación, intervalo, secuencia, variable o elemento con otro cercano al verdadero. No introducir tres opciones remotamente absurdas o que pertenezcan a disciplinas distintas.
+3. Comprueba la prueba de ocultación: si un aspirante que no conoce el manual puede descartar dos opciones simplemente porque son físicamente disparatadas, están formuladas con extremos («siempre», «nunca», «exclusivamente») o difieren groseramente del resto, reformula ESAS alternativas antes de entregar el MISMO JSON. La correcta no debe sobresalir por longitud, cautelas o vocabulario.
+4. CORRECTA: tres distractores cercanos pero falsos para la misma pregunta, sustentados como errores por contraste con la evidencia. INCORRECTA: tres HECHOS VERDADEROS DISTINTOS y explícitos en la evidencia, más una sola falsedad próxima; tres paráfrasis del mismo hecho NO cuentan como tres discriminaciones. Nunca atribuyas una afirmación falsa al manual.
+5. No inventes hechos nuevos: los detalles de la respuesta verdadera proceden del fragmento; las alternativas falsas son CONTRASTES de datos explícitos. Si la ficha es escueta, pregunta su delimitación técnica exacta sin construir supuestos nuevos ni crear una ambigüedad. En cifras, compara valores de igual unidad y magnitud y condiciones de la misma fila, sin respuestas solapadas.
+6. Ejemplo de TÉCNICA DE REDACCIÓN, con material ya documentado, NO copiarlo como pregunta del lote ni usarlo como fuente de otras fichas:
+   «¿Qué combinación describe el ataque indirecto?»
+   A) Exterior por una abertura; aplicación prolongada para llenar el recinto de vapor. [correcta]
+   B) Interior por una abertura; aplicación prolongada para llenar el recinto de vapor.
+   C) Exterior por una abertura; aplicación breve para llenar el recinto de vapor.
+   D) Exterior por una abertura; aplicación prolongada para evitar formar vapor.
+   Las falsas alteran SOLO un rasgo de la misma técnica, sin distractores de otra familia.
+7. Comprueba la unicidad de la clave dentro de esta generación; si hay dos alternativas compatibles con la evidencia, reformula sin enviar otra petición. Mantén el estilo del examen oficial 2024/2026 según la familia asignada. No aumentes complejidad, llamadas a Gemini ni tiempos de espera.
+Este bloque no modifica las 45 preguntas gráficas prefabricadas, las siete plantillas numéricas locales ni los temas 37, 38 y 39.
 `:'';
   return `\nTEMA 40, CEIS Guadalajara: 4 opciones y UNA correcta;
 referir siempre la técnica, condición, tabla, magnitud y unidad pertinente.
@@ -9537,7 +9546,19 @@ function specificEvidenceReady128(t){
   // Una fórmula original breve (Q = S·v) es evidencia suficiente para T39.
   if(t39Hydraulica(t) && String(t?.item_type||'').toLowerCase()==='formula' &&
      /[A-Za-z\u0370-\u03ff](?:_[A-Za-z0-9]+)?\s*=\s*[^=\s]{1,}/.test(String(t?.source_evidence||'')))return true;
-  return String(t?.source_evidence||'').trim().length>=55||
+  const evidence=String(t?.source_evidence||'').trim();
+  // SERVER171: túneles (tema DB 30) y puertos/altos (tema DB 33) contienen
+  // fichas de una sola relación factual que pueden medir menos de 55 caracteres.
+  // Validar la estructura literal, no el tamaño arbitrario del fragmento.
+  // El auditor factual independiente existente sigue comprobando la respuesta.
+  if(String(t?.topic_block||'').toLowerCase()==='geografia'){
+    const topic=Number(t?.topic_id);
+    const route=/^(?:T[uú]nel|Puerto\s*\/\s*alto):\s*[^.]+\.\s*V[ií]a:\s*[A-Z]{1,3}-\d+(?:-[A-Z])?(?:\s*\/\s*[A-Z]{1,3}-\d+(?:-[A-Z])?)*\.$/i;
+    const extreme=/^T[ÚU]NEL M[ÁA]S AL (?:NORTE|SUR|ESTE|OESTE) DE NAVARRA:\s*\S.+$/i;
+    if((topic===30&&(/^(?:T[uú]nel):/i.test(evidence)&&route.test(evidence)||extreme.test(evidence)))||
+       (topic===33&&/^Puerto\s*\/\s*alto:/i.test(evidence)&&route.test(evidence)))return true;
+  }
+  return evidence.length>=55||
     (String(t?.topic_block||'').toLowerCase()==='especifico'&&specificFormulaReady128(t));
 }
 function specificNumericReady128(t){
