@@ -14110,8 +14110,26 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const soloSolares=geo && targets.length>0 && targets.every(esTemaSolares2026);
   const soloFerrocarril=geo && targets.length>0 && targets.every(esTemaFerrocarril2026);
   const soloCamino=geo && targets.length>0 && targets.every(esTemaCamino2026);
+  const slots37=targets.flatMap((t,i)=>
+    String(t.topic_block||'').toLowerCase()==='geografia' &&
+    coverageTopicNumber(t.topic_name)===37 ? [i+1] : []);
+  const soloTema37=geo && slots37.length===targets.length;
+  // Una sola instrucción, en el prompt ya existente (sin Gemini adicional).
+  const reglas37=slots37.length ? `REGLA PRIORITARIA EXCLUSIVA DE TEMA 37 EN LOS SLOTS ${slots37.join(', ')}:
+  Elige para CADA slot exactamente UNA de estas TRES redacciones, con el topónimo y, si es preciso, la vertiente/tramo que figura en ESE objetivo:
+  1) «Se produce un accidente en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?»
+  2) «Se declara un incendio en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?»
+  3) «Se requiere un rescate en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?»
+  Sustituye [LUGAR] por el topónimo del objetivo y su sector SOLO si distingue parques. No reveles en el enunciado el parque, ni su nombre como pista. Sin preguntas CORRECTA/INCORRECTA; sin otra interrogación distinta. Las 4 opciones son SOLO cuatro parques físicos de este catálogo literal de los apuntes: Alsasua, Burguete, Central Cordovilla, Estella, Lodosa, Navascués, Oronoz, Peralta, Sangüesa, Tafalla, Tudela. Una única solución: el parque de la cabecera PARQUE DE y de la asociación del objetivo, nunca por proximidad inventada.
+  Solo se examina parque según apuntes; orientación, carreteras, altura, municipio y vertientes sirven exclusivamente para identificar el lugar. Artxuaga sur → Central Cordovilla; Artxuaga norte → Burguete. No son asignaciones oficiales de despacho. Tres variantes = un mismo conocimiento y una sola pregunta por slot. El formato específico T37 prevalece sobre los patrones genéricos de geografía, sin aplicarse a otros slots.
+` : '';
   const examples=leg ? pickLegislationExamples94(targets,difficulty,2) :
     soloPoligonos ? t22ModelosPorLote115(targets) :
+    soloTema37 ? [
+      'Se produce un accidente en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?',
+      'Se declara un incendio en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?',
+      'Se requiere un rescate en [LUGAR]. ¿Qué parque de bomberos intervendría en primer lugar?'
+    ] :
     soloConexiones ? CONEXIONES_ESTILO_EJEMPLOS_2026 :
     soloEolicos ? EOLICOS_ESTILO_EJEMPLOS_2026 :
     soloSolares ? resetSolarExamples82(targets) :
@@ -14162,6 +14180,7 @@ unidades necesarias de los datos y evitando respuestas equivalentes.
 Las preguntas TEÓRICAS cuyo objeto es una fórmula literal no son cálculos.
 MUY ALTA: escribe primero una clave respaldada y tres distractores plausibles sobre LA MISMA variable técnica (magnitud con unidad y escala comparables, condición, paso, componente o relación); evita disparates, absolutos gratuitos y categorías distintas. Si el fragmento solo ofrece un dato sencillo, mantén la precisión literal: nunca inventes otra condición para fingir dificultad. Enunciado breve y de examen, sin escenificaciones («un equipo analiza...») ni referencias genéricas al temario fuera de las literales CEIS; un supuesto operativo solo si está documentado. Cuatro opciones homogéneas, no solapadas y una única solución. INCORRECTA: tres opciones verdaderas y una falsa inequívoca. Explicación consistente con la clave, sin letras A/B/C/D porque se barajan después. Sin hechos externos, filtros ni nuevas rondas.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
+${reglas37}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
@@ -14951,6 +14970,21 @@ function geo114QuestionIssue(q){
   if(normalize(q?.topic_block)!=='geografia')return null;
   const t22Issue=t22QuestionIssue116(q);
   if(t22Issue)return t22Issue;
+  // TEMA 37: se aplica el mismo preflight geográfico ya existente.
+  // Únicamente parque según apuntes; no añadir un validador paralelo.
+  if(coverageTopicNumber(q?.topic_name)===37){
+    const stem37=normalize(q?.stem);
+    if(!/^(?:se produce un accidente en|se declara un incendio en|se requiere un rescate en)\s+.+?\.?\s*¿que parque de bomberos intervendria en primer lugar\?\s*$/.test(stem37))
+      return 't37_plantilla_incidente_parque';
+    const parques37=new Set(['alsasua','burguete','central cordovilla',
+      'estella','lodosa','navascues','oronoz','peralta',
+      'sanguesa','tafalla','tudela']);
+    const options37=Array.isArray(q?.options)?q.options:[];
+    if(options37.length!==4 || options37.some(x=>{
+      const parque=normalize(x).replace(/^parque de (?:bomberos de )?/, '');
+      return !parques37.has(parque);
+    }))return 't37_opciones_no_son_parques';
+  }
   const stem=normalize(q?.stem);
   const opts=Array.isArray(q?.options)?q.options:[];
   if(coverageTopicNumber(q?.topic_name)===22 &&
