@@ -1415,7 +1415,12 @@ Tabla 4: dato impreso 224 kW/m² frente a 244 kW/m² calculados;
 no ofrecer ambos como correctos para una misma pregunta.
 Una pregunta gráfica ya prefabricada se toma del banco y NUNCA se
 redacta o modifica mediante este prompt. Solo los objetivos textuales
-pendientes pasan a Gemini.\n`;
+pendientes pasan a Gemini.
+SERVER162 T40: en modalidades Mixto/Literal, Bernoulli, Charles, flotabilidad,
+presión del viento y ejercicios multietapa se evalúan SOLO mediante fórmula,
+variables, unidades, condiciones y teoría del PDF; nunca convertirlos en
+operaciones numéricas largas. En modo Cálculos exclusivo T40, únicamente se
+usan las siete plantillas numéricas locales auditadas (sin otras fórmulas).\n`;
 }
 // SERVER159: el esquema existente puede conservar un CHECK heredado (0..2),
 // aunque el DDL actual permite 0..3. Sin corregirlo, 10 de las 45 preguntas
@@ -15171,6 +15176,166 @@ app.post('/api/study-bank-test',async(req,res)=>{
   }catch(e){if(client){try{await client.query('ROLLBACK')}catch{}client.release()}
     console.error('111_BANK:',e);return res.status(500).json({ok:false,error:String(e.message||e)});}
 });
+// SERVER162 — Tema 40, modo Cálculos: siete familias NUMÉRICAS de fuente CEIS.
+// Algoritmo local; cero peticiones a Gemini. La fuente, cobertura, SRS y el
+// sistema de sesiones son los que ya utiliza el servidor. Nunca inventa leyes.
+const T40_NUMERIC_162 = Object.freeze({
+  ILC:{ids:[23684,23685,23734],pages:[8,14]},
+  KAWAGOE:{ids:[23688,23690,23735],pages:[8,14]},
+  THORNTON:{ids:[23689,23691,23692],pages:[8,9]},
+  AGUA_SENSIBLE:{ids:[23789,23790,23791,23794,24260],pages:[20,38]},
+  AGUA_LATENTE:{ids:[23792,23793,23798,24261],pages:[20,38]},
+  VAPOR_SENSIBLE:{ids:[23795,23796,23800,24262],pages:[20,21,38]},
+  VOLUMEN_VAPOR:{ids:[23802,23803,23804,23805,23806,23807,23808,24094,24266],pages:[21,38]}
+});
+const T40_NUMERIC_ID_FAMILY_162 = new Map(Object.entries(T40_NUMERIC_162)
+  .flatMap(([family,definition])=>definition.ids.map(id=>[id,family])));
+const T40_EXPANSION_162 = new Map([
+  [23802,[100,1600]],[23803,[100,1600]],[23804,[200,2060]],
+  [23805,[300,2520]],[23806,[400,2980]],[23807,[500,3440]],
+  [23808,[600,3900]],[24094,[200,2060]],[24266,[200,2060]]
+]);
+const t40Pick162=list=>list[Math.floor(Math.random()*list.length)];
+const t40Fmt162=(x,d=2)=>Number(x).toLocaleString('es-ES',{
+  minimumFractionDigits:d,maximumFractionDigits:d,useGrouping:false
+});
+function t40NumericFamily162(t){
+  if(Number(t?.topic_id)!==50 || !t?.exam_relevant)return null;
+  const name=String(t.topic_name||'').toUpperCase();
+  if(!name.includes('TEMA 40 INCENDIOS DE INTERIOR'))return null;
+  const f=T40_NUMERIC_ID_FAMILY_162.get(Number(t.id));
+  if(!f || !T40_NUMERIC_162[f].pages.includes(Number(t.source_page)) ||
+     Number(t.manual_page)!==Number(t.source_page)+82 ||
+     !String(t.source_evidence||'').trim())return null;
+  // Cada ejercicio debe estar vinculado a una ficha fuente ACTIVA.
+  return f;
+}
+// Crea 4 resultados inequívocos y homogéneos, con clave comprobada mediante
+// cálculo independiente del texto y sin respuestas redondeadas equivalentes.
+function t40Choices162(correct,unit,digits){
+  const key=t40Fmt162(correct,digits);
+  const multipliers=[0.75,0.8,0.85,0.9,1.1,1.15,1.2,1.25,1.3];
+  const pool=multipliers.map(f=>t40Fmt162(correct*f,digits));
+  const selected=[key];
+  for(const proposed of pool.sort(()=>Math.random()-.5)){
+    if(!selected.includes(proposed))selected.push(proposed);
+    if(selected.length===4)break;
+  }
+  if(selected.length!==4)throw Error('T40_162: alternativas numéricas no distinguibles');
+  const options=selected.map(v=>`${v} ${unit}`);
+  return {options,correctIndex:0};
+}
+function t40Exercise162(target,difficulty){
+  const family=t40NumericFamily162(target);
+  if(!family)throw Error(`T40_162: fuente no validada para ID ${target?.id}`);
+  const high=difficulty==='muy alta';
+  let stem='',value=0,unit='',digits=2,proof='';
+  switch(family){
+    case 'ILC':{
+      const heat=t40Pick162([20,25,30,40]);
+      const grams=t40Pick162([25,40,50,75,100,125,150,200]);
+      const rate=grams/1000;
+      value=rate*heat; unit='MW';digits=2;
+      stem=high?
+        `En la valoración de un incendio limitado por el combustible, la tasa de combustión es de ${grams} g/s y el poder calorífico considerado es ${heat} MJ/kg. ¿Cuál es la potencia del incendio?`:
+        `En un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`;
+      proof=`Q = ṁc · Hc = ${t40Fmt162(rate,3)} kg/s × ${heat} MJ/kg = ${t40Fmt162(value,2)} MW.`;
+      break;
+    }
+    case 'KAWAGOE':{
+      const heat=t40Pick162([20,25,30]);
+      const height=t40Pick162([1,2.25,4]);
+      const root=Math.sqrt(height);
+      const area=t40Pick162([1,1.5,2,2.5,3]);
+      value=0.092*heat*area*root;unit='MW';digits=3;
+      stem=`En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando Kawagoe con k = 0,092, ¿qué potencia se obtiene?`;
+      proof=`Q = k · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(value,3)} MW.`;
+      break;
+    }
+    case 'THORNTON':{
+      const perSecond=t40Pick162([50,100,150,200,250]);
+      const secs=t40Pick162([10,20,40,60]);
+      const grams=perSecond*secs;
+      value=0.0131*grams/secs;unit='MW';digits=3;
+      stem=`Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton, con 0,0131 MJ por gramo de oxígeno consumido, ¿cuál es la potencia media?`;
+      proof=`Q = Et · mO₂ / t = 0,0131 MJ/g × ${grams} g / ${secs} s = ${t40Fmt162(value,3)} MW.`;
+      break;
+    }
+    case 'AGUA_SENSIBLE':{
+      const from=t40Pick162([0,20,50,80]);
+      const mass=t40Pick162([1,2]);
+      const delta=100-from;
+      value=mass*4.183*delta;unit='kJ';digits=2;
+      stem=`En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. Tomando c = 4,183 kJ/(kg·°C), ¿cuánta energía absorbe?`;
+      proof=`E = m · c · ΔT = ${mass} × 4,183 × (${100} − ${from}) = ${t40Fmt162(value,2)} kJ.`;
+      break;
+    }
+    case 'AGUA_LATENTE':{
+      const mass=t40Pick162([1,2,3,4]);
+      value=mass*2257;unit='kJ';digits=0;
+      stem=`Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. Si el calor latente de evaporación es 2.257 kJ/kg, ¿qué energía requiere únicamente el cambio de fase?`;
+      proof=`E = m · Cv = ${mass} × 2.257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`;
+      break;
+    }
+    case 'VAPOR_SENSIBLE':{
+      const mass=t40Pick162([1,2,3]);
+      const delta=t40Pick162([50,100,200]);
+      const until=100+delta;
+      value=mass*4.09*delta;unit='kJ';digits=2;
+      stem=`En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. Considerando c del vapor = 4,090 kJ/(kg·°C), ¿qué energía absorbe el vapor en ese calentamiento?`;
+      proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × ${delta} = ${t40Fmt162(value,2)} kJ.`;
+      break;
+    }
+    case 'VOLUMEN_VAPOR':{
+      const [temp,factor]=T40_EXPANSION_162.get(Number(target.id))||[];
+      if(!factor)throw Error('T40_162: coeficiente de expansión no asociado a fuente');
+      const litres=t40Pick162([1,2,3,4,5,10]);
+      const efficiency=high?t40Pick162([50,100]):100;
+      const evaporated=litres*efficiency/100;
+      value=evaporated*factor;unit='L';digits=0;
+      stem=`En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Según la tabla de expansión del CEIS (${t40Fmt162(factor,0)} L de vapor por L evaporado), ¿qué volumen de vapor se produce?`;
+      proof=`Agua evaporada = ${litres} × ${efficiency}/100 = ${t40Fmt162(evaporated,2)} L; Vv = ${t40Fmt162(evaporated,2)} × ${t40Fmt162(factor,0)} = ${t40Fmt162(value,0)} L.`;
+      break;
+    }
+    default:throw Error(`T40_162: familia desconocida ${family}`);
+  }
+  if(!Number.isFinite(value)||value<=0)throw Error('T40_162: resultado físico inválido');
+  const {options,correctIndex}=t40Choices162(value,unit,digits);
+  const question={stem,options,correctIndex,
+    explanation:`${proof} Fórmula y dato de referencia: CEIS Guadalajara, p. ${target.manual_page}.`,
+    sourceEvidence:String(target.source_evidence),sourcePage:Number(target.source_page),
+    manualPage:String(target.manual_page),questionFamily:'CALCULO_FORMULACION',
+    difficulty,graphic:null,resetLocal136:true,t40Deterministic162:true};
+  if(resetShape136(question) || !question.options[correctIndex].startsWith(t40Fmt162(value,digits)+' '))
+    throw Error('T40_162: cálculo/opciones inválidos');
+  return question;
+}
+function t40ChooseTargets162(pool,count){
+  const buckets=new Map(Object.keys(T40_NUMERIC_162).map(k=>[k,[]]));
+  const seen=new Set();
+  for(const target of pool){
+    const id=Number(target.id),family=t40NumericFamily162(target);
+    if(family&&!seen.has(id)){buckets.get(family).push(target);seen.add(id);}
+  }
+  const round=[...buckets.keys()];
+  for(let i=round.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));
+    [round[i],round[j]]=[round[j],round[i]];}
+  const selected=[];
+  for(let turn=0;selected.length<count;turn++){
+    let added=false;
+    for(const family of round){
+      const target=buckets.get(family)[turn];
+      if(target){selected.push({...target,questionFamily:'CALCULO_FORMULACION'});added=true;}
+      if(selected.length===count)break;
+    }
+    if(!added)break;
+  }
+  if(selected.length<count){
+    throw Error(`T40 Cálculos: solo ${selected.length} fichas numéricas distintas elegibles para ${count} preguntas en el SRS actual. Reduce la cantidad o espera al repaso programado; no se rellenará con teoría ni se repetirán fichas.`);
+  }
+  return selected;
+}
+
 app.post('/api/generate',async(req,res)=>{
   const started=Date.now();const supplied=req.body?.runId;
   const runId=normalizeGenerationRunId(supplied);const signature=runId?generationRunSignature(req.body):null;
@@ -15214,6 +15379,44 @@ app.post('/api/generate',async(req,res)=>{
     if(req.body?.testType && !['new','normal'].includes(req.body.testType))
       throw Error('Modalidad incorrecta: los repasos tienen un endpoint sin Gemini.');
     const topicIds=await resolveGenerationTopicScope(req.body);
+    // SERVER162: Tema 40, modo CÁLCULOS puro = plantillas numéricas
+    // auditadas. Sin Gemini, sin alterar T38/T39, gráficos, bancos ni SRS.
+    if(mode==='calculos' && Array.isArray(topicIds)&&topicIds.includes(50)){
+      if(topicIds.length!==1)throw Error(
+        'Para utilizar las plantillas del Tema 40 en Cálculos, selecciona solo ese tema. No se mezclan fórmulas de otros temas.');
+      if(count>40)throw Error('T40 Cálculos: máximo 40 preguntas por sesión.');
+      const identity=await db.query(`SELECT id,block,topic_order,name
+        FROM topics WHERE id=$1`,[50]);
+      const row=identity.rows[0];
+      if(row?.block!=='especifico'||Number(row.topic_order)!==40||
+         !String(row.name||'').toUpperCase().startsWith('TEMA 40 INCENDIOS DE INTERIOR'))
+        throw Error('T40_162: identidad del tema no verificada. No se generan preguntas.');
+      const pool=await getAdaptiveCoverageCandidates(1000,[50],examMode,freshOnly111);
+      const chosen=t40ChooseTargets162(pool,count);
+      const usedStems162=new Set();
+      let local=chosen.map(t=>{
+        for(let attempt=0;attempt<100;attempt++){
+          const candidate=t40Exercise162(t,difficulty);
+          const key=R136_NORM(candidate.stem);
+          if(!usedStems162.has(key)){usedStems162.add(key);return candidate;}
+        }
+        throw Error('T40_162: no se consiguió una variante de enunciado distinta sin repetir conocimiento.');
+      });
+      // Mismo validador de alternativas y redistribución de la aplicación.
+      local=resetBalanceNewAnswers83(local);
+      if(local.some(q=>resetShape136(q))||
+         new Set(local.map(q=>R136_NORM(q.stem))).size!==local.length)
+        throw Error('T40_162: pregunta duplicada o malformada; nada se guarda.');
+      draft136={targets:chosen,questions:local};
+      const saved=await persistGeneratedTest({questions:local,targets:chosen,
+        requestedCount:count,difficulty,mode,testType:freshOnly111?'new':testType,
+        runId,runSignature:signature,freshOnly111});
+      console.log('T40_162_CALCULOS_OK',JSON.stringify({count,sessionId:saved.sessionId,
+        families:chosen.map(t=>t40NumericFamily162(t)),geminiCalls:0}));
+      return res.json({ok:true,sessionId:saved.sessionId,
+        questions:publicManualPageQuestions(saved.questions),
+        geminiCalls:0,coverage:{targeted:chosen.length,markedWorked:0}});
+    }
     // El manual IIFF reside íntegro en PostgreSQL; no depende de File Search.
     // Se conserva la condición original para TODOS los demás ámbitos.
     if(!STORE){
