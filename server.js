@@ -1428,6 +1428,15 @@ ${t40Difficulty163}
 Una pregunta gráfica ya prefabricada se toma del banco y NUNCA se
 redacta o modifica mediante este prompt. Solo los objetivos textuales
 pendientes pasan a Gemini.
+SERVER167 T40 — Banco docente de fórmulas CEIS para preguntas de Muy alta:
+Bernoulli (P+ρgh+ρv²/2), conservación de masa, gases ideales y
+proporción de temperaturas absolutas, radiación Stefan-Boltzmann,
+presión eólica ρv²/2, caudales Ql/QULH/Qr, relación r=Ae/Ai,
+diferencial ΔP=k′/(1+r²), densidad ρ=m/V y calor en tres fases.
+En un test Mixto de diez preguntas, no más de DOS deben ser puramente
+teóricas de fórmulas. Solo puede usarse como fuente factual el soporte
+concreto de CADA objetivo asignado, no este listado como sustituto del PDF.
+Evita mencionar la ley en el enunciado cuando su nombre regale la respuesta.
 SERVER162 T40: en modalidades Mixto/Literal, Bernoulli, Charles, flotabilidad,
 presión del viento y ejercicios multietapa se evalúan SOLO mediante fórmula,
 variables, unidades, condiciones y teoría del PDF; nunca convertirlos en
@@ -11027,18 +11036,23 @@ async function persistGeneratedTest({
     // SERVER96: última barrera, bajo bloqueo de filas, contra dos POST
     // concurrentes, recuperaciones y sustituciones posteriores a selección.
     const ids=targets.map(t=>Number(t?.id));
-    if(ids.some(id=>!Number.isInteger(id)||id<=0)||new Set(ids).size!==ids.length)
-      throw new Error('SRS96: objetivos inexistentes o repetidos dentro del test.');
+    if(ids.some(id=>!Number.isInteger(id)||id<=0)||
+       (!isPractice111(testType)&&new Set(ids).size!==ids.length))
+      throw new Error('SRS96: objetivos inexistentes o repetidos en test con seguimiento SRS.');
     const locked=await client.query(`SELECT id FROM coverage_items
       WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE`,[ids]);
-    if(locked.rows.length!==ids.length)
+    if(locked.rows.length!==new Set(ids).size)
       throw new Error('SRS96: conocimiento eliminado durante la generación.');
+    // SERVER167: entrenamiento libre del Tema 40 no consume ni adelanta SRS.
+    // Toda generación NORMAL sigue usando EXACTAMENTE la barrera original.
+    if(!isPractice111(testType)){
     const eligible=await client.query(`SELECT ci.id FROM coverage_items ci
       LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
       WHERE ci.id=ANY($1::int[]) AND ${SRS96_ELIGIBLE_SQL}
         AND ${freshOnly111 ? FRESH111_SQL : 'TRUE'}`,[ids]);
     if(eligible.rows.length!==ids.length)
       throw new Error('SRS96: algún conocimiento se preguntó antes de su plazo de repaso. No se guarda el test.');
+    }
     for(const topicId of iiffTopics96){
       const blocked=await iiff96BlockedHistory(topicId,client);
       if(targets.some((t,index)=>Number(t.topic_id)===topicId &&
@@ -15228,9 +15242,9 @@ function t40NumericFamily162(t){
 // SERVER166 — conversión dimensional SOLO en parte de las preguntas del T40.
 // Primero se calculan cuatro magnitudes físicas distintas; después se elige
 // cómo expresarlas. No hay dobles soluciones MW/kW, kJ/MJ o L/m³.
-const T40_ALT_UNITS_166=Object.freeze({MW:['kW',1000],kJ:['MJ',0.001],L:['m³',0.001]});
+const T40_ALT_UNITS_166=Object.freeze({MW:['kW',1000],kJ:['MJ',0.001],L:['m³',0.001],kg:['g',1000]});
 function t40CanonicalOption166(option,baseUnit){
-  const m=String(option).match(/^([0-9]+(?:,[0-9]+)?) (MW|kW|kJ|MJ|L|m³)$/);
+  const m=String(option).match(/^([0-9]+(?:,[0-9]+)?) (MW|kW|kJ|MJ|L|m³|kg|g|m²|°C|%|veces)$/);
   if(!m)throw Error('T40_166: alternativa con unidad no reconocida');
   const number=Number(m[1].replace(',','.'));
   const alternate=T40_ALT_UNITS_166[baseUnit];
@@ -15261,7 +15275,7 @@ function t40Choices162(correct,unit,digits,mixedUnits166=false){
   const [altUnit,multiplier]=T40_ALT_UNITS_166[unit]||[];
   const options=selected.map((num,i)=>{
     if(altIndices.has(i)){
-      const precision=unit==='MW'?Math.max(0,digits-3):digits+3;
+      const precision=unit==='MW'?Math.max(0,digits-3):unit==='kg'?Math.max(0,digits-2):digits+3;
       return `${t40Fmt162(num*multiplier,precision)} ${altUnit}`;
     }
     return `${t40Fmt162(num,digits)} ${unit}`;
@@ -15271,7 +15285,7 @@ function t40Choices162(correct,unit,digits,mixedUnits166=false){
   if(physical.some(v=>!Number.isFinite(v)||v<=0) ||
      Math.abs(physical[0]-correct)>roundingTolerance ||
      physical.slice(1).some(v=>Math.abs(v-correct)<=roundingTolerance) ||
-     physical.some((v,i)=>physical.slice(i+1).some(v2=>Math.abs(v-v2)<=roundingTolerance*2)))
+     physical.some((v,i)=>physical.slice(i+1).some(v2=>Math.abs(v-v2)<=Math.max(1e-8,roundingTolerance*0.25))))
     throw Error('T40_166: equivalencia entre alternativas o resultado impreciso');
   return {options,correctIndex:0};
 }
@@ -15283,137 +15297,318 @@ function t40MixedUnitSlots166(count){
   }
   return new Set(positions.slice(0,Math.max(1,Math.floor(count*0.30))));
 }
-function t40Exercise162(target,difficulty,variantIndex166=0,mixedUnits166=false){
-  const family=t40NumericFamily162(target);
-  if(!family)throw Error(`T40_162: fuente no validada para ID ${target?.id}`);
-  const high=difficulty==='muy alta';
-  const alternateInput166=variantIndex166%2===1;
-  let stem='',value=0,unit='',digits=2,proof='';
+
+// SERVER167 — banco teórico de fórmulas CEIS: alternativas prevalidables y
+// anclas individuales de cobertura; no se pide a Gemini inventar fórmulas.
+// En modalidad Mixto, Gemini sigue disponiendo de las fichas de fórmulas
+// originales del PDF y del instructivo factual del Tema 40.
+const T40_FORMULA_BANK_167=Object.freeze([{"key":"DENSIDAD_T","sourceId":24240,"stem":"Si se compara la densidad de un mismo gas a 20 °C y 500 °C manteniendo la presión constante, ¿qué cociente permite calcular la densidad final a partir de la inicial?","options":["(273 + 500) / (273 + 20)","(273 + 20) / (273 + 500)","500 / 20","(500 − 20) / 273"],"correctIndex":1,"explanation":"La densidad a presión constante es inversamente proporcional a la temperatura absoluta: ρ₂ = ρ₁ · T₁/T₂. CEIS p. 88.","sourcePage":6,"manualPage":88},{"key":"STEFAN","sourceId":24241,"stem":"En las condiciones de aplicación de la ley de radiación recogida en el manual, si se duplica la temperatura absoluta del colchón de gases, ¿por qué factor varía la potencia radiada?","options":["4","8","16","2"],"correctIndex":2,"explanation":"La potencia radiada es proporcional a la cuarta potencia de la temperatura absoluta: 2⁴ = 16. CEIS p. 88.","sourcePage":6,"manualPage":88},{"key":"HC_QUIM","sourceId":23725,"stem":"En la expresión del poder calorífico del combustible basada en las energías químicas del manual, ¿cuál es la relación correcta?","options":["Hc = Eq inicial − Eq final − E activación","Hc = Eq final − Eq inicial − E activación","Hc = Eq inicial − Eq final + E activación","Hc = Eq inicial + Eq final − E activación"],"correctIndex":0,"explanation":"El manual representa Hc como energía química inicial menos final menos la de activación. CEIS p. 96.","sourcePage":14,"manualPage":96},{"key":"CARGA_COMB","sourceId":23731,"stem":"En un recinto se mantiene el mismo poder calorífico por unidad de masa, pero se duplica la masa de combustible por unidad de superficie. ¿Qué sucede con la carga de combustible Cc?","options":["Permanece constante","Se divide por dos","Se cuadruplica","Se duplica"],"correctIndex":3,"explanation":"Cc = Hc · μ, donde μ es la masa por unidad de superficie. CEIS p. 96.","sourcePage":14,"manualPage":96},{"key":"SALIDA_MASA","sourceId":23827,"stem":"En la aplicación del principio de conservación de masa a la ventilación de un incendio, ¿qué expresión incorpora correctamente la masa combustible que se convierte en gas?","options":["m saliente = m entrante − m gas","m saliente = m entrante + m gas","m entrante = m saliente + m gas","m gas = m saliente + m entrante"],"correctIndex":1,"explanation":"La masa saliente es la masa entrante más la masa de combustible transformada en gas. CEIS p. 105.","sourcePage":23,"manualPage":105},{"key":"M_GAS_VARIABLE","sourceId":23828,"stem":"Si la masa saliente supera la masa entrante en un proceso de ventilación de incendio, ¿qué representa específicamente esa diferencia en el balance del manual?","options":["La masa de aire retenida sin intercambio","La masa total de oxígeno contenida al inicio","La masa de combustible interior transformada en gas","La masa de vapor exterior que se condensa"],"correctIndex":2,"explanation":"La diferencia entre masa saliente y entrante corresponde a m→gas, combustible convertido en gas. CEIS p. 105.","sourcePage":23,"manualPage":105},{"key":"BERNOULLI_COMPLETO","sourceId":23833,"stem":"Para un flujo ideal en la formulación general de Bernoulli, ¿qué suma de términos permanece constante a lo largo de una línea de corriente?","options":["P + ρgh + ρv²/2","P + ρgh + ρv/2","P + ρg/h + ρv²/2","P + ρh/g + ρv²/2"],"correctIndex":0,"explanation":"Bernoulli incluye presión estática, término hidrostático y presión dinámica. CEIS p. 106.","sourcePage":24,"manualPage":106},{"key":"BERNOULLI_H","sourceId":23834,"stem":"En la ecuación P + ρgh + ρv²/2 = constante, ¿qué representa el término ρgh, frente al término ρv²/2?","options":["Presión dinámica frente a presión estática","Presión absoluta frente a relativa","Caudal volumétrico frente a presión dinámica","Contribución hidrostática por altura frente a presión dinámica"],"correctIndex":3,"explanation":"ρgh es el término hidrostático; ρv²/2 corresponde al dinámico. CEIS p. 106.","sourcePage":24,"manualPage":106},{"key":"BERNOULLI_ALT","sourceId":23835,"stem":"Al aplicar Bernoulli entre dos puntos situados a la misma altura y con igual densidad, ¿qué expresión queda correctamente simplificada?","options":["P₁ + ρv₁²/2 = P₂ + ρv₂/2","P₁ + ρv₁²/2 = P₂ + ρv₂²/2","P₁ + ρgv₁ = P₂ + ρgv₂","P₁ + ρv₁/2 = P₂ + ρv₂/2"],"correctIndex":1,"explanation":"A igual altura se cancela el término ρgh, pero se mantiene v al cuadrado. CEIS p. 106.","sourcePage":24,"manualPage":106},{"key":"BERNOULLI_PV","sourceId":24096,"stem":"Entre dos puntos de una corriente ideal a igual altura y densidad, si aumenta la velocidad y no intervienen pérdidas, ¿qué sucede con la presión estática?","options":["Aumenta en la misma proporción que la velocidad","No varía porque la densidad es igual","Disminuye para compensar el aumento de presión dinámica","Se convierte en presión hidrostática constante"],"correctIndex":2,"explanation":"Con P + ρv²/2 constante, mayor velocidad implica menor presión estática. CEIS p. 106.","sourcePage":24,"manualPage":106},{"key":"CHARLES_ABS","sourceId":24097,"stem":"Para un gas a presión constante se comparan dos volúmenes a distintas temperaturas. ¿Qué relación es válida según el manual?","options":["V₁/T₁ = V₂/T₂, con temperaturas absolutas","V₁/T₁ = V₂/T₂, con temperaturas en °C sin convertir","V₁·T₁ = V₂·T₂, con temperaturas absolutas","V₁/V₂ = T₂/T₁, con temperaturas absolutas"],"correctIndex":0,"explanation":"La relación V/T es constante a presión constante y exige Kelvin. CEIS p. 107.","sourcePage":25,"manualPage":107},{"key":"DENSIDAD_VOL","sourceId":24098,"stem":"Si el volumen ocupado por una masa fija de gases se duplica sin variar la masa, ¿cómo se modifica su densidad?","options":["Se duplica","Permanece igual","Se cuadruplica","Se reduce a la mitad"],"correctIndex":3,"explanation":"ρ = m/V, por lo que duplicar V a masa constante reduce ρ a la mitad. CEIS p. 107.","sourcePage":25,"manualPage":107},{"key":"DENSIDAD_500","sourceId":24099,"stem":"Para estimar la densidad de gases a 500 °C a partir de la densidad a 20 °C, ¿qué transformación corresponde a presión constante?","options":["ρ₅₀₀ = ρ₂₀ · 773/293","ρ₅₀₀ = ρ₂₀ · 293/773","ρ₅₀₀ = ρ₂₀ · 500/20","ρ₅₀₀ = ρ₂₀ · (500 − 20)/293"],"correctIndex":1,"explanation":"Las temperaturas se expresan en Kelvin y se aplica ρ₂ = ρ₁ T₁/T₂. CEIS p. 107.","sourcePage":25,"manualPage":107},{"key":"CAUDAL_LIBRE","sourceId":24007,"stem":"En la caracterización de ventiladores, ¿qué relación define el caudal libre del conjunto según el manual?","options":["Ql = Qe − Qa","Ql = Qa / Qe","Ql = Qe + Qa","Ql = Qe × Qa"],"correctIndex":2,"explanation":"El caudal libre suma el flujo de la hélice y el aire arrastrado. CEIS p. 136.","sourcePage":54,"manualPage":136},{"key":"CAUDAL_EMPUJE","sourceId":24008,"stem":"En la expresión del caudal libre obtenida desde el empuje del ventilador, ¿qué forma recoge el manual?","options":["Ql = √(E·A₀/ρ)","Ql = E·A₀/ρ","Ql = √(E·ρ/A₀)","Ql = E·ρ/A₀"],"correctIndex":0,"explanation":"La relación del manual es Ql = √(E·A₀/ρ). CEIS p. 136.","sourcePage":54,"manualPage":136},{"key":"CAUDAL_ULH","sourceId":24012,"stem":"El método ULH estima el caudal a partir de la velocidad medida en el centro de la salida de gases. ¿Cuál es la operación que realiza?","options":["Área de entrada por velocidad de entrada","Área de salida dividida por velocidad de salida","Velocidad de salida dividida por área de salida","Área de salida por velocidad de salida"],"correctIndex":3,"explanation":"QULH = Ae·ve; extrapolación a la sección completa de salida. CEIS p. 137.","sourcePage":55,"manualPage":137},{"key":"CAUDAL_R","sourceId":24035,"stem":"Se define r como la relación entre área de salida y área de entrada. Sin considerar el incendio, ¿qué expresión recoge el caudal efectivo del ventilador?","options":["Qr = k·r/(1+r²)","Qr = k·r/√(1+r²)","Qr = k/(1+r²)","Qr = k·√(1+r²)/r"],"correctIndex":1,"explanation":"La expresión es Qr = k·r/√(1+r²), con r=Ae/Ai. CEIS p. 141.","sourcePage":59,"manualPage":141},{"key":"PRESION_R","sourceId":24040,"stem":"En la expresión simplificada del diferencial de presión interior de un recinto sometido a VPP, ¿qué dependencia respecto de r=Ae/Ai aparece?","options":["ΔP = k′·(1+r²)","ΔP = k′·r/√(1+r²)","ΔP = k′/(1+r²)","ΔP = k′·√(1+r²)"],"correctIndex":2,"explanation":"ΔP = k′/(1+r²). CEIS p. 142.","sourcePage":60,"manualPage":142},{"key":"PRESION_V","sourceId":24066,"stem":"Si se duplica la velocidad de un viento, manteniendo la misma densidad del aire, ¿qué sucede con la presión eólica básica?","options":["Se cuadruplica","Se duplica","Se divide por dos","Se multiplica por ocho"],"correctIndex":0,"explanation":"Pwb = ρv²/2, luego el factor de incremento es 2²=4. CEIS p. 144.","sourcePage":62,"manualPage":144},{"key":"PRESION_RHO","sourceId":24067,"stem":"En el cálculo de la presión eólica básica, ¿qué valor de densidad del aire utiliza como referencia el manual?","options":["1,0 kg/m³","1,29 kg/m³","0,46 kg/m³","1,2 kg/m³"],"correctIndex":3,"explanation":"El manual utiliza ρ = 1,2 kg/m³ en la relación Pwb = ρv²/2. CEIS p. 144.","sourcePage":62,"manualPage":144},{"key":"TEMP_ABS_VOLUME","sourceId":24265,"stem":"En la contracción térmica de los gases de un recinto a presión constante, ¿qué cociente determina el volumen final respecto al inicial?","options":["T inicial / T final, en Kelvin","T final / T inicial, en Kelvin","T final / T inicial, en °C","(T inicial − T final) / T inicial, en °C"],"correctIndex":1,"explanation":"V₂ = V₁·T₂/T₁ utilizando temperaturas absolutas. CEIS p. 120.","sourcePage":38,"manualPage":120},{"key":"TOTAL_FASES","sourceId":24263,"stem":"Si el agua se calienta hasta 100 °C, se vaporiza y después el vapor sigue calentándose, ¿qué términos deben sumarse para obtener la absorción total?","options":["Solo el calor latente y el calor sensible del vapor","Solo el calor sensible del líquido y el latente","Calor sensible del líquido, calor latente y calor sensible del vapor","Calor sensible del líquido y calor sensible del vapor, restando el latente"],"correctIndex":2,"explanation":"Son tres absorciones: elevar el líquido a ebullición, evaporarlo y sobrecalentar el vapor. CEIS p. 120.","sourcePage":38,"manualPage":120},{"key":"RATIO_3_LAWS","sourceId":24241,"stem":"Según la dependencia radiativa del manual, si la temperatura absoluta aumenta un 50 %, ¿en qué proporción se modifica la potencia radiada, suponiendo constante el resto?","options":["Se multiplica por 1,5","Se multiplica por 2,25","Se multiplica por 3,375","Se multiplica por 5,0625"],"correctIndex":3,"explanation":"Para la radiación P∝T⁴, 1,5⁴=5,0625. CEIS p. 88.","sourcePage":6,"manualPage":88},{"key":"R_RATIO_LIMIT","sourceId":24035,"stem":"Al aumentar indefinidamente la relación r entre salida y entrada de gases en el modelo de VPP del manual, ¿hacia qué valor tiende el factor r/√(1+r²)?","options":["Tiende a 1","Tiende a 0","Aumenta sin límite","Tiende a 1/r"],"correctIndex":0,"explanation":"r/√(1+r²) tiende a 1; el caudal se aproxima al límite k. CEIS p. 141.","sourcePage":59,"manualPage":141}]);
+const T40_NUMERIC_BASE_167=Object.keys(T40_NUMERIC_162);
+const T40_ALL_SOURCE_IDS_167=[...new Set([
+  ...Object.values(T40_NUMERIC_162).flatMap(v=>v.ids),24263,
+  ...T40_FORMULA_BANK_167.map(v=>v.sourceId)
+])];
+const t40Shuffle167=items=>{
+  const a=[...items];
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a;
+};
+// Solo el Tema 40 en Cálculos: los objetivos se consultan por fuente y sin
+// condición temporal, porque la sesión es práctica libre y NO modifica SRS.
+async function t40SourceRows167(){
+  const r=await db.query(`SELECT ci.id,ci.topic_id,t.name AS topic_name,t.block AS topic_block,
+    ci.source_page,ci.manual_page,ci.exam_relevant,ci.source_evidence,ci.concept
+    FROM coverage_items ci JOIN topics t ON t.id=ci.topic_id
+    WHERE ci.topic_id=50 AND ci.id=ANY($1::int[]) AND ci.exam_relevant=TRUE`,
+    [T40_ALL_SOURCE_IDS_167]);
+  return new Map(r.rows.map(x=>[Number(x.id),x]));
+}
+function t40VerifyTheory167(row,entry){
+  return Boolean(row&&Number(row.id)===entry.sourceId&&
+    Number(row.source_page)===entry.sourcePage&&
+    Number(row.manual_page)===entry.manualPage&&
+    Number(row.topic_id)===50&&row.exam_relevant===true&&
+    String(row.source_evidence||'').trim());
+}
+function t40Question167(target,stem,value,unit,digits,proof,mathKey,mixed=false,difficulty='muy alta'){
+  const {options,correctIndex}=t40Choices162(value,unit,digits,mixed&&Boolean(T40_ALT_UNITS_166[unit]));
+  const q={stem,options,correctIndex,
+    explanation:`${proof} Fórmula y dato de referencia: CEIS Guadalajara, p. ${target.manual_page}.`,
+    sourceEvidence:String(target.source_evidence),sourcePage:Number(target.source_page),
+    manualPage:String(target.manual_page),questionFamily:'CALCULO_FORMULACION',
+    difficulty,graphic:null,resetLocal136:true,t40Deterministic162:true,
+    t40MathKey167:mathKey,t40CorrectValue167:value,t40CorrectUnit167:unit,
+    t40MixedUnit167:mixed&&Boolean(T40_ALT_UNITS_166[unit])};
+  if(resetShape136(q)||
+     Math.abs(t40CanonicalOption166(q.options[0],unit)-value)>0.5*Math.pow(10,-digits)+1e-8)
+    throw Error('T40_167: alternativa no válida, ambigua o incorrecta');
+  return q;
+}
+function t40CoreQuestion167(target,family,variant,mixed=false,difficulty='muy alta'){
+  const inverse=variant%2===1;
+  let stem,value,unit,digits,proof,key;
   switch(family){
     case 'ILC':{
       const heat=t40Pick162([20,25,30,40]);
-      const grams=t40Pick162([25,40,50,75,100,125,150,200]);
+      const secs=t40Pick162([10,20,40]);
+      const grams=t40Pick162([50,75,100,125,150,200]);
       const rate=grams/1000;
-      value=rate*heat; unit='MW';digits=2;
-      stem=alternateInput166?
-        `Durante la evaluación de un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con un poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`:
-        (high?
-        `En la valoración de un incendio limitado por el combustible, la tasa de combustión es de ${grams} g/s y el poder calorífico considerado es ${heat} MJ/kg. ¿Cuál es la potencia del incendio?`:
-        `En un incendio limitado por el combustible se consumen ${t40Fmt162(rate,3)} kg/s de material con poder calorífico de ${heat} MJ/kg. ¿Qué potencia desarrolla el incendio?`);
-      proof=`Q = ṁc · Hc = ${t40Fmt162(rate,3)} kg/s × ${heat} MJ/kg = ${t40Fmt162(value,2)} MW.`;
-      break;
+      if(inverse){
+        const mass=t40Pick162([2,4,6,8]);
+        const power=mass/secs*heat;
+        stem=`Durante un incendio limitado por el combustible se desarrolla una potencia de ${t40Fmt162(power,2)} MW durante ${secs} s. El combustible tiene un poder calorífico de ${heat} MJ/kg. ¿Qué masa se consume?`;
+        value=mass;unit='kg';digits=2;
+        proof=`m = Q · t / Hc = ${t40Fmt162(power,2)} × ${secs} / ${heat} = ${t40Fmt162(mass,2)} kg.`;
+        key=`ILC:MASA:${power}:${secs}:${heat}`;
+      }else{
+        stem=`En un incendio limitado por el combustible, la tasa de combustión es de ${grams} g/s y el poder calorífico es ${heat} MJ/kg. ¿Cuál es la potencia del incendio?`;
+        value=rate*heat;unit='MW';digits=2;
+        proof=`Q = ṁc · Hc = ${t40Fmt162(rate,3)} × ${heat} = ${t40Fmt162(value,2)} MW.`;
+        key=`ILC:POTENCIA:${grams}:${heat}`;
+      }break;
     }
     case 'KAWAGOE':{
       const heat=t40Pick162([20,25,30]);
       const height=t40Pick162([1,2.25,4]);
       const root=Math.sqrt(height);
       const area=t40Pick162([1,1.5,2,2.5,3]);
-      value=0.092*heat*area*root;unit='MW';digits=3;
-      stem=alternateInput166?
-        `La dotación valora un incendio limitado por la ventilación con una abertura de ${t40Fmt162(area,1)} m² y ${t40Fmt162(height*100,0)} cm de altura. Considerando Hc = ${heat} MJ/kg, ¿qué potencia resulta de aplicar Kawagoe?`:
-        `En un incendio de interior limitado por la ventilación, con una sola apertura, se considera Hc = ${heat} MJ/kg, superficie de apertura A = ${t40Fmt162(area,1)} m² y altura h = ${t40Fmt162(height,2)} m. Aplicando la ecuación de Kawagoe recogida en el manual, ¿qué potencia se obtiene?`;
-      proof=`Q = k · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(value,3)} MW.` +
-        (alternateInput166?` Altura: ${t40Fmt162(height*100,0)} cm = ${t40Fmt162(height,2)} m.`:'');
-      break;
+      const q=0.092*heat*area*root;
+      if(inverse){
+        stem=`En un incendio de interior limitado por la ventilación, una única apertura de ${t40Fmt162(height,2)} m de altura permite estimar una potencia de ${t40Fmt162(q,3)} MW. Si Hc = ${heat} MJ/kg, ¿qué superficie tiene la apertura?`;
+        value=area;unit='m²';digits=2;
+        proof=`A = Q / (k · Hc · √h) = ${t40Fmt162(q,3)} / (0,092 × ${heat} × ${t40Fmt162(root,2)}) = ${t40Fmt162(area,2)} m².`;
+        key=`KAWAGOE:AREA:${heat}:${height}:${q}`;
+      }else{
+        const cm=t40Pick162([true,false]);
+        stem=`Un incendio de interior limitado por la ventilación presenta una sola apertura de ${t40Fmt162(area,1)} m² y ${cm?t40Fmt162(height*100,0)+' cm':t40Fmt162(height,2)+' m'} de altura. Con un poder calorífico de ${heat} MJ/kg, ¿qué potencia se estima?`;
+        value=q;unit='MW';digits=3;
+        proof=`Q = 0,092 · Hc · A · √h = 0,092 × ${heat} × ${t40Fmt162(area,1)} × ${t40Fmt162(root,2)} = ${t40Fmt162(q,3)} MW.`;
+        key=`KAWAGOE:POTENCIA:${heat}:${height}:${area}`;
+      }break;
     }
     case 'THORNTON':{
       const perSecond=t40Pick162([50,100,150,200,250]);
-      const secs=t40Pick162([10,20,40,60]);
+      const secs=t40Pick162([10,20,40]);
       const grams=perSecond*secs;
-      value=0.0131*grams/secs;unit='MW';digits=3;
-      stem=alternateInput166?
-        `En una intervención se estima que se han consumido ${t40Fmt162(grams/1000,2)} kg de oxígeno durante ${secs} s. ¿Qué potencia media corresponde a la regla de Thornton?`:
-        `Durante la estimación de la potencia de un incendio se determina que se han consumido ${grams} g de oxígeno en ${secs} s. Según la regla de Thornton recogida en el manual, ¿cuál es la potencia media?`;
-      proof=`Q = Et · mO₂ / t = 0,0131 MJ/g × ${grams} g / ${secs} s = ${t40Fmt162(value,3)} MW.`+
-        (alternateInput166?` Oxígeno: ${t40Fmt162(grams/1000,2)} kg = ${grams} g.`:'');
-      break;
+      const q=0.0131*perSecond;
+      if(inverse){
+        stem=`Durante un incendio se estima una potencia media de ${t40Fmt162(q,3)} MW durante ${secs} segundos. ¿Qué masa de oxígeno se ha consumido en ese intervalo?`;
+        value=grams/1000;unit='kg';digits=2;
+        proof=`mO₂ = Q · t / 0,0131 = ${t40Fmt162(q,3)} × ${secs} / 0,0131 = ${grams} g = ${t40Fmt162(value,2)} kg.`;
+        key=`THORNTON:OXIGENO:${perSecond}:${secs}`;
+      }else{
+        stem=`En un incendio se consumen ${grams} g de oxígeno en ${secs} s. ¿Qué potencia media se desarrolla?`;
+        value=q;unit='MW';digits=3;
+        proof=`Q = 0,0131 × mO₂ / t = 0,0131 × ${grams} / ${secs} = ${t40Fmt162(q,3)} MW.`;
+        key=`THORNTON:POTENCIA:${perSecond}:${secs}`;
+      }break;
     }
     case 'AGUA_SENSIBLE':{
-      const from=t40Pick162([0,20,50,80]);
-      const mass=t40Pick162([1,2]);
-      const delta=100-from;
-      value=mass*4.183*delta;unit='kJ';digits=2;
-      stem=alternateInput166?
-        `Durante el enfriamiento en una intervención se calientan ${mass*1000} g de agua líquida de ${from} °C a 100 °C sin llegar a evaporarse. ¿Qué energía absorbe el agua?`:
-        `En una intervención se calientan ${mass} kg de agua líquida desde ${from} °C hasta 100 °C, sin evaporarla. ¿Cuánta energía absorbe el agua durante ese calentamiento?`;
-      proof=`E = m · c · ΔT = ${mass} × 4,183 × (${100} − ${from}) = ${t40Fmt162(value,2)} kJ.`+
-        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
-      break;
+      const initial=t40Pick162([20,40,50,60,80]);
+      const mass=t40Pick162([1,2,3]);
+      const absorbed=mass*4.183*(100-initial);
+      if(inverse){
+        stem=`Una masa de ${mass} kg de agua líquida absorbe ${t40Fmt162(absorbed,2)} kJ y alcanza 100 °C sin vaporizarse. ¿Cuál era su temperatura inicial?`;
+        value=initial;unit='°C';digits=0;
+        proof=`T inicial = 100 − E/(m · 4,183) = 100 − ${t40Fmt162(absorbed,2)}/(${mass} × 4,183) = ${initial} °C.`;
+        key=`AGUA:T_INICIAL:${mass}:${initial}`;
+      }else{
+        const grams=t40Pick162([true,false]);
+        stem=`Durante una intervención se calientan ${grams?mass*1000+' g':mass+' kg'} de agua líquida de ${initial} °C a 100 °C, sin evaporarla. ¿Qué energía absorbe?`;
+        value=absorbed;unit='kJ';digits=2;
+        proof=`E = m · c · ΔT = ${mass} × 4,183 × (100 − ${initial}) = ${t40Fmt162(value,2)} kJ.`;
+        key=`AGUA:ENERGIA:${mass}:${initial}`;
+      }break;
     }
     case 'AGUA_LATENTE':{
-      const mass=t40Pick162([1,2,3,4]);
-      value=mass*2257;unit='kJ';digits=0;
-      stem=alternateInput166?
-        `En una intervención se transforman por completo en vapor ${mass*1000} g de agua que ya estaban a 100 °C. ¿Qué energía absorbe únicamente la vaporización?`:
-        `Durante una extinción se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. ¿Qué energía absorbe el agua únicamente durante el cambio de fase?`;
-      proof=`E = m · Cv = ${mass} × 2.257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`+
-        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
-      break;
+      if(inverse){
+        const litres=t40Pick162([4,8]);
+        const pct=t40Pick162([25,50,75]);
+        const absorbed=litres*pct/100*2257;
+        stem=`Se aplican ${litres} L de agua a 100 °C y durante el cambio de fase absorben ${t40Fmt162(absorbed,0)} kJ. ¿Qué porcentaje del agua aplicada se ha vaporizado?`;
+        value=pct;unit='%';digits=0;
+        proof=`m evaporada = ${t40Fmt162(absorbed,0)}/2257 = ${t40Fmt162(litres*pct/100,2)} kg; porcentaje = m evaporada/${litres} × 100 = ${pct} %.`;
+        key=`LATENTE:PORCENTAJE:${litres}:${pct}`;
+      }else{
+        const mass=t40Pick162([1,2,3,4,5]);
+        stem=`En una intervención se evaporan por completo ${mass} kg de agua que ya estaban a 100 °C. ¿Qué energía absorbe únicamente la vaporización?`;
+        value=mass*2257;unit='kJ';digits=0;
+        proof=`E = m · Lv = ${mass} × 2257 = ${t40Fmt162(value,0)} kJ. No se suma calentamiento previo.`;
+        key=`LATENTE:ENERGIA:${mass}`;
+      }break;
     }
     case 'VAPOR_SENSIBLE':{
       const mass=t40Pick162([1,2,3]);
-      const delta=t40Pick162([50,100,200]);
-      const until=100+delta;
-      value=mass*4.09*delta;unit='kJ';digits=2;
-      stem=alternateInput166?
-        `Durante un incendio, ${mass*1000} g de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía requiere exclusivamente calentar ese vapor?`:
-        `En un recinto incendiado, ${mass} kg de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía absorbe el vapor únicamente en ese calentamiento?`;
-      proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × ${delta} = ${t40Fmt162(value,2)} kJ.`+
-        (alternateInput166?` Masa: ${mass*1000} g = ${mass} kg.`:'');
-      break;
+      const until=t40Pick162([150,200,300,400,500,600]);
+      const absorbed=mass*4.09*(until-100);
+      if(inverse){
+        stem=`Una masa de ${mass} kg de vapor de agua a 100 °C absorbe ${t40Fmt162(absorbed,2)} kJ sin cambiar de fase. ¿Qué temperatura final alcanza?`;
+        value=until;unit='°C';digits=0;
+        proof=`T final = 100 + E/(m · 4,090) = 100 + ${t40Fmt162(absorbed,2)}/(${mass} × 4,090) = ${until} °C.`;
+        key=`VAPOR:T_FINAL:${mass}:${until}`;
+      }else{
+        const grams=t40Pick162([true,false]);
+        stem=`En un recinto incendiado, ${grams?mass*1000+' g':mass+' kg'} de vapor de agua pasan de 100 °C a ${until} °C. ¿Qué energía absorbe el vapor exclusivamente durante ese calentamiento?`;
+        value=absorbed;unit='kJ';digits=2;
+        proof=`E = m · c vapor · ΔT = ${mass} × 4,090 × (${until} − 100) = ${t40Fmt162(value,2)} kJ.`;
+        key=`VAPOR:ENERGIA:${mass}:${until}`;
+      }break;
     }
     case 'VOLUMEN_VAPOR':{
       const [temp,factor]=T40_EXPANSION_162.get(Number(target.id))||[];
-      if(!factor)throw Error('T40_162: coeficiente de expansión no asociado a fuente');
-      const litres=t40Pick162([1,2,3,4,5,10]);
-      const efficiency=high?t40Pick162([50,100]):100;
-      const evaporated=litres*efficiency/100;
-      value=evaporated*factor;unit='L';digits=0;
-      stem=alternateInput166?
-        `En la refrigeración de gases de un local, la dotación aplica ${litres} L de agua y solo se evapora el ${efficiency} %. Si el vapor alcanza ${temp} °C, ¿qué volumen ocupa conforme a la expansión recogida en el CEIS?`:
-        `En una intervención se aplican ${litres} L de agua; se evapora el ${efficiency} % y el vapor alcanza ${temp} °C. Aplicando los valores de expansión del vapor recogidos en el manual CEIS, ¿qué volumen de vapor se produce?`;
-      proof=`Agua evaporada = ${litres} × ${efficiency}/100 = ${t40Fmt162(evaporated,2)} L; Vv = ${t40Fmt162(evaporated,2)} × ${t40Fmt162(factor,0)} = ${t40Fmt162(value,0)} L.`;
-      break;
+      if(!factor)throw Error('T40_167: fuente de expansión no validada');
+      const litres=t40Pick162([2,4,5,6]);
+      const pct=t40Pick162([25,50,75,100]);
+      const vv=litres*pct/100*factor;
+      if(inverse){
+        const inversePct=t40Pick162([25,50,75]);
+        const finalVol=litres*inversePct/100*factor;
+        stem=`Se aplican ${litres} L de agua y el vapor producido a ${temp} °C ocupa ${t40Fmt162(finalVol,0)} L. ¿Qué porcentaje del agua inicial se ha evaporado?`;
+        value=inversePct;unit='%';digits=0;
+        proof=`Agua evaporada = ${t40Fmt162(finalVol,0)} / ${factor} = ${t40Fmt162(litres*inversePct/100,2)} L; porcentaje = agua evaporada/${litres} × 100 = ${inversePct} %.`;
+        key=`EXPANSION:PORCENTAJE:${temp}:${litres}:${inversePct}`;
+      }else{
+        stem=`En una intervención se aplican ${litres} L de agua, se evapora el ${pct} % y el vapor alcanza ${temp} °C. ¿Qué volumen de vapor se produce?`;
+        value=vv;unit='L';digits=0;
+        proof=`V vapor = (${litres} × ${pct}/100) × ${factor} = ${t40Fmt162(value,0)} L.`;
+        key=`EXPANSION:VOLUMEN:${temp}:${litres}:${pct}`;
+      }break;
     }
-    default:throw Error(`T40_162: familia desconocida ${family}`);
+    default:throw Error('T40_167: familia no definida '+family);
   }
-  if(!Number.isFinite(value)||value<=0)throw Error('T40_162: resultado físico inválido');
-  const {options,correctIndex}=t40Choices162(value,unit,digits,mixedUnits166);
-  const question={stem,options,correctIndex,
-    explanation:`${proof} Fórmula y dato de referencia: CEIS Guadalajara, p. ${target.manual_page}.`,
-    sourceEvidence:String(target.source_evidence),sourcePage:Number(target.source_page),
-    manualPage:String(target.manual_page),questionFamily:'CALCULO_FORMULACION',
-    difficulty,graphic:null,resetLocal136:true,t40Deterministic162:true};
-  if(resetShape136(question) ||
-     Math.abs(t40CanonicalOption166(question.options[correctIndex],unit)-value)>
-       0.5*Math.pow(10,-digits)+1e-8)
-    throw Error('T40_166: cálculo/opciones inválidos');
-  return question;
+  return t40Question167(target,stem,value,unit,digits,proof,key,mixed,difficulty);
 }
-function t40ChooseTargets162(pool,count){
-  const buckets=new Map(Object.keys(T40_NUMERIC_162).map(k=>[k,[]]));
-  const seen=new Set();
-  for(const target of pool){
-    const id=Number(target.id),family=t40NumericFamily162(target);
-    if(family&&!seen.has(id)){buckets.get(family).push(target);seen.add(id);}
+function t40AdvancedQuestion167(target,kind,mixed=false,difficulty='muy alta'){
+  if(kind==='TRIPLE'){
+    if(Number(target.id)!==24263||Number(target.manual_page)!==120)
+      throw Error('T40_167: ancla tres fases inválida');
+    const mass=t40Pick162([1,2,3]);
+    const initial=t40Pick162([15,20,30,50]);
+    const final=t40Pick162([200,300,400,500,600]);
+    const sensible=mass*4.183*(100-initial);
+    const latent=mass*2257;
+    const vapor=mass*4.09*(final-100);
+    const absorbed=sensible+latent+vapor;
+    const stem=`Durante una intervención se aplican ${mass} L de agua a ${initial} °C. Todo el agua alcanza 100 °C, se vaporiza por completo y el vapor se calienta hasta ${final} °C. ¿Qué energía total absorbe el agua en las tres etapas?`;
+    const proof=`Calentamiento líquido: ${t40Fmt162(sensible,2)} kJ; vaporización: ${t40Fmt162(latent,0)} kJ; calentamiento vapor: ${t40Fmt162(vapor,2)} kJ. E total = ${t40Fmt162(absorbed,2)} kJ. Se toman 1 L ≈ 1 kg.`;
+    return t40Question167(target,stem,absorbed,'kJ',2,proof,`TRIPLE:${mass}:${initial}:${final}`,mixed,difficulty);
   }
-  const round=[...buckets.keys()];
-  for(let i=round.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));
-    [round[i],round[j]]=[round[j],round[i]];}
-  const selected=[];
-  for(let turn=0;selected.length<count;turn++){
-    let added=false;
-    for(const family of round){
-      const target=buckets.get(family)[turn];
-      if(target){selected.push({...target,questionFamily:'CALCULO_FORMULACION'});added=true;}
-      if(selected.length===count)break;
+  if(kind==='KAWAGOE_RATIO'){
+    if(![23688,23690,23735].includes(Number(target.id)))
+      throw Error('T40_167: ancla de comparación de aperturas inválida');
+    const [a1,h1,a2,h2]=t40Pick162([[2,1,3,4],[2,4,3,4],[2,1,4,1],[1.5,1,3,4],[2,1,2.5,4]]);
+    const factor=a2*Math.sqrt(h2)/(a1*Math.sqrt(h1));
+    const stem=`Un incendio de interior limitado por la ventilación tiene inicialmente una apertura de ${t40Fmt162(a1,1)} m² y ${h1} m de altura. Después pasa a ${t40Fmt162(a2,1)} m² y ${h2} m de altura, sin cambios en el combustible. ¿Por qué factor cambia la potencia estimada del incendio?`;
+    const proof=`Q₂/Q₁ = (A₂·√h₂)/(A₁·√h₁) = (${t40Fmt162(a2,1)}×${Math.sqrt(h2)})/(${t40Fmt162(a1,1)}×${Math.sqrt(h1)}) = ${t40Fmt162(factor,2)}. Se cancelan k y Hc.`;
+    return t40Question167(target,stem,factor,'veces',2,proof,`RATIO:${a1}:${h1}:${a2}:${h2}`,false,difficulty);
+  }
+  if(kind==='THORNTON_INVERSE'){
+    if(![23689,23691,23692].includes(Number(target.id)))
+      throw Error('T40_167: ancla de consumo de oxígeno inválida');
+    const rate=t40Pick162([50,100,150,200,250]);
+    const secs=t40Pick162([10,20,40]);
+    const power=0.0131*rate;
+    const mass=rate*secs/1000;
+    const stem=`Durante un incendio se estima una potencia media de ${t40Fmt162(power,3)} MW durante ${secs} segundos. ¿Qué masa de oxígeno se ha consumido en ese intervalo?`;
+    const proof=`mO₂ = Q·t/0,0131 = ${t40Fmt162(power,3)} × ${secs} / 0,0131 = ${t40Fmt162(mass*1000,0)} g = ${t40Fmt162(mass,2)} kg.`;
+    return t40Question167(target,stem,mass,'kg',2,proof,`THORNTON:OXIGENO:${rate}:${secs}`,mixed,difficulty);
+  }
+  throw Error('T40_167: avanzada no definida '+kind);
+}
+function t40TheoryQuestion167(target,entry,difficulty='muy alta'){
+  if(!t40VerifyTheory167(target,entry))throw Error('T40_167: teoría sin vínculo literal validado');
+  const q={stem:entry.stem,options:[...entry.options],correctIndex:entry.correctIndex,
+    explanation:entry.explanation,sourceEvidence:String(target.source_evidence),
+    sourcePage:Number(target.source_page),manualPage:String(target.manual_page),
+    questionFamily:'T40_FORMULA_TEORIA_167',difficulty,
+    graphic:null,resetLocal136:true,t40Deterministic162:true,t40TheoryKey167:entry.key};
+  if(resetShape136(q)||q.options.length!==4)throw Error('T40_167: pregunta teórica inválida');
+  return q;
+}
+function t40CanMix167(plan){
+  if(plan.kind==='theory'||plan.advanced==='KAWAGOE_RATIO')return false;
+  if(plan.advanced)return true;
+  return plan.variant%2===0||['ILC','THORNTON'].includes(plan.family);
+}
+// 7 familias obligatorias para tests >=7; para tests de 5, cinco distintas.
+// Solo 1-2 preguntas teóricas en los 3 huecos de los tests de 10.
+// El test libre no consume SRS. Se alternan fórmulas previamente verificadas.
+function t40Plans167(rows,count,usedTheory=new Set()){
+  const buckets=new Map(T40_NUMERIC_BASE_167.map(f=>[f,T40_NUMERIC_162[f].ids
+    .map(id=>rows.get(id)).filter(t=>t40NumericFamily162(t)===f)]));
+  const available=T40_NUMERIC_BASE_167.filter(f=>buckets.get(f).length);
+  if(count>=7&&available.length!==7)throw Error('T40_167: faltan fuentes documentales de alguna de las siete familias.');
+  if(available.length<Math.min(7,count))throw Error('T40_167: menos familias documentales que preguntas.');
+  const taken=new Set();
+  function choose(f){
+    const b=t40Shuffle167(buckets.get(f)||[]);
+    const t=b.find(x=>!taken.has(Number(x.id)))||b[0];
+    if(!t)throw Error('T40_167: sin ficha acreditada para '+f);
+    taken.add(Number(t.id));return t;
+  }
+  let plans=t40Shuffle167(available).slice(0,Math.min(count,7)).map(f=>({kind:'core',family:f,variant:Math.random()<0.5?0:1,target:choose(f)}));
+  if(count<=7)return t40Shuffle167(plans);
+  const slots=count-plans.length;
+  const formulaMax=Math.min(2,slots-1);
+  const theoryN=count>=10?Math.min(formulaMax,Math.floor(Math.random()*3)):0;
+  const advancedN=slots-theoryN;
+  const advancedKinds=['TRIPLE',...t40Shuffle167(['KAWAGOE_RATIO','THORNTON_INVERSE'])];
+  const extras=[];
+  for(let i=0;i<advancedN;i++){
+    if(i<advancedKinds.length){
+      const kind=advancedKinds[i];
+      const candidates=kind==='TRIPLE'?[24263]:kind==='KAWAGOE_RATIO'?[23735,23688,23690]:[23691,23689,23692];
+      const src=candidates.map(id=>rows.get(id)).find(t=>t&&!taken.has(Number(t.id)))||rows.get(candidates[0]);
+      if(!src)throw Error('T40_167: sin ancla avanzada '+kind);
+      extras.push({kind:'advanced',advanced:kind,target:src});taken.add(Number(src.id));
+    }else{
+      const f=T40_NUMERIC_BASE_167[(i-advancedKinds.length)%7];
+      extras.push({kind:'core',family:f,variant:((i-advancedKinds.length)%2),target:choose(f)});
     }
-    if(!added)break;
   }
-  if(selected.length<count){
-    throw Error(`T40 Cálculos: solo ${selected.length} fichas numéricas distintas elegibles para ${count} preguntas en el SRS actual. Reduce la cantidad o espera al repaso programado; no se rellenará con teoría ni se repetirán fichas.`);
+  const avoid=extras.some(x=>x.advanced==='TRIPLE')?new Set(['TOTAL_FASES']):new Set();
+  const theory=t40Shuffle167(T40_FORMULA_BANK_167).filter(e=>
+    t40VerifyTheory167(rows.get(e.sourceId),e)&&!avoid.has(e.key)).sort((a,b)=>
+      Number(usedTheory.has(a.stem))-Number(usedTheory.has(b.stem)));
+  const selected=[];const usedTheoryIds=new Set();
+  for(const entry of theory){
+    if(selected.length>=theoryN)break;
+    if(usedTheoryIds.has(entry.sourceId))continue;
+    selected.push({kind:'theory',entry,target:rows.get(entry.sourceId)});
+    usedTheoryIds.add(entry.sourceId);
   }
-  return selected;
+  if(selected.length!==theoryN)throw Error('T40_167: banco teórico insuficiente');
+  plans=[...plans,...extras,...selected];
+  // Si en el mismo test hay una inversión avanzada de Thornton, la básica
+  // comprueba potencia; no se duplica el despeje de masa.
+  if(plans.some(x=>x.advanced==='THORNTON_INVERSE')){
+    plans.forEach(x=>{if(x.kind==='core'&&x.family==='THORNTON')x.variant=0;});
+  }
+  const eligible=plans.filter(t40CanMix167);
+  const requiredMix=Math.min(Math.floor(count*0.3),eligible.length);
+  for(const p of t40Shuffle167(eligible).slice(0,requiredMix))p.mixed=true;
+  if(count===10&&requiredMix!==3)throw Error('T40_167: no hay tres plazas con unidades mixtas');
+  return t40Shuffle167(plans);
+}
+function t40QuestionsFromPlans167(plans,difficulty='muy alta'){
+  const usedMath=new Set(),usedStem=new Set(),local=[];
+  for(const plan of plans){
+    let accepted=null;
+    for(let attempt=0;attempt<60;attempt++){
+      let q;
+      if(plan.kind==='theory')q=t40TheoryQuestion167(plan.target,plan.entry,difficulty);
+      else if(plan.kind==='advanced')q=t40AdvancedQuestion167(plan.target,plan.advanced,plan.mixed,difficulty);
+      else q=t40CoreQuestion167(plan.target,plan.family,plan.variant,plan.mixed,difficulty);
+      const stem=R136_NORM(q.stem),key=q.t40MathKey167||'THEORY:'+q.t40TheoryKey167;
+      if(!usedMath.has(key)&&!usedStem.has(stem)){
+        usedMath.add(key);usedStem.add(stem);accepted=q;break;
+      }
+      if(plan.kind==='theory')break;
+    }
+    if(!accepted)throw Error('T40_167: duplicado matemático o literal entre preguntas, no se guarda');
+    local.push(accepted);
+  }
+  return local;
 }
 
 app.post('/api/generate',async(req,res)=>{
@@ -15471,36 +15666,32 @@ app.post('/api/generate',async(req,res)=>{
       if(row?.block!=='especifico'||Number(row.topic_order)!==40||
          !String(row.name||'').toUpperCase().startsWith('TEMA 40 INCENDIOS DE INTERIOR'))
         throw Error('T40_162: identidad del tema no verificada. No se generan preguntas.');
-      const pool=await getAdaptiveCoverageCandidates(1000,[50],examMode,freshOnly111);
-      const chosen=t40ChooseTargets162(pool,count);
-      const usedStems162=new Set();
-      const familyUses166=new Map();
-      const mixedSlots166=t40MixedUnitSlots166(chosen.length);
-      let local=chosen.map((t,i)=>{
-        const family=t40NumericFamily162(t);
-        const variant166=familyUses166.get(family)||0;
-        familyUses166.set(family,variant166+1);
-        for(let attempt=0;attempt<100;attempt++){
-          const candidate=t40Exercise162(t,difficulty,variant166,mixedSlots166.has(i));
-          const key=R136_NORM(candidate.stem);
-          if(!usedStems162.has(key)){usedStems162.add(key);return candidate;}
-        }
-        throw Error('T40_162: no se consiguió una variante de enunciado distinta sin repetir conocimiento.');
-      });
-      // Mismo validador de alternativas y redistribución de la aplicación.
+      // 167: práctica libre aislada del SRS, fuentes documentales verificadas.
+      const rows167=await t40SourceRows167();
+      const previouslyAsked=await db.query(`SELECT stem FROM question_bank
+        WHERE question_family='T40_FORMULA_TEORIA_167'
+        ORDER BY last_shown_at DESC LIMIT 30`);
+      const plans167=t40Plans167(rows167,count,new Set(previouslyAsked.rows.map(x=>x.stem)));
+      let local=t40QuestionsFromPlans167(plans167,difficulty);
       local=resetBalanceNewAnswers83(local);
       if(local.some(q=>resetShape136(q))||
-         new Set(local.map(q=>R136_NORM(q.stem))).size!==local.length)
-        throw Error('T40_162: pregunta duplicada o malformada; nada se guarda.');
+         new Set(local.map(q=>R136_NORM(q.stem))).size!==local.length||
+         new Set(local.map(q=>q.t40MathKey167||'THEORY:'+q.t40TheoryKey167)).size!==local.length||
+         local.filter(q=>q.questionFamily==='T40_FORMULA_TEORIA_167').length>2)
+        throw Error('T40_167: diversidad o límites de fórmulas incumplidos');
+      const chosen=plans167.map(p=>p.target);
       draft136={targets:chosen,questions:local};
       const saved=await persistGeneratedTest({questions:local,targets:chosen,
-        requestedCount:count,difficulty,mode,testType:freshOnly111?'new':testType,
-        runId,runSignature:signature,freshOnly111});
-      console.log('T40_162_CALCULOS_OK',JSON.stringify({count,sessionId:saved.sessionId,
-        families:chosen.map(t=>t40NumericFamily162(t)),geminiCalls:0}));
+        requestedCount:count,difficulty,mode,testType:'practice_all',
+        runId,runSignature:signature,freshOnly111:false});
+      console.log('T40_167_CALCULOS_OK',JSON.stringify({count,sessionId:saved.sessionId,
+        families:plans167.filter(p=>p.kind==='core').map(p=>p.family),
+        advanced:plans167.filter(p=>p.kind==='advanced').map(p=>p.advanced),
+        theory:plans167.filter(p=>p.kind==='theory').map(p=>p.entry.key),
+        mixedUnits:local.filter(q=>q.t40MixedUnit167).length,geminiCalls:0,practice:true}));
       return res.json({ok:true,sessionId:saved.sessionId,
-        questions:publicManualPageQuestions(saved.questions),
-        geminiCalls:0,coverage:{targeted:chosen.length,markedWorked:0}});
+        questions:publicManualPageQuestions(saved.questions),geminiCalls:0,
+        coverage:{targeted:chosen.length,markedWorked:0},practice:true});
     }
     // El manual IIFF reside íntegro en PostgreSQL; no depende de File Search.
     // Se conserva la condición original para TODOS los demás ámbitos.
