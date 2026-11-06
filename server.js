@@ -1430,6 +1430,9 @@ Este bloque no modifica las 45 preguntas gráficas prefabricadas, las siete plan
   return `\nTEMA 40, CEIS Guadalajara: 4 opciones y UNA correcta;
 referir siempre la técnica, condición, tabla, magnitud y unidad pertinente.
 No confundir tablas 18/20/22 ni separar relaciones de fila/columna.
+Para cualquier pregunta del apartado 2.3.8/2.3.9, NOMBRAR VPP o ventilación natural según la ficha. Si se pregunta por Qr, aclarar que es caudal efectivo generado por ventilador VPP, y definir r=Ae/Ai, Ae y Ai. No preguntar una ecuación descontextualizada. Para cualquier pregunta que pida identificar una fórmula, las CUATRO alternativas deberán emplear la sintaxis KaTeX ya habilitada en public/app.js, con delimitadores \( ... \), \frac{numerador}{denominador}, \sqrt{...} y subíndices. Las cuatro opciones deben tener apariencia comparable; no escribir una en fracción y tres en texto lineal. Si no puedes formular las cuatro con sintaxis homogénea, pregunta un concepto o valor documentado de las tablas.
+Distingue rigurosamente las tablas: 18 = rendimiento de ventilación natural vertical a 500 °C; 20 = rendimiento del caudal efectivo VPP; 21 = r recomendable y mínima por modalidad; 22 = diferencial de presión en VPP. No trasladar valores de otra tabla a la ficha, ni incorporar datos que no figuran en su evidencia.
+Respuestas de dificultad muy alta: cuatro distractores del MISMO ámbito técnico y grado de precisión; ninguna respuesta correcta debe resaltar por longitud o plausibilidad. Evita preguntas de definición universal con tres disparates. Escoge la condición exacta, una comparación próxima y real o una inferencia limitada respaldada por el fragmento. No usar el título de un índice como objetivo.
 Tabla 2: unidades y valores impresos literales (Hc kJ/kg); no corregirlos.
 Tabla 4: dato impreso 224 kW/m² frente a 244 kW/m² calculados;
 no ofrecer ambos como correctos para una misma pregunta.
@@ -1452,6 +1455,140 @@ variables, unidades, condiciones y teoría del PDF; nunca convertirlos en
 operaciones numéricas largas. En modo Cálculos exclusivo T40, únicamente se
 usan las siete plantillas numéricas locales auditadas (sin otras fórmulas).\n`;
 }
+
+// SERVER175 — T40 VENTILACIÓN: correspondencias contrastadas en las
+// tablas 18, 20, 21 y 22 del CEIS Guadalajara (pp. 130, 141 y 142).
+// No se deduce una cifra de otra tabla ni se consulta Gemini para estas fichas.
+// El dato exacto de la BD DEBE concordar con el inventario ya auditado.
+const T40_VENTILACION_175=Object.freeze({
+  '18':Object.freeze({page:130,ratios:['0,5','1','1,5'],values:[90,71,50]}),
+  '20':Object.freeze({page:141,ratios:['0,5','1','1,5','2','3','4'],values:[50,71,83,89,95,97]}),
+  '22':Object.freeze({page:142,ratios:['0,5','1','1,5','2','3','4'],values:[80,50,30,20,10,6]})
+});
+const T40_R_175=Object.freeze([
+  {tipo:'ventilación natural vertical',rec:'r < 0,5',min:'r < 1'},
+  {tipo:'VPP ofensiva',rec:'r > 2',min:'r > 1'},
+  {tipo:'VPP defensiva',rec:'r > 2',min:'r > 0,5'}
+]);
+function t40TablaFact175(t){
+  if(Number(t?.topic_id)!==50||!t?.exam_relevant)return null;
+  const m=String(t.concept||'').match(/^T40-T(18|20|21|22)-K00([1-9])\s*\|/);
+  if(!m)return null;
+  const table=m[1],idx=Number(m[2])-1;
+  const evidence=String(t.source_evidence||'').replace(/\\u003c/gi,'<')
+    .replace(/\\u003e/gi,'>').replace(/\s+/g,' ').trim();
+  const compact=evidence.toLowerCase().replace(/\s+/g,'');
+  if(!Number.isInteger(Number(t.source_page))||
+     !evidence.includes(`T40-T${table}-K${String(idx+1).padStart(3,'0')}`))return null;
+  if(table==='21'){
+    const f=T40_R_175[idx];
+    if(!f||Number(t.manual_page)!==142)return null;
+    if(!compact.includes(`recomendable:${f.rec.toLowerCase().replace(/\s+/g,'')}`)||
+       !compact.includes(`mínimo:${f.min.toLowerCase().replace(/\s+/g,'')}`))return null;
+    return {table,idx,rec:f.rec,min:f.min,tipo:f.tipo};
+  }
+  const f=T40_VENTILACION_175[table];
+  if(!f||idx<0||idx>=f.values.length||Number(t.manual_page)!==f.page)return null;
+  const r=f.ratios[idx],value=f.values[idx];
+  if(!compact.includes(`r=${r}`)||
+     !new RegExp(`(?:^|[^0-9])${value}\\s*%`).test(evidence))return null;
+  if(table==='18'&&!/ventilación natural vertical/i.test(evidence))return null;
+  if(table==='20'&&!/rendimiento/i.test(evidence))return null;
+  if(table==='22'&&!/presión diferencial/i.test(evidence))return null;
+  return {table,idx,r,value};
+}
+function t40TablaPregunta175(t,seed=0,difficulty='alta'){
+  const fact=t40TablaFact175(t);
+  if(!fact)return null;
+  const sourceEvidence=String(t.source_evidence);
+  const page=String(t.manual_page);
+  let stem,opts,correct;
+  if(fact.table==='21'){
+    // Cuatro relaciones del MISMO tipo, no opciones absurdas de otras técnicas.
+    const requested=seed%2===0?'rec':'min';
+    correct=fact[requested];
+    stem=`Para la ${fact.tipo}, con r = área de salida de gases / área de entrada de aire, ¿qué condición ${requested==='rec'?'recomendable':'mínima'} establece el manual para esa relación de áreas?`;
+    const candidateValues=['r < 0,5','r < 1','r > 0,5','r > 1','r > 2'];
+    opts=[correct,...candidateValues.filter(x=>x!==correct).slice((fact.idx+seed)%2,(fact.idx+seed)%2+3)];
+    if(opts.length!==4)opts=[correct,...candidateValues.filter(x=>x!==correct).slice(0,3)];
+  }else{
+    const f=T40_VENTILACION_175[fact.table],v=f.values,idx=fact.idx;
+    if(fact.table==='18'){
+      stem=`En ventilación natural vertical de gases a 500 °C, la relación entre área de salida y entrada es r = ${fact.r}. ¿Qué rendimiento sobre el teórico máximo corresponde a esa condición?`;
+      opts=[`${fact.value} %`,...([90,71,50,80].filter(x=>x!==fact.value).map(x=>`${x} %`)).slice(0,3)];
+    }else if(fact.table==='20'){
+      stem=`En una ventilación por presión positiva (VPP) destinada a evacuar gases, la relación área de salida / área de entrada es r = ${fact.r}. ¿Qué porcentaje del caudal efectivo máximo teórico se alcanza?`;
+      const order=[...v.keys()].filter(i=>i!==idx).sort((a,b)=>Math.abs(a-idx)-Math.abs(b-idx));
+      opts=[`${fact.value} %`,...order.slice(0,3).map(i=>`${v[i]} %`)];
+    }else{
+      stem=`Durante una operación de presurización con VPP, la relación entre el área de salida y la de entrada de gases es r = ${fact.r}. ¿Qué porcentaje del diferencial de presión máximo teórico corresponde?`;
+      const order=[...v.keys()].filter(i=>i!==idx).sort((a,b)=>Math.abs(a-idx)-Math.abs(b-idx));
+      opts=[`${fact.value} %`,...order.slice(0,3).map(i=>`${v[i]} %`)];
+    }
+    correct=`${fact.value} %`;
+  }
+  const evidenceSuffix=fact.table==='21'
+    ?`${fact.tipo}: recomendable ${fact.rec}; mínima ${fact.min}.`
+    :`r=${fact.r}, ${fact.table==='22'?'diferencial de presión':'rendimiento'} ${fact.value} %.`;
+  const q={stem,options:opts,correctIndex:0,
+    explanation:`Según el manual CEIS Guadalajara, tabla ${fact.table}, página ${page}: ${evidenceSuffix}`,
+    sourceEvidence,sourcePage:t.source_page,manualPage:page,
+    questionFamily:'2026_CORRECTA',difficulty,resetLocal136:true,t40Tabla175:fact.table};
+  return resetShape136(q)?null:q;
+}
+
+function t40FormulaQr175(t,difficulty='alta'){
+  if(Number(t?.topic_id)!==50||Number(t?.id)!==24035||
+     Number(t?.manual_page)!==141||!t?.exam_relevant)return null;
+  const evidence=String(t.source_evidence||'');
+  if(!evidence.includes('Qr = k x (r / raíz de (1 + r²))')||
+     !evidence.includes('r = Ae / Ai'))return null;
+  // Los delimitadores \(...\) son compatibles con el KaTeX ya cargado en
+  // public/app.js. Las CUATRO expresiones se muestran como fracción apilada.
+  const options=[
+    String.raw`\(\displaystyle Q_r=k\cdot\frac{r}{\sqrt{1+r^2}}\)`,
+    String.raw`\(\displaystyle Q_r=k\cdot\frac{r^2}{\sqrt{1+r^2}}\)`,
+    String.raw`\(\displaystyle Q_r=k\cdot\frac{r}{\sqrt{1+r}}\)`,
+    String.raw`\(\displaystyle Q_r=k\cdot\frac{r}{\sqrt{1+2r^2}}\)`
+  ];
+  const q={
+    stem:'En ventilación por presión positiva (VPP), el caudal efectivo (Qr) creado por un ventilador depende de la relación entre el área de salida de gases (Ae) y el área de entrada (Ai). Con r = Ae/Ai y k como la constante de la ecuación, ¿qué expresión reproduce el caudal efectivo, sin considerar el efecto del incendio?',
+    options,correctIndex:0,
+    explanation:'Manual CEIS Guadalajara, página 141: el caudal efectivo de la VPP depende de r=Ae/Ai y sigue Qr=k·r/√(1+r²).',
+    sourceEvidence:evidence,sourcePage:t.source_page,manualPage:String(t.manual_page),
+    questionFamily:'2026_CORRECTA',difficulty,resetLocal136:true,t40Formula175:true
+  };
+  return resetShape136(q)?null:q;
+}
+
+// Dentro del selector EXISTENTE, sin tocar fechas SRS ni hacer una nueva SQL.
+// Se reemplazan SOLO plazas del mismo nivel de prioridad y mismo tema.
+// Cada test corto de T40 reserva hasta dos relaciones tabuladas verificadas.
+function t40PriorizarTablas175(selected,candidates,count,topicIds,strategy){
+  if(!Array.isArray(topicIds)||topicIds.length!==1||Number(topicIds[0])!==50||
+     strategy==='simulation'||count<5)return;
+  const target=Math.min(3,Math.max(1,Math.floor(count/5)));
+  const current=new Set(selected.filter(t=>t40TablaFact175(t)).map(t=>t40TablaFact175(t).table));
+  const selectedIds=new Set(selected.map(t=>Number(t.id)));
+  const pool=candidates.filter(t=>!selectedIds.has(Number(t.id))&&t40TablaFact175(t));
+  // Tablas distintas primero; dentro de ellas, la ficha de menor exposición.
+  pool.sort((a,b)=>(Number(a.adaptive_priority||4)-Number(b.adaptive_priority||4))||
+    (Number(a.times_asked||0)-Number(b.times_asked||0))||Number(a.id)-Number(b.id));
+  let replaced=0;
+  for(const candidate of pool){
+    if(current.size>=target)break;
+    const group=t40TablaFact175(candidate).table;
+    if(current.has(group))continue;
+    const slot=selected.findIndex((t,i)=>i>0&&i%10!==8&&
+      !t40TablaFact175(t)&&Number(t.adaptive_priority||4)===Number(candidate.adaptive_priority||4));
+    if(slot<0)continue;
+    selectedIds.delete(Number(selected[slot].id));
+    selected[slot]=candidate;selectedIds.add(Number(candidate.id));
+    current.add(group);replaced++;
+  }
+  if(replaced)console.log('T40_175_TABLAS_PRIORIZADAS',JSON.stringify({count,replaced,groups:[...current]}));
+}
+
 // SERVER159: el esquema existente puede conservar un CHECK heredado (0..2),
 // aunque el DDL actual permite 0..3. Sin corregirlo, 10 de las 45 preguntas
 // T40 con respuesta D fracasarían y se revertiría toda la importación.
@@ -10338,6 +10475,9 @@ if(selectedAdaptive.length < count){
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
   );
 }
+// SERVER175: dar cabida a tablas 18/20/21/22 en preguntas nuevas T40,
+// sin desplazar vencimientos SRS ni introducir una ruta nueva de generación.
+t40PriorizarTablas175(selectedAdaptive,adaptiveCandidates,count,allowedTopicIds,selectionStrategy);
 // Aplicar una sola vez antes de asignar familias. No fuerza matemáticas
 // inexistentes ni desplaza preguntas de distinta prioridad SRS.
 specificAlignFormula128(selectedAdaptive,adaptiveCandidates);
@@ -10366,7 +10506,9 @@ console.log(
 
   const selected = result.rows.map((item,index)=>({
     ...item,
-    questionFamily: item.ankiPreferredFamily || families[index] || "GENERAL"
+    questionFamily: (t40TablaFact175(item)||
+      (Number(item.topic_id)===50&&Number(item.id)===24035))
+      ? "2026_CORRECTA" : (item.ankiPreferredFamily || families[index] || "GENERAL")
   }));
 /*
 VALIDACIÓN PREVIA DE COMPATIBILIDAD DE FAMILIAS
@@ -13255,11 +13397,12 @@ function resetGeoTableQuestion136(t,seed=0,difficulty='alta',pool=[]){
   const offset=(Number(t.id)||seed)%Math.max(1,other.length);
   const alternatives=[fact.station,...Array.from({length:3},(_,i)=>other[(offset+i)%other.length])];
   if(alternatives.length!==4||new Set(alternatives.map(norm)).size!==4)return null;
-  const municipality=fact.municipality?` (municipio de ${fact.municipality})`:'';
+  // SERVER174: el municipio padre se reserva para explicación y fuente.
+  // No revelar el municipio al preguntar por el parque del concejo/localidad.
   const variants=[
-    `En una intervención en ${fact.place}${municipality}, ¿qué parque de bomberos corresponde según el temario?`,
-    `¿Qué parque de bomberos actuaría en primer lugar en ${fact.place}${municipality}, conforme a las asociaciones de los apuntes?`,
-    `Se produce una emergencia en ${fact.place}${municipality}. ¿Qué parque figura como referencia territorial en el temario?`
+    `En una intervención en ${fact.place}, ¿qué parque de bomberos corresponde según el temario?`,
+    `¿Qué parque de bomberos actuaría en primer lugar en ${fact.place}, conforme a las asociaciones de los apuntes?`,
+    `Se produce una emergencia en ${fact.place}. ¿Qué parque figura como referencia territorial en el temario?`
   ];
   const idx=Math.abs((Number(t.id)||seed)*17+seed)%3;
   const source=`Relación estructurada de la ficha indexada: ${fact.full}. Rótulo original: ${String(t.source_evidence||'').trim()}.`;
@@ -13471,6 +13614,7 @@ function reglasCalidadTransversal81(difficulty,leg,geo){
       : 'ESPECÍFICO: contrastar componentes, magnitudes, unidades o procedimientos documentados; no inventar límites.';
   return `CALIDAD TRANSVERSAL DE OPOSICIÓN:
 - Enunciado natural y directo, sin pistas, fórmulas vacías ni preguntas sobre tablas o páginas.
+- REGLA TRANSVERSAL SIN PISTAS (todos los temas y bloques): pregunta con la IDENTIFICACIÓN MÍNIMA del objeto y solo las condiciones necesarias para resolver una cuestión inequívoca. Si se pregunta por el parque que corresponde a un concejo, municipio, polígono, instalación solar/eólica, helisuperficie, accidente geográfico o lugar, NO anticipes en el enunciado su municipio padre, parque, rutas, carreteras, ubicación cardinal o datos relacionados que faciliten deducir la respuesta; tampoco añadas aclaraciones entre paréntesis. Todos esos datos se conservan completos en la EVIDENCIA y se pueden mostrar en la EXPLICACIÓN/FUENTE tras responder. El nombre auténtico del objeto sí se conserva. Si existe homonimia real que exige diferenciar dos asociaciones, usa SOLO un sector o vertiente imprescindible que NO revele la respuesta; si eso no basta, cambia la operación examinable sin inventar datos. Esta regla también afecta a enunciados con datos técnicos, fechas, organismos y fórmulas: nunca regales en el enunciado el dato que se pide, aunque puede contener las condiciones necesarias para cálculos y razonamientos legítimos.
 - Cuatro alternativas distintas de la MISMA categoría, extensión y precisión similares. Distractores cercanos: variar una propiedad significativa y comprobable, no añadir nombres ni hechos externos. Prohibidas pistas gramaticales y una opción desproporcionadamente detallada.
 ${geo ? `- GEOGRAFÍA (pistas): si preguntas QUÉ polígono está en el municipio X, NINGUNA alternativa puede revelar su municipio entre paréntesis ni incluir una etiqueta geográfica que permita contestar leyendo el propio nombre. NO cambies ni recortes denominaciones oficiales; si el nombre contiene esa pista de forma inherente, reformula la pregunta a otro atributo con evidencia.
 - HIDROGRAFÍA (cuatro opciones): no preguntes SOLO por izquierda/derecha con cuatro respuestas; pregunta por DOS propiedades juntas, p.ej. receptor DIRECTO + margen, o margen + lugar de confluencia, siempre que ambos campos se acrediten expresamente para ese afluente. Las cuatro alternativas han de ser 2 x 2 (dos receptores o dos lugares DOCUMENTADOS x izquierda/derecha), una sola verdadera. No uses márgenes central/superior/posterior/inferior. Si no hay dos lugares respaldados que realmente discriminen, usa receptor directo + margen o cambia la operación examinable. No inventes localidades, receptores o relaciones para completar opciones.` : ""}
@@ -16078,7 +16222,9 @@ app.post('/api/generate',async(req,res)=>{
       const usedLocalStems=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
       for(const {t,index} of todo){
         for(const shift of [0,1]){
-          const local=(shift===0 && riverLocalSlots.has(index)
+          const local=t40TablaPregunta175(t,index+shift,difficulty) ||
+          t40FormulaQr175(t,difficulty) ||
+          (shift===0 && riverLocalSlots.has(index)
             ?geo114RiverComposite(t,riverProofs,difficulty):null) ||
             resetGeoTableQuestion136(t,index+shift,difficulty,targets);
           if(local&&!usedLocalStems.has(R136_NORM(local.stem))){
@@ -16201,7 +16347,9 @@ app.post('/api/generate',async(req,res)=>{
             // Los formatos geográficos deterministas mantienen su ruta normal.
             // Reutilizar la construcción local IIFF previamente acordada SOLO
             // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
-            const local=(high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
+            const local=t40TablaPregunta175(other,slot.index,difficulty)||
+              t40FormulaQr175(other,difficulty)||
+              (high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
               resetGeoTableQuestion136(other,slot.index,difficulty,targets);
             if(local&&!acceptedStems.has(R136_NORM(local.stem))){
               questions[slot.index]=local;acceptedStems.add(R136_NORM(local.stem));
