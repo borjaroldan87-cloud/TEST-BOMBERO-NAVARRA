@@ -1807,11 +1807,53 @@ async function t41ImportOnce(topic){
     await client.query('BEGIN');
     const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
     const t=topics.rows[0];
-    const pdf=await client.query(`SELECT 1 FROM topic_local_pdfs
-      WHERE topic_id=$1 AND TRIM(pdf_sha256)=$2 AND page_count=36
-      AND size_bytes=OCTET_LENGTH(pdf_bytes) LIMIT 1`,[t.id,data.pdf_sha256]);
-    if(!t41Topic(t)||!pdf.rows.length||Number(t.total_items)<1)
-      throw Error('T41: cargar primero el PDF exacto y confirmar cobertura');
+    // T41-179: conservar la indexación File Search existente. Su PDF no se
+    // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
+    // El PDF exacto (36 páginas) se incorpora en el paquete con SHA verificado.
+    if(!t41Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
+      throw Error('T41: tema no indexado; no se altera ninguna cobertura');
+    const remote=await client.query(`SELECT document_name
+      FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
+    if(!remote.rows[0]?.document_name)
+      throw Error('T41: no hay fuente File Search vinculada; no se suplanta');
+    if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
+      throw Error('T41: falta el PDF original y el inventario de ampliaciones');
+    const pdfBytes=Buffer.from(data.pdf_base64,'base64');
+    const fileHash=createHash('sha256').update(pdfBytes).digest('hex');
+    if(fileHash!==data.pdf_sha256||pdfBytes.length<1000||
+       pdfBytes.length>20*1024*1024||
+       pdfBytes.subarray(0,5).toString('latin1')!=='%PDF-')
+      throw Error('T41: PDF local distinto del original indexado');
+    const source=await PDFDocument.load(pdfBytes,{updateMetadata:false});
+    if(source.getPageCount()!==36)throw Error('T41: el PDF no tiene 36 páginas');
+    await client.query(`INSERT INTO topic_local_pdfs
+      (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,36,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [t.id,fileHash,pdfBytes.length,pdfBytes]);
+    const stored=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      encode(sha256(pdf_bytes),'hex') AS stored_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const check=stored.rows[0];
+    if(!check||check.sha!==fileHash||check.stored_sha!==fileHash||
+       Number(check.page_count)!==36||
+       Number(check.size_bytes)!==pdfBytes.length||
+       Number(check.stored_size)!==pdfBytes.length)
+      throw Error('T41: copia PDF local incompatible; no se sobrescribe');
+    // Completar únicamente lagunas verificadas contra páginas físicas.
+    // DO NOTHING preserva historial y SRS si ya se instaló antes.
+    for(const item of data.coverage_additions){
+      if(!/^T41-TXT-AUD-\d{3}$/.test(item.external_key)||
+         !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>36||
+         !item.concept||!item.source_evidence)
+        throw Error('T41: ampliación documental no válida');
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'concepto','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
     const imgMap=new Map();
     for(const asset of data.images){
       const file=asset.file,uri='/graphics/incendios-vegetacion/'+file;
@@ -1880,11 +1922,16 @@ async function t41ImportOnce(topic){
     await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
       WHERE topic_folder='incendios-vegetacion' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
-    await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
-      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query(`UPDATE topics SET
+      name='TEMA 41. INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL',
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
-    console.log('T41_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,images:11,questions:50}));
-    return {ok:true,topicId:t.id,images:11,questions:50};
+    console.log('T41_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
+      images:11,questions:50,documentaryAdditions:data.coverage_additions.length,
+      pdfSha256:fileHash}));
+    return {ok:true,topicId:t.id,images:11,questions:50,
+      documentaryAdditions:data.coverage_additions.length};
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
