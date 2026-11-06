@@ -1430,6 +1430,8 @@ Este bloque no modifica las 45 preguntas gráficas prefabricadas, las siete plan
   return `\nTEMA 40, CEIS Guadalajara: 4 opciones y UNA correcta;
 referir siempre la técnica, condición, tabla, magnitud y unidad pertinente.
 No confundir tablas 18/20/22 ni separar relaciones de fila/columna.
+CEIS p.115: si se trata el ejercicio 5×5×2,5 m a 200 °C, preguntar y responder en LITROS DE AGUA LÍQUIDA (30,3 L), no de vapor; conserva en la fuente la errata literal del manual pero no la copies a una opción correcta. En cálculos, indicar magnitud y unidad. Con datos redondeados, no fabricar distractores a centésimas incompatibles con el propio manual.
+
 Para cualquier pregunta del apartado 2.3.8/2.3.9, NOMBRAR VPP o ventilación natural según la ficha. Si se pregunta por Qr, aclarar que es caudal efectivo generado por ventilador VPP, y definir r=Ae/Ai, Ae y Ai. No preguntar una ecuación descontextualizada. Para cualquier pregunta que pida identificar una fórmula, las CUATRO alternativas deberán emplear la sintaxis KaTeX ya habilitada en public/app.js, con delimitadores \( ... \), \frac{numerador}{denominador}, \sqrt{...} y subíndices. Las cuatro opciones deben tener apariencia comparable; no escribir una en fracción y tres en texto lineal. Si no puedes formular las cuatro con sintaxis homogénea, pregunta un concepto o valor documentado de las tablas.
 Distingue rigurosamente las tablas: 18 = rendimiento de ventilación natural vertical a 500 °C; 20 = rendimiento del caudal efectivo VPP; 21 = r recomendable y mínima por modalidad; 22 = diferencial de presión en VPP. No trasladar valores de otra tabla a la ficha, ni incorporar datos que no figuran en su evidencia.
 Respuestas de dificultad muy alta: cuatro distractores del MISMO ámbito técnico y grado de precisión; ninguna respuesta correcta debe resaltar por longitud o plausibilidad. Evita preguntas de definición universal con tres disparates. Escoge la condición exacta, una comparación próxima y real o una inferencia limitada respaldada por el fragmento. No usar el título de un índice como objetivo.
@@ -1587,6 +1589,28 @@ function t40PriorizarTablas175(selected,candidates,count,topicIds,strategy){
     current.add(group);replaced++;
   }
   if(replaced)console.log('T40_175_TABLAS_PRIORIZADAS',JSON.stringify({count,replaced,groups:[...current]}));
+}
+
+// SERVER176: solución del ejercicio CEIS p.115 con MAGNITUD correcta.
+// El manual imprime "30,3L de vapor de agua", pero calcula 30,3 L de AGUA
+// LÍQUIDA para producir 62.500 L de vapor. Se conserva la cita literal en
+// sourceEvidence; no se altera el PDF, historial SRS ni la base de datos.
+function t40AguaLiquida176(t,difficulty='muy alta'){
+  if(Number(t?.topic_id)!==50||Number(t?.id)!==23905||
+     Number(t?.manual_page)!==115||!t?.exam_relevant)return null;
+  const evidence=String(t.source_evidence||'');
+  if(!/5\s*x\s*5\s*m/i.test(evidence)||
+     !evidence.includes('30,3L de vapor de agua'))return null;
+  const q={
+    stem:'En un recinto confinado de 5 m × 5 m de planta y 2,5 m de altura, se pretende llenarlo de vapor a 200 °C. Si 1 L de agua líquida produce 2.060 L de vapor a esa temperatura y la efectividad es del 100 %, ¿qué volumen de AGUA LÍQUIDA es necesario?',
+    options:['15,2 L de agua líquida','30,3 L de agua líquida',
+      '62,5 L de agua líquida','125,0 L de agua líquida'],
+    correctIndex:1,
+    explanation:String.raw`El recinto contiene \(5\cdot5\cdot2{,}5=62{,}5\ \mathrm{m}^3=62\,500\ \mathrm{L}\) de volumen. El agua líquida necesaria es \(V_{agua}=\frac{62\,500}{2\,060}=30{,}34\ \mathrm{L}\), aproximadamente 30,3 L. NOTA DOCUMENTAL: la respuesta impresa del CEIS, p. 115, dice «30,3 L de vapor de agua», pero ese volumen corresponde al agua LÍQUIDA antes de evaporarse; el vapor ocupa 62.500 L.`,
+    sourceEvidence:evidence,sourcePage:t.source_page,manualPage:'115',
+    questionFamily:'CALCULO_FORMULACION',difficulty,resetLocal136:true,t40Liquid176:true
+  };
+  return resetShape136(q)?null:q;
 }
 
 // SERVER159: el esquema existente puede conservar un CHECK heredado (0..2),
@@ -14994,6 +15018,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
     WHERE qb.active=TRUE AND ${SRS96_ELIGIBLE_SQL}
+      AND NOT (qb.id=1341 AND ci.id=23905) /* T40 CEIS p115: magnitud errónea */
       AND ${onlyFresh111 ? FRESH111_SQL : 'TRUE'}
       AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
       AND qb.validation_version>=6
@@ -15404,6 +15429,7 @@ async function fetchBankReview111({count,topicIds,testType,difficulty}){
     LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
     LEFT JOIN legislation_anki_questions aq ON aq.id=qb.source_anki_question_id
     WHERE qb.active=TRUE AND qb.validation_version>=6
+      AND NOT (qb.id=1341 AND ci.id=23905) /* pregunta antigua conserva historia */
       AND qb.validation_version NOT IN (107,113)
       AND ci.times_asked>0
       AND (ci.exam_relevant=TRUE OR ci.item_type='anki_independent')
@@ -16224,6 +16250,7 @@ app.post('/api/generate',async(req,res)=>{
         for(const shift of [0,1]){
           const local=t40TablaPregunta175(t,index+shift,difficulty) ||
           t40FormulaQr175(t,difficulty) ||
+          t40AguaLiquida176(t,difficulty) ||
           (shift===0 && riverLocalSlots.has(index)
             ?geo114RiverComposite(t,riverProofs,difficulty):null) ||
             resetGeoTableQuestion136(t,index+shift,difficulty,targets);
@@ -16349,6 +16376,7 @@ app.post('/api/generate',async(req,res)=>{
             // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
             const local=t40TablaPregunta175(other,slot.index,difficulty)||
               t40FormulaQr175(other,difficulty)||
+              t40AguaLiquida176(other,difficulty)||
               (high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
               resetGeoTableQuestion136(other,slot.index,difficulty,targets);
             if(local&&!acceptedStems.has(R136_NORM(local.stem))){
