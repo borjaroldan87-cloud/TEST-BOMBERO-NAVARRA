@@ -16723,9 +16723,109 @@ async function applyT40DocumentalRepair161(){
   }finally{client.release();}
 }
 
+// SERVER172: fe de erratas documental del Tema 37. UNICA transaccion idempotente.
+// No interviene en prompts, auditores, filtros ni llamadas de Gemini.
+async function applyT37CorrectionsOnce172(){
+  const marker='t37_correcciones_documentales_2026_11_06_v1';
+  const client=await db.connect();
+  let inTransaction=false;
+  try{
+    await client.query('BEGIN'); inTransaction=true;
+    const check=await client.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[marker]);
+    if(check.rowCount){await client.query('COMMIT');inTransaction=false;return;}
+    const topic=(await client.query('SELECT * FROM topics WHERE id=51 FOR UPDATE')).rows[0];
+    if(!topic || topic.name!=='TEMA 37 ACCIDENTES GEOGRAFICOS Y SIERRAS' ||
+       Number(topic.total_items)!==392)throw Error('Tema 37: estado distinto del auditado');
+    const ids=[24328,24371,24481,24507,24530];
+    const cover=(await client.query('SELECT * FROM coverage_items WHERE topic_id=51 AND id=ANY($1::int[]) FOR UPDATE',[ids])).rows;
+    const ci=new Map(cover.map(x=>[Number(x.id),x]));
+    if(ci.size!==5 || !ci.get(24328)?.concept?.startsWith('Arrizuri.') ||
+       !ci.get(24371)?.concept?.startsWith('Carizgordo.') ||
+       !ci.get(24507)?.concept?.startsWith('Bengasa.') ||
+       !ci.get(24481)?.concept?.startsWith('Camporrada.') ||
+       !ci.get(24530)?.concept?.startsWith('Camporrada.') ||
+       ci.get(24481).section!=='PARQUE DE PERALTA' ||
+       ci.get(24530).section!=='PARQUE DE TAFALLA' ||
+       !ids.every(id=>ci.get(id).exam_relevant===true) ||
+       Number(ci.get(24481).times_asked)!==1 ||
+       Number(ci.get(24481).times_wrong)!==1 ||
+       Number(ci.get(24530).times_asked)!==0)
+      throw Error('Tema 37: fichas modificadas; no aplicar automaticamente');
+    const questionIds=[1228,1229,1232,1233];
+    const bank=(await client.query('SELECT * FROM question_bank WHERE id=ANY($1::bigint[]) FOR UPDATE',[questionIds])).rows;
+    const qb=new Map(bank.map(x=>[Number(x.id),x]));
+    if(qb.size!==4 || qb.get(1228).coverage_item_id!==24328 ||
+       qb.get(1229).coverage_item_id!==24371 ||
+       qb.get(1233).coverage_item_id!==24507 ||
+       qb.get(1232).coverage_item_id!==24481 ||
+       qb.get(1232).correct_index!==3 || qb.get(1232).options?.[1]!=='Tafalla' ||
+       Number(qb.get(1232).times_wrong)!==1 || Number(qb.get(1232).times_shown)!==1)
+      throw Error('Tema 37: banco distinto del auditado');
+    const exam=(await client.query('SELECT * FROM test_sessions WHERE id=133 FOR UPDATE')).rows[0];
+    const answer=(await client.query('SELECT * FROM test_session_questions WHERE id=1260 FOR UPDATE')).rows[0];
+    const rev=(await client.query('SELECT * FROM coverage_review_state WHERE coverage_item_id=24481 FOR UPDATE')).rows[0];
+    const targetReview=(await client.query('SELECT * FROM coverage_review_state WHERE coverage_item_id=24530 FOR UPDATE')).rows;
+    if(!exam || exam.correct_answers!==5 || exam.wrong_answers!==5 || exam.total_questions!==10 ||
+       !answer || Number(answer.session_id)!==133 || Number(answer.question_id)!==1232 ||
+       answer.coverage_item_id!==24481 || answer.selected_index!==1 || answer.is_correct!==false ||
+       !rev || rev.total_reviews!==1 || rev.total_wrong!==1 || targetReview.length)
+      throw Error('Tema 37: puntuacion o SRS han variado; no aplicar automaticamente');
+    const more=(await client.query('SELECT id FROM question_bank WHERE coverage_item_id=ANY($1::int[]) AND id<>ALL($2::bigint[])',[ids,questionIds])).rows;
+    if(more.length)throw Error('Tema 37: hay preguntas nuevas en las fichas rectificadas');
+    // Copia de los registros anteriores, recuperable desde app_state.
+    const backup={timestamp:new Date().toISOString(),topic,cover,bank,exam,answer,review:rev,
+      source:'Correcciones del usuario: Arrizuri, Cabizgordo, Benasa y Camporrada'};
+    const change=async(sql,params,n=1)=>{
+      const result=await client.query(sql,params);
+      if(result.rowCount!==n)throw Error('Tema 37: cantidad inesperada en un cambio');
+    };
+    // Rectificar el contexto exclusivamente en la fuente de Arrizuri.
+    const arr=' Descripción de los apuntes: Pico al norte de Aranarache, en las Limitaciones de las Améscoas.';
+    await change('UPDATE coverage_items SET source_evidence=source_evidence || $1 WHERE id=24328',[arr]);
+    await change('UPDATE question_bank SET source_evidence=source_evidence || $1,updated_at=NOW() WHERE id=1228',[arr]);
+    // Nombres validados: los codigos originales y la clave SRS no cambian.
+    for(const [ciId,qbId,fromName,toName] of [[24371,1229,'Carizgordo','Cabizgordo'],[24507,1233,'Bengasa','Benasa']]){
+      await change(`UPDATE coverage_items SET concept=replace(concept,$1,$2),
+        source_evidence=replace(source_evidence,$1,$2) WHERE id=$3`,[fromName,toName,ciId]);
+      await change(`UPDATE question_bank SET stem=replace(stem,$1,$2),
+        explanation=replace(explanation,$1,$2),source_evidence=replace(source_evidence,$1,$2),
+        updated_at=NOW() WHERE id=$3`,[fromName,toName,qbId]);
+    }
+    // Camporrada: NO son dos parajes. La ficha de Peralta se archiva, no se borra.
+    await change(`UPDATE coverage_items SET exam_relevant=FALSE,worked=FALSE,
+       times_asked=0,times_correct=0,times_wrong=0,times_blank=0,last_asked_at=NULL
+       WHERE id=24481`,[]);
+    await change(`UPDATE coverage_items SET worked=TRUE,times_asked=1,times_correct=1,
+       times_wrong=0,times_blank=0,last_asked_at=$1 WHERE id=24530`,[ci.get(24481).last_asked_at]);
+    // Conservar la pregunta original, ahora vinculada a la ficha correcta.
+    const source=`H263 · Camporrada. ACCIDENTE GEOGRAFICO. Ubicacion de referencia: paraje agrícola entre Traibuenas y Santacara. Asociacion de parque segun los apuntes: Tafalla. Fuentes: H07-03. Descripción de los apuntes: Llanura o paraje agrícola entre Traibuenas y Santacara.`;
+    await change(`UPDATE question_bank SET coverage_item_id=24530,correct_index=1,
+      explanation='Camporrada corresponde al parque de Tafalla, segun la correccion expresa de los apuntes. Rada es una excepcion territorial distinta.',
+      source_evidence=$1,times_correct=1,times_wrong=0,updated_at=NOW()
+      WHERE id=1232`,[source]);
+    await change('UPDATE test_session_questions SET coverage_item_id=24530,is_correct=TRUE WHERE id=1260',[]);
+    await change('UPDATE test_sessions SET correct_answers=6,wrong_answers=4 WHERE id=133',[]);
+    // El conocimiento es el mismo: trasladar el repaso, no duplicarlo.
+    await change(`UPDATE coverage_review_state SET coverage_item_id=24530,
+      consecutive_correct=1,consecutive_wrong=0,total_correct=1,total_wrong=0,
+      updated_at=NOW() WHERE coverage_item_id=24481`,[]);
+    await change('UPDATE topics SET total_items=391 WHERE id=51',[]);
+    await change('INSERT INTO app_state(key,value) VALUES($1,$2)',[marker,JSON.stringify(backup)]);
+    await client.query('COMMIT');inTransaction=false;
+    console.log('T37_172_CORREGIDO',{fichasExaminables:391,preguntaHistorica:1232,
+      test133:'6/10',source:'Arrizuri/Cabizgordo/Benasa/Camporrada'});
+  }catch(e){
+    if(inTransaction){try{await client.query('ROLLBACK')}catch(_){}}
+    throw e;
+  }finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  // Una única reparación documental. Si la BD cambió, la aplicación sigue operativa.
+  try{await applyT37CorrectionsOnce172();}
+  catch(e){console.error('T37_172_NO_APLICADO:',String(e?.message||e));}
   await applyVerifiedFireTheoryRepairV1();
   // T40 documental: fallo de preflight no bloquea el arranque ni modifica datos.
   try{await applyT40DocumentalRepair161();}
