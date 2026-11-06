@@ -8490,6 +8490,12 @@ const GEOGRAPHY_EXAMINABLE_SQL_125 = `(
       OR ci.source_evidence ILIKE '%Lodosa-Peralta/Azkoien%'
     )
   )
+  AND NOT (
+    LOWER(BTRIM(COALESCE(ci.section,''))) IN ('índice','indice','sumario','tabla de contenidos')
+    OR LOWER(BTRIM(COALESCE(ci.section,''))) LIKE 'índice - %'
+    OR LOWER(BTRIM(COALESCE(ci.section,''))) LIKE 'indice - %'
+    OR COALESCE(ci.concept,'') ~* '^(Subapartados de |Capítulos incluidos en |Estructura general (del documento|de los contenidos))'
+  )
 )`;
 // La barrera del banco se aplica a la RESPUESTA de GEO T22, no a una norma
 // administrativa legítima (T21). No tocar sesiones ya contestadas.
@@ -9558,7 +9564,12 @@ function specificEvidenceReady128(t){
     if((topic===30&&(/^(?:T[uú]nel):/i.test(evidence)&&route.test(evidence)||extreme.test(evidence)))||
        (topic===33&&/^Puerto\s*\/\s*alto:/i.test(evidence)&&route.test(evidence)))return true;
   }
-  return evidence.length>=55||
+  // 173: una relación o dato completo puede ocupar menos de 55 letras.
+  // La fuente debe contener AMBOS lados de la relación; no basta un topónimo
+  // aislado ni una etiqueta editorial. La relación GEO estructurada se
+  // resolverá por la ruta local, con el concepto verificado como fuente.
+  const compactFact=evidence.length>=18 && /^(?:[^:]{2,100}:\s*[^:]{2,}|[^=]{2,100}=\s*[^=]{2,})$/u.test(evidence);
+  return evidence.length>=55||compactFact||Boolean(resetBriefRelation173(t))||
     (String(t?.topic_block||'').toLowerCase()==='especifico'&&specificFormulaReady128(t));
 }
 function specificNumericReady128(t){
@@ -9678,14 +9689,18 @@ const nucleusCandidateLimit =
   Array.isArray(allowedTopicIds) && allowedTopicIds.length === 1
     ? Math.max(count * 100, 1400)
     : (Array.isArray(allowedTopicIds) && allowedTopicIds.length<=20 ? Math.max(count * 70, 2400) : Math.max(count * 25, 300));
-const adaptiveCandidates = specificSpread128(geographyDiverseCandidates115(
-  await getAdaptiveCoverageCandidates(
-    nucleusCandidateLimit,
-    allowedTopicIds,
-    selectionStrategy,
-    freshOnly111
-  )
+const rawAdaptive173=await getAdaptiveCoverageCandidates(
+    nucleusCandidateLimit,allowedTopicIds,selectionStrategy,freshOnly111);
+// Una ficha no verificable NO debe ocupar una plaza para después bloquearla.
+const readyAdaptive173=rawAdaptive173.filter(t=>
+  String(t?.topic_block||'').toLowerCase()!=='geografia'||specificEvidenceReady128(t));
+const adaptiveCandidates=specificSpread128(geographyDiverseCandidates115(
+  readyAdaptive173
 ),count);
+if(rawAdaptive173.length!==readyAdaptive173.length)
+  console.log('RESET_173_PREFLIGHT_EVIDENCIAS:',JSON.stringify({
+    candidatas:rawAdaptive173.length,aptas:readyAdaptive173.length,
+    descartadas:rawAdaptive173.length-readyAdaptive173.length}));
 
 if(adaptiveCandidates.length < count){
   throw new Error(
@@ -9734,7 +9749,8 @@ const legislationScope82 = adaptiveCandidates.length > 0 &&
   adaptiveCandidates.every(item => String(item?.topic_block || '').trim().toLowerCase() === 'legislacion');
 // SERVER 81: conservar la plaza de cobertura nueva del selector original.
 // La lista ya está equilibrada dentro de su prioridad por el plan transversal.
-if(newCandidate && !legislationScope82){
+if(newCandidate && (String(newCandidate?.topic_block||'').toLowerCase()!=='geografia'||
+     specificEvidenceReady128(newCandidate)) && !legislationScope82){
   selectedAdaptive.push(newCandidate);
 }
 
@@ -13176,7 +13192,82 @@ function resetQuote136(quote, excerpt, allowShortLiteral=false){
 }
 // No crear preguntas locales para parques solares/eólicos a partir de tablas
 // antiguas: ambas materias pasan por la generación + auditoría documental.
-function resetGeoTableQuestion136(){ return null; }
+// SERVER173: restaurar la misma ruta LOCAL prevista para fichas territoriales.
+// Únicamente se construyen relaciones explícitas ya indexadas y cuyo rótulo
+// original coincide con el primer término. No deducir por municipios próximos.
+function resetBriefRelation173(t){
+  if(String(t?.topic_block||'').toLowerCase()!=='geografia')return null;
+  // Respetar reglas especiales ya instaladas: T22 (polígonos y accesos)
+  // y T37 (tres variantes estrictas de incidente -> parque).
+  if([22,37].includes(coverageTopicNumber(t?.topic_name)))return null;
+  const parts=String(t?.concept||'').split(/\s*->\s*/).map(x=>x.trim()).filter(Boolean);
+  if(parts.length<2||parts.length>3)return null;
+  const fold=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[.\s]+$/g,'').replace(/\s*\/\s*/g,'/')
+    .replace(/\s+/g,' ').trim();
+  const original=String(t?.source_evidence||'').trim();
+  const foldedSource=fold(original),foldedHead=fold(parts[0]);
+  // El OCR/indexador a veces conserva viñetas «» y rótulos «Concejos:».
+  // Exigir siempre el topónimo COMPLETO delimitado por palabra; no aceptar
+  // coincidencias parciales o atribuir una relación a otro topónimo.
+  const quotedHead=foldedHead.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const literalPresent=foldedHead && new RegExp(`(?:^|[^a-z0-9])${quotedHead}(?:$|[^a-z0-9])`,'u').test(foldedSource);
+  if(!original||!literalPresent)return null;
+  const park=parts.at(-1);
+  const label=/^(?:Parque|Sede)\s+(?:de\s+)?/i.test(park);
+  // La transcripción también identifica las sedes físicas de Pamplona
+  // únicamente como «Cordovilla» y «Trinitarios»; no fusionar las sedes.
+  if(!label&&!/^(?:Cordovilla|Trinitarios)$/i.test(park))return null;
+  const stated=label?park.replace(/^(?:Parque|Sede)\s+(?:de\s+)?/i,'').trim():park;
+  // Alias bilingües de los propios registros T21: jamás deben aparecer
+  // «Alsasua» y «Altsasu/Alsasua» como DOS respuestas diferentes.
+  const canonical={
+    'altsasu/alsasua':'Alsasua','auritz/burguete':'Burguete',
+    'estella-lizarra':'Estella','navascues/nabaskoze':'Navascués',
+    'sanguesa/zangoza':'Sangüesa','peralta/azkoien':'Peralta',
+    'cordovilla':'Central Cordovilla','central cordovilla':'Central Cordovilla'
+  };
+  const parkName=canonical[fold(stated)]||stated;
+  if(parkName.length<3||t?.source_page==null||String(t.source_page).trim()===''||
+     !Number.isFinite(Number(t.source_page)))return null;
+  if(parts.length===3 && parts[1].length<3)return null;
+  return {place:parts[0],municipality:parts.length===3?parts[1]:null,
+    station:parkName,full:parts.join(' -> ')};
+}
+function resetGeoTableQuestion136(t,seed=0,difficulty='alta',pool=[]){
+  const fact=resetBriefRelation173(t);
+  if(!fact)return null;
+  // Las alternativas nombran parques ya presentes en el temario, no rutas
+  // ni atribuciones adicionales. Distractores nunca cambian la ficha válida.
+  const stations=[fact.station,...(pool||[]).filter(r=>Number(r.topic_id)===Number(t.topic_id))
+    .map(resetBriefRelation173).filter(Boolean).map(r=>r.station),
+    'Alsasua','Burguete','Central Cordovilla','Estella','Lodosa','Navascués',
+    'Oronoz','Peralta','Sangüesa','Tafalla','Tudela'];
+  const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().trim();
+  const distinct=[];const used=new Set();
+  for(const station of stations){
+    if(used.has(norm(station)))continue;
+    used.add(norm(station));distinct.push(station);
+  }
+  const other=distinct.slice(1);
+  // Variar el punto de partida sin introducir hechos nuevos.
+  const offset=(Number(t.id)||seed)%Math.max(1,other.length);
+  const alternatives=[fact.station,...Array.from({length:3},(_,i)=>other[(offset+i)%other.length])];
+  if(alternatives.length!==4||new Set(alternatives.map(norm)).size!==4)return null;
+  const municipality=fact.municipality?` (municipio de ${fact.municipality})`:'';
+  const variants=[
+    `En una intervención en ${fact.place}${municipality}, ¿qué parque de bomberos corresponde según el temario?`,
+    `¿Qué parque de bomberos actuaría en primer lugar en ${fact.place}${municipality}, conforme a las asociaciones de los apuntes?`,
+    `Se produce una emergencia en ${fact.place}${municipality}. ¿Qué parque figura como referencia territorial en el temario?`
+  ];
+  const idx=Math.abs((Number(t.id)||seed)*17+seed)%3;
+  const source=`Relación estructurada de la ficha indexada: ${fact.full}. Rótulo original: ${String(t.source_evidence||'').trim()}.`;
+  return {stem:variants[idx],options:alternatives,correctIndex:0,
+    explanation:`Según la asociación expresamente indexada en los apuntes, ${fact.full}.`,
+    sourceEvidence:source,sourcePage:t.source_page??null,manualPage:t.manual_page??null,
+    questionFamily:'2024_TEXTO',difficulty};
+}
 // Une objetivos contiguos del mismo bloque SIN perder su posición global.
 // Un lote se limita por número de preguntas Y tamaño de evidencia, para evitar
 // que una petición enorme convierta menos llamadas en más latencia y 504.
@@ -14186,7 +14277,8 @@ Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una
 ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo||targets.every(iiff91Topic)?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
-${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
+${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`Para conceptos técnicos, razonamientos y procedimientos prioriza enunciados y opciones desarrollados siguiendo el examen de 2026; para cifras, definiciones literales y relaciones exactas usa redacción breve precisa. No equipares longitud con dificultad ni extiendas datos simples artificialmente.
+ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
 2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION en modo cálculos T39 exige cálculo numérico REAL; en otros modos permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
 EVALUABILIDAD EN TODO EL BLOQUE ESPECÍFICO: preguntar únicamente hechos,
 relaciones y fórmulas presentes en el PDF original o aclaraciones expresas
@@ -15988,7 +16080,7 @@ app.post('/api/generate',async(req,res)=>{
         for(const shift of [0,1]){
           const local=(shift===0 && riverLocalSlots.has(index)
             ?geo114RiverComposite(t,riverProofs,difficulty):null) ||
-            resetGeoTableQuestion136(t,index+shift,difficulty);
+            resetGeoTableQuestion136(t,index+shift,difficulty,targets);
           if(local&&!usedLocalStems.has(R136_NORM(local.stem))){
             questions[index]=local;usedLocalStems.add(R136_NORM(local.stem));break;
           }
@@ -16110,7 +16202,7 @@ app.post('/api/generate',async(req,res)=>{
             // Reutilizar la construcción local IIFF previamente acordada SOLO
             // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
             const local=(high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
-              resetGeoTableQuestion136(other,slot.index,difficulty);
+              resetGeoTableQuestion136(other,slot.index,difficulty,targets);
             if(local&&!acceptedStems.has(R136_NORM(local.stem))){
               questions[slot.index]=local;acceptedStems.add(R136_NORM(local.stem));
             }
