@@ -15158,6 +15158,53 @@ function t22Fact116(q){
     fullSource:src
   };
 }
+// SERVER177: rescate LOCAL de una plaza T22 rechazada en un examen MIXTO.
+// Utiliza EXCLUSIVAMENTE la ficha GEO validada y rutas de otras fichas del
+// mismo tema elegibles por SRS; no genera datos nuevos ni añade llamadas Gemini.
+// Nunca usar una ruta inventada, una ruta no documentada o alternativas
+// equivalentes por distinto orden de carreteras.
+function t22RescueRoads177(target,eligible,difficulty){
+  if(!t22NewTopic116(target))return null;
+  const fact=t22Fact116(target);
+  const source=String(target.source_evidence||'').trim();
+  if(!fact.name||!fact.park||!fact.roads||
+      !source.includes(fact.name)||!source.includes(fact.roads)||
+      !t22OnlyRoadOption116(fact.roads))return null;
+  const key=s=>[...new Set(t22Roads116(s))].sort().join('|');
+  const actual=key(fact.roads);
+  if(!actual)return null;
+  const actualRoads=new Set(t22Roads116(fact.roads));
+  const candidates=(eligible||[]).filter(row=>
+    Number(row.topic_id)===Number(target.topic_id) &&
+    Number(row.id)!==Number(target.id)).map(row=>{
+      const other=t22Fact116(row);
+      const roadKey=key(other.roads);
+      return {road:other.roads,roadKey,
+        difference:Math.abs(t22Roads116(other.roads).length-actualRoads.size),
+        shared:t22Roads116(other.roads).filter(v=>actualRoads.has(v)).length};
+    }).filter(x=>x.roadKey&&x.roadKey!==actual&&t22OnlyRoadOption116(x.road));
+  candidates.sort((a,b)=>a.difference-b.difference||b.shared-a.shared||
+    a.road.localeCompare(b.road,'es'));
+  const seen=new Set([actual]),options=[fact.roads];
+  for(const row of candidates){
+    if(seen.has(row.roadKey))continue;
+    seen.add(row.roadKey);options.push(row.road);
+    if(options.length===4)break;
+  }
+  if(options.length!==4)return null;
+  const q={
+    stem:`Para acceder desde el parque territorial al polígono ${fact.name}, ¿qué itinerario de carreteras corresponde a ese acceso?`,
+    options,correctIndex:0,
+    explanation:`El polígono ${fact.name} tiene como parque territorial ${fact.park}. El itinerario de acceso documentado desde ese parque es ${fact.roads}.`,
+    sourceEvidence:source,sourcePage:target.source_page??null,
+    manualPage:target.manual_page??null,
+    questionFamily:target.questionFamily||'2024_TEXTO',difficulty,
+    resetLocal136:true
+  };
+  if(resetShape136(q)||geo114QuestionIssue({...q,topic_block:target.topic_block,
+      topic_name:target.topic_name,concept:target.concept}))return null;
+  return q;
+}
 function t22Roads116(x){
   return (String(x||'').toUpperCase().match(/\b(?:NA|PA|AP|PR|N|A)\s*-\s*\d+(?:-[A-Z0-9]+)*/g)||[])
     .map(y=>y.replace(/\s+/g,''));
@@ -16334,6 +16381,20 @@ app.post('/api/generate',async(req,res)=>{
             Math.max(1000,count*50),topicIds,examMode,freshOnly111);
           const occupied=new Set(targets.filter((_,idx)=>Boolean(questions[idx])).map(t=>Number(t.id)));
           for(const slot of holes){
+            // SERVER177: antes de volver a pagar un lote, completar T22 con
+            // un ejercicio factual de rutas si los tres distractores son
+            // diferentes, elegibles y provienen del MISMO PDF/TEMA.
+            if(t22NewTopic116(slot.t)){
+              const local=t22RescueRoads177(slot.t,recoveryCandidates119,difficulty);
+              if(local&&!acceptedStems.has(R136_NORM(local.stem))){
+                questions[slot.index]=local;
+                acceptedStems.add(R136_NORM(local.stem));
+                console.log('T22_177_RESCATE_LOCAL:',JSON.stringify({
+                  slot:slot.index,coverageId:Number(slot.t.id),
+                  topicId:Number(slot.t.topic_id)}));
+                continue;
+              }
+            }
             const pool119=high119&&iiff91Topic(slot.t)?
               [...recoveryCandidates119].sort((a,b)=>
                 (iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a))*4+
