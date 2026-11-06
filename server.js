@@ -1748,6 +1748,167 @@ async function t40ImportOnce157(topic){
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
+
+/* TEMA 41 — banco grafico cerrado sobre el PDF del CEIS, con 11 recortes
+ * y 50 preguntas. Instalacion idempotente, no modifica temas anteriores.
+ * Cero llamadas a Gemini para preguntas ya validadas.
+ */
+let t41PreparedData=null;
+function t41Topic(topic){
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
+  return /^\s*tema\s*41\b/i.test(name) &&
+    /incendios?\s+de\s+vegetacion/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t41LoadData(){
+  if(t41PreparedData)return t41PreparedData;
+  const file=path.join(process.cwd(),'t41_graphics_data.js');
+  if(!fs.existsSync(file))return null;
+  const content=fs.readFileSync(file,'utf8');
+  const marker='module.exports = ';
+  const start=content.indexOf(marker);
+  if(start<0)throw Error('T41: cabecera de paquete grafico invalida');
+  const data=JSON.parse(content.slice(start+marker.length).trim().replace(/;\s*$/,''));
+  if(data?.schema!==1||data.topic_number!==41||data.pdf_page_count!==36||
+     !Array.isArray(data.images)||data.images.length!==11||
+     !Array.isArray(data.questions)||data.questions.length!==50||
+     new Set(data.images.map(x=>x.file)).size!==11||
+     new Set(data.questions.map(x=>x.external_key)).size!==50)
+    throw Error('T41: recortes o preguntas incompletos o repetidos');
+  t41PreparedData=data;return data;
+}
+function t41WriteImages(){
+  const data=t41LoadData();if(!data)return {skipped:true};
+  const dir=path.join(process.cwd(),'public','graphics','incendios-vegetacion');
+  fs.mkdirSync(dir,{recursive:true});let written=0;
+  for(const asset of data.images){
+    if(!/^T41_GRAF_\d{5}_FIG_\d{3}_P\d{3}\.png$/.test(asset.file))
+      throw Error('T41: nombre de imagen inesperado');
+    const buf=Buffer.from(asset.base64,'base64');
+    const sha=createHash('sha256').update(buf).digest('hex');
+    if(sha!==asset.sha256||!buf.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T41: checksum/png invalido '+asset.file);
+    const dest=path.join(dir,asset.file);
+    if(fs.existsSync(dest)){
+      if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+        throw Error('T41: fichero de imagen existente distinto '+asset.file);
+    }else{fs.writeFileSync(dest,buf);written++;}
+  }
+  return {images:11,written};
+}
+async function t41ImportOnce(topic){
+  if(!t41Topic(topic))return {skipped:true};
+  const data=t41LoadData();if(!data)return {skipped:true,missing:true};
+  t41WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=topics.rows[0];
+    const pdf=await client.query(`SELECT 1 FROM topic_local_pdfs
+      WHERE topic_id=$1 AND TRIM(pdf_sha256)=$2 AND page_count=36
+      AND size_bytes=OCTET_LENGTH(pdf_bytes) LIMIT 1`,[t.id,data.pdf_sha256]);
+    if(!t41Topic(t)||!pdf.rows.length||Number(t.total_items)<1)
+      throw Error('T41: cargar primero el PDF exacto y confirmar cobertura');
+    const imgMap=new Map();
+    for(const asset of data.images){
+      const file=asset.file,uri='/graphics/incendios-vegetacion/'+file;
+      const sourceId='incendios-vegetacion/'+file;
+      const q=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'incendios-vegetacion',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
+        sanitization_version=2,updated_at=NOW() RETURNING id`,
+      [sourceId,file,'T41 figura '+asset.figure,
+       'Recorte literal sin rotulos CEIS pag. '+asset.printed_page,
+       'CEIS Guadalajara, Parte 6, pag. '+asset.printed_page]);
+      imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
+    }
+    let imported=0;
+    for(const row of data.questions){
+      const img=imgMap.get(row.graphic_file);
+      if(!img||row.image_sha256!==data.images.find(i=>i.file===row.graphic_file)?.sha256||
+         !/^T41-GRAF-\d{4}$/.test(row.external_key)||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         row.question_family!=='GRAFICA'||row.difficulty!=='muy alta'||
+         !row.stem||!row.source_evidence)
+        throw Error('T41: pregunta no valida '+row.external_key);
+      const key=row.external_key+' · '+row.coverage_concept;
+      const c=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t41_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE RETURNING id`,
+      [t.id,row.coverage_section,key,row.source_pdf_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(c.rows[0].id);
+      const graphic={...row.graphic,assetId:img.id,publicUrl:img.uri,
+        sourceId:img.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const previous=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+        LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(previous.rows.length){
+        const old=previous.rows[0];
+        if(old.stem!==row.stem||JSON.stringify(old.options)!==JSON.stringify(row.options)||
+          Number(old.correct_index)!==Number(row.correct_index))
+          throw Error('T41: pregunta distinta ya existente: '+row.external_key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+        correct_index,explanation,source_evidence,source_page,manual_page,
+        question_family,difficulty,graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+        row.explanation,row.source_evidence,row.source_pdf_page,row.manual_page,
+        JSON.stringify(graphic)]);
+      imported++;
+    }
+    if(imported!==50)throw Error('T41: numero de preguntas importadas incompleto');
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='incendios-vegetacion' AND source_file LIKE 'Screenshot_%'
+      AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
+      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query('COMMIT');
+    console.log('T41_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,images:11,questions:50}));
+    return {ok:true,topicId:t.id,images:11,questions:50};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t41GraphicBankPairs(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t41_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
 async function t40GraphicBankPairs157(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -4083,6 +4244,28 @@ function coverageTopicNumber(topicName){
 function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
+
+  if(topicNumber===41)return `
+TEMA 41 CEIS GUADALAJARA — COBERTURA DOCUMENTAL.
+Usa como fuente UNICAMENTE el PDF cargado (las páginas seleccionadas por el
+opositor son las que entran en examen: impresas 244-259, 270-279 y 282-283).
+No rellenes los saltos editoriales ni inventes páginas que no se aportaron.
+Extrae cada dato numérico con SU condición, técnica, magnitud y unidad.
+Separa filas de Tabla 1 (meteorología), Tabla 4 (longitud de llama y ataque),
+Tabla 5 (puestos y funciones), Tabla 6 de p.276 (protección de estructuras)
+y otra Tabla 6 de p.277 (autoprotección): son CINCO estructuras diferentes.
+Conserva grupos, cargas, altura y características de los 13 modelos de combustible;
+que dos modelos compartan carga NO es error ni justifica su fusión.
+No confundir presiones de salida de bomba para distintas maniobras con la
+presión en punta de lanza. No conviertas observaciones del manual de 2015
+en norma operativa actual. Estadísticas históricas solo con fecha.
+Usa figuras técnicas y tablas del PDF para extraer hechos, pero NO crees
+fichas sobre pies, numeración editorial o fotografías sin contenido examinable.
+Los recursos gráficos específicos del tema se importan desde banco cerrado;
+no inventes imágenes ni preguntas visuales que carezcan de imagen verificable.
+No uses los 378 candidatos externos como cota rígida: cubre el contenido real,
+con fuente, página, relación y verificabilidad, sin duplicar hechos.
+`;
 
 
    if(topicNumber===21){
@@ -6998,6 +7181,14 @@ const parsed={
         console.error('T40_157_IMPORTACION_PENDIENTE:',String(error?.message||error));
         // El PDF ya se guardó: no volver a pagar la extracción para este fallo.
       }
+    }
+    // T41: importar recursos graficos cerrados en una transaccion propia.
+    // La indexacion textual ya se ha completado; si falla la semilla, NO
+    // forzar otra ronda pagada de Gemini.
+    if(t41Topic(topic)){
+      try{const seeded=await t41ImportOnce(topic);
+        console.log('T41_GRAFICO_AUTOIMPORT',JSON.stringify(seeded));
+      }catch(e){console.error('T41_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
@@ -10621,6 +10812,10 @@ for(let i = 0; i < selected.length; i++){
   // No llamar a Gemini para un emparejamiento ya verificado.
   if(t40Topic157(originalGraphicSlot) && t40Resources157Load()){
     selected[i]={...originalGraphicSlot,t40PreparedGraphicSlot157:true};
+    continue;
+  }
+  if(t41Topic(originalGraphicSlot) && t41LoadData()){
+    selected[i]={...originalGraphicSlot,t41PreparedGraphicSlot:true};
     continue;
   }
 
@@ -14553,6 +14748,26 @@ async function resetGenerateGroup136(ai, group,difficulty,mode,comparisonPool=[]
     objetivos:group.length,comparadores:comparisons.length}));
   const iiffScope=group.some(iiff91Topic);
   const t40Guide157=t40QuestionGuide157(group,difficulty);
+  const t41Positions=group.flatMap((t,i)=>t41Topic(t)?[i+1]:[]);
+  const t41Guide=t41Positions.length?`
+T41 CEIS Guadalajara (solo objetivos en posiciones ${t41Positions.join(', ')}):
+- Solo hechos textuales del extracto de ESA ficha, con condiciones y unidades.
+- Modelo de dificultad: examen oficial 2023 pregunta 69 (vientos de ladera),
+  cuatro afirmaciones técnicas próximas; estilo de precisión 2024/2026.
+- INCORRECTA: tres verdaderas distintas, una falsa pero cercana. CORRECTA:
+  alternativas del mismo tipo, longitud y unidad; un único rasgo discriminante.
+- Modelos Rothermel: mantener carga+grupo+descripción en la misma asociación.
+  No declarar falsa una carga que aparece compartida por dos modelos.
+- Distingue las DOS tablas 6: p276 5-12 bar baja presión para protección,
+  p277 8-12 bar alta presión para autoprotección; no mezclar con la punta.
+- Tabla 4: cuatro rangos de longitud de llama con medio/ataque contextual.
+  No afirmar inclusividad de umbrales que la fuente no precise matemáticamente.
+- Tablas y secuencias: conservar fila y columna. Foehn y vientos: datos
+  climáticos con su fenómeno exacto. Datos antiguos solo como los imprime CEIS.
+- Las figuras 4/5/8/9 tienen preguntas PREDEFINIDAS: no improvises preguntas
+  de reconocimiento visual en otros objetivos sin recurso gráfico mostrado.
+- No añadir reintentos, llamadas ni inventar hechos para aumentar dificultad.
+`:'';
   // SERVER127: no duplicar cada objetivo. Una generación y una auditoría
   // independiente por lote. La comprobación factual y calidad=2 permanecen.
   const iiffGenerationRules=iiffScope?
@@ -14579,7 +14794,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       : resetPrompt136(group,difficulty,mode,comparisons)+
         (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
         iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
-        geoPhysical112+t40Guide157,config:{
+        geoPhysical112+t40Guide157+t41Guide,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:(geoHighChallenge||(iiffScope&&difficulty==='muy alta'))?'medium':'low'}}:{}),
@@ -16191,7 +16406,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -16219,15 +16434,17 @@ app.post('/api/generate',async(req,res)=>{
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
     // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
-    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157)){
-      const slots=targets.map((t,i)=>t.t40PreparedGraphicSlot157?i:-1)
+    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot)){
+      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot)?i:-1)
         .filter(i=>i>=0);
       const grouped=new Map();
       for(const i of slots){
         const topicId=Number(targets[i].topic_id);
         if(!grouped.has(topicId))grouped.set(topicId,
           mode==='mixto'
-            ?await t40GraphicBankPairs157(topicId,freshOnly111,difficulty)
+            ?(targets[i].t41PreparedGraphicSlot
+              ?await t41GraphicBankPairs(topicId,freshOnly111,difficulty)
+              :await t40GraphicBankPairs157(topicId,freshOnly111,difficulty))
             :[]);
       }
       const seenAssets=new Set(),seenFigures=new Set();
@@ -16265,7 +16482,7 @@ app.post('/api/generate',async(req,res)=>{
         }else{
           // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
           targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
-            t40PreparedGraphicSlot157:false};
+            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false};
           console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
         }
       }
@@ -17191,6 +17408,8 @@ async function startServer(){
   try{t40WriteImages157();}catch(e){
     console.error('T40_157_IMAGENES_NO_PREPARADAS:',e?.message||e);
   }
+  try{const im=t41WriteImages();console.log('T41_GRAFICOS_LOCALES',JSON.stringify(im));}
+  catch(e){console.error('T41_GRAFICOS_LOCALES_PENDIENTES:',String(e?.message||e));}
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
@@ -17210,6 +17429,11 @@ async function startServer(){
       "EXAM STYLE STORE recuperado:",
       EXAM_STYLE_STORE || "ninguno"
     );
+    db.query(`SELECT id,name,block,total_items FROM topics WHERE block='especifico' AND
+      name ~* '^TEMA[[:space:]]*41([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(t41Topic).map(t=>t41ImportOnce(t))))
+      .then(r=>console.log('T41_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('T41_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
