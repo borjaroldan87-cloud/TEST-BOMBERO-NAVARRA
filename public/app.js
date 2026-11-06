@@ -42,7 +42,7 @@ const T37_DESCRIPCIONES_FUENTE_V1 = Object.freeze({
   "H056": "Cima de 1125 m en el valle de Ollo.",
   "H057": "Macizo junto al monte Mandoegi (1046 m), frontera entre Navarra y Guipúzcoa, en el emblemático paraje natural de Leitzalarrea (municipio de Leitza); Urepel (1059 m).",
   "H060": "Risco a 1068 m sobre puerto Larraona, frontera con Álava.",
-  "H061": "Pico al norte de Aranarache, sierra Urbasa.",
+  "H061": "Pico al norte de Aranarache, en las Limitaciones de las Améscoas.",
   "H062": "Collado, parte alta sierra Lokiz.",
   "H063": "Arroyo al este de Los Arcos que baja hacia Sesma.",
   "H064": "Elevación del terreno en Oteiza de la Solana, al oeste del Ega.",
