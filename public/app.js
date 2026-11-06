@@ -1679,8 +1679,26 @@ function legacyExamFormulaToLatex(value){
   }catch{return null;}
 }
 
+// APP172: permite representar el LaTeX literal ya guardado en PDFs/fuentes
+// anteriores, incluso cuando no trae delimitadores. No interpreta ni altera
+// las operaciones y se aplica a la presentación, no al banco ni al examen.
+function normalizarLatexSinDelimitadores172(input){
+  let str=String(input ?? '');
+  if(!window.katex || /\\\(|\\\[/.test(str) ||
+     !/\\(?:rho|Delta|frac|sqrt|mu|sigma|sum|theta|pi|cdot)(?![A-Za-z])/.test(str))return str;
+  const startsMath=/^\s*\\(?:rho|Delta|frac|sqrt|mu|sigma|sum|theta|pi|cdot)(?![A-Za-z])/;
+  // Una cita «...», como las evidencias antiguas del CEIS, puede ser una
+  // ecuación completa: se formatea únicamente si COMIENZA con un comando TeX.
+  str=str.replace(/«([^»\r\n]{8,950})»/g,(whole,inner)=>
+    startsMath.test(inner)?`«\\[${inner.trim()}\\]»`:whole);
+  // Fuente que contiene directamente una línea matemática sin comillas.
+  str=str.replace(/(^|\n)([^\r\n]{8,950})(?=\n|$)/g,(whole,prefix,line)=>
+    startsMath.test(line)?`${prefix}\\[${line.trim()}\\]`:whole);
+  return str;
+}
+
 function formatExamContent(value){
-  let text=String(value ?? "");
+  let text=normalizarLatexSinDelimitadores172(value);
   if(window.katex){
     const legacyMath=legacyExamFormulaToLatex(text);
     if(legacyMath)text=`\\[${legacyMath}\\]`;
