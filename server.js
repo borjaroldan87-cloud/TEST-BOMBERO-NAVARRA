@@ -1870,7 +1870,7 @@ async function t41ImportOnce(topic){
         crop_x=0,crop_y=0,crop_width=1,crop_height=1,
         mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
         sanitization_version=2,updated_at=NOW() RETURNING id`,
-      [sourceId,file,'T41 figura '+asset.figure,
+      [sourceId,file,uri,'T41 figura '+asset.figure,
        'Recorte literal sin rotulos CEIS pag. '+asset.printed_page,
        'CEIS Guadalajara, Parte 6, pag. '+asset.printed_page]);
       imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
