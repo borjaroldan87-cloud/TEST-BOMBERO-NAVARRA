@@ -1956,6 +1956,662 @@ async function t41GraphicBankPairs(topicId,freshOnly,difficulty){
   return rows.rows;
 }
 
+
+/* TEMA 42: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
+let t42PreparedData=null;
+function t42Topic(topic){
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
+  return /^\s*tema\s*42\b/i.test(name) &&
+    /incendios?\s+en\s+tuneles/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t42LoadData(){
+  if(t42PreparedData)return t42PreparedData;
+  const file=path.join(process.cwd(),'t42_graphics_data.js');
+  if(!fs.existsSync(file))return null;
+  const content=fs.readFileSync(file,'utf8');
+  const marker='module.exports = ';
+  const start=content.indexOf(marker);
+  if(start<0)throw Error('T42: cabecera de paquete grafico invalida');
+  const data=JSON.parse(content.slice(start+marker.length).trim().replace(/;\s*$/,''));
+  if(data?.schema!==1||data.topic_number!==42||data.pdf_page_count!==22||
+     !Array.isArray(data.images)||data.images.length!==15||
+     !Array.isArray(data.questions)||data.questions.length!==90||
+     new Set(data.images.map(x=>x.file)).size!==15||
+     new Set(data.questions.map(x=>x.external_key)).size!==90)
+    throw Error('T42: recortes o preguntas incompletos o repetidos');
+  if(data.coverage_additions.some(item=>/^\s*Tabla\s*[678]\s*[.:]/i.test(String(item.section||''))))
+    throw Error('T42: el paquete contiene tablas experimentales 6, 7 u 8 excluidas');
+  t42PreparedData=data;return data;
+}
+function t42WriteImages(){
+  const data=t42LoadData();if(!data)return {skipped:true};
+  const dir=path.join(process.cwd(),'public','graphics','incendios-tuneles');
+  fs.mkdirSync(dir,{recursive:true});let written=0;
+  for(const asset of data.images){
+    if(!/^T42_FIG_\d{2}_P\d{3}\.png$/.test(asset.file))
+      throw Error('T42: nombre de imagen inesperado');
+    const buf=Buffer.from(asset.base64,'base64');
+    const sha=createHash('sha256').update(buf).digest('hex');
+    if(sha!==asset.sha256||!buf.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T42: checksum/png invalido '+asset.file);
+    const dest=path.join(dir,asset.file);
+    if(fs.existsSync(dest)){
+      if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+        throw Error('T42: fichero de imagen existente distinto '+asset.file);
+    }else{fs.writeFileSync(dest,buf);written++;}
+  }
+  return {images:15,written};
+}
+async function t42ImportOnce(topic,uploadedPdfPath=null){
+  if(!t42Topic(topic))return {skipped:true};
+  const data=t42LoadData();if(!data)return {skipped:true,missing:true};
+  t42WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=topics.rows[0];
+    // Importación solo cuando la fuente de la indexación coincide.
+    // Si se llama desde el formulario, verificar el SHA del PDF subido.
+    // Al reintentar en el arranque, exigir el nombre del PDF oficial suministrado.
+    if(uploadedPdfPath){
+      const uploaded=fs.readFileSync(uploadedPdfPath);
+      if(createHash('sha256').update(uploaded).digest('hex')!==data.pdf_sha256)
+        throw Error('T42: SHA del PDF realmente indexado distinto del paquete');
+    }else if(String(t.source_file||'')!==String(data.pdf_filename)){
+      throw Error('T42: fuente del tema no coincide con el PDF preparado');
+    }
+    // T42-179: conservar la indexación File Search existente. Su PDF no se
+    // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
+    // El PDF exacto se incorpora en el paquete con SHA verificado.
+    if(!t42Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
+      throw Error('T42: tema no indexado; no se altera ninguna cobertura');
+    const remote=await client.query(`SELECT document_name
+      FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
+    if(!remote.rows[0]?.document_name)
+      throw Error('T42: no hay fuente File Search vinculada; no se suplanta');
+    if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
+      throw Error('T42: falta el PDF original y el inventario de ampliaciones');
+    const pdfBytes=Buffer.from(data.pdf_base64,'base64');
+    const fileHash=createHash('sha256').update(pdfBytes).digest('hex');
+    if(fileHash!==data.pdf_sha256||pdfBytes.length<1000||
+       pdfBytes.length>20*1024*1024||
+       pdfBytes.subarray(0,5).toString('latin1')!=='%PDF-')
+      throw Error('T42: PDF local distinto del original indexado');
+    const source=await PDFDocument.load(pdfBytes,{updateMetadata:false});
+    if(source.getPageCount()!==22)throw Error('T42: el PDF no tiene 22 páginas');
+    await client.query(`INSERT INTO topic_local_pdfs
+      (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,22,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [t.id,fileHash,pdfBytes.length,pdfBytes]);
+    const stored=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      encode(sha256(pdf_bytes),'hex') AS stored_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const check=stored.rows[0];
+    if(!check||check.sha!==fileHash||check.stored_sha!==fileHash||
+       Number(check.page_count)!==22||
+       Number(check.size_bytes)!==pdfBytes.length||
+       Number(check.stored_size)!==pdfBytes.length)
+      throw Error('T42: copia PDF local incompatible; no se sobrescribe');
+    // Completar únicamente lagunas verificadas contra páginas físicas.
+    // DO NOTHING preserva historial y SRS si ya se instaló antes.
+    for(const item of data.coverage_additions){
+      if(!/^T42-TAB-\d{4}$/.test(item.external_key)||
+         !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>22||
+         !item.concept||!item.source_evidence)
+        throw Error('T42: ampliación documental no válida');
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'tabla_t42','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
+    const imgMap=new Map();
+    for(const asset of data.images){
+      const file=asset.file,uri='/graphics/incendios-tuneles/'+file;
+      const sourceId='incendios-tuneles/'+file;
+      const q=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'incendios-tuneles',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
+        sanitization_version=2,updated_at=NOW() RETURNING id`,
+      [sourceId,file,uri,'T42 figura '+asset.figure,
+       'Recorte literal sin rotulos CEIS pag. '+asset.printed_page,
+       'CEIS Guadalajara, Parte 4, pag. '+asset.printed_page]);
+      imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
+    }
+    let imported=0;
+    for(const row of data.questions){
+      const img=imgMap.get(row.graphic_file);
+      if(!img||row.image_sha256!==data.images.find(i=>i.file===row.graphic_file)?.sha256||
+         !/^T42-GRAF-\d{4}$/.test(row.external_key)||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         row.question_family!=='GRAFICA'||row.difficulty!=='muy alta'||
+         !row.stem||!row.source_evidence)
+        throw Error('T42: pregunta no valida '+row.external_key);
+      const key=row.external_key+' · '+row.coverage_concept;
+      const c=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t42_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE RETURNING id`,
+      [t.id,row.coverage_section,key,row.source_pdf_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(c.rows[0].id);
+      const graphic={...row.graphic,assetId:img.id,publicUrl:img.uri,
+        sourceId:img.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const previous=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+        LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(previous.rows.length){
+        const old=previous.rows[0];
+        if(old.stem!==row.stem||JSON.stringify(old.options)!==JSON.stringify(row.options)||
+          Number(old.correct_index)!==Number(row.correct_index))
+          throw Error('T42: pregunta distinta ya existente: '+row.external_key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+        correct_index,explanation,source_evidence,source_page,manual_page,
+        question_family,difficulty,graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+        row.explanation,row.source_evidence,row.source_pdf_page,row.manual_page,
+        JSON.stringify(graphic)]);
+      imported++;
+    }
+    if(imported!==90)throw Error('T42: numero de preguntas importadas incompleto');
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='incendios-tuneles' AND source_file LIKE 'Screenshot_%'
+      AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET
+      name='TEMA 42. INCENDIOS EN TÚNELES',
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query('COMMIT');
+    console.log('T42_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
+      images:15,questions:90,documentaryAdditions:data.coverage_additions.length,
+      pdfSha256:fileHash}));
+    return {ok:true,topicId:t.id,images:15,questions:90,
+      documentaryAdditions:data.coverage_additions.length};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t42GraphicBankPairs(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t42_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
+
+
+
+/* T43: módulo documental/gráfico aislado, sin modificación de otros temas. */
+/* TEMA 43: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
+let t43PreparedData=null;
+function t43Topic(topic){
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
+  return /^\s*tema\s*43\b/i.test(name) &&
+    /rescate\s+en\s+accidentes?\s+ferroviarios/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t43LoadData(){
+  if(t43PreparedData)return t43PreparedData;
+  const file=path.join(process.cwd(),'t43_graphics_data.js');
+  if(!fs.existsSync(file))return null;
+  const content=fs.readFileSync(file,'utf8');
+  const marker='module.exports = ';
+  const start=content.indexOf(marker);
+  if(start<0)throw Error('T43: cabecera de paquete grafico invalida');
+  const data=JSON.parse(content.slice(start+marker.length).trim().replace(/;\s*$/,''));
+  if(data?.schema!==1||data.topic_number!==43||data.pdf_page_count!==24||
+     !Array.isArray(data.images)||data.images.length!==11||
+     !Array.isArray(data.questions)||data.questions.length!==86||
+     new Set(data.images.map(x=>x.file)).size!==11||
+     new Set(data.questions.map(x=>x.external_key)).size!==86)
+    throw Error('T43: recortes o preguntas incompletos o repetidos');
+  t43PreparedData=data;return data;
+}
+function t43WriteImages(){
+  const data=t43LoadData();if(!data)return {skipped:true};
+  const dir=path.join(process.cwd(),'public','graphics','ferroviarios');
+  fs.mkdirSync(dir,{recursive:true});let written=0;
+  for(const asset of data.images){
+    if(!/^T43_FIG_\d{2}_P\d{3}\.png$/.test(asset.file))
+      throw Error('T43: nombre de imagen inesperado');
+    const buf=Buffer.from(asset.base64,'base64');
+    const sha=createHash('sha256').update(buf).digest('hex');
+    if(sha!==asset.sha256||!buf.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T43: checksum/png invalido '+asset.file);
+    const dest=path.join(dir,asset.file);
+    if(fs.existsSync(dest)){
+      if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+        throw Error('T43: fichero de imagen existente distinto '+asset.file);
+    }else{fs.writeFileSync(dest,buf);written++;}
+  }
+  return {images:11,written};
+}
+async function t43ImportOnce(topic,uploadedPdfPath=null){
+  if(!t43Topic(topic))return {skipped:true};
+  const data=t43LoadData();if(!data)return {skipped:true,missing:true};
+  t43WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=topics.rows[0];
+    // Importación solo cuando la fuente de la indexación coincide.
+    // Si se llama desde el formulario, verificar el SHA del PDF subido.
+    // Al reintentar en el arranque, exigir el nombre del PDF oficial suministrado.
+    if(uploadedPdfPath){
+      const uploaded=fs.readFileSync(uploadedPdfPath);
+      if(createHash('sha256').update(uploaded).digest('hex')!==data.pdf_sha256)
+        throw Error('T43: SHA del PDF realmente indexado distinto del paquete');
+    }else if(String(t.source_file||'')!==String(data.pdf_filename)){
+      throw Error('T43: fuente del tema no coincide con el PDF preparado');
+    }
+    // T43-179: conservar la indexación File Search existente. Su PDF no se
+    // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
+    // El PDF exacto se incorpora en el paquete con SHA verificado.
+    if(!t43Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
+      throw Error('T43: tema no indexado; no se altera ninguna cobertura');
+    const remote=await client.query(`SELECT document_name
+      FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
+    if(!remote.rows[0]?.document_name)
+      throw Error('T43: no hay fuente File Search vinculada; no se suplanta');
+    if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
+      throw Error('T43: falta el PDF original y el inventario de ampliaciones');
+    const pdfBytes=Buffer.from(data.pdf_base64,'base64');
+    const fileHash=createHash('sha256').update(pdfBytes).digest('hex');
+    if(fileHash!==data.pdf_sha256||pdfBytes.length<1000||
+       pdfBytes.length>20*1024*1024||
+       pdfBytes.subarray(0,5).toString('latin1')!=='%PDF-')
+      throw Error('T43: PDF local distinto del original indexado');
+    const source=await PDFDocument.load(pdfBytes,{updateMetadata:false});
+    if(source.getPageCount()!==24)throw Error('T43: el PDF no tiene 24 páginas');
+    await client.query(`INSERT INTO topic_local_pdfs
+      (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,24,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [t.id,fileHash,pdfBytes.length,pdfBytes]);
+    const stored=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      encode(sha256(pdf_bytes),'hex') AS stored_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const check=stored.rows[0];
+    if(!check||check.sha!==fileHash||check.stored_sha!==fileHash||
+       Number(check.page_count)!==24||
+       Number(check.size_bytes)!==pdfBytes.length||
+       Number(check.stored_size)!==pdfBytes.length)
+      throw Error('T43: copia PDF local incompatible; no se sobrescribe');
+    // Completar únicamente lagunas verificadas contra páginas físicas.
+    // DO NOTHING preserva historial y SRS si ya se instaló antes.
+    for(const item of data.coverage_additions){
+      if(!/^T43-(?:TAB|NUM)-\d{4}$/.test(item.external_key)||
+         !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>22||
+         !item.concept||!item.source_evidence)
+        throw Error('T43: ampliación documental no válida');
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'dato_t43_preparado','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
+    const imgMap=new Map();
+    for(const asset of data.images){
+      const file=asset.file,uri='/graphics/ferroviarios/'+file;
+      const sourceId='ferroviarios/'+file;
+      const q=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'ferroviarios',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
+        sanitization_version=2,updated_at=NOW() RETURNING id`,
+      [sourceId,file,uri,'T43 figura '+asset.figure,
+       'Recorte original delimitado al contenido gráfico CEIS pag. '+asset.printed_page,
+       'CEIS Guadalajara, Parte 6, pag. '+asset.printed_page]);
+      imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
+    }
+    let imported=0;
+    for(const row of data.questions){
+      const img=imgMap.get(row.graphic_file);
+      if(!img||row.image_sha256!==data.images.find(i=>i.file===row.graphic_file)?.sha256||
+         !/^T43-GRAF-\d{4}$/.test(row.external_key)||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         row.question_family!=='GRAFICA'||row.difficulty!=='muy alta'||
+         !row.stem||!row.source_evidence)
+        throw Error('T43: pregunta no valida '+row.external_key);
+      const key=row.external_key+' · '+row.coverage_concept;
+      const c=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t43_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE RETURNING id`,
+      [t.id,row.coverage_section,key,row.source_pdf_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(c.rows[0].id);
+      const graphic={...row.graphic,assetId:img.id,publicUrl:img.uri,
+        sourceId:img.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const previous=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+        LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(previous.rows.length){
+        const old=previous.rows[0];
+        if(old.stem!==row.stem||JSON.stringify(old.options)!==JSON.stringify(row.options)||
+          Number(old.correct_index)!==Number(row.correct_index))
+          throw Error('T43: pregunta distinta ya existente: '+row.external_key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+        correct_index,explanation,source_evidence,source_page,manual_page,
+        question_family,difficulty,graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+        row.explanation,row.source_evidence,row.source_pdf_page,row.manual_page,
+        JSON.stringify(graphic)]);
+      imported++;
+    }
+    if(imported!==86)throw Error('T43: numero de preguntas importadas incompleto');
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='ferroviarios' AND source_file LIKE 'Screenshot_%'
+      AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET
+      name='TEMA 43. RESCATE EN ACCIDENTES FERROVIARIOS',
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query('COMMIT');
+    console.log('T43_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
+      images:11,questions:86,documentaryAdditions:data.coverage_additions.length,
+      pdfSha256:fileHash}));
+    return {ok:true,topicId:t.id,images:11,questions:86,
+      documentaryAdditions:data.coverage_additions.length};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t43GraphicBankPairs(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t43_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
+
+
+/* T44: módulo documental/gráfico aislado, sin modificación de otros temas. */
+/* TEMA 44: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
+let t44PreparedData=null;
+function t44Topic(topic){
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
+  return /^\s*tema\s*44\b/i.test(name) &&
+    /rescate\s+en\s+ascensores/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t44LoadData(){
+  if(t44PreparedData)return t44PreparedData;
+  const file=path.join(process.cwd(),'t44_graphics_data.js');
+  if(!fs.existsSync(file))return null;
+  const content=fs.readFileSync(file,'utf8');
+  const marker='module.exports = ';
+  const start=content.indexOf(marker);
+  if(start<0)throw Error('T44: cabecera de paquete grafico invalida');
+  const data=JSON.parse(content.slice(start+marker.length).trim().replace(/;\s*$/,''));
+  if(data?.schema!==1||data.topic_number!==44||data.pdf_page_count!==14||
+     !Array.isArray(data.images)||data.images.length!==26||
+     !Array.isArray(data.questions)||data.questions.length!==73||
+     new Set(data.images.map(x=>x.file)).size!==26||
+     new Set(data.questions.map(x=>x.external_key)).size!==73)
+    throw Error('T44: recortes o preguntas incompletos o repetidos');
+  t44PreparedData=data;return data;
+}
+function t44WriteImages(){
+  const data=t44LoadData();if(!data)return {skipped:true};
+  const dir=path.join(process.cwd(),'public','graphics','ascensores');
+  fs.mkdirSync(dir,{recursive:true});let written=0;
+  for(const asset of data.images){
+    if(!/^T44_FIG_\d{2}_P\d{3}\.png$/.test(asset.file))
+      throw Error('T44: nombre de imagen inesperado');
+    const buf=Buffer.from(asset.base64,'base64');
+    const sha=createHash('sha256').update(buf).digest('hex');
+    if(sha!==asset.sha256||!buf.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T44: checksum/png invalido '+asset.file);
+    const dest=path.join(dir,asset.file);
+    if(fs.existsSync(dest)){
+      if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+        throw Error('T44: fichero de imagen existente distinto '+asset.file);
+    }else{fs.writeFileSync(dest,buf);written++;}
+  }
+  return {images:26,written};
+}
+async function t44ImportOnce(topic,uploadedPdfPath=null){
+  if(!t44Topic(topic))return {skipped:true};
+  const data=t44LoadData();if(!data)return {skipped:true,missing:true};
+  t44WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=topics.rows[0];
+    // Importación solo cuando la fuente de la indexación coincide.
+    // Si se llama desde el formulario, verificar el SHA del PDF subido.
+    // Al reintentar en el arranque, exigir el nombre del PDF oficial suministrado.
+    if(uploadedPdfPath){
+      const uploaded=fs.readFileSync(uploadedPdfPath);
+      if(createHash('sha256').update(uploaded).digest('hex')!==data.pdf_sha256)
+        throw Error('T44: SHA del PDF realmente indexado distinto del paquete');
+    }else if(String(t.source_file||'')!==String(data.pdf_filename)){
+      throw Error('T44: fuente del tema no coincide con el PDF preparado');
+    }
+    // T44-179: conservar la indexación File Search existente. Su PDF no se
+    // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
+    // El PDF exacto (14 páginas) se incorpora en el paquete con SHA verificado.
+    if(!t44Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
+      throw Error('T44: tema no indexado; no se altera ninguna cobertura');
+    const remote=await client.query(`SELECT document_name
+      FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
+    if(!remote.rows[0]?.document_name)
+      throw Error('T44: no hay fuente File Search vinculada; no se suplanta');
+    if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
+      throw Error('T44: falta el PDF original y el inventario de ampliaciones');
+    const pdfBytes=Buffer.from(data.pdf_base64,'base64');
+    const fileHash=createHash('sha256').update(pdfBytes).digest('hex');
+    if(fileHash!==data.pdf_sha256||pdfBytes.length<1000||
+       pdfBytes.length>20*1024*1024||
+       pdfBytes.subarray(0,5).toString('latin1')!=='%PDF-')
+      throw Error('T44: PDF local distinto del original indexado');
+    const source=await PDFDocument.load(pdfBytes,{updateMetadata:false});
+    if(source.getPageCount()!==14)throw Error('T44: el PDF no tiene 14 páginas');
+    await client.query(`INSERT INTO topic_local_pdfs
+      (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,14,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [t.id,fileHash,pdfBytes.length,pdfBytes]);
+    const stored=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      encode(sha256(pdf_bytes),'hex') AS stored_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const check=stored.rows[0];
+    if(!check||check.sha!==fileHash||check.stored_sha!==fileHash||
+       Number(check.page_count)!==14||
+       Number(check.size_bytes)!==pdfBytes.length||
+       Number(check.stored_size)!==pdfBytes.length)
+      throw Error('T44: copia PDF local incompatible; no se sobrescribe');
+    // Completar únicamente lagunas verificadas contra páginas físicas.
+    // DO NOTHING preserva historial y SRS si ya se instaló antes.
+    for(const item of data.coverage_additions){
+      if(!/^T44-NUM-\d{4}$/.test(item.external_key)||
+         !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>14||
+         !item.concept||!item.source_evidence)
+        throw Error('T44: ampliación documental no válida');
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'dato_t44_preparado','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
+    const imgMap=new Map();
+    for(const asset of data.images){
+      const file=asset.file,uri='/graphics/ascensores/'+file;
+      const sourceId='ascensores/'+file;
+      const q=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'ascensores',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
+        sanitization_version=2,updated_at=NOW() RETURNING id`,
+      [sourceId,file,uri,'T44 figura '+asset.figure,
+       'Recorte original delimitado al contenido gráfico CEIS pag. '+asset.printed_page,
+       'CEIS Guadalajara, Parte 4, pag. '+asset.printed_page]);
+      imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
+    }
+    let imported=0;
+    for(const row of data.questions){
+      const img=imgMap.get(row.graphic_file);
+      if(!img||row.image_sha256!==data.images.find(i=>i.file===row.graphic_file)?.sha256||
+         !/^T44-GRAF-\d{4}$/.test(row.external_key)||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         row.question_family!=='GRAFICA'||row.difficulty!=='muy alta'||
+         !row.stem||!row.source_evidence)
+        throw Error('T44: pregunta no valida '+row.external_key);
+      const key=row.external_key+' · '+row.coverage_concept;
+      const c=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t44_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE RETURNING id`,
+      [t.id,row.coverage_section,key,row.source_pdf_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(c.rows[0].id);
+      const graphic={...row.graphic,assetId:img.id,publicUrl:img.uri,
+        sourceId:img.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const previous=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+        LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(previous.rows.length){
+        const old=previous.rows[0];
+        if(old.stem!==row.stem||JSON.stringify(old.options)!==JSON.stringify(row.options)||
+          Number(old.correct_index)!==Number(row.correct_index))
+          throw Error('T44: pregunta distinta ya existente: '+row.external_key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+        correct_index,explanation,source_evidence,source_page,manual_page,
+        question_family,difficulty,graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+        row.explanation,row.source_evidence,row.source_pdf_page,row.manual_page,
+        JSON.stringify(graphic)]);
+      imported++;
+    }
+    if(imported!==73)throw Error('T44: numero de preguntas importadas incompleto');
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='ascensores' AND source_file LIKE 'Screenshot_%'
+      AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET
+      name='TEMA 44. RESCATE EN ASCENSORES',
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query('COMMIT');
+    console.log('T44_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
+      images:26,questions:73,documentaryAdditions:data.coverage_additions.length,
+      pdfSha256:fileHash}));
+    return {ok:true,topicId:t.id,images:26,questions:73,
+      documentaryAdditions:data.coverage_additions.length};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t44GraphicBankPairs(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t44_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
+
+
+
+
 async function t40GraphicBankPairs157(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -4292,6 +4948,94 @@ function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
 
+  if(topicNumber===44)return `
+REGLAS PRIORITARIAS TEMA 44 RESCATE EN ASCENSORES, CEIS GUADALAJARA 2015.
+ÚNICA FUENTE FACTUAL: PDF aportado de 14 páginas físicas, contenido impreso
+CEIS 328-334 y 336-338. No completar saltos ni modificar el PDF o la norma citada.
+Extrae cada DEFINICIÓN, TIPO, FUNCIÓN, SECUENCIA y CONDICIÓN individualmente.
+No confundir mecanismos de adherencia (con/sin engranajes, velocidades 0,1-1,75 y
+2-10 m/s) con impulsión hidráulica directa 1:1, directa lateral, diferencial 2:1,
+y doble impulsión. Distinguir relación pistón/cabina, requerimiento de foso y uso.
+Ascensor de bomberos según CEIS p.329: altura de evacuación >28 m y >15 m en el
+uso hospitalario mencionado, carga 630 kg, superficie 1,40 m², paso 0,80 m,
+doble alimentación y segunda fuente de 1 hora, recorrido de 1 minuto o menos.
+La Tabla 1 p.336 tiene CUATRO COLUMNAS de ubicación: eléctrico/hidráulico x
+con/sin cuarto de máquinas. Extraer cada combinación y acceso AL CUADRO sin
+atribuir la ubicación de un tipo a otro.
+Distinguir piezas del cuarto de máquinas (polea, motor-reductor, freno,
+limitador de velocidad) y sus funciones, y las seis tipologías de puertas 1-6.
+Panel de maniobras p.331: 230-400 V. Contrapeso p.332: peso cabina +45 % DEL
+PESO DE LA CABINA (no 45 % de carga máxima). Foso: al menos medio metro con
+amortiguadores comprimidos. Faldón p.333: 750 mm total y 200 mm mínimo fijo.
+Rescate SIN mover cabina p.336: al piso superior >80 cm, al inferior <30 cm
+según el texto; una ilustración dice NO superar 30 cm. NO forzar igualdad sin
+cotejar contexto, preguntar desigualdades con cuidado.
+Secuencias distintas: funcionamiento normal 4 pasos, sin mover cabina,
+sistema eléctrico auxiliar 7 pasos (solo eléctricos sin cuarto con ese sistema),
+manualmente electromecánico 14 pasos, hidráulico sin corriente 9 pasos,
+desenclave con corte y cierre final. Diferenciar acciones y prioridad.
+Conservar las fechas y normas literales del CEIS como datos de ESA EDICIÓN; no
+consultar, actualizar ni corregir con legislación o prácticas externas.
+Evita preguntas evidentes por textos o flechas en el gráfico. Las 73 preguntas
+gráficas son fijas y se importan directamente; Gemini no las rehace ni añade
+imágenes. Las 170 unidades extraídas del texto son un INVENTARIO CANDIDATO,
+no cuota rígida. Preguntar solo datos únicos con cita y contexto.
+`;
+  if(topicNumber===43)return `
+REGLAS PRIORITARIAS — TEMA 43 RESCATE EN ACCIDENTES FERROVIARIOS (CEIS EDICIÓN 2015).
+Fuente factual única: PDF subido, 24 páginas físicas. Contenido examinable impreso en
+CEIS 420–431 y 434–439; cubiertas, páginas blancas y separadores NO son hechos examinables.
+Cada cifra debe conservar la unidad y la relación que la define: vías ibérica 1.668 mm,
+internacional 1.435 mm, métrica 1.000 mm; 25.000 V CA, 3.000 V CC y en la edición
+1.500 V CC para ancho métrico; distinguir líneas, periodos y contexto.
+TRIPLE IMPORTANTÍSIMO: TFA 5 kg/cm² afloje, 3,5 kg/cm² frenada máxima EN SERVICIO y
+0 kg/cm² urgencia. TDP 7–10 kg/cm². NUNCA permutar TFA y TDP. Separar colores de
+llaves TFA azul / TDP rojo y posición abierta paralela / cerrada perpendicular.
+Diferenciar carril cabeza/patín/alma, traviesa/balasto, corazón fijo/espadín móvil,
+accionamiento de agujas eléctrico/mecánico/manual; catenaria/feeder/pantógrafo/trole;
+conjuntos de soporte y compensación (sin tensión) / atirantado y suspensión (con tensión)
+SEGÚN LA CLASIFICACIÓN DE LA EDICIÓN DEL MANUAL, sin generalizar como instrucción
+operativa universal; brida/husillo/tensor/topes de enganches.
+Descomponer los grupos por características y todas las cifras de la p.437–438:
+longitud, peso, toneladas por eje y coche, grosor/estructuras, acristalamiento,
+material y condiciones. No trasponer magnitudes entre clases de trenes.
+Tabla 1 de CEIS p.430: cuatro comunidades autónomas y su lista de entidades,
+como dato HISTÓRICO SEGÚN EL MANUAL DE 2015, no como afirmación administrativa
+actual. Cualquier norma citada en las páginas CEIS se pregunta EXCLUSIVAMENTE como dato literal del manual entregado, sin evaluar su vigencia ni añadir otras normas. No usar fuentes externas para completar, corregir o actualizar esta sección.
+No generar imágenes nuevas ni otras preguntas con imágenes: las 86 preguntas visuales
+cerradas y 11 recortes se importan directamente al banco, sin Gemini ni paraphraseo.
+NUNCA preguntar por imagen de portada o láminas ornamentales, códigos internos,
+números de hoja o valores sin su concepto y unidad. No hacer inferencias de mapas
+territoriales de 2015 como si reflejaran red actual.
+No utilizar 433 candidatos de inventario como cuota: extraer todas las relaciones
+EXAMINABLES únicas, separar datos distintos, y demostrar la página/cita del PDF.
+`;
+  if(topicNumber===42)return `
+TEMA 42 CEIS GUADALAJARA — COBERTURA DOCUMENTAL DE INCENDIOS EN TÚNELES.
+Fuente factual ÚNICA: las 22 páginas físicas suministradas, impresas CEIS 178-187 y 190-196.
+No reconstruyas páginas ausentes 188-189, ni el contenido de separadores, cabeceras o fotografías ornamentales.
+Desglosa umbral + condición + unidad + igualdad/inequidad de las tablas ELEGIBLES.
+EXCLUSIÓN ABSOLUTA DEL TEMARIO PREGUNTABLE: tablas experimentales 6 y 7 (CEIS p.186)
+y tabla experimental 8 (CEIS p.187). Son resultados de ensayos sin contexto suficiente;
+NO extraer filas, resultados, valores, series, radiaciones, distancias, tiempos ni HRR de
+ellas. NO crear preguntas sobre ellas ni reutilizarlas como opciones o distractores.
+No deducir reglas operativas de las conclusiones numéricas de dichos experimentos.
+Conservar el PDF fuente original íntegro; excluir los hechos, no modificar el manual.
+Tabla 2 cuatro combinaciones de tráfico/retenciones; tabla 9 caudal y líneas por
+vehículo; tabla 10 gota óptima 0,3-0,7 mm; tabla 11 ERA y tabla 12 rutas de gases.
+La condición de uso de monobotella de Tabla 11 contiene una contradicción editorial
+(«superiores a 20-30 minutos»); no convertirla en regla general hasta cotejo.
+En Tabla 11 distinguir autonomía nominal, real y uso; en Tabla 12, ruta fría y caliente.
+Distingue radiación kW/m², potencia HRR MW, energía GJ, caudal l/min,
+velocidad del aire m/s, temperatura °C y duración min, y nunca los intercambies.
+Distingue ventilación longitudinal, con extracción masiva, semitransversal y transversal;
+flujo de aire <1, 1-3 y >3 m/s; estratificación ~1 m/s y siempre <2 m/s.
+Diferencia técnicas de intervención, orientación/guía, ERA y seguridad.
+Los datos regulatorios se atribuyen SIEMPRE a esta edición CEIS, no a toda la legislación vigente.
+La fuente gráfica es el banco prefabricado original: no crees nuevas imágenes ni preguntas
+visuales libres. No uses un recuento esperado de 526 como cuota rígida; extrae el contenido
+real con página, cita y contexto, sin fusionar condiciones ni fabricar fragmentos.
+`;
   if(topicNumber===41)return `
 TEMA 41 CEIS GUADALAJARA — COBERTURA DOCUMENTAL.
 Usa como fuente UNICAMENTE el PDF cargado (las páginas seleccionadas por el
@@ -7082,6 +7826,12 @@ console.log(
   `COVERAGE AUDIT: completada. Añadidos ${auditItems.length} elementos. Total: ${allItems.length}`
 );
 let deduplicatedItems=deduplicateCoverageItems(allItems).filter(item=>
+  !t42Topic(topic) || !(
+    // Solo filas y mediciones experimentales de Tablas 6/7/8, páginas 186-187.
+    [12,13].includes(Number(item.sourcePage)) &&
+    /(?:tabla\s*[678]\b|l[oöó]nnermark|ingason|runehamar.*(?:ensayo|prueba)|(?:n[úu]mero|nº) de ejercicio)/i.test(
+      String(item.section||'')+' '+String(item.concept||'')+' '+String(item.sourceEvidence||''))
+  )).filter(item=>
   !t39HydraulicCoverage ||
   !(t39IsDuplicatedTable8Numeric(item)||t39IsContradictoryTable3Numeric(item)));
 
@@ -7236,6 +7986,24 @@ const parsed={
       try{const seeded=await t41ImportOnce(topic);
         console.log('T41_GRAFICO_AUTOIMPORT',JSON.stringify(seeded));
       }catch(e){console.error('T41_IMPORT_PENDIENTE:',String(e?.message||e));}
+    }
+    // T42: carga de preguntas fijas e imágenes una vez indexado el PDF.
+    if(t42Topic(topic)){
+      try{const loaded=await t42ImportOnce(topic,pdfPath);
+        console.log('T42_AUTOIMPORT',JSON.stringify(loaded));
+      }catch(e){console.error('T42_IMPORT_PENDIENTE:',String(e?.message||e));}
+    }
+    // T43: seeding gráfico transaccional, independiente de la extracción ya pagada.
+    if(t43Topic(topic)){
+      try{const loaded=await t43ImportOnce(topic,pdfPath);
+        console.log('T43_AUTOIMPORT',JSON.stringify(loaded));
+      }catch(e){console.error('T43_IMPORT_PENDIENTE:',String(e?.message||e));}
+    }
+    // T44: importación gráfica/numérica a partir del PDF CEIS exacto ya indexado.
+    if(t44Topic(topic)){
+      try{const loaded=await t44ImportOnce(topic,pdfPath);
+        console.log('T44_AUTOIMPORT',JSON.stringify(loaded));
+      }catch(e){console.error('T44_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
@@ -10863,6 +11631,18 @@ for(let i = 0; i < selected.length; i++){
   }
   if(t41Topic(originalGraphicSlot) && t41LoadData()){
     selected[i]={...originalGraphicSlot,t41PreparedGraphicSlot:true};
+    continue;
+  }
+  if(t44Topic(originalGraphicSlot) && t44LoadData()){
+    selected[i]={...originalGraphicSlot,t44PreparedGraphicSlot:true};
+    continue;
+  }
+  if(t43Topic(originalGraphicSlot) && t43LoadData()){
+    selected[i]={...originalGraphicSlot,t43PreparedGraphicSlot:true};
+    continue;
+  }
+  if(t42Topic(originalGraphicSlot) && t42LoadData()){
+    selected[i]={...originalGraphicSlot,t42PreparedGraphicSlot:true};
     continue;
   }
 
@@ -14636,6 +15416,65 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
     String(t.topic_block||'').toLowerCase()==='geografia' &&
     coverageTopicNumber(t.topic_name)===37 ? [i+1] : []);
   const soloTema37=geo && slots37.length===targets.length;
+  const slotsT42=targets.flatMap((t,i)=>
+    String(t.topic_block||'').toLowerCase()==='especifico' &&
+    coverageTopicNumber(t.topic_name)===42 ? [i+1] : []);
+  const slotsT43=targets.flatMap((t,i)=>
+    String(t.topic_block||'').toLowerCase()==='especifico' &&
+    coverageTopicNumber(t.topic_name)===43 ? [i+1] : []);
+  const slotsT44=targets.flatMap((t,i)=>
+    String(t.topic_block||'').toLowerCase()==='especifico' &&
+    coverageTopicNumber(t.topic_name)===44 ? [i+1] : []);
+  const reglasT44=slotsT44.length ? `REGLAS T44 EXCLUSIVAS SLOTS ${slotsT44.join(', ')}:
+  Usa exclusivamente fragmentos CEIS correspondientes a cada objetivo; no otras normas.
+  Dificultad Muy Alta similar a ejercicios 2023/2024/2026 SOLO POR FORMA.
+  Preguntas CORRECTA e INCORRECTA: mismo dominio, distractores que permutan
+  UNA condición, cifra, mecanismo o paso del procedimiento. No regalar cifras.
+  Contrapeso 45 % de peso de CABINA; no confundir con carga máxima.
+  No mezclar mecánico manual, eléctrico auxiliar ni hidráulico y sus secuencias.
+  Las 73 preguntas gráficas están cerradas y no se regeneran con Gemini.
+  En normativa, mostrar «según el CEIS aportado»; NO actualizar reglas del PDF.
+` : '';
+  const reglasT43=slotsT43.length ? `REGLAS T43 SOLO SLOTS ${slotsT43.join(', ')}:
+  Responde EXCLUSIVAMENTE conforme al fragmento CEIS de la ficha asignada.
+  Estilo examen: cuatro alternativas plausibles, SOLO una correcta. Preguntas CORRECTA,
+  INCORRECTA, asociaciones triples y cifras con condiciones, evitando distractores ajenos.
+  En INCORRECTA, tres afirmaciones respaldadas y una falsa inequívoca. No regalar la
+  respuesta en el enunciado; no ofrecer fórmula en cálculo si se exige conocerla.
+  Diferenciar peso total/de coche/por eje; m, mm, km, V, kV, A, mA y kg/cm², y
+  distinguir valores AFLOJE, SERVICIO, URGENCIA y TDP. No inferir vigencia actual
+  de cifras normativas/institucionales de la edición CEIS 2015.
+  Tabla CEIS p.430: preguntar SIEMPRE "según el manual edición 2015", con
+  comunidad, entidad gestora y fila completa; no generalizar a actualidad.
+  Ejemplo SOLO ESTILO, datos CEIS p.427: ¿qué asociación TFA/TDP y sus presiones
+  es completamente correcta? Distractores cambian función de freno/rango.
+  Ejemplo SOLO ESTILO, datos CEIS p.437: ¿qué grupo de longitud, masa, ancho de vía
+  y tipo de tren corresponde al párrafo? Opciones cercanas y asociadas a modelo.
+  El banco visual cerrado ya resuelve GRAFICA: Gemini no crea ni altera esas preguntas.
+` : '';
+  const reglasT42=slotsT42.length ? `REGLAS T42 EXCLUSIVAS EN SLOTS ${slotsT42.join(', ')}:
+  Preguntar las relaciones exactas del fragmento CEIS, con rigor de examen Navarra 2024
+  (preguntas oficiales 62 y 63: CORRECTA / INCORRECTA, términos técnicos cercanos,
+  cifras y condiciones), nunca tomar sus respuestas como fuente factual.
+  Cada distractor debe cambiar UNA condición, fila/columna, unidad o dato respaldado;
+  no incluir opciones absurdas ni deducibles solo de la flecha de una figura.
+  EXCLUIR COMPLETAMENTE la Tabla 6 (p.186), la Tabla 7 (p.186) y la Tabla 8
+  (p.187): no preguntar resultados de experimentos, ni calcular, comparar, recuperar,
+  transformar o citar sus cifras; tampoco emplearlas como distractores.
+  El PDF original se mantiene intacto; el resto de datos son preguntables.
+  Separar potencia MW, radiación kW/m², energía GJ, caudal l/min, velocidad m/s,
+  temperatura °C y autonomía nominal de operativa. No convertir unidades en pistas.
+  Para fichas de tabla, ignorar códigos T42-TAB-XXXX; exigir fila, columna, valor,
+  condición y unidad. Como ya hay 90 preguntas gráficas cerradas, NO inventar otras.
+  EJEMPLO DE FORMA (NO copiar a otros objetivos): «Según CEIS p.179, tabla 2,
+  ¿qué asociación de sentido de circulación, retenciones y distancia entre accesos
+  es correcta?». Alternativas cercanas, una sola combinación respaldada.
+  EJEMPLO DE FORMA (NO copiar a otros objetivos): «Según CEIS p.187, en el
+  apartado de evacuación, ¿qué afirmación sobre el comportamiento de los ocupantes
+  es CORRECTA?». Usar exclusivamente la explicación del texto, no la Tabla 8.
+  En INCORRECTA, exactamente tres afirmaciones fieles al PDF y una falsa.
+` : '';
+
   // Una sola instrucción, en el prompt ya existente (sin Gemini adicional).
   const reglas37=slots37.length ? `REGLA PRIORITARIA EXCLUSIVA DE TEMA 37 EN LOS SLOTS ${slots37.join(', ')}:
   Elige para CADA slot exactamente UNA de estas TRES redacciones, con el topónimo y, si es preciso, la vertiente/tramo que figura en ESE objetivo:
@@ -14704,6 +15543,9 @@ Las preguntas TEÓRICAS cuyo objeto es una fórmula literal no son cálculos.
 MUY ALTA: escribe primero una clave respaldada y tres distractores plausibles sobre LA MISMA variable técnica (magnitud con unidad y escala comparables, condición, paso, componente o relación); evita disparates, absolutos gratuitos y categorías distintas. Si el fragmento solo ofrece un dato sencillo, mantén la precisión literal: nunca inventes otra condición para fingir dificultad. Enunciado breve y de examen, sin escenificaciones («un equipo analiza...») ni referencias genéricas al temario fuera de las literales CEIS; un supuesto operativo solo si está documentado. Cuatro opciones homogéneas, no solapadas y una única solución. INCORRECTA: tres opciones verdaderas y una falsa inequívoca. Explicación consistente con la clave, sin letras A/B/C/D porque se barajan después. Sin hechos externos, filtros ni nuevas rondas.`:''}\nDIVERSIDAD TRANSVERSAL (Legislación, Geografía, Específico): cada OBJETIVO es un hecho distinto; pregunta por su relación examinable, no repitas enunciados equivalentes ni inviertas el mismo dato entre preguntas. Si hay varias operaciones documentadas (identificar, relacionar, aplicar, ordenar, distinguir), distribúyelas; NO fuerces operaciones sin evidencia. No repitas un patrón sólo por aparecer en los ejemplos de estilo.
 ${geo?'ESTILO GEOGRAFÍA: Formula preguntas directas sobre un hecho, una ubicación, una relación, un itinerario o una intervención documentada. Prefiere enunciados positivos; permite NO cuando la relación negativa esté plenamente acreditada. No uses fórmulas genéricas como «señale la correcta/incorrecta» ni impongas cuotas de polaridad. No inventes escenarios, trayectos o proximidades. La dificultad, los distractores y la verificación factual siguen las reglas comunes.':''}
 ${reglas37}
+${reglasT42}
+${reglasT43}
+${reglasT44}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
@@ -16453,7 +17295,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -16481,15 +17323,21 @@ app.post('/api/generate',async(req,res)=>{
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
     // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
-    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot)){
-      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot)?i:-1)
+    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot)){
+      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot)?i:-1)
         .filter(i=>i>=0);
       const grouped=new Map();
       for(const i of slots){
         const topicId=Number(targets[i].topic_id);
         if(!grouped.has(topicId))grouped.set(topicId,
-          mode==='mixto'
-            ?(targets[i].t41PreparedGraphicSlot
+          (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot)
+            ?(targets[i].t44PreparedGraphicSlot
+              ?await t44GraphicBankPairs(topicId,freshOnly111,difficulty)
+              :targets[i].t43PreparedGraphicSlot
+              ?await t43GraphicBankPairs(topicId,freshOnly111,difficulty)
+              :targets[i].t42PreparedGraphicSlot
+              ?await t42GraphicBankPairs(topicId,freshOnly111,difficulty)
+              :targets[i].t41PreparedGraphicSlot
               ?await t41GraphicBankPairs(topicId,freshOnly111,difficulty)
               :await t40GraphicBankPairs157(topicId,freshOnly111,difficulty))
             :[]);
@@ -16529,7 +17377,7 @@ app.post('/api/generate',async(req,res)=>{
         }else{
           // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
           targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
-            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false};
+            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false};
           console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
         }
       }
@@ -17457,6 +18305,12 @@ async function startServer(){
   }
   try{const im=t41WriteImages();console.log('T41_GRAFICOS_LOCALES',JSON.stringify(im));}
   catch(e){console.error('T41_GRAFICOS_LOCALES_PENDIENTES:',String(e?.message||e));}
+  try{const im=t42WriteImages();console.log('T42_IMAGENES_LOCALES',JSON.stringify(im));}
+  catch(e){console.error('T42_IMAGENES_PENDIENTES:',String(e?.message||e));}
+  try{const im=t43WriteImages();console.log('T43_IMAGENES_LOCALES',JSON.stringify(im));}
+  catch(e){console.error('T43_IMAGENES_PENDIENTES:',String(e?.message||e));}
+  try{const im=t44WriteImages();console.log('T44_IMAGENES_LOCALES',JSON.stringify(im));}
+  catch(e){console.error('T44_IMAGENES_PENDIENTES:',String(e?.message||e));}
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
@@ -17481,6 +18335,23 @@ async function startServer(){
       .then(r=>Promise.all(r.rows.filter(t41Topic).map(t=>t41ImportOnce(t))))
       .then(r=>console.log('T41_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T41_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    db.query(`SELECT id,name,block,total_items FROM topics WHERE block='especifico'
+       AND name ~* '^TEMA[[:space:]]*42([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(t42Topic).map(t=>t42ImportOnce(t))))
+      .then(r=>console.log('T42_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('T42_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
+      FROM topics WHERE block='especifico' AND
+      name ~* '^TEMA[[:space:]]*43([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(t43Topic).map(t=>t43ImportOnce(t))))
+      .then(r=>console.log('T43_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('T43_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
+      FROM topics WHERE block='especifico' AND
+      name ~* '^TEMA[[:space:]]*44([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(t44Topic).map(t=>t44ImportOnce(t))))
+      .then(r=>console.log('T44_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('T44_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
