@@ -2788,6 +2788,237 @@ async function t44GraphicBankPairs(topicId,freshOnly,difficulty){
 
 
 
+/* T45: módulo documental/gráfico aislado, sin modificación de otros temas. */
+/* TEMA 45: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
+let t45PreparedData=null;
+function t45Topic(topic){
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ')
+    .replace(/\s+/g,' ').trim();
+  return /^tema\s*45\b/i.test(name) &&
+    /(?:apicola|otras especies)/i.test(name) &&
+    String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
+}
+function t45LoadData(){
+  if(t45PreparedData)return t45PreparedData;
+  const file=path.join(process.cwd(),'t45_graphics_data.js');
+  if(!fs.existsSync(file))return null;
+  const content=fs.readFileSync(file,'utf8');
+  const marker='module.exports = ';
+  const start=content.indexOf(marker);
+  if(start<0)throw Error('T45: cabecera de paquete grafico invalida');
+  const data=JSON.parse(content.slice(start+marker.length).trim().replace(/;\s*$/,''));
+  if(data?.schema!==1||data.topic_number!==45||data.pdf_page_count!==32||
+     !Array.isArray(data.images)||data.images.length!==20||
+     !Array.isArray(data.questions)||data.questions.length!==54||
+     new Set(data.images.map(x=>x.file)).size!==20||
+     new Set(data.questions.map(x=>x.external_key)).size!==54)
+    throw Error('T45: recortes o preguntas incompletos o repetidos');
+  t45PreparedData=data;return data;
+}
+function t45WriteImages(){
+  const data=t45LoadData();if(!data)return {skipped:true};
+  const dir=path.join(process.cwd(),'public','graphics','apicola');
+  fs.mkdirSync(dir,{recursive:true});let written=0;
+  for(const asset of data.images){
+    if(!/^T45_FIG_\d{2}_P\d{3}\.png$/.test(asset.file))
+      throw Error('T45: nombre de imagen inesperado');
+    const buf=Buffer.from(asset.base64,'base64');
+    const sha=createHash('sha256').update(buf).digest('hex');
+    if(sha!==asset.sha256||!buf.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T45: checksum/png invalido '+asset.file);
+    const dest=path.join(dir,asset.file);
+    if(fs.existsSync(dest)){
+      if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+        throw Error('T45: fichero de imagen existente distinto '+asset.file);
+    }else{fs.writeFileSync(dest,buf);written++;}
+  }
+  return {images:20,written};
+}
+async function t45ImportOnce(topic,uploadedPdfPath=null){
+  if(!t45Topic(topic))return {skipped:true};
+  const data=t45LoadData();if(!data)return {skipped:true,missing:true};
+  t45WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const topics=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=topics.rows[0];
+    // Importación solo cuando la fuente de la indexación coincide.
+    // Si se llama desde el formulario, verificar el SHA del PDF subido.
+    // Al reintentar en el arranque, exigir el nombre del PDF oficial suministrado.
+    if(uploadedPdfPath){
+      const uploaded=fs.readFileSync(uploadedPdfPath);
+      const hashUploaded=createHash('sha256').update(uploaded).digest('hex');
+      if(hashUploaded!==data.pdf_sha256 &&
+        !(Array.isArray(data.pdf_equivalent_sha256)&&
+          data.pdf_equivalent_sha256.includes(hashUploaded)))
+        throw Error('T45: SHA del PDF realmente indexado distinto del paquete');
+    }else{
+      // Retoma el tema solo si el PDF que figura como fuente es el PDF
+      // realmente suministrado. No deducir identidades desde un titulo.
+      const known=String(t.source_file||'')===String(data.pdf_filename);
+      if(!known){
+        const prior=await client.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[t.id]);
+        if(prior.rows[0]?.sha!==String(data.pdf_sha256))
+          throw Error('T45: fuente distinta del PDF CEIS preparado');
+      }
+    }
+    // T45-179: conservar la indexación File Search existente. Su PDF no se
+    // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
+    // El PDF exacto (32 páginas) se incorpora en el paquete con SHA verificado.
+    if(!t45Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
+      throw Error('T45: tema no indexado; no se altera ninguna cobertura');
+    const remote=await client.query(`SELECT document_name
+      FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
+    if(!remote.rows[0]?.document_name)
+      throw Error('T45: no hay fuente File Search vinculada; no se suplanta');
+    if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
+      throw Error('T45: falta el PDF original y el inventario de ampliaciones');
+    const pdfBytes=Buffer.from(data.pdf_base64,'base64');
+    const fileHash=createHash('sha256').update(pdfBytes).digest('hex');
+    if(fileHash!==data.pdf_sha256||pdfBytes.length<1000||
+       pdfBytes.length>20*1024*1024||
+       pdfBytes.subarray(0,5).toString('latin1')!=='%PDF-')
+      throw Error('T45: PDF local distinto del original indexado');
+    const source=await PDFDocument.load(pdfBytes,{updateMetadata:false});
+    if(source.getPageCount()!==32)throw Error('T45: el PDF no tiene 32 páginas');
+    await client.query(`INSERT INTO topic_local_pdfs
+      (topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,32,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [t.id,fileHash,pdfBytes.length,pdfBytes]);
+    const stored=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      encode(sha256(pdf_bytes),'hex') AS stored_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const check=stored.rows[0];
+    if(!check||check.sha!==fileHash||check.stored_sha!==fileHash||
+       Number(check.page_count)!==32||
+       Number(check.size_bytes)!==pdfBytes.length||
+       Number(check.stored_size)!==pdfBytes.length)
+      throw Error('T45: copia PDF local incompatible; no se sobrescribe');
+    // Completar únicamente lagunas verificadas contra páginas físicas.
+    // DO NOTHING preserva historial y SRS si ya se instaló antes.
+    for(const item of data.coverage_additions){
+      if(!/^T45-NUM-\d{4}$/.test(item.external_key)||
+         !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>32||
+         !item.concept||!item.source_evidence)
+        throw Error('T45: ampliación documental no válida');
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'dato_t45_preparado','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
+    const imgMap=new Map();
+    for(const asset of data.images){
+      const file=asset.file,uri='/graphics/apicola/'+file;
+      const sourceId='apicola/'+file;
+      const q=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'apicola',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,is_usable=TRUE,analysis_status='analyzed',
+        sanitization_version=2,updated_at=NOW() RETURNING id`,
+      [sourceId,file,uri,'T45 figura '+asset.figure,
+       'Recorte original delimitado al contenido gráfico CEIS pag. '+asset.printed_page,
+       'CEIS Guadalajara, Parte 8, pag. '+asset.printed_page]);
+      imgMap.set(file,{id:Number(q.rows[0].id),uri,sourceId});
+    }
+    let imported=0;
+    for(const row of data.questions){
+      const img=imgMap.get(row.graphic_file);
+      if(!img||row.image_sha256!==data.images.find(i=>i.file===row.graphic_file)?.sha256||
+         !/^T45-GRAF-\d{4}$/.test(row.external_key)||
+         !Array.isArray(row.options)||row.options.length!==4||
+         new Set(row.options).size!==4||
+         !Number.isInteger(row.correct_index)||row.correct_index<0||row.correct_index>3||
+         row.question_family!=='GRAFICA'||row.difficulty!=='muy alta'||
+         !row.stem||!row.source_evidence)
+        throw Error('T45: pregunta no valida '+row.external_key);
+      const key=row.external_key+' · '+row.coverage_concept;
+      const c=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_t45_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE RETURNING id`,
+      [t.id,row.coverage_section,key,row.source_pdf_page,row.manual_page,row.source_evidence]);
+      const coverageId=Number(c.rows[0].id);
+      const graphic={...row.graphic,assetId:img.id,publicUrl:img.uri,
+        sourceId:img.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const previous=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id DESC
+        LIMIT 1 FOR UPDATE`,[coverageId]);
+      if(previous.rows.length){
+        const old=previous.rows[0];
+        if(old.stem!==row.stem||JSON.stringify(old.options)!==JSON.stringify(row.options)||
+          Number(old.correct_index)!==Number(row.correct_index))
+          throw Error('T45: pregunta distinta ya existente: '+row.external_key);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+        correct_index,explanation,source_evidence,source_page,manual_page,
+        question_family,difficulty,graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [coverageId,row.stem,JSON.stringify(row.options),row.correct_index,
+        row.explanation,row.source_evidence,row.source_pdf_page,row.manual_page,
+        JSON.stringify(graphic)]);
+      imported++;
+    }
+    if(imported!==54)throw Error('T45: numero de preguntas importadas incompleto');
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='apicola' AND source_file LIKE 'Screenshot_%'
+      AND is_usable=TRUE`);
+    await client.query(`UPDATE topics SET
+      name='TEMA 45. RESCATE APÍCOLA Y DE OTRAS ESPECIES',
+      total_items=(SELECT COUNT(*) FROM coverage_items
+        WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
+    await client.query('COMMIT');
+    console.log('T45_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
+      images:20,questions:54,documentaryAdditions:data.coverage_additions.length,
+      pdfSha256:fileHash}));
+    return {ok:true,topicId:t.id,images:20,questions:54,
+      documentaryAdditions:data.coverage_additions.length};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function t45GraphicBankPairs(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_t45_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
+
+
+
+
+
 async function t40GraphicBankPairs157(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -8182,6 +8413,12 @@ const parsed={
         console.log('T44_AUTOIMPORT',JSON.stringify(loaded));
       }catch(e){console.error('T44_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
+    // T45: importa únicamente el mismo PDF CEIS aportado, con SHA estricto.
+    if(t45Topic(topic)){
+      try{const loaded=await t45ImportOnce(topic,pdfPath);
+        console.log('T45_AUTOIMPORT',JSON.stringify(loaded));
+      }catch(e){console.error('T45_IMPORT_PENDIENTE:',String(e?.message||e));}
+    }
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
 
@@ -11812,6 +12049,10 @@ for(let i = 0; i < selected.length; i++){
   }
   if(t44Topic(originalGraphicSlot) && t44LoadData()){
     selected[i]={...originalGraphicSlot,t44PreparedGraphicSlot:true};
+    continue;
+  }
+  if(t45Topic(originalGraphicSlot) && t45LoadData()){
+    selected[i]={...originalGraphicSlot,t45PreparedGraphicSlot:true};
     continue;
   }
   if(t43Topic(originalGraphicSlot) && t43LoadData()){
@@ -15602,6 +15843,27 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const slotsT44=targets.flatMap((t,i)=>
     String(t.topic_block||'').toLowerCase()==='especifico' &&
     coverageTopicNumber(t.topic_name)===44 ? [i+1] : []);
+  const slotsT45=targets.flatMap((t,i)=>
+    String(t.topic_block||'').toLowerCase()==='especifico' &&
+    coverageTopicNumber(t.topic_name)===45 && /apicola|otras especies/i.test(
+      String(t.topic_name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')) ? [i+1] : []);
+  const reglasT45=slotsT45.length ? `REGLAS T45 SOLO SLOTS ${slotsT45.join(', ')}:
+  UNICA FUENTE factual el documento CEIS Guadalajara Parte 8 aportado, impreso
+  paginas 532-553 y 556-559. NO introducir datos exteriores ni actualizaciones.
+  Exigir contexto en cada cifra: casta, fase, especie, rango, unidad y pagina.
+  Ciclos: REINA 16 d (huevo 3, larva 8, ninfa 4), ZANGANO 24 d (3/10/11),
+  OBRERA 21 d (3/10/8): conservar literalmente; no forzar suma 3+8+4=16.
+  Diferenciar los limites, distribuciones de castas y especies de avispa,
+  sin mezclar abeja, vespa velutina, vespa crabro, vespula, polistes y bombus.
+  Distinguir enjambres desnudos/establecidos, feromonas QMP y Nasanov,
+  y tecnicas aplicables con riesgos y condiciones del manual.
+  Los 54 reactivos GRAFICA estan completamente prefabricados y se recuperan
+  del banco: NO pedir a Gemini que reconozca imagenes ni regenere alternativas.
+  Muy Alta: distractores de mismo dominio, una correcta, sin umbrales solapados;
+  usar los exámenes 2023-2026 solo para forma, NUNCA como fuente factual.
+  Leyes, organos y tratamientos citados describen solo CEIS 2015; no
+  presentarlos como normativa ni protocolos clinicos vigentes.
+` : '';
   const reglasT44=slotsT44.length ? `REGLAS T44 EXCLUSIVAS SLOTS ${slotsT44.join(', ')}:
   Usa exclusivamente fragmentos CEIS correspondientes a cada objetivo; no otras normas.
   Dificultad Muy Alta similar a ejercicios 2023/2024/2026 SOLO POR FORMA.
@@ -15729,6 +15991,7 @@ ${reglas37}
 ${reglasT42}
 ${reglasT43}
 ${reglasT44}
+${reglasT45}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
@@ -17481,7 +17744,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!t.t45PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -17509,15 +17772,17 @@ app.post('/api/generate',async(req,res)=>{
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
     // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
-    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot)){
-      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot)?i:-1)
+    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot)){
+      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot)?i:-1)
         .filter(i=>i>=0);
       const grouped=new Map();
       for(const i of slots){
         const topicId=Number(targets[i].topic_id);
         if(!grouped.has(topicId))grouped.set(topicId,
-          (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot)
-            ?(targets[i].t44PreparedGraphicSlot
+          (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot)
+            ?(targets[i].t45PreparedGraphicSlot
+              ?await t45GraphicBankPairs(topicId,freshOnly111,difficulty)
+              :targets[i].t44PreparedGraphicSlot
               ?await t44GraphicBankPairs(topicId,freshOnly111,difficulty)
               :targets[i].t43PreparedGraphicSlot
               ?await t43GraphicBankPairs(topicId,freshOnly111,difficulty)
@@ -17563,7 +17828,7 @@ app.post('/api/generate',async(req,res)=>{
         }else{
           // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
           targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
-            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false};
+            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false,t45PreparedGraphicSlot:false};
           console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
         }
       }
@@ -18497,6 +18762,8 @@ async function startServer(){
   catch(e){console.error('T43_IMAGENES_PENDIENTES:',String(e?.message||e));}
   try{const im=t44WriteImages();console.log('T44_IMAGENES_LOCALES',JSON.stringify(im));}
   catch(e){console.error('T44_IMAGENES_PENDIENTES:',String(e?.message||e));}
+  try{const im=t45WriteImages();console.log('T45_IMAGENES_LOCALES',JSON.stringify(im));}
+  catch(e){console.error('T45_IMAGENES_PENDIENTES:',String(e?.message||e));}
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
@@ -18541,6 +18808,12 @@ async function startServer(){
       .then(r=>Promise.all(r.rows.filter(t44Topic).map(t=>t44ImportOnce(t))))
       .then(r=>console.log('T44_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T44_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
+      FROM topics WHERE block='especifico' AND
+      name ~* '^TEMA[[:space:]]*45([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(t45Topic).map(t=>t45ImportOnce(t))))
+      .then(r=>console.log('T45_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
