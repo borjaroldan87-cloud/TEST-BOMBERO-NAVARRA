@@ -2868,12 +2868,26 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
     // T45-179: conservar la indexación File Search existente. Su PDF no se
     // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
     // El PDF exacto (32 páginas) se incorpora en el paquete con SHA verificado.
-    if(!t45Topic(t)||Number(t.total_items)<1||!t.file_search_indexed)
-      throw Error('T45: tema no indexado; no se altera ninguna cobertura');
+    if(!t45Topic(t)||Number(t.total_items)<1)
+      throw Error('T45: tema sin cobertura; no se altera ninguna ficha');
+    // SERVER190: admitir también el PDF local original con SHA verificado.
+    // Solo se permite para T45; los demás temas y File Search no cambian.
     const remote=await client.query(`SELECT document_name
       FROM topic_source_documents WHERE topic_id=$1`,[t.id]);
-    if(!remote.rows[0]?.document_name)
-      throw Error('T45: no hay fuente File Search vinculada; no se suplanta');
+    const local=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS stored_size,
+      ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const loc=local.rows[0];
+    const localReady=Boolean(loc && loc.sha===data.pdf_sha256 &&
+      loc.actual_sha===data.pdf_sha256 && Number(loc.page_count)===32 &&
+      Number(loc.size_bytes)===Number(loc.stored_size) &&
+      remote.rows[0]?.document_name==='local-pdf:sha256:'+data.pdf_sha256);
+    const remoteReady=Boolean(t.file_search_indexed &&
+      remote.rows[0]?.document_name &&
+      !String(remote.rows[0].document_name).startsWith('local-pdf:'));
+    if(!localReady && !remoteReady)
+      throw Error('T45: falta indexación o PDF local íntegro; se conserva la cobertura');
     if(!data.pdf_base64||!Array.isArray(data.coverage_additions))
       throw Error('T45: falta el PDF original y el inventario de ampliaciones');
     const pdfBytes=Buffer.from(data.pdf_base64,'base64');
@@ -4491,6 +4505,38 @@ async function replaceT40Document159(topic,pdfPath,items){
   await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
     {sha,pages:66,bytes});
   console.log(`T40_159_PDF_Y_COBERTURA_LOCAL: ${items.length} conocimientos guardados`);
+}
+
+// SERVER190: T45 CEIS, guardado íntegro en PostgreSQL en una sola transacción.
+// Evita que una operación remota de Google File Search bloquee el guardado
+// de conocimientos ya extraídos. Vía exclusivamente T45, con SHA del paquete.
+async function replaceT45Document190(topic,pdfPath,items){
+  if(!t45Topic(topic))throw Error('T45: identidad de tema incompatible');
+  const data=t45LoadData();
+  if(!data || !data.pdf_base64 || data.pdf_page_count!==32)
+    throw Error('T45: paquete documental ausente o incompleto');
+  const submitted=fs.readFileSync(pdfPath);
+  const suppliedHash=createHash('sha256').update(submitted).digest('hex');
+  if(suppliedHash!==data.pdf_sha256 &&
+     !(Array.isArray(data.pdf_equivalent_sha256) &&
+       data.pdf_equivalent_sha256.includes(suppliedHash)))
+    throw Error('T45: el PDF seleccionado no coincide con el CEIS auditado');
+  const bytes=Buffer.from(data.pdf_base64,'base64');
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256 || bytes.length<1000 ||
+     bytes.length>20*1024*1024 ||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw Error('T45: SHA o formato del PDF original inválido');
+  const source=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(source.getPageCount()!==32)
+    throw Error('T45: el PDF CEIS debe contener 32 páginas');
+  if(!Array.isArray(items)||items.length<1||items.some(x=>
+    !Number.isInteger(x.sourcePage)||x.sourcePage<1||x.sourcePage>32||
+    !String(x.concept||'').trim() || !String(x.sourceEvidence||'').trim()))
+    throw Error('T45: ficha sin página, concepto o evidencia documental');
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages:32,bytes});
+  console.log(`T45_190_PDF_COBERTURA_LOCAL_CONFIRMADA: ${items.length} fichas; sha=${sha}`);
 }
 
 // SERVER115 R2 — nuevo Tema 22: PDF completo, 197 fichas confirmadas
@@ -7683,7 +7729,8 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       if(hash!==T39_CEIS_PDF_SHA256)
         throw new Error('T39: este PDF no coincide con el Tema 39 CEIS verificado. No se descartan páginas ni se modifica la cobertura.');
     }
-    if(!STORE && !t39HydraulicCoverage && !t40Resumable159)
+    if(!STORE && !t39HydraulicCoverage && !t40Resumable159 &&
+       !t45Topic(topic))
       throw new Error("Primero indexa el PDF.");
     const iiffPdfHash86=iiffManual86
       ? createHash("sha256").update(fs.readFileSync(pdfPath)).digest("hex")
@@ -8373,6 +8420,7 @@ const parsed={
     if(iiffManual86) await replaceIiffDocument90(topic,pdfPath,validItems);
     else if(t39HydraulicCoverage) await replaceT39Document(topic,pdfPath,validItems);
     else if(t40Resumable159) await replaceT40Document159(topic,pdfPath,validItems);
+    else if(t45Topic(topic)) await replaceT45Document190(topic,pdfPath,validItems);
     else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
     // Importación opcional, ACOTADA y transaccional de las 45 preguntas
