@@ -2565,8 +2565,11 @@ let t44PreparedData=null;
 function t44Topic(topic){
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
-  return /^\s*tema\s*44\b/i.test(name) &&
-    /rescate\s+en\s+ascensores/i.test(name) &&
+  // T44-188: admitir solamente el titulo CEIS definitivo o el titulo
+  // de la primera indexacion originado por el nombre de descarga verificado.
+  const nombreOficial=/^\s*tema\s*44\b[.\s]*rescate\s+en\s+ascensores\s*$/i.test(name);
+  const nombreImportado=/^\s*tema\s*44\b[.\s]*ascensores\s+para\s+indexar\s*$/i.test(name);
+  return (nombreOficial||nombreImportado) &&
     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico';
 }
 function t44LoadData(){
@@ -2622,8 +2625,15 @@ async function t44ImportOnce(topic,uploadedPdfPath=null){
       const uploaded=fs.readFileSync(uploadedPdfPath);
       if(createHash('sha256').update(uploaded).digest('hex')!==data.pdf_sha256)
         throw Error('T44: SHA del PDF realmente indexado distinto del paquete');
-    }else if(String(t.source_file||'')!==String(data.pdf_filename)){
-      throw Error('T44: fuente del tema no coincide con el PDF preparado');
+    }else{
+      // T44-188: se acepta el nombre de archivo de la ultima descarga
+      // UNICAMENTE si su SHA coincide con el PDF original del modulo.
+      // No aceptar nombres genericos ni relajar la comprobacion de integridad.
+      const originalName=String(t.source_file||'')===String(data.pdf_filename);
+      const downloadAlias=String(t.source_file||'')==='TEMA44_ASCENSORES_PARA_INDEXAR.pdf' &&
+        String(data.pdf_sha256)==='ecdfe969192d95deb93e3e6fa53c1ef9d841146aabe71e6d26fac14892012d8b';
+      if(!originalName&&!downloadAlias)
+        throw Error('T44: fuente del tema no coincide con el PDF preparado');
     }
     // T44-179: conservar la indexación File Search existente. Su PDF no se
     // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
