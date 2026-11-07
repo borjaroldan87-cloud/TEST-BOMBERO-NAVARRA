@@ -2335,7 +2335,16 @@ async function t43ImportOnce(topic,uploadedPdfPath=null){
       if(createHash('sha256').update(uploaded).digest('hex')!==data.pdf_sha256)
         throw Error('T43: SHA del PDF realmente indexado distinto del paquete');
     }else if(String(t.source_file||'')!==String(data.pdf_filename)){
-      throw Error('T43: fuente del tema no coincide con el PDF preparado');
+      // Un PDF verificado puede haberse subido con otro nombre. No confiar
+      // en el nombre: aceptar SOLO si ya existe su copia local íntegra,
+      // enlazada a este tema y con el SHA exacto del CEIS.
+      const linked=await client.query(`SELECT trim(pdf_sha256) AS sha,
+        encode(sha256(pdf_bytes),'hex') AS actual_sha, page_count
+        FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+      const fp=linked.rows[0];
+      if(!fp||fp.sha!==data.pdf_sha256||fp.actual_sha!==data.pdf_sha256||
+         Number(fp.page_count)!==24)
+        throw Error('T43: fuente PDF distinta y sin copia local validada');
     }
     // T43-179: conservar la indexación File Search existente. Su PDF no se
     // guardaba localmente, pero el banco fijo de imágenes exigía ese registro.
@@ -2487,6 +2496,68 @@ async function t43GraphicBankPairs(topicId,freshOnly,difficulty){
 }
 
 
+
+
+/* T43-AUD-187: solo corrección de cobertura de TEMA 43, basada en CEIS 420–439.
+   No se reindexa, ni se toca T41/T42, ni se alteran preguntas/SRS existentes. */
+const T43_AUDIT_187_ATOMS=[{"key":"T43-AUD-0001","section":"Historia ferroviaria","concept":"Número de vagones arrastrados en la locomotora de Richard Treveitch de 1804: cinco vagones, con 10 toneladas de acero y 70 hombres","source_page":4,"manual_page":"420","source_evidence":"El origen del sistema ferroviario se encuentra en 1804 en el sur de Gales, cuando el ingeniero de minas Richard Treveitch modificó una máquina de vapor para que moviera una locomotora a 8 km/h y arrastrara cinco vagones cargados con 10 toneladas de acero y 70 hombres. Se desplazó sobre una vía de 15 km de longitud."},{"key":"T43-AUD-0002","section":"Historia ferroviaria","concept":"Personas transportadas por la locomotora de Richard Treveitch en 1804 según el manual: 70 hombres","source_page":4,"manual_page":"420","source_evidence":"El origen del sistema ferroviario se encuentra en 1804 en el sur de Gales, cuando el ingeniero de minas Richard Treveitch modificó una máquina de vapor para que moviera una locomotora a 8 km/h y arrastrara cinco vagones cargados con 10 toneladas de acero y 70 hombres. Se desplazó sobre una vía de 15 km de longitud."},{"key":"T43-AUD-0003","section":"Historia ferroviaria","concept":"Capacidad ilustrativa de las locomotoras eléctricas citadas en el CEIS: más de 400 personas en vías de 25 kV","source_page":4,"manual_page":"420","source_evidence":"actualmente en España hay locomotoras eléctricas que alcanzan los 350 km/h y que transportan a más de 400 personas en vías electrificadas con 25 kV."},{"key":"T43-AUD-0004","section":"Subestaciones y alimentación eléctrica","concept":"Límite inferior del intervalo de tensión de las suministradoras que transforman las subestaciones: 30.000 voltios (intervalo 30.000–40.000 V)","source_page":7,"manual_page":"423","source_evidence":"Las subestaciones se encargan de transformar (y, en muchas ocasiones, de rectificar) la corriente de las suministradoras (que alcanza los 30.000-40.000 voltios)."},{"key":"T43-AUD-0005","section":"Material rodante / locomotoras","concept":"Porcentaje aproximado de líneas ferroviarias españolas que empleaban energía eléctrica en la edición CEIS: 52 %","source_page":9,"manual_page":"425","source_evidence":"Actualmente en España, más de la mitad de las líneas ferroviarias (alrededor del 52%) emplean energía eléctrica."},{"key":"T43-AUD-0006","section":"Tubería de depósitos principales (TDP)","concept":"Presión mínima del intervalo de la TDP: 7 kg/cm², con intervalo de mantenimiento de 7–10 kg/cm²","source_page":11,"manual_page":"427","source_evidence":"Los vagones de mercancías no suelen disponer de esta tubería. La presión se mantiene entre 7-10 kg/cm²."},{"key":"T43-AUD-0007","section":"Elementos de seguridad / normativa en el manual","concept":"Número aproximado de trenes que circulaban por España al día según CEIS: unos 4.000","source_page":12,"manual_page":"428","source_evidence":"Todos los trenes que circulan en España (unos 4.000 al día) tienen que cumplir la normativa específica: Especificaciones Técnicas de Interoperabilidad (ETI) y Especificaciones Técnicas de Homologación (ETH)."},{"key":"T43-AUD-0008","section":"Elementos de seguridad / ventanas de socorro","concept":"Número mínimo de ventanas de socorro por coche de viajeros: dos, señalizadas interior y exteriormente","source_page":12,"manual_page":"428","source_evidence":"Cada coche de viajeros posee, como mínimo, dos ventanas de socorro en la zona de los viajeros."},{"key":"T43-AUD-0009","section":"Red ferroviaria y entidades gestoras (edición 2015)","concept":"Kilómetros de vías administrados por Adif según el texto CEIS: 13.945 km","source_page":14,"manual_page":"430","source_evidence":"Actualmente administra 13.945 kilómetros de vías y 1.566 estaciones."},{"key":"T43-AUD-0010","section":"Red ferroviaria y entidades gestoras (edición 2015)","concept":"Número de estaciones administradas por Adif según el texto CEIS: 1.566","source_page":14,"manual_page":"430","source_evidence":"Actualmente administra 13.945 kilómetros de vías y 1.566 estaciones."},{"key":"T43-AUD-0011","section":"Sistemas de electrificación ferroviaria","concept":"Frecuencia de la red de alta velocidad española indicada por el CEIS: 50 hertzios para 25.000 V en alterna","source_page":14,"manual_page":"430","source_evidence":"Existen líneas de 3.000 voltios en continua (la red convencional), líneas de 25.000 voltios en alterna a 50 Hertzios (la red de alta velocidad) y líneas de 1.500 voltios en continua, que es la red de ancho métrico."},{"key":"T43-AUD-0012","section":"Sistemas de seguridad eléctrica","concept":"Referencia inferior de intensidad para el arranque de una unidad de Cercanías según CEIS: más de 300 o 400 amperios","source_page":19,"manual_page":"435","source_evidence":"Téngase en cuenta que una unidad de Cercanías puede necesitar para arrancar más de 300 o 400 amperios"},{"key":"T43-AUD-0013","section":"Sistemas de seguridad eléctrica","concept":"Relación comparativa indicada en el CEIS entre diferencial doméstico de 30 mA y tendido ferroviario: 10.000 veces inferior","source_page":19,"manual_page":"435","source_evidence":"los diferenciales de los domicilios saltan con una derivación de tan solo 30 mA (miliamperios), corriente capaz de matar a una persona y 10.000 veces inferior a la que circula por un tendido ferroviario)"},{"key":"T43-AUD-0014","section":"Acceso al tren / acristalamiento","concept":"Límite inferior del grosor de cristales de acceso: 5 mm, intervalo CEIS 5–9,52 mm","source_page":22,"manual_page":"438","source_evidence":"Su grosor puede oscilar entre los 5 y los 9,52 mm."},{"key":"T43-AUD-0015","section":"Materiales de fabricación / revestimiento","concept":"Límite inferior del grosor de la capa interior de extrusión: 40 mm, intervalo CEIS 40–50 mm","source_page":22,"manual_page":"438","source_evidence":"En el interior va una capa de extrusión de unos 40-50 mm y dos paredes de 3 mm con hueco en medio."},{"key":"T43-AUD-0016","section":"Técnicas de abordaje / apertura improvisada de huecos","concept":"Finalidad del primer acceso mediante una abertura reducida: comprobar funciones vitales de los accidentados y valorar el estado interior del tren","source_page":23,"manual_page":"439","source_evidence":"Para el primer acceso es suficiente realizar aberturas que permitan comprobar las funciones vitales de accidentados y valorar el estado del interior del tren."}];
+async function t43AuditRepair187(topic){
+  if(!t43Topic(topic))return {skipped:true};
+  const data=t43LoadData();
+  if(!data)return {skipped:true,missingModule:true};
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const res=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=res.rows[0];
+    if(!t||!t43Topic(t)||!t.file_search_indexed)
+      throw Error('T43-AUD-187: tema indexado incompatible');
+    // La copia local y su SHA (comprobados debajo) prevalecen sobre el nombre.
+    const stored=await client.query(`SELECT trim(pdf_sha256) AS sha,
+      page_count, encode(sha256(pdf_bytes),'hex') AS actual_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    const file=stored.rows[0];
+    if(!file||file.sha!==data.pdf_sha256||file.actual_sha!==data.pdf_sha256||
+       Number(file.page_count)!==24)
+      throw Error('T43-AUD-187: el PDF local no coincide con el CEIS de 24 páginas');
+    const cnt=await client.query(`SELECT COUNT(*)::int AS n FROM question_bank qb
+      JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+      WHERE ci.topic_id=$1 AND ci.item_type='grafica_t43_original'
+        AND qb.active=TRUE AND qb.question_family='GRAFICA'`,[t.id]);
+    if(Number(cnt.rows[0]?.n)!==86)
+      throw Error('T43-AUD-187: banco gráfico incompleto; no se modifica la cobertura');
+    let inserted=0;
+    for(const a of T43_AUDIT_187_ATOMS){
+      if(!/^T43-AUD-\d{4}$/.test(a.key)||a.source_page+416!==Number(a.manual_page)||
+         !a.source_evidence||!a.concept||a.source_evidence.length<45)
+        throw Error('T43-AUD-187: ficha sin cita válida '+a.key);
+      const result=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'dato_t43_preparado','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [t.id,a.section,a.key+' · '+a.concept,a.source_page,a.manual_page,a.source_evidence]);
+      inserted+=Number(result.rowCount||0);
+    }
+    // Los cuatro registros de la tabla de gestores fueron generados con una
+    // anotación editorial en source_evidence. Limpiar SOLO esa coletilla;
+    // no se cambia la entidad, el valor documental ni la procedencia del dato.
+    const cleaned=await client.query(`UPDATE coverage_items
+      SET source_evidence=replace(source_evidence,
+        ' (DATOS DEL MANUAL EDICIÓN 2015; NO AFIRMAR VIGENCIA ACTUAL)','')
+      WHERE topic_id=$1 AND item_type='dato_t43_preparado'
+        AND concept LIKE 'T43-TAB-%'
+        AND source_evidence LIKE '%(DATOS DEL MANUAL EDICIÓN 2015; NO AFIRMAR VIGENCIA ACTUAL)%'`,[t.id]);
+    const count=await client.query(`SELECT COUNT(*)::int AS n
+      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE`,[t.id]);
+    const total=Number(count.rows[0]?.n||0);
+    await client.query('UPDATE topics SET total_items=$2 WHERE id=$1',[t.id,total]);
+    await client.query('COMMIT');
+    console.log('T43_AUDITORIA_187_APLICADA',JSON.stringify({topicId:t.id,inserted,total,
+      cleanedEvidence:Number(cleaned.rowCount||0)}));
+    return {ok:true,topicId:t.id,inserted,total,cleanedEvidence:Number(cleaned.rowCount||0)};
+  }catch(err){await client.query('ROLLBACK');throw err;}
+  finally{client.release();}
+}
 
 /* T44: módulo documental/gráfico aislado, sin modificación de otros temas. */
 /* TEMA 44: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
@@ -8091,7 +8162,8 @@ const parsed={
     // T43: seeding gráfico transaccional, independiente de la extracción ya pagada.
     if(t43Topic(topic)){
       try{const loaded=await t43ImportOnce(topic,pdfPath);
-        console.log('T43_AUTOIMPORT',JSON.stringify(loaded));
+        const audit=await t43AuditRepair187(topic);
+        console.log('T43_AUTOIMPORT',JSON.stringify({loaded,audit}));
       }catch(e){console.error('T43_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
     // T44: importación gráfica/numérica a partir del PDF CEIS exacto ya indexado.
@@ -18447,7 +18519,10 @@ async function startServer(){
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
       name ~* '^TEMA[[:space:]]*43([^0-9]|$)'`)
-      .then(r=>Promise.all(r.rows.filter(t43Topic).map(t=>t43ImportOnce(t))))
+      .then(r=>Promise.all(r.rows.filter(t43Topic).map(async t=>{
+        const loaded=await t43ImportOnce(t);
+        const audit=await t43AuditRepair187(t);
+        return {loaded,audit};})))
       .then(r=>console.log('T43_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T43_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
