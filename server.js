@@ -1919,6 +1919,36 @@ async function t41ImportOnce(topic){
       imported++;
     }
     if(imported!==50)throw Error('T41: numero de preguntas importadas incompleto');
+    // Corrección ACOTADA y documentada T41/CEIS p244: cuatro respuestas
+    // de umbral eran simultáneamente verdaderas para la pregunta 1468.
+    // Se conserva su id y estadísticas (SRS), se corrige SOLO stem/opciones.
+    const t41q=await client.query(`SELECT id,stem,options,correct_index,manual_page
+      FROM question_bank WHERE id=$1 AND coverage_item_id=$2 FOR UPDATE`,
+      [1468,24661]);
+    if(t41q.rows.length){
+      const old=t41q.rows[0];
+      const oldOpts=['Superó las 12.000 ha','Superó las 18.000 ha',
+        'Superó las 25.000 ha','Superó las 15.000 ha'];
+      const newOpts=[
+        'El manual fija exactamente en 18.000 ha la superficie afectada en 2013.',
+        'El manual afirma que se superaron las 18.000 ha, sin indicar una cifra exacta.',
+        'El manual señala que la superficie de 2013 fue inferior a 18.000 ha.',
+        'El manual no aporta ningún umbral de superficie para el año 2013.'
+      ];
+      const newStem='Según el CEIS Guadalajara, página 244, ¿qué información recoge literalmente sobre la superficie afectada por incendios forestales en España en 2013?';
+      const prev=JSON.stringify(old.options);
+      if(String(old.manual_page)!=='244'||Number(old.correct_index)!==1)
+        throw Error('T41-186: pregunta 1468 no corresponde a la ficha auditada');
+      if(prev===JSON.stringify(oldOpts)){
+        await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+          correct_index=1,explanation=$4,updated_at=NOW()
+          WHERE id=$1 AND coverage_item_id=24661`,[1468,newStem,
+          JSON.stringify(newOpts),
+          'La página 244 del CEIS solo afirma que en 2013 se superaron las 18.000 ha; no proporciona un total exacto.']);
+      }else if(prev!==JSON.stringify(newOpts)||old.stem!==newStem){
+        throw Error('T41-186: pregunta 1468 modificada externamente; no se sobrescribe');
+      }
+    }
     await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
       WHERE topic_folder='incendios-vegetacion' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
@@ -1979,8 +2009,11 @@ function t42LoadData(){
      !Array.isArray(data.images)||data.images.length!==15||
      !Array.isArray(data.questions)||data.questions.length!==90||
      new Set(data.images.map(x=>x.file)).size!==15||
-     new Set(data.questions.map(x=>x.external_key)).size!==90)
-    throw Error('T42: recortes o preguntas incompletos o repetidos');
+     new Set(data.questions.map(x=>x.external_key)).size!==90||
+     !Array.isArray(data.coverage_additions)||
+     data.coverage_additions.length!==179||
+     data.questions.some(q=>/runehamar|ensayos?|pruebas\s+realizadas/i.test(String(q.stem||''))))
+    throw Error('T42: recortes, datos o preguntas incompletos o excluidos');
   if(data.coverage_additions.some(item=>/^\s*Tabla\s*[678]\s*[.:]/i.test(String(item.section||''))))
     throw Error('T42: el paquete contiene tablas experimentales 6, 7 u 8 excluidas');
   t42PreparedData=data;return data;
@@ -2004,6 +2037,59 @@ function t42WriteImages(){
     }else{fs.writeFileSync(dest,buf);written++;}
   }
   return {images:15,written};
+}
+// T42-186: verified DOCUMENT-only repair. No changes outside Tema 42.
+// These specific records describe laboratory exercises, not generic knowledge;
+ // the user excluded studies in p.185 and the three experimental tables p.186-187.
+const T42_186_RETIRED_BY_PAGE=Object.freeze({
+  185:[25596,25597,25598,25599,25600,25601,25602,25603],
+  186:[25608,25609,25610,25611,25612,25615,25618,25619,25620],
+  187:[25621,25623,25624],
+  191:[25649] // editorial contradiction in monobottle usage (15-20 vs >20-30 min).
+});
+async function t42RepairCoverage186(client,topicId){
+  const expected=new Map(Object.entries(T42_186_RETIRED_BY_PAGE)
+    .flatMap(([page,ids])=>ids.map(id=>[id,String(page)])));
+  const ids=[...expected.keys()];
+  const result=await client.query(`SELECT id,manual_page,exam_relevant
+    FROM coverage_items WHERE topic_id=$1 AND id=ANY($2::int[]) FOR UPDATE`,
+    [topicId,ids]);
+  for(const row of result.rows){
+    if(String(row.manual_page)!==expected.get(Number(row.id)))
+      throw Error('T42-186: record page mismatch: '+row.id);
+  }
+  const present=result.rows.map(row=>Number(row.id));
+  const retired=await client.query(`UPDATE coverage_items
+    SET exam_relevant=FALSE
+    WHERE topic_id=$1 AND id=ANY($2::int[]) AND exam_relevant=TRUE
+    RETURNING id`,[topicId,present]);
+  if(present.length){
+    await client.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+      WHERE coverage_item_id=ANY($1::int[]) AND active=TRUE`,[present]);
+  }
+  // The printed formula has a factor 1/3 before Q/(4*pi*R^2).
+  // The extracted record had omitted that factor. Preserve source PDF unchanged.
+  const oldFormula=await client.query(`SELECT id,concept,source_evidence,manual_page
+    FROM coverage_items WHERE topic_id=$1 AND id=25616 FOR UPDATE`,[topicId]);
+  let formulaFixed=false;
+  if(oldFormula.rows.length){
+    const row=oldFormula.rows[0];
+    if(String(row.manual_page)!=='186')
+      throw Error('T42-186: formula page mismatch');
+    if(!String(row.concept||'').includes('(1/3)')){
+      if(!String(row.concept||'').includes('qs = Q / (4 * pi * R^2)'))
+        throw Error('T42-186: formula does not match audited record');
+      await client.query(`UPDATE coverage_items SET concept=$2,source_evidence=$3
+        WHERE topic_id=$1 AND id=25616`,[topicId,
+        "Ecuación de radiación CEIS p. 186: q_s'' = (1/3) × Q / (4πR²)",
+        "Ecuación reproducida visualmente de CEIS p.186: q_s'' = (1/3) × Q / (4πR²); q_s'' es radiación, Q tasa total de emisión de calor y R distancia desde la fuente puntual efectiva."]);
+      await client.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+        WHERE coverage_item_id=25616 AND active=TRUE`);
+      formulaFixed=true;
+    }
+  }
+  return {retiredNow:retired.rows.length,presentKnownRecords:present.length,
+    formulaFixed,retirementExpected:ids.length};
 }
 async function t42ImportOnce(topic,uploadedPdfPath=null){
   if(!t42Topic(topic))return {skipped:true};
@@ -2057,18 +2143,27 @@ async function t42ImportOnce(topic,uploadedPdfPath=null){
        Number(check.size_bytes)!==pdfBytes.length||
        Number(check.stored_size)!==pdfBytes.length)
       throw Error('T42: copia PDF local incompatible; no se sobrescribe');
+    // Retirar solamente conocimientos experimentales no examinables y corregir
+    // la fórmula que se transcribió sin el factor 1/3.
+    const t42Repair=t42RepairCoverage186(client,t.id);
+    // La reparación se realiza en la MISMA transacción que la importación.
+    const repair186=await t42Repair;
     // Completar únicamente lagunas verificadas contra páginas físicas.
     // DO NOTHING preserva historial y SRS si ya se instaló antes.
     for(const item of data.coverage_additions){
-      if(!/^T42-TAB-\d{4}$/.test(item.external_key)||
+      const tab=/^T42-TAB-\d{4}$/.test(item.external_key);
+      const text=/^T42-TXT-\d{4}$/.test(item.external_key);
+      if((!tab&&!text)||
          !Number.isInteger(item.source_page)||item.source_page<1||item.source_page>22||
+         String(item.manual_page)!==String(item.source_page+174)||
          !item.concept||!item.source_evidence)
         throw Error('T42: ampliación documental no válida');
       await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
         item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
-        VALUES($1,$2,$3,'tabla_t42','literal_documental',$4,$5,$6,TRUE)
+        VALUES($1,$2,$3,$4,'literal_documental',$5,$6,$7,TRUE)
         ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
         [t.id,item.section,item.external_key+' · '+item.concept,
+         tab?'tabla_t42':'concepto_t42_revisado',
          item.source_page,item.manual_page,item.source_evidence]);
     }
     const imgMap=new Map();
@@ -2146,9 +2241,9 @@ async function t42ImportOnce(topic,uploadedPdfPath=null){
     await client.query('COMMIT');
     console.log('T42_GRAFICOS_CARGADOS',JSON.stringify({topicId:t.id,
       images:15,questions:90,documentaryAdditions:data.coverage_additions.length,
-      pdfSha256:fileHash}));
+      repair186,pdfSha256:fileHash}));
     return {ok:true,topicId:t.id,images:15,questions:90,
-      documentaryAdditions:data.coverage_additions.length};
+      repair186,documentaryAdditions:data.coverage_additions.length};
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
@@ -15461,6 +15556,12 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   EXCLUIR COMPLETAMENTE la Tabla 6 (p.186), la Tabla 7 (p.186) y la Tabla 8
   (p.187): no preguntar resultados de experimentos, ni calcular, comparar, recuperar,
   transformar o citar sus cifras; tampoco emplearlas como distractores.
+  Excluir además resultados numéricos de los ensayos Runehamar p.185 y todo dato
+  derivado de las tablas 6/7/8: no preguntar temperaturas por distancias,
+  tiempos de ejercicios, HRR de pruebas ni cifras por vehículo ensayado.
+  La ecuación de CEIS p.186 es q_s'' = (1/3) × Q/(4πR²); no omitir el 1/3.
+  La tabla 11 p.191 contiene una frase contradictoria sobre uso de monobotella;
+  no preguntarla. Sí se permiten autonomías nominales y reales inequívocas.
   El PDF original se mantiene intacto; el resto de datos son preguntables.
   Separar potencia MW, radiación kW/m², energía GJ, caudal l/min, velocidad m/s,
   temperatura °C y autonomía nominal de operativa. No convertir unidades en pistas.
@@ -15655,6 +15756,9 @@ T41 CEIS Guadalajara (solo objetivos en posiciones ${t41Positions.join(', ')}):
   climáticos con su fenómeno exacto. Datos antiguos solo como los imprime CEIS.
 - Las figuras 4/5/8/9 tienen preguntas PREDEFINIDAS: no improvises preguntas
   de reconocimiento visual en otros objetivos sin recurso gráfico mostrado.
+- Las alternativas con cifras y expresiones 'superó', 'al menos', 'más de':
+  NO generar umbrales anidados que sean simultáneamente verdaderos.
+  Si el texto solo afirma 'superó X', no convertir X en una cifra exacta.
 - No añadir reintentos, llamadas ni inventar hechos para aumentar dificultad.
 `:'';
   // SERVER127: no duplicar cada objetivo. Una generación y una auditoría
