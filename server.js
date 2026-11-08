@@ -3013,28 +3013,34 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
 const HEALTH_NAMES_192={
   46:'SOPORTE VITAL',47:'URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS',
   48:'HERIDAS Y LESIONES DE TEJIDOS BLANDOS Y MOVILIZACION E INMOVILIZACION',
-  49:'GRANDES EMERGENCIAS Y CATASTROFES TRIAJE',50:'PREVENCION Y APOYO PSICOLOGICO'
+  49:'GRANDES EMERGENCIAS Y CATASTROFES TRIAJE',50:'PREVENCION Y APOYO PSICOLOGICO',
+  51:'APERTURAS FORZADAS',
+  52:'RESCATE Y BUSQUEDA EN GRANDES AREAS'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
   47:/URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS/,
   48:/HERIDAS Y LESIONES DE TEJIDOS BLANDOS.*MOVILIZACION E INMOVILIZACION/,
   49:/GRANDES EMERGENCIAS.*(?:TRIAJE|TRIAGE)/,
-  50:/PREVENCION Y APOYO PSICOLOGICO/
+  50:/PREVENCION Y APOYO PSICOLOGICO/,
+  51:/APERTURAS FORZADAS/,
+  52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
   47:'MODELO (no repetir): relacionar las tres fases de mortalidad traumática con lesiones y momento temporal; cambiar UNA fase o causa en cada distractor. Distinguir segundos/minutos, primeras horas y dias/semanas.',
   48:'MODELO (no repetir): contrastar lavado superficial desde centro a periferia frente a irrigacion de herida profunda con suero a presion; distractores que intercambien técnica y tipo.',
   49:'MODELO (no repetir): asociar gravedad, prioridad, color y orden de evacuacion; mezclar solo dos atributos por distractor. La clave debe mantener la cadena correcta del CEIS.',
-  50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.'
+  50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.',
+  51:'MODELO DE ESTILO (no copiar literal): compara vidrio laminado con vidrio de cámara en una misma pregunta y permuta SOLO la forma de unión, el material PVB (1 mm), la presencia de cámara y el perfil hueco. Otro modelo: contrasta normas UNE EN 1627:2011, UNE 85160:2013 y UNE-EN 1303:2006 por su objeto exacto. En cada distractor altera solo una propiedad del CEIS, sin añadir fuentes; no dar instrucciones prácticas para abrir cerraduras.',
+  52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Otro modelo: deducir la prioridad de los sectores Mattson calculando media de cinco evaluaciones; un error habitual es intercambiar sectores 2 y 4 por un unico punto porcentual. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.'
 };
 const healthCache192=new Map();
 function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|50)\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-2])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3042,9 +3048,13 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(),`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
-  const data=require(file);
+  const source=fs.readFileSync(file,'utf8').trim();
+  const prefix='module.exports = ';
+  if(!source.startsWith(prefix)||!source.endsWith(';'))
+    throw Error(`HEALTH192: formato de modulo T${n} no reconocido`);
+  const data=JSON.parse(source.slice(prefix.length,-1));
   if(data?.schema!==1||data.topic_number!==n||
      !Array.isArray(data.images)||!Array.isArray(data.questions)||
      !Array.isArray(data.coverage_additions)||
@@ -3311,7 +3321,7 @@ function graphicTopicFolderFromTopicName(topicName){
     ["salud-t48", ["atencion inicial politraumatizado"]],
     ["salud-t49", ["traumatismos"]],
     ["salud-t50", ["heridas y lesiones tejidos blandos"]],
-    ["salud-t51", ["movilizacion e inmovilizacion"]],
+    ["salud-t51", ["aperturas forzadas"]],
     ["salud-t52", ["grandes emergencias y triaje"]],
     ["salud-t53", ["apoyo psicologico"]],
     ["edificacion-apeos", ["edificacion", "apeos"]],
@@ -19133,7 +19143,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|50)([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[01])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(t=>healthImportOnce192(t))))
       .then(r=>console.log('HEALTH192_ARRANQUE',JSON.stringify(r)))
