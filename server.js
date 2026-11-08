@@ -3007,6 +3007,241 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
+
+// SERVER192: Temas sanitarios 46-53. Un importador reutilizado, sin filtros de
+// generación adicionales, sin segunda llamada a Gemini y sin alterar SRS.
+const HEALTH_NAMES_192={
+  46:'SOPORTE VITAL',47:'URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS',
+  48:'HERIDAS Y LESIONES DE TEJIDOS BLANDOS Y MOVILIZACION E INMOVILIZACION',
+  49:'GRANDES EMERGENCIAS Y CATASTROFES TRIAJE',50:'PREVENCION Y APOYO PSICOLOGICO'
+};
+const HEALTH_ALIAS_192={
+  46:/SOPORTE VITAL/,
+  47:/URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS/,
+  48:/HERIDAS Y LESIONES DE TEJIDOS BLANDOS.*MOVILIZACION E INMOVILIZACION/,
+  49:/GRANDES EMERGENCIAS.*(?:TRIAJE|TRIAGE)/,
+  50:/PREVENCION Y APOYO PSICOLOGICO/
+};
+const HEALTH_EXAM_STYLE_192={
+  46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
+  47:'MODELO (no repetir): relacionar las tres fases de mortalidad traumática con lesiones y momento temporal; cambiar UNA fase o causa en cada distractor. Distinguir segundos/minutos, primeras horas y dias/semanas.',
+  48:'MODELO (no repetir): contrastar lavado superficial desde centro a periferia frente a irrigacion de herida profunda con suero a presion; distractores que intercambien técnica y tipo.',
+  49:'MODELO (no repetir): asociar gravedad, prioridad, color y orden de evacuacion; mezclar solo dos atributos por distractor. La clave debe mantener la cadena correcta del CEIS.',
+  50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.'
+};
+const healthCache192=new Map();
+function healthTopicNumber192(topic){
+  if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
+  const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
+  const m=name.match(/^TEMA\s*(4[6-9]|50)\b/);
+  if(!m)return 0;
+  const n=Number(m[1]);
+  return HEALTH_ALIAS_192[n]?.test(name)?n:0;
+}
+function healthLoadData192(n){
+  if(healthCache192.has(n))return healthCache192.get(n);
+  if(!HEALTH_NAMES_192[n])return null;
+  const file=path.join(process.cwd(),`t${n}_health_data.js`);
+  if(!fs.existsSync(file))return null;
+  const data=require(file);
+  if(data?.schema!==1||data.topic_number!==n||
+     !Array.isArray(data.images)||!Array.isArray(data.questions)||
+     !Array.isArray(data.coverage_additions)||
+     (data.questions.length<data.images.length)||
+     new Set(data.images.map(a=>a.file)).size!==data.images.length||
+     new Set(data.questions.map(q=>q.external_key)).size!==data.questions.length||
+     !/^[0-9a-f]{64}$/.test(String(data.pdf_sha256||'')) ||
+     !Number.isInteger(data.pdf_page_count)||data.pdf_page_count<1)
+    throw Error(`HEALTH192: modulo T${n} incompleto`);
+  healthCache192.set(n,data);return data;
+}
+function healthWriteImages192(onlyTopic=0){
+  let count=0;
+  for(const n of Object.keys(HEALTH_NAMES_192).map(Number)){
+    if(onlyTopic && n!==onlyTopic)continue;
+    const data=healthLoadData192(n);
+    if(!data)continue;
+    const dir=path.join(process.cwd(),'public','graphics',`salud-t${n}`);
+    fs.mkdirSync(dir,{recursive:true});
+    for(const a of data.images){
+      if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
+        throw Error(`HEALTH192: nombre de imagen no permitido T${n}`);
+      const bytes=Buffer.from(a.base64,'base64');
+      const sha=createHash('sha256').update(bytes).digest('hex');
+      if(sha!==a.sha256||!bytes.subarray(0,8).equals(
+        Buffer.from([137,80,78,71,13,10,26,10])))
+        throw Error(`HEALTH192: imagen o SHA invalido ${a.file}`);
+      const dest=path.join(dir,a.file);
+      if(fs.existsSync(dest)){
+        if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
+          throw Error(`HEALTH192: imagen distinta ya instalada ${a.file}`);
+      }else{fs.writeFileSync(dest,bytes);count++;}
+    }
+  }
+  return count;
+}
+async function healthReplaceDocument192(topic,pdfPath,items){
+  const n=healthTopicNumber192(topic),data=healthLoadData192(n);
+  if(!n||!data)throw Error('HEALTH192: tema o paquete sin coincidencia');
+  const bytes=fs.readFileSync(pdfPath);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256||bytes.length<1000||bytes.length>20*1024*1024||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+     throw Error(`HEALTH192: PDF T${n} distinto del auditado`);
+  const document=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(document.getPageCount()!==data.pdf_page_count)
+    throw Error(`HEALTH192: paginas T${n} no coinciden`);
+  if(!Array.isArray(items)||items.length<1||items.some(x=>
+      !Number.isInteger(x.sourcePage)||x.sourcePage<1||
+      x.sourcePage>data.pdf_page_count||!x.concept||!x.sourceEvidence))
+    throw Error(`HEALTH192: contenido no indexable T${n}`);
+  // PDF y cobertura se confirman juntos como en T45/190. Sin File Search.
+  await saveCoverageItems(topic.id,items,`local-pdf:sha256:${sha}`,
+    {sha,pages:data.pdf_page_count,bytes});
+  console.log(`HEALTH192_PDF_COBERTURA_LOCAL T${n} fichas=${items.length}`);
+}
+async function healthImportOnce192(topic,uploadedPdfPath=null){
+  const n=healthTopicNumber192(topic);
+  if(!n)return {skipped:true};
+  const data=healthLoadData192(n);
+  if(!data)return {skipped:true,missing:true};
+  healthWriteImages192(n);
+  if(uploadedPdfPath){
+    const sha=createHash('sha256').update(fs.readFileSync(uploadedPdfPath)).digest('hex');
+    if(sha!==data.pdf_sha256)throw Error(`HEALTH192: PDF T${n} diferente`);
+  }
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    const rows=await client.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    const t=rows.rows[0];
+    if(!t||healthTopicNumber192(t)!==n||Number(t.total_items)<1)
+      throw Error(`HEALTH192: T${n} no indexado`);
+    const local=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS actual_size,
+      ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
+      FROM topic_local_pdfs WHERE topic_id=$1`,[topic.id]);
+    const l=local.rows[0];
+    const record=await client.query(`SELECT document_name FROM topic_source_documents
+      WHERE topic_id=$1`,[topic.id]);
+    if(!l||l.sha!==data.pdf_sha256||l.actual_sha!==data.pdf_sha256||
+       Number(l.page_count)!==data.pdf_page_count||
+       Number(l.actual_size)!==Number(l.size_bytes)||
+       record.rows[0]?.document_name!==`local-pdf:sha256:${data.pdf_sha256}`)
+      throw Error(`HEALTH192: T${n} fuente local no íntegra`);
+    for(const item of data.coverage_additions){
+      if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
+         !Number.isInteger(item.source_page)||item.source_page<1||
+         item.source_page>data.pdf_page_count||
+         !item.concept||!item.source_evidence)
+        throw Error(`HEALTH192: ficha adicional T${n} inválida`);
+      await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'dato_salud_preparado','literal_documental',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [topic.id,item.section,item.external_key+' · '+item.concept,
+         item.source_page,item.manual_page,item.source_evidence]);
+    }
+    const graphicMap=new Map();
+    for(const asset of data.images){
+      const uri=`/graphics/salud-t${n}/${asset.file}`;
+      const sourceId=`salud-t${n}/${asset.file}`;
+      const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
+        source_file,public_url,asset_index,asset_type,concept,description,
+        source_evidence,crop_x,crop_y,crop_width,crop_height,mask_regions,
+        is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,$2,$3,$4,0,'individual',$5,$6,$7,0,0,1,1,
+        '[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        concept=EXCLUDED.concept,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
+        is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
+        RETURNING id`,[sourceId,`salud-t${n}`,asset.file,uri,asset.concept,
+           `CEIS imagen original pagina ${asset.printed_page}`,
+           `CEIS Guadalajara, pagina ${asset.printed_page}`]);
+      graphicMap.set(asset.file,{id:Number(row.rows[0].id),sourceId,uri});
+    }
+    let imported=0;
+    for(const item of data.questions){
+      const g=graphicMap.get(item.graphic_file);
+      const asset=data.images.find(x=>x.file===item.graphic_file);
+      if(!g||!asset||item.image_sha256!==asset.sha256||
+         !item.external_key?.startsWith(`T${n}-GRAF-`)||
+         !Array.isArray(item.options)||item.options.length!==4||
+         new Set(item.options).size!==4||
+         !Number.isInteger(item.correct_index)||item.correct_index<0||
+         item.correct_index>3||item.question_family!=='GRAFICA'||
+         item.difficulty!=='muy alta'||!item.stem||!item.source_evidence||
+         !Number.isInteger(item.source_pdf_page)||item.source_pdf_page<1||
+         item.source_pdf_page>data.pdf_page_count)
+        throw Error(`HEALTH192: pregunta grafica T${n} inválida`);
+      const key=item.external_key+' · '+item.coverage_concept;
+      const cov=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        VALUES($1,$2,$3,'grafica_salud_original','interpretacion_visual',$4,$5,$6,TRUE)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
+        source_evidence=EXCLUDED.source_evidence,exam_relevant=TRUE RETURNING id`,
+        [topic.id,item.coverage_section,key,item.source_pdf_page,
+         item.manual_page,item.source_evidence]);
+      const cid=Number(cov.rows[0].id);
+      const graphic={...item.graphic,assetId:g.id,publicUrl:g.uri,
+        sourceId:g.sourceId,assetType:'individual',
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      const prior=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA'
+        ORDER BY id DESC LIMIT 1 FOR UPDATE`,[cid]);
+      if(prior.rows.length){
+        const old=prior.rows[0];
+        if(old.stem!==item.stem||JSON.stringify(old.options)!==JSON.stringify(item.options)||
+           Number(old.correct_index)!==Number(item.correct_index))
+          throw Error(`HEALTH192: pregunta prefabricada distinta ya existente ${item.external_key}`);
+        await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+      }else{
+        await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+          correct_index,explanation,source_evidence,source_page,manual_page,
+          question_family,difficulty,graphic,validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,6,TRUE)`,
+        [cid,item.stem,JSON.stringify(item.options),item.correct_index,
+         item.explanation,item.source_evidence,item.source_pdf_page,
+         item.manual_page,JSON.stringify(graphic)]);
+      }
+      imported++;
+    }
+    await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
+      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE)
+      WHERE id=$1`,[topic.id]);
+    await client.query('COMMIT');
+    console.log('HEALTH192_GRAFICOS_CARGADOS',JSON.stringify({topicId:topic.id,
+      topic:n,images:data.images.length,questions:imported,
+      documentaryAdditions:data.coverage_additions.length}));
+    return {ok:true,topic:n,images:data.images.length,questions:imported};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+async function healthGraphicBankPairs192(topicId,freshOnly,difficulty){
+  if(difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=$1 AND ci.item_type='grafica_salud_original'
+      AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=6 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
+    [topicId,Boolean(freshOnly)]);
+  return rows.rows;
+}
+
 async function t45GraphicBankPairs(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -3071,6 +3306,14 @@ function graphicTopicFolderFromTopicName(topicName){
     ["trafico", ["trafico"]],
     ["ferroviarios", ["ferroviario", "ferroviarios"]],
     ["apicola", ["apicola"]],
+    ["salud-t46", ["valoracion primaria y secundaria"]],
+    ["salud-t47", ["soporte vital basico"]],
+    ["salud-t48", ["atencion inicial politraumatizado"]],
+    ["salud-t49", ["traumatismos"]],
+    ["salud-t50", ["heridas y lesiones tejidos blandos"]],
+    ["salud-t51", ["movilizacion e inmovilizacion"]],
+    ["salud-t52", ["grandes emergencias y triaje"]],
+    ["salud-t53", ["apoyo psicologico"]],
     ["edificacion-apeos", ["edificacion", "apeos"]],
     ["apeo-poda", ["apeo y poda", "poda de arbolado", "apeo de arbolado"]],
     ["estructuras-colapsadas", ["estructuras colapsadas", "estructura colapsada"]],
@@ -8421,6 +8664,7 @@ const parsed={
     else if(t39HydraulicCoverage) await replaceT39Document(topic,pdfPath,validItems);
     else if(t40Resumable159) await replaceT40Document159(topic,pdfPath,validItems);
     else if(t45Topic(topic)) await replaceT45Document190(topic,pdfPath,validItems);
+    else if(healthTopicNumber192(topic)) await healthReplaceDocument192(topic,pdfPath,validItems);
     else if(coverageTopicNumber(topic.name)===22) await replaceGeo22Document115(topic,pdfPath,validItems);
     else await replaceTopicDocument(topic,pdfPath,validItems);
     // Importación opcional, ACOTADA y transaccional de las 45 preguntas
@@ -8466,6 +8710,13 @@ const parsed={
       try{const loaded=await t45ImportOnce(topic,pdfPath);
         console.log('T45_AUTOIMPORT',JSON.stringify(loaded));
       }catch(e){console.error('T45_IMPORT_PENDIENTE:',String(e?.message||e));}
+    }
+    // 46-53: importacion sanitaria preparada, aislada; el PDF no se reindexa
+    // por fallo de una pregunta grafica o de material adicional.
+    if(healthTopicNumber192(topic)){
+      try{const loaded=await healthImportOnce192(topic,pdfPath);
+        console.log('HEALTH192_AUTOIMPORT',JSON.stringify(loaded));
+      }catch(e){console.error('HEALTH192_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
     // Los checkpoints IIFF se conservan incluso tras el guardado para no
     // pagar otra extracción hasta validar generación y fidelidad del tema.
@@ -12101,6 +12352,11 @@ for(let i = 0; i < selected.length; i++){
   }
   if(t45Topic(originalGraphicSlot) && t45LoadData()){
     selected[i]={...originalGraphicSlot,t45PreparedGraphicSlot:true};
+    continue;
+  }
+  if(healthTopicNumber192(originalGraphicSlot) &&
+     healthLoadData192(healthTopicNumber192(originalGraphicSlot))){
+    selected[i]={...originalGraphicSlot,healthPreparedGraphicSlot192:true};
     continue;
   }
   if(t43Topic(originalGraphicSlot) && t43LoadData()){
@@ -16045,6 +16301,7 @@ ${reglasT42}
 ${reglasT43}
 ${reglasT44}
 ${reglasT45}
+${targets.map((t,i)=>healthTopicNumber192(t)?`TEMA SANITARIO SLOT ${i+1} (T${healthTopicNumber192(t)}): SOLO evidencia CEIS 2015 del objetivo. Diferencia etapa, condicion, unidad, contexto y destinatario. No sustituir protocolos por fuentes externas. Los reactivos GRAFICA de estas fichas están prefabricados en banco y no deben regenerarse. Distractores proximos de mismo tipo; cuatro opciones y una clave sin pistas. EJEMPLO DE ESTILO TEMATICO: ${HEALTH_EXAM_STYLE_192[healthTopicNumber192(t)]||""}`:'').filter(Boolean).join('\n')}
 ${styleTitle}: ${JSON.stringify(examples).slice(0,soloSolares?8500:4400)}
 ${soloCamino?CAMINO_REGLAS_2026+' DIFERENCIA RAMALES: un municipio, concejo, lugar del recorrido y casco urbano son niveles distintos; si una secuencia está dividida en ramales, NO conviertas sus registros en pasos sucesivos obligatorios. La orientación izquierda/derecha solo se interpreta en el sentido de marcha indicado expresamente en el PDF.':''}
 ${soloFerrocarril?'FERROCARRIL: Prioridad operativa a instalación ferroviaria concreta → parque de bomberos asignado para primera salida ante incidente, SIN deducir proximidad ni tiempos de respuesta. Trabaja también la clasificación literal de cada instalación (estación, apeadero, apartadero, cargadero y mixtas), TODOS los pasos con semibarreras documentados, las relaciones línea → carreteras que sigue o cruza y los recuentos por línea y categoría cuando sean demostrables. Sin porcentajes ni cuotas por modalidad: agota progresivamente los objetivos distintos de cobertura; no descartes tipos con pocos casos. Alterna instalaciones, tramos y operaciones cuando los OBJETIVOS seleccionados lo permitan; no repitas la misma relación ni concentres preguntas en una sola página o sección si hay otros objetivos disponibles. Evita preguntas artificiales sobre cuál es la única línea fuera de servicio o combinaciones triviales de vía única/doble y servicio. No confundir paso con semibarreras con estación, apeadero o apartadero. La selección de objetivos y el SRS son responsabilidad del servidor; estos ejemplos SOLO muestran estilo, no aportan hechos.':''}
@@ -17797,7 +18054,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!t.t45PreparedGraphicSlot&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!t.t45PreparedGraphicSlot&&!t.healthPreparedGraphicSlot192&&!specificEvidenceReady128(t)&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -17825,15 +18082,17 @@ app.post('/api/generate',async(req,res)=>{
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
     // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
-    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot)){
-      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot)?i:-1)
+    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)){
+      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)?i:-1)
         .filter(i=>i>=0);
       const grouped=new Map();
       for(const i of slots){
         const topicId=Number(targets[i].topic_id);
         if(!grouped.has(topicId))grouped.set(topicId,
-          (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot)
-            ?(targets[i].t45PreparedGraphicSlot
+          (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot||targets[i].healthPreparedGraphicSlot192)
+            ?(targets[i].healthPreparedGraphicSlot192
+              ?await healthGraphicBankPairs192(topicId,freshOnly111,difficulty)
+              :targets[i].t45PreparedGraphicSlot
               ?await t45GraphicBankPairs(topicId,freshOnly111,difficulty)
               :targets[i].t44PreparedGraphicSlot
               ?await t44GraphicBankPairs(topicId,freshOnly111,difficulty)
@@ -17852,14 +18111,17 @@ app.post('/api/generate',async(req,res)=>{
         const chosen=pool.find(r=>{
           const picture=r.graphic||{};
           const figure=String(picture.publicUrl||'').match(/_FIG_(\d+)/)?.[1];
+          // Un numero de figura puede repetirse en distintos temas; deduplicar
+          // por tema + figura, nunca entre manuales independientes.
+          const figureKey=figure?`${r.topic_id}:${figure}`:null;
           return !seenAssets.has(Number(picture.assetId)) &&
-            (!figure || !seenFigures.has(figure)) &&
+            (!figureKey || !seenFigures.has(figureKey)) &&
             !targets.some((t,j)=>j!==i && Number(t.id)===Number(r.coverage_id));
         });
         if(chosen){
           const fig=String(chosen.graphic?.publicUrl||'').match(/_FIG_(\d+)/)?.[1];
           seenAssets.add(Number(chosen.graphic.assetId));
-          if(fig)seenFigures.add(fig);
+          if(fig)seenFigures.add(`${chosen.topic_id}:${fig}`);
           targets[i]={id:Number(chosen.coverage_id),topic_id:Number(chosen.topic_id),
             topic_name:chosen.topic_name,topic_block:chosen.topic_block,
             section:chosen.section,concept:chosen.concept,
@@ -17881,7 +18143,7 @@ app.post('/api/generate',async(req,res)=>{
         }else{
           // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
           targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
-            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false,t45PreparedGraphicSlot:false};
+            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false,t45PreparedGraphicSlot:false,healthPreparedGraphicSlot192:false};
           console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
         }
       }
@@ -18817,6 +19079,8 @@ async function startServer(){
   catch(e){console.error('T44_IMAGENES_PENDIENTES:',String(e?.message||e));}
   try{const im=t45WriteImages();console.log('T45_IMAGENES_LOCALES',JSON.stringify(im));}
   catch(e){console.error('T45_IMAGENES_PENDIENTES:',String(e?.message||e));}
+  try{const im=healthWriteImages192();console.log('HEALTH192_IMAGENES_LOCALES',im);}
+  catch(e){console.error('HEALTH192_IMAGENES_PENDIENTES:',String(e?.message||e));}
   console.log("STARTUP 2/4: syncGraphicAssets");
   await syncGraphicAssets();
   console.log("STARTUP 2/4 OK");
@@ -18867,6 +19131,13 @@ async function startServer(){
       .then(r=>Promise.all(r.rows.filter(t45Topic).map(t=>t45ImportOnce(t))))
       .then(r=>console.log('T45_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
+      FROM topics WHERE block='especifico' AND
+      name ~* '^TEMA[[:space:]]*(4[6-9]|50)([^0-9]|$)'`)
+      .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
+        .map(t=>healthImportOnce192(t))))
+      .then(r=>console.log('HEALTH192_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('HEALTH192_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
