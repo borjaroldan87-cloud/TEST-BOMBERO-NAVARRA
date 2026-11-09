@@ -3008,7 +3008,7 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
   finally{client.release();}
 }
 
-// SERVER200: Temas 46-53. Se reutiliza el importador previo, sin filtros de
+// SERVER201: Temas 46-54, base acumulativa SERVER200. Se reutiliza el importador previo, sin filtros de
 // generación adicionales, sin segunda llamada a Gemini y sin alterar SRS.
 const HEALTH_NAMES_192={
   46:'SOPORTE VITAL',47:'URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS',
@@ -3016,7 +3016,8 @@ const HEALTH_NAMES_192={
   49:'GRANDES EMERGENCIAS Y CATASTROFES TRIAJE',50:'PREVENCION Y APOYO PSICOLOGICO',
   51:'APERTURAS FORZADAS',
   52:'RESCATE Y BUSQUEDA EN GRANDES AREAS',
-  53:'RESCATE EN RIOS RIADAS E INUNDACIONES'
+  53:'RESCATE EN RIOS RIADAS E INUNDACIONES',
+  54:'VEHICULOS DE BOMBEROS'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3026,7 +3027,8 @@ const HEALTH_ALIAS_192={
   50:/PREVENCION Y APOYO PSICOLOGICO/,
   51:/APERTURAS FORZADAS/,
   52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/,
-  53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/
+  53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/,
+  54:/VEHICULOS DE BOMBEROS/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -3036,14 +3038,15 @@ const HEALTH_EXAM_STYLE_192={
   50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.',
   51:'MODELO DE ESTILO (no copiar literal): compara vidrio laminado con vidrio de cámara en una misma pregunta y permuta SOLO la forma de unión, el material PVB (1 mm), la presencia de cámara y el perfil hueco. Otro modelo: contrasta normas UNE EN 1627:2011, UNE 85160:2013 y UNE-EN 1303:2006 por su objeto exacto. En cada distractor altera solo una propiedad del CEIS, sin añadir fuentes; no dar instrucciones prácticas para abrir cerraduras.',
   52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Otro modelo: deducir la prioridad de los sectores Mattson calculando media de cinco evaluaciones; un error habitual es intercambiar sectores 2 y 4 por un unico punto porcentual. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
-  53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: diferenciar distribuciones de sacos para muros de diez metros y H=0,5 m: 500 frente a 900, sin incluir esos datos en el grafico. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas.'
+  53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: diferenciar distribuciones de sacos para muros de diez metros y H=0,5 m: 500 frente a 900, sin incluir esos datos en el grafico. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas.',
+  54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.'
 };
 const healthCache192=new Map();
 function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-3])\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-4])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3051,7 +3054,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3075,7 +3078,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
@@ -3143,6 +3146,29 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
        Number(l.actual_size)!==Number(l.size_bytes)||
        record.rows[0]?.document_name!==`local-pdf:sha256:${data.pdf_sha256}`)
       throw Error(`HEALTH192: T${n} fuente local no íntegra`);
+    // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
+    // not hundreds of sequential calls at every server startup. Other themes
+    // retain their original import path unchanged. No Gemini dependency here.
+    if(n===54){
+      const records=[];
+      for(const item of data.coverage_additions){
+        if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
+           !Number.isInteger(item.source_page)||item.source_page<1||
+           item.source_page>data.pdf_page_count||!item.concept||!item.source_evidence)
+          throw Error(`HEALTH192: ficha adicional T${n} inválida`);
+        records.push({section:item.section,concept:item.external_key+' · '+item.concept,
+          source_page:item.source_page,manual_page:item.manual_page,
+          source_evidence:item.source_evidence});
+      }
+      if(records.length)await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+        item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+        SELECT $1,r.section,r.concept,'dato_salud_preparado','literal_documental',
+          r.source_page,r.manual_page,r.source_evidence,TRUE
+        FROM jsonb_to_recordset($2::jsonb) AS r(section text,concept text,
+          source_page integer,manual_page text,source_evidence text)
+        ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
+        [topic.id,JSON.stringify(records)]);
+    }else{
     for(const item of data.coverage_additions){
       if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
          !Number.isInteger(item.source_page)||item.source_page<1||
@@ -3156,9 +3182,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         [topic.id,item.section,item.external_key+' · '+item.concept,
          item.source_page,item.manual_page,item.source_evidence]);
     }
+    }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':`salud-t${n}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':`salud-t${n}`;
       const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
@@ -3224,6 +3251,14 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       }
       imported++;
     }
+    if(n===54){
+      await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+        WHERE topic_folder='vehiculos' AND is_usable=TRUE
+          AND source_id=ANY($1::text[])`,[ 
+        ['vehiculos/Screenshot_20260924-180917-display-0.png.png',
+         'vehiculos/Screenshot_20260924-141506-display-0.png~3.jpg',
+         'vehiculos/Screenshot_20260924-180959-display-0.png.png']]);
+    }
     await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
       FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE)
       WHERE id=$1`,[topic.id]);
@@ -3231,6 +3266,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     console.log('HEALTH192_GRAFICOS_CARGADOS',JSON.stringify({topicId:topic.id,
       topic:n,images:data.images.length,questions:imported,
       documentaryAdditions:data.coverage_additions.length}));
+    if(n===54)console.log('SERVER201_T54_CARGADO',JSON.stringify({topicId:topic.id,images:data.images.length,questions:imported,documentaryAdditions:data.coverage_additions.length}));
     if(n===53)console.log('SERVER200_T53_CARGADO',JSON.stringify({topicId:topic.id,
       images:data.images.length,questions:imported,documentaryAdditions:data.coverage_additions.length}));
     return {ok:true,topic:n,images:data.images.length,questions:imported};
@@ -8250,6 +8286,10 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     const iiffManual86=isIiffManual86(topic);
     const t39HydraulicCoverage=isT39CoverageSource(topic);
     const t40Resumable159=t40Topic157(topic);
+    // SERVER202: T53/T54 aprovechan los checkpoints y la lectura robusta
+    // ya existente para IIFF, sin añadir bucles de reintento a Gemini.
+    const t5354Resumable202=String(topic.block||'').trim().toLowerCase()==='especifico' &&
+      [53,54].includes(coverageTopicNumber(topic.name));
     // El único PDF que autoriza asociar las 45 imágenes del banco T40 es
     // la unión original de 66 páginas ya verificada, byte a byte.
     if(t40Topic157(topic)){
@@ -8273,8 +8313,9 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       : null;
     const t39PdfHash=t39HydraulicCoverage?T39_CEIS_PDF_SHA256:null;
     const t40PdfHash=t40Resumable159?t40Resources157Load().pdf_sha256:null;
-    const reusableHash=iiffPdfHash86||t39PdfHash||t40PdfHash;
-    if(iiffManual86||t39HydraulicCoverage||t40Resumable159)
+    const reusableHash=iiffPdfHash86||t39PdfHash||t40PdfHash||
+      (t5354Resumable202 ? createHash('sha256').update(fs.readFileSync(pdfPath)).digest('hex') : null);
+    if(iiffManual86||t39HydraulicCoverage||t40Resumable159||t5354Resumable202)
       console.log(`COVERAGE: checkpoints por bloque habilitados para ${topic.name}`);
     if(iiffManual86){
       const found=await db.query(`SELECT t.total_items AS total,
@@ -8511,7 +8552,7 @@ for(const chunk of (literalItems?[]:chunks)){
     `COVERAGE: analizando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  if(iiffManual86||t39HydraulicCoverage){
+  if(iiffManual86||t39HydraulicCoverage||t5354Resumable202){
     const buildAnalysisRequest86=part=>({
       model:"gemini-3.5-flash-lite",
       contents:[
@@ -8705,7 +8746,7 @@ for(const chunk of (literalItems?[]:auditChunks)){
     `COVERAGE AUDIT: revisando páginas ${chunk.startPage}-${chunk.endPage}`
   );
 
-  if(iiffManual86||t39HydraulicCoverage){
+  if(iiffManual86||t39HydraulicCoverage||t5354Resumable202){
     const buildAuditRequest86=part=>({
       model:"gemini-3.5-flash-lite",
       contents:[
@@ -9004,7 +9045,7 @@ const parsed={
         console.log('T45_AUTOIMPORT',JSON.stringify(loaded));
       }catch(e){console.error('T45_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
-    // 46-53: importacion sanitaria preparada, aislada; el PDF no se reindexa
+    // 46-54: importacion documental/gráfica preparada, aislada; el PDF no se reindexa
     // por fallo de una pregunta grafica o de material adicional.
     if(healthTopicNumber192(topic)){
       try{const loaded=await healthImportOnce192(topic,pdfPath);
@@ -19427,7 +19468,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-3])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-4])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
