@@ -3041,6 +3041,14 @@ const HEALTH_EXAM_STYLE_192={
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: diferenciar distribuciones de sacos para muros de diez metros y H=0,5 m: 500 frente a 900, sin incluir esos datos en el grafico. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas.',
   54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.'
 };
+// SERVER203: Dos exportaciones byte-distintas del MISMO PDF T54, comprobadas
+// página a página (38/38: texto y render idénticos). Nunca aceptar otros PDF.
+const HEALTH_T54_EQUIVALENT_SHA203='3deffdfbf88aefa5bd014ad3fa35baaf6ed3be28f4b673c4775fe632552eacf4';
+function healthPdfApproved203(n,sha,data){
+  return sha===data.pdf_sha256 ||
+    (n===54 && data.pdf_sha256==='06a0768038f7c1dd1979579d39dfbb9e1e12f310eed4eff2c3824076d5e58cb6' &&
+     sha===HEALTH_T54_EQUIVALENT_SHA203);
+}
 const healthCache192=new Map();
 function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
@@ -3102,7 +3110,7 @@ async function healthReplaceDocument192(topic,pdfPath,items){
   if(!n||!data)throw Error('HEALTH192: tema o paquete sin coincidencia');
   const bytes=fs.readFileSync(pdfPath);
   const sha=createHash('sha256').update(bytes).digest('hex');
-  if(sha!==data.pdf_sha256||bytes.length<1000||bytes.length>20*1024*1024||
+  if(!healthPdfApproved203(n,sha,data)||bytes.length<1000||bytes.length>20*1024*1024||
      bytes.subarray(0,5).toString('latin1')!=='%PDF-')
      throw Error(`HEALTH192: PDF T${n} distinto del auditado`);
   const document=await PDFDocument.load(bytes,{updateMetadata:false});
@@ -3125,7 +3133,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   healthWriteImages192(n);
   if(uploadedPdfPath){
     const sha=createHash('sha256').update(fs.readFileSync(uploadedPdfPath)).digest('hex');
-    if(sha!==data.pdf_sha256)throw Error(`HEALTH192: PDF T${n} diferente`);
+    if(!healthPdfApproved203(n,sha,data))throw Error(`HEALTH192: PDF T${n} diferente`);
   }
   const client=await db.connect();
   try{
@@ -3141,10 +3149,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     const l=local.rows[0];
     const record=await client.query(`SELECT document_name FROM topic_source_documents
       WHERE topic_id=$1`,[topic.id]);
-    if(!l||l.sha!==data.pdf_sha256||l.actual_sha!==data.pdf_sha256||
+    if(!l||!healthPdfApproved203(n,l.sha,data)||l.actual_sha!==l.sha||
        Number(l.page_count)!==data.pdf_page_count||
        Number(l.actual_size)!==Number(l.size_bytes)||
-       record.rows[0]?.document_name!==`local-pdf:sha256:${data.pdf_sha256}`)
+       record.rows[0]?.document_name!==`local-pdf:sha256:${l.sha}`)
       throw Error(`HEALTH192: T${n} fuente local no íntegra`);
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
@@ -8438,6 +8446,26 @@ const {totalPages,chunks}=literalItems
   ? {totalPages:structuredSource.recordPages,chunks:[]}
   : await splitPdfIntoChunks(pdfPath,coverageChunkPages,
       t39HydraulicCoverage?{first:2,last:16}:null);
+// SERVER203: T53 tiene capítulos de enumeraciones densas a partir de p11.
+// Reducir solo esas peticiones; conservar checkpoints 1-5 y 6-10.
+// No se reintentan respuestas RECITATION ni se aceptan resultados bloqueados.
+if(t5354Resumable202 && coverageTopicNumber(topic.name)===53){
+  const originalChunks=[...chunks];chunks.length=0;
+  for(const part of originalChunks){
+    if(part.startPage>=11 && part.endPage>part.startPage){
+      const shorter=await bisectPdfChunk86(part);
+      for(const one of (shorter||[part])){
+        // En producción, 14-15 activó RECITATION incluso después
+        // de la bisección previa. Solicitar ambas páginas por separado.
+        if(one.startPage===14 && one.endPage===15){
+          const single=await bisectPdfChunk86(one);
+          chunks.push(...(single||[one]));
+        }else chunks.push(one);
+      }
+    }else chunks.push(part);
+  }
+  console.log('SERVER203_T53_BLOQUES',chunks.map(c=>`${c.startPage}-${c.endPage}`).join(','));
+}
 if(t39HydraulicCoverage && totalPages!==17)
   throw new Error('T39: el PDF esperado debe tener 17 páginas físicas. No se sustituye cobertura.');
 if(literalItems){
@@ -8569,7 +8597,13 @@ procedimientos ni información VISUAL técnicamente demostrable.
 Este paso construye solo un inventario factual: NO generes preguntas ni imágenes nuevas.
 sourcePage debe estar dentro de ${part.startPage}-${part.endPage}.
 manualPage es la página IMPRESA al pie, no deducida; si no se lee, null.
-`},
+`+(t5354Resumable202 && coverageTopicNumber(topic.name)===53 ? `
+REGLA DE REDACCIÓN PARA ESTE MANUAL: sintetiza cada conocimiento con
+lenguaje propio, fiel al sentido y conservando literalmente cifras, medidas,
+secuencias y terminología técnica. En sourceEvidence usa una referencia
+BREVE y precisa de máximo 15 palabras; nunca copies párrafos ni listas
+largas de la fuente. Conserva las páginas para verificarla posteriormente.
+`:'')},
         {inlineData:{mimeType:"application/pdf",data:part.data}}
       ],
       config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
@@ -8759,7 +8793,12 @@ for(const chunk of (literalItems?[]:auditChunks)){
             return Number.isFinite(p) && p>=1 && p<part.startPage;
           })
         )+(t39HydraulicCoverage?T39_COVERAGE_EXTRACTION_GUIDE+
-          t39KnownFactsForBlock(part):coverageImageRulesIiff86(topic,part.startPage,part.endPage))},
+          t39KnownFactsForBlock(part):coverageImageRulesIiff86(topic,part.startPage,part.endPage))+
+          (t5354Resumable202 && coverageTopicNumber(topic.name)===53 ? `
+Para la auditoría, lista SOLO omisiones. Resume cada conocimiento en palabras
+propias, con sus cifras y terminología originales; sourceEvidence máximo
+15 palabras, nunca transcribas párrafos extensos. Conserva sourcePage exacta.
+`:'' )},
         {inlineData:{mimeType:"application/pdf",data:part.data}}
       ],
       config:{responseMimeType:"application/json",responseJsonSchema:coverageSchema}
