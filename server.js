@@ -3017,7 +3017,8 @@ const HEALTH_NAMES_192={
   51:'APERTURAS FORZADAS',
   52:'RESCATE Y BUSQUEDA EN GRANDES AREAS',
   53:'RESCATE EN RIOS RIADAS E INUNDACIONES',
-  54:'VEHICULOS DE BOMBEROS'
+  54:'VEHICULOS DE BOMBEROS',
+  55:'INCENDIOS INDUSTRIALES'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3028,7 +3029,8 @@ const HEALTH_ALIAS_192={
   51:/APERTURAS FORZADAS/,
   52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/,
   53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/,
-  54:/VEHICULOS DE BOMBEROS/
+  54:/VEHICULOS DE BOMBEROS/,
+  55:/INCENDIOS INDUSTRIALES/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -3039,7 +3041,8 @@ const HEALTH_EXAM_STYLE_192={
   51:'MODELO DE ESTILO (no copiar literal): compara vidrio laminado con vidrio de cámara en una misma pregunta y permuta SOLO la forma de unión, el material PVB (1 mm), la presencia de cámara y el perfil hueco. Otro modelo: contrasta normas UNE EN 1627:2011, UNE 85160:2013 y UNE-EN 1303:2006 por su objeto exacto. En cada distractor altera solo una propiedad del CEIS, sin añadir fuentes; no dar instrucciones prácticas para abrir cerraduras.',
   52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Mattson: preguntar SOLO teoría general del método (equipos de 4–5, sectores, porcentajes que suman 100% y media como criterio de prioridad). PROHIBIDO preguntar datos, medias, cálculos, orden de los sectores o interpretar la tabla numérica demostrativa de la página 476. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: comparar la disposición a soga, piramidal o a escalera de los sacos según su función documentada, sin pedir memorizar los números del dibujo ilustrativo. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas. SILBATO del manual p.189: tres toques aislados indican hacia abajo/río abajo; tres toques EN SERIE indican emergencia/peligro. La referencia a "en serie" es imprescindible: no confundir ni omitir esa condición.',
-  54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.'
+  54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.',
+  55:'MODELO CEIS 2015 PARA T55 (no copiar): Tipos A-E: cruza ocupación del edificio, distancia exacta (mayor de 3 m o menor/igual), cerramiento lateral y máximo de cubierta (tipo E hasta 50%); distractor altera una condicion. Tabla 1 p.213: unir riesgo BAJO/MEDIO/ALTO, planta sotano/sobre rasante y tipos A-B-C con R30/R60/R90/R120/R180 y NO ADMITIDO; cuatro alternativas equilibradas. Carga de fuego Qe promedio ponderado por superficie. Qs=(Σ Gi qi Ci)/A * K * Ra: NO generar cálculos Qs porque K no está definido en el PDF; conservarla solo para identificación literal. Siempre unidades CEIS y factores dados. Espuma: comparar baja/media/alta expansion, 5 L/min/m2 de derrame, tecnica de cubricion simple y rebote, sistema Venturi, piezas del proporcionador, Pro-Pak y tabla 4 p.227. No preguntar valores de los EJEMPLOS resueltos de p.220. IMPORTANTE p.221 formula R=(V/T)*Cn*CL tiene variables C/Cn/CL incongruentes: no hacer problemas sobre ella. La deteccion de imágenes y preguntas GRAFICA de T55 esta prefabricada: reutilizarlas, NO interpretarlas otra vez ni generar imagenes. Sustituir distractores equivalentes por alternativas de magnitud, condicion, etapa o finalidad diferente pero plausible; NO usar tres afirmaciones semanticamente iguales. Referencia legislativa en este manual es histórica: NO preguntar por VIGENCIA ACTUAL, ni afirmar que RD2267/2004 siga vigente. La definición se pregunta solo SEGUN CEIS de este PDF. Fuentes exclusivamente PDF del usuario; no actualizar leyes ni incluir datos externos. El estilo mejora sin llamadas adicionales.'
 };
 // SERVER204: ejemplo ilustrativo Mattson T52 no examinable. Los datos del
 // PDF permanecen; no deben ocupar plazas nuevas aunque se reimporte el tema.
@@ -3156,7 +3159,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-4])\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-5])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3164,7 +3167,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3188,7 +3191,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
@@ -3309,7 +3312,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54){
+    if(n===54||n===55){
       const records=[];
       for(const item of data.coverage_additions){
         if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
@@ -3345,7 +3348,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':`salud-t${n}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':`salud-t${n}`;
       const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
@@ -8354,6 +8357,95 @@ async function analyzeIiffChunk86(ai,chunk,buildRequest,normalizePages,depth=0){
     return joined;
   }
 }
+// SERVER206: T55 documentary import takes only the PDF the user supplied.
+// Exact SHA check, original bytes + all independent documentary units saved atomically.
+// No external facts, no File Search, no added Gemini call and no changes to old topics.
+async function t55PreparedIndex206(topic,pdfPath){
+  if(healthTopicNumber192(topic)!==55)throw Error('SERVER206: titulo/bloque distinto a T55');
+  const data=healthLoadData192(55);
+  if(!data||!Array.isArray(data.coverage_additions)||data.coverage_additions.length<100)
+    throw Error('SERVER206: paquete documental T55 incompleto');
+  const bytes=fs.readFileSync(pdfPath);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(bytes.subarray(0,5).toString('latin1')!=='%PDF-'||
+     sha!==data.pdf_sha256||bytes.length<1000||bytes.length>20*1024*1024)
+    throw Error('T55: el PDF no coincide con el documento examinado; ninguna ficha se importó');
+  const parsed=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(parsed.getPageCount()!==data.pdf_page_count)
+    throw Error('T55: numero de paginas distinto del PDF auditado');
+  for(const item of data.coverage_additions){
+    if(!/^T55-EJ-MA-\d{4}$/.test(item.external_key)||!item.source_evidence||
+       !item.concept||!item.section||!Number.isInteger(item.source_page)||
+       item.source_page<1||item.source_page>data.pdf_page_count||
+       String(item.manual_page)!==String(208+item.source_page))
+      throw Error('T55: ficha mal formada '+item.external_key);
+  }
+  const records=data.coverage_additions.map(item=>({
+    section:item.section,concept:item.external_key+' · '+item.concept,
+    item_type:'dato_salud_preparado',evaluation_type:'literal_documental',
+    source_page:item.source_page,manual_page:item.manual_page,
+    source_evidence:item.source_evidence
+  }));
+  const c=await db.connect();
+  let result;
+  try{
+    await c.query('BEGIN');
+    const lock=await c.query('SELECT id,name,block,topic_order FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==55||
+       Number(lock.rows[0].topic_order)!==55)throw Error('T55: identidad u orden de tema incorrectos');
+    const prior=await c.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
+    if(prior.rowCount&&prior.rows[0].sha!==sha)
+      throw Error('T55: PDF previo diferente; se preserva el tema e historial');
+    await c.query(`INSERT INTO coverage_items(topic_id,section,concept,item_type,
+      evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+      SELECT $1,r.section,r.concept,r.item_type,r.evaluation_type,
+        r.source_page,r.manual_page,r.source_evidence,TRUE
+      FROM jsonb_to_recordset($2::jsonb) AS r(section text,concept text,item_type text,
+        evaluation_type text,source_page integer,manual_page text,source_evidence text)
+      ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        section=EXCLUDED.section,source_page=EXCLUDED.source_page,
+        manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence,
+        exam_relevant=TRUE`,[topic.id,JSON.stringify(records)]);
+    await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO UPDATE SET
+        page_count=EXCLUDED.page_count,size_bytes=EXCLUDED.size_bytes,
+        pdf_bytes=EXCLUDED.pdf_bytes,pdf_sha256=EXCLUDED.pdf_sha256,updated_at=NOW()`,
+      [topic.id,sha,data.pdf_page_count,bytes.length,bytes]);
+    await c.query(`INSERT INTO topic_source_documents(topic_id,document_name)
+      VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
+      document_name=EXCLUDED.document_name,updated_at=NOW()`,
+      [topic.id,'local-pdf:sha256:'+sha]);
+    await c.query(`UPDATE topics SET file_search_indexed=FALSE,
+      total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
+      worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
+      WHERE id=$1`,[topic.id]);
+    const v=await c.query(`SELECT t.total_items AS n,p.page_count,p.size_bytes,
+       OCTET_LENGTH(p.pdf_bytes) AS actual_bytes,TRIM(p.pdf_sha256) AS stored_sha,
+       ENCODE(SHA256(p.pdf_bytes),'hex') AS computed_sha
+       FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id WHERE t.id=$1`,[topic.id]);
+    if(v.rowCount!==1||Number(v.rows[0].n)<records.length||
+      Number(v.rows[0].page_count)!==data.pdf_page_count||
+      Number(v.rows[0].size_bytes)!==bytes.length||
+      Number(v.rows[0].actual_bytes)!==bytes.length||
+      v.rows[0].stored_sha!==sha||v.rows[0].computed_sha!==sha)
+      throw Error('T55: PDF o cobertura no valida, transaccion revertida');
+    result={topicId:Number(topic.id),documentaryItems:Number(v.rows[0].n),pdfSha256:sha};
+    await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK');throw e;}
+  finally{c.release();}
+  // Graphics and prepared questions are a distinct, idempotent transaction.
+  // Their failure does NOT require Gemini re-reading or re-paying for the PDF.
+  const graphic=await healthImportOnce192({...topic,total_items:result.documentaryItems},pdfPath);
+  const info=await db.query(`SELECT total_items,worked_items FROM topics WHERE id=$1`,[topic.id]);
+  const total=Number(info.rows[0]?.total_items)||0,worked=Number(info.rows[0]?.worked_items)||0;
+  console.log('SERVER206_T55_IMPORTADO:',JSON.stringify({topicId:topic.id,totalItems:total,
+    preparedQuestions:data.questions.length,figures:data.images.length,pdfSha256:sha}));
+  return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
+    workedItems:worked,pendingItems:total-worked,
+    coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
+    preparedFigures:graphic.images,preparedQuestions:graphic.questions};
+}
+
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
@@ -8364,13 +8456,6 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       .trim()
       .slice(0,120);
   try{
-    const ai=aiClient();
-    const coverageGenerate=
-      request =>
-        generateCoverageWithRetry(
-          ai,
-          request
-        );
     console.log("COVERAGE: iniciando análisis");
 
     const requestedTopicId=
@@ -8448,6 +8533,17 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+    if(healthTopicNumber192(topic)===55){
+      // Indexed PDF + CEIS facts already verified; do not use the generic LLM extractor.
+      const done=await t55PreparedIndex206(topic,pdfPath);
+      await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
+        topic:done.topic,totalItems:done.totalItems,workedItems:done.workedItems,
+        pendingItems:done.pendingItems,coveragePercentage:done.coveragePercentage});
+      res.json(done);
+      return; // finally: release advisory lock, remove only this temporary upload
+    }
+    const ai=aiClient();
+    const coverageGenerate=request=>generateCoverageWithRetry(ai,request);
     const iiffManual86=isIiffManual86(topic);
     const t39HydraulicCoverage=isT39CoverageSource(topic);
     const t40Resumable159=t40Topic157(topic);
@@ -19800,7 +19896,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-4])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-5])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
