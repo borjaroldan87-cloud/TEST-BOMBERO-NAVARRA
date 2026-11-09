@@ -3231,6 +3231,103 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
+
+// SERVER197 — ampliación documental SOLO de los temas 46–50.
+// Importación tras la previa sanitaria, sin reindexar PDF ni tocar SRS/tests.
+// Los registros son unidades CEIS verificadas y sujetos a deduplicación
+// de contenido AL IMPORTAR; no son filtros en la generación de preguntas.
+const T4650_DELTA197_FILE=path.join(process.cwd(),'t46_t50_coverage_delta_data.js');
+let T4650_DELTA197_CACHE=null;
+function t4650Norm197(v){return String(v||'').normalize('NFD')
+ .replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');}
+function t4650Tokens197(s){
+ const stop=new Set('de del la las los el en un una unos unas para por con que se sus su es son fue sean como cuando esta este esto estos estas entre mismo misma parte paciente persona personas personas victima victimas rescatador rescatadores cual cuales cuyo donde puede deben deben mas'.split(' '));
+ return new Set(t4650Norm197(s).split(' ').filter(w=>w.length>2&&!stop.has(w)));
+}
+function t4650Covered197(item,existing){
+ const k=t4650Norm197(item.concept), e=t4650Norm197(item.source_evidence), kw=t4650Tokens197(k);
+ const numbers=[...k.matchAll(/\b\d+(?:[,.]\d+)?\b/g)].map(m=>m[0]);
+ for(const old of existing){
+   if(Number(old.source_page)!==Number(item.pdf_page))continue;
+   const oldC=t4650Norm197(old.concept).replace(/^t\d+\s+cov\s+[a-f0-9]{16}\s+/,''),
+     oldE=t4650Norm197(old.source_evidence);
+   if(oldC===k || (k.length>=32&&oldC.includes(k)))return true;
+   // Una cita completa ya dedicada al mismo hecho no se duplica.
+   if(e.length>25 && (oldE===e || (oldE.includes(e)&&oldE.length<=e.length*1.6)))return true;
+   if(oldC.length<12||kw.size<3)continue;
+   const ow=t4650Tokens197(oldC), shared=[...kw].filter(w=>ow.has(w)).length;
+   // Misma asociación documental (no solo un listado resumido).
+   if(shared/kw.size>=.80 && shared/ow.size>=.65){
+      if(numbers.every(n=>oldC.split(' ').includes(n)))return true;
+   }
+ }
+ return false;
+}
+function t4650Load197(){
+ if(T4650_DELTA197_CACHE)return T4650_DELTA197_CACHE;
+ if(!fs.existsSync(T4650_DELTA197_FILE))throw Error('SERVER197: falta fichero documental');
+ const s=fs.readFileSync(T4650_DELTA197_FILE,'utf8').trim(),prefix='module.exports = ';
+ if(!s.startsWith(prefix)||!s.endsWith(';'))throw Error('SERVER197: formato de datos no reconocido');
+ const d=JSON.parse(s.slice(prefix.length,-1));
+ if(d.schema!==1||!Array.isArray(d.items)||d.items.length<200)throw Error('SERVER197: datos incompletos');
+ const unique=new Set();
+ for(const a of d.items){
+  const p=d.origin_pdf?.[String(a.topic_number)];
+  if(!p || !/^[a-f0-9]{64}$/.test(p.pdf_sha256)||!Number.isInteger(a.pdf_page)||a.pdf_page<1||a.pdf_page>p.pdf_page_count||
+     Number(a.manual_page)!==a.pdf_page+p.manual_offset||!String(a.external_key||'').match(/^T(?:4[6-9]|50)-COV-[A-F0-9]{16}$/)||
+     !a.concept||!a.source_evidence || String(a.source_evidence).length>600 ||
+     createHash('sha256').update(a.source_evidence,'utf8').digest('hex')!==a.citation_sha256 || unique.has(a.external_key))
+      throw Error('SERVER197: ficha documental no válida '+String(a.external_key));
+  unique.add(a.external_key);
+ }
+ T4650_DELTA197_CACHE=d;return d;
+}
+async function t4650CoverageImport197(topic){
+ const n=healthTopicNumber192(topic);
+ if(!Number.isInteger(n)||n<46||n>50)return {skipped:true};
+ const d=t4650Load197(),f=d.origin_pdf[String(n)];
+ const candidates=d.items.filter(x=>x.topic_number===n);
+ const client=await db.connect();
+ try{
+  await client.query('BEGIN');
+  const tr=await client.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=$1 FOR UPDATE`,[topic.id]);
+  const t=tr.rows[0];
+  if(!t || healthTopicNumber192(t)!==n || Number(t.topic_order)!==n || Number(t.total_items)<1)
+    throw Error('SERVER197: tema no indexado o no coincide T'+n);
+  const src=await client.query(`SELECT pdf_sha256,page_count,ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
+    FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+  const original=src.rows[0];
+  if(!original || String(original.pdf_sha256).trim()!==f.pdf_sha256 ||
+     original.actual_sha!==f.pdf_sha256||Number(original.page_count)!==Number(f.pdf_page_count))
+    throw Error('SERVER197: PDF CEIS no coincide T'+n);
+  const prev=await client.query(`SELECT id,concept,source_evidence,source_page FROM coverage_items
+    WHERE topic_id=$1 FOR UPDATE`,[t.id]);
+  const existing=prev.rows;
+  const approved=[];let skipped=0;
+  for(const a of candidates){
+   if(t4650Covered197(a,existing)){skipped++;continue;}
+   approved.push(a);
+  }
+  // Una sola inserción parametrizada por tema, sin llamadas externas/Gemini.
+  const r=await client.query(`INSERT INTO coverage_items
+    (topic_id,section,concept,item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+    SELECT $1, rec.section, rec.external_key || ' · ' || rec.concept,
+      'dato_ceis_desglosado','literal_documental',rec.pdf_page,rec.manual_page,rec.source_evidence,TRUE
+    FROM jsonb_to_recordset($2::jsonb) AS rec(section text,external_key text,concept text,
+       pdf_page integer,manual_page text,source_evidence text)
+    ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING
+    RETURNING id`,[t.id,JSON.stringify(approved)]);
+  const updated=await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*) FROM coverage_items
+     WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1 RETURNING total_items`,[t.id]);
+  await client.query('COMMIT');
+  console.log('SERVER197_COBERTURA_APLICADA',JSON.stringify({topic:n,candidates:candidates.length,
+   redundant:skipped,inserted:r.rows.length,totalItems:updated.rows[0].total_items}));
+  return {topic:n,candidates:candidates.length,redundant:skipped,inserted:r.rows.length,
+   totalItems:updated.rows[0].total_items};
+ }catch(e){await client.query('ROLLBACK');throw e;}
+ finally{client.release();}
+}
+
 async function healthGraphicBankPairs192(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -19141,13 +19238,18 @@ async function startServer(){
       .then(r=>Promise.all(r.rows.filter(t45Topic).map(t=>t45ImportOnce(t))))
       .then(r=>console.log('T45_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
-    db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
+    db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[01])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-2])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
-        .map(t=>healthImportOnce192(t))))
-      .then(r=>console.log('HEALTH192_ARRANQUE',JSON.stringify(r)))
-      .catch(e=>console.error('HEALTH192_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+        .map(async t=>{
+          const base=await healthImportOnce192(t);
+          // Importar cobertura DESPUÉS de finalizar la importación existente.
+          const supplement=await t4650CoverageImport197(t);
+          return {base,supplement};
+        })))
+      .then(r=>console.log('HEALTH197_ARRANQUE',JSON.stringify(r)))
+      .catch(e=>console.error('HEALTH197_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
