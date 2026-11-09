@@ -3037,10 +3037,56 @@ const HEALTH_EXAM_STYLE_192={
   49:'MODELO (no repetir): asociar gravedad, prioridad, color y orden de evacuacion; mezclar solo dos atributos por distractor. La clave debe mantener la cadena correcta del CEIS.',
   50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.',
   51:'MODELO DE ESTILO (no copiar literal): compara vidrio laminado con vidrio de cámara en una misma pregunta y permuta SOLO la forma de unión, el material PVB (1 mm), la presencia de cámara y el perfil hueco. Otro modelo: contrasta normas UNE EN 1627:2011, UNE 85160:2013 y UNE-EN 1303:2006 por su objeto exacto. En cada distractor altera solo una propiedad del CEIS, sin añadir fuentes; no dar instrucciones prácticas para abrir cerraduras.',
-  52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Otro modelo: deducir la prioridad de los sectores Mattson calculando media de cinco evaluaciones; un error habitual es intercambiar sectores 2 y 4 por un unico punto porcentual. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
+  52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Mattson: preguntar SOLO teoría general del método (equipos de 4–5, sectores, porcentajes que suman 100% y media como criterio de prioridad). PROHIBIDO preguntar datos, medias, cálculos, orden de los sectores o interpretar la tabla numérica demostrativa de la página 476. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: diferenciar distribuciones de sacos para muros de diez metros y H=0,5 m: 500 frente a 900, sin incluir esos datos en el grafico. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas.',
   54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.'
 };
+// SERVER204: ejemplo ilustrativo Mattson T52 no examinable. Los datos del
+// PDF permanecen; no deben ocupar plazas nuevas aunque se reimporte el tema.
+function t52MattsonExample204(r){
+  if(healthTopicNumber192(r)!==52)return false;
+  const c=String(r?.concept||'').trim();
+  return /^Valores de la Tabla 1 de prioridades de b[uú]squeda asignadas por el m[eé]todo de Mattson/i.test(c)||
+    /^T52-EJ-MA-(?:0020|00(?:3[0-9]|4[0-9]|5[0-9]|6[0-2]))\b/i.test(c)||
+    /^T52-GRAF-0001\b/i.test(c);
+}
+// SOLO equivalencia 1:25.000, no se fusionan conceptos de brújula/UTM.
+function t52ScaleConcept204(r){
+  if(healthTopicNumber192(r)!==52)return null;
+  const c=String(r?.concept||'');
+  const content=[r?.concept,r?.section,r?.source_evidence].join(' ');
+  if(/br[uú]jula/i.test(c)||!/\b1\s*:\s*25[.\s]?000\b/i.test(content))return null;
+  if(!/(?:escala|distancia|cent[ií]metro|equivalencia|medid[oa])/i.test(c))return null;
+  return `${r.topic_id}:escala25000_distancia`;
+}
+// Comparación local MUY conservadora: preserva cambios numéricos, negaciones,
+// condiciones, unidades, direcciones y relaciones físicas. Sin Gemini extra.
+function specificEquivalentOptions204(q){
+  if(!Array.isArray(q?.options)||q.options.length!==4)return false;
+  const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  const stop=new Set('se el la los las de del en por para con que una un unos unas como cual sus su al es son tiene tienen presenta permite obtener aportar caracteriza caracteriza entre ventajas virtud capacidad conjunto constituye refiere refiere ofrece consiste caracteriza principal referido respecto configuracion'.split(' '));
+  const meaningful=x=>new Set(norm(x).split(' ').filter(w=>(w.length>2||w==='no'||w==='si')&&!stop.has(w)));
+  const numbers=x=>(String(x).match(/[+-]?\d+(?:[.,]\d+)*/g)||[]).join('|');
+  const protectedWords=new Set('no nunca sin excepto salvo antes despues superior inferior anterior posterior abierto abierta cerrado cerrada izquierda derecha arriba abajo mayor menor mas menos alta baja primero segundo tercero cuarto verdadero falso correcto incorrecto diferente iguales inversa directa'.split(' '));
+  for(let i=0;i<4;i++)for(let j=i+1;j<4;j++){
+    if(numbers(q.options[i])!==numbers(q.options[j]))continue;
+    const a=meaningful(q.options[i]),b=meaningful(q.options[j]);
+    // No confundir el orden de válvulas, tramos o condiciones contrapuestas.
+    if([['abierta','cerrada'],['abierto','cerrado'],['antes','despues'],['mayor','menor'],['izquierda','derecha']].some(pair=>
+       pair.every(w=>a.has(w)&&b.has(w))))continue;
+    if(Math.min(a.size,b.size)<4)continue;
+    if([...protectedWords].some(w=>a.has(w)!==b.has(w)))continue;
+    const common=[...a].filter(w=>b.has(w)).length;
+    if(common/Math.max(a.size,b.size)>=0.95)return true;
+  }
+  return false;
+}
+function specificQualityIssue204(q,t,difficulty){
+  return difficulty==='muy alta' && String(t?.topic_block||'').toLowerCase()==='especifico' &&
+    !iiff91Topic(t) && specificEquivalentOptions204(q)?'alternativas_parafraseadas':null;
+}
+
 // SERVER203: Dos exportaciones byte-distintas del MISMO PDF T54, comprobadas
 // página a página (38/38: texto y render idénticos). Nunca aceptar otros PDF.
 const HEALTH_T54_EQUIVALENT_SHA203='3deffdfbf88aefa5bd014ad3fa35baaf6ed3be28f4b673c4775fe632552eacf4';
@@ -3213,6 +3259,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     let imported=0;
     for(const item of data.questions){
+      // SERVER204: el ejemplo numérico de Mattson ya no es examinable;
+      // no reactivar por upsert su pregunta gráfica en cada arranque.
+      if(n===52&&item.external_key==='T52-GRAF-0001')continue;
       const g=graphicMap.get(item.graphic_file);
       const asset=data.images.find(x=>x.file===item.graphic_file);
       if(!g||!asset||item.image_sha256!==asset.sha256||
@@ -3549,7 +3598,7 @@ async function healthGraphicBankPairs192(topicId,freshOnly,difficulty){
       AND ($2::boolean=FALSE OR (${FRESH111_SQL}))
     ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 120`,
     [topicId,Boolean(freshOnly)]);
-  return rows.rows;
+  return rows.rows.filter(r=>!t52MattsonExample204(r));
 }
 
 async function t45GraphicBankPairs(topicId,freshOnly,difficulty){
@@ -10256,10 +10305,11 @@ WHERE
 
   // SERVER96: la SQL ya bloquea por fecha/ID todos los bloques.
   // Para IIFF, adicionalmente evita hermanos semánticos en la misma página.
-  const iiffTopics=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
-  if(!iiffTopics.length)return result.rows;
+  const eligible204=result.rows.filter(r=>!t52MattsonExample204(r));
+  const iiffTopics=[...new Set(eligible204.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
+  if(!iiffTopics.length)return eligible204;
   const blocked=(await Promise.all(iiffTopics.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
-  return result.rows.filter(r=>!iiff91Topic(r)||!iiff102CandidateRepetition(r,blocked));
+  return eligible204.filter(r=>!iiff91Topic(r)||!iiff102CandidateRepetition(r,blocked));
 }
 
 async function getNewCoverageCandidate(
@@ -10321,6 +10371,7 @@ async function getNewCoverageCandidate(
   // evita hasta 60 SELECT repetidos en la vía mixta, sin cambiar resultados.
   const historyByTopic=new Map();
   for(const candidate of result.rows){
+    if(t52MattsonExample204(candidate))continue;
     if(!iiff91Topic(candidate))return candidate;
     const topicId=Number(candidate.topic_id);
     if(!historyByTopic.has(topicId))
@@ -12591,6 +12642,25 @@ if(selectedAdaptive.length < count){
   throw new Error(
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
   );
+}
+// SERVER204: no repetir en el MISMO test dos conversiones idénticas
+// de escala 1:25.000 solo por variar los centímetros de partida.
+{
+  const keys=new Set(),used=new Set(selectedAdaptive.map(x=>Number(x.id)));
+  for(let i=0;i<selectedAdaptive.length;i++){
+    const original=selectedAdaptive[i],key=t52ScaleConcept204(original);
+    if(!key)continue;
+    if(keys.has(key)){
+      const other=adaptiveCandidates.find(x=>Number(x.topic_id)===Number(original.topic_id)&&
+        !used.has(Number(x.id))&&!t52MattsonExample204(x)&&
+        (!t52ScaleConcept204(x)||!keys.has(t52ScaleConcept204(x)))&&
+        !selectedAdaptive.some(t=>t.topic_id===x.topic_id&&t.section===x.section&&t.concept===x.concept));
+      if(other){
+        selectedAdaptive[i]=other;used.delete(Number(original.id));used.add(Number(other.id));
+        console.log('T52_204_ESCALA_DIVERSIFICADA:',JSON.stringify({original:original.id,nueva:other.id}));
+      }
+    }else keys.add(key);
+  }
 }
 // SERVER175: dar cabida a tablas 18/20/21/22 en preguntas nuevas T40,
 // sin desplazar vencimientos SRS ni introducir una ruta nueva de generación.
@@ -16061,7 +16131,7 @@ function t39BernoulliNumeric131(q,t){
 function t39Math154(q){
   if(!q||!Array.isArray(q.options)||q.options.length!==4)return null;
   const stem=String(q.stem||'');
-  const pattern=/([+-]?(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?))\s*(kg\/m[³3]|m\/s[²2]|m[³3]\/s|m[³3]\/h|L\/min|L\/s|cm\/s|m\/s|mm[²2]|cm[²2]|dm[²2]|m[²2]|kPa|bar|Pa|mm|cm|m)(?![\p{L}\p{N}])/giu;
+  const pattern=/([+-]?(?:\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:[.,]\d+)?))\s*(kg\/m[³3]|m\/s[²2]|m[³3]\/s|m[³3]\/h|L\/min|L\/s|cm\/s|m\/s|mm[²2]|cm[²2]|dm[²2]|m[²2]|kPa|bar|Pa|N|mm|cm|m)(?![\p{L}\p{N}])/giu;
   const number=v=>{
     const x=String(v).replace(/\s/g,'');
     return Number(/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(x)&&!x.startsWith('0.')
@@ -16069,7 +16139,7 @@ function t39Math154(q){
   };
   const entries=[...stem.matchAll(pattern)].map(m=>({value:number(m[1]),unit:m[2]}))
     .filter(x=>Number.isFinite(x.value));
-  const factor=u=>u==='m/s²'||u==='m/s2'?1:(T39_FACTORES_SI_153[u]??T39_FACTORES_SI_153[u.replace(/3/g,'³').replace(/2/g,'²')]??null);
+  const factor=u=>u==='N'||u==='m/s²'||u==='m/s2'?1:(T39_FACTORES_SI_153[u]??T39_FACTORES_SI_153[u.replace(/3/g,'³').replace(/2/g,'²')]??null);
   const si=x=>x.value*factor(x.unit);
   const fmt=x=>Number(x.toPrecision(12)).toLocaleString('es-ES',{maximumFractionDigits:8});
   let result=null,solution=null,unit=null;
@@ -16114,10 +16184,45 @@ function t39Math154(q){
         `P_absoluta=${fmt(si(ps[0]))}+${fmt(hydro)}=${fmt(result)} Pa.`;
     }
   }
+  // Pascal: aplica F/S constante. Solo si hay dos áreas y una fuerza
+  // claramente aplicada al émbolo mayor/menor, y se pregunta por la opuesta.
+  if(result===null&&/(?:prensa hidr[aá]ulica|principio de pascal)/i.test(stem)&&
+     /fuerza/i.test(stem)&&/cilindro|[eé]mbolo/i.test(stem)){
+    const areas=entries.filter(x=>/^(?:mm|cm|dm|m)[²2]$/i.test(x.unit));
+    const forces=entries.filter(x=>x.unit==='N');
+    const largerApplied=/fuerza\s+de\s*[\d.,]+\s*N\s+sobre\s+(?:el|la)\s+(?:cilindro|[eé]mbolo)\s+de\s+mayor/i.test(stem)||
+      /(?:aplica|ejerce|act[uú]a)[\s\S]{0,70}(?:sobre|en)\s+(?:el|la)\s+(?:cilindro|[eé]mbolo)\s+de\s+mayor/i.test(stem);
+    const smallerApplied=/(?:aplica|ejerce|act[uú]a)[\s\S]{0,70}(?:sobre|en)\s+(?:el|la)\s+(?:cilindro|[eé]mbolo)\s+de\s+menor/i.test(stem);
+    const asksSmaller=/fuerza[\s\S]{0,50}(?:sobre|en)\s+(?:el|la)\s+(?:cilindro|[eé]mbolo)\s+de\s+menor\s+superficie\s*\?/i.test(stem);
+    const asksLarger=/fuerza[\s\S]{0,50}(?:sobre|en)\s+(?:el|la)\s+(?:cilindro|[eé]mbolo)\s+de\s+mayor\s+superficie\s*\?/i.test(stem);
+    if(areas.length===2&&forces.length===1&&
+       ((largerApplied&&asksSmaller)||(smallerApplied&&asksLarger))&&
+       [...areas,...forces].every(x=>Number.isFinite(factor(x.unit)))){
+      const sorted=areas.map(si).sort((a,b)=>a-b);
+      if(sorted[0]>0&&sorted[1]>sorted[0]){
+        result=largerApplied?si(forces[0])*sorted[0]/sorted[1]:si(forces[0])*sorted[1]/sorted[0];
+        unit='N';
+        solution=`S_menor=${fmt(sorted[0])} m²; S_mayor=${fmt(sorted[1])} m²; F=${fmt(si(forces[0]))} × ${fmt(largerApplied?sorted[0]:sorted[1])}/${fmt(largerApplied?sorted[1]:sorted[0])}=${fmt(result)} N.`;
+      }
+    }
+  }
+  // Hidrostática relativa: la presión debida exclusivamente al peso
+  // de una única columna es ρ·g·h; no confundir con presión absoluta.
+  if(result===null&&/presi[oó]n hidrost[aá]tica/i.test(stem)&&
+     !/presi[oó]n absoluta/i.test(stem)&&/peso del fluido|columna de l[ií]quido/i.test(stem)){
+    const rho=entries.filter(x=>/^kg\/m[³3]$/i.test(x.unit));
+    const g=entries.filter(x=>/^m\/s[²2]$/i.test(x.unit));
+    const h=entries.filter(x=>/^(?:m|cm|mm)$/i.test(x.unit));
+    if(rho.length===1&&g.length===1&&h.length===1&&
+       [...rho,...g,...h].every(x=>Number.isFinite(factor(x.unit)))){
+      result=si(rho[0])*si(g[0])*si(h[0]);unit='Pa';
+      solution=`P=ρgh=${fmt(si(rho[0]))}×${fmt(si(g[0]))}×${fmt(si(h[0]))}=${fmt(result)} Pa.`;
+    }
+  }
   if(result===null||!Number.isFinite(result)||!unit)return null;
   const expectedUnit=unit.replace(/3/g,'³');
   const parsed=q.options.map(option=>{
-    const m=String(option).trim().replace(/^[A-D][.):]\s*/i,'').match(/^([+-]?\d[\d.,]*)\s*(Pa|kPa|bar|m[³3]\/s|m[³3]\/h|L\/s|L\/min)$/i);
+    const m=String(option).trim().replace(/^[A-D][.):]\s*/i,'').match(/^([+-]?\d[\d.,]*)\s*(N|Pa|kPa|bar|m[³3]\/s|m[³3]\/h|L\/s|L\/min)$/i);
     return m?{value:number(m[1]),unit:m[2],decimals:(m[1].split(',')[1]||'').length}:null;
   });
   if(parsed.some(x=>!x))return null; // notación de opción desconocida: decide auditor existente
@@ -16851,7 +16956,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
-    const shapeIssue=resetShape136(q);
+    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
     const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
@@ -17049,6 +17154,7 @@ ACLARACIONES AUTORIZADAS: ${T39_REGLAS_HIDRAULICA}
 FILAS: ${JSON.stringify(blind)}` : null;
   const auditing=await resetGeminiCall139(ai,'auditar',{model:auditModel120,
     contents:onlyT39?t39Audit138:(auditPrompt82+
+      (difficulty==='muy alta'?'\nALTERNATIVAS: no aceptes opciones que sean paráfrasis del mismo hecho; en INCORRECTA las tres verdaderas deben ser HECHOS DISTINTOS, no frases sinónimas, y la falsa ha de ser técnicamente plausible. Si una respuesta se distingue sin conocer el documento por absurda o por tres opciones idénticas, marca answer=-1. No penalices en cambio tres opciones cercanas que cambian un número, unidad, condición, secuencia o dirección concreta, porque son distractores válidos. Sin llamadas adicionales.':'')+
       (group.every(t=>String(t.topic_block||'').toLowerCase()==='especifico')?
         '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual. En ejercicio de cálculo Alta/Muy alta, el ENUNCIADO no debe dar la fórmula de resolución ni especificar la unidad de respuesta: si lo hace, answer=-1; la fórmula y SI deben figurar solo en explicación/opciones. Los datos sí conservan sus unidades. Evitar dos opciones físicamente equivalentes.':'')+
       (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
@@ -17085,14 +17191,14 @@ FILAS: ${JSON.stringify(blind)}` : null;
     fichasOriginales:group.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
     const a=auditByIndex142.get(i);
-    const strictT39=onlyT39&&t39StrictNumeric133(q);
+    const strictT39=t39Hydraulica(group[i])&&t39StrictNumeric133(q);
     const math154=strictT39?t39Math154(q):null;
     // Si la operación puede reconstruirse del enunciado, la verdad numérica
     // prevalece sobre el índice erróneo del modelo. Los criterios documentales
     // del MISMO auditor siguen siendo obligatorios.
     if(math154?.invalid)return null;
     if(math154 && a && Number.isInteger(a.answer) && a.answer>=0 &&
-       a.unitsOk===true && a.relationOk===true && a.reasoningOk===true){
+       (!onlyT39||(a.unitsOk===true&&a.relationOk===true&&a.reasoningOk===true))){
       if(math154.index!==q.correctIndex||math154.index!==a.answer)
         console.warn('T39_154_CORRECCION_MATEMATICA:',JSON.stringify({
           coverageId:Number(group[i].id),original:q.correctIndex,
@@ -17108,7 +17214,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       (strictT39&&(!String(a?.solution||'').trim()||
         !t39BasisProof144(a,group[i],q)||
         t39PreflightIssue143(q,group[i],difficulty,mode))));
-    if(t39AuditFailure143||resetShape136(q)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
+    if(t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -17143,8 +17249,10 @@ FILAS: ${JSON.stringify(blind)}` : null;
         maskRegions:Array.isArray(asset.mask_regions)?asset.mask_regions:[]}
       :null;
     if(group[i].questionFamily==='GRAFICA'&&!picture)return null;
-    const explanation=onlyT39&&strictT39
-      ?`Resolución: ${math154?.solution&&a?.answer>=0?math154.solution:String(a.solution).trim()} Fundamento documental: «${evidence}».`
+    const explanation=strictT39&&math154?.solution&&a?.answer>=0
+      ?`Resolución: ${math154.solution} Fundamento documental: «${evidence}».`
+      :onlyT39&&strictT39
+      ?`Resolución: ${String(a.solution).trim()} Fundamento documental: «${evidence}».`
       :otherSpecific
       ?(iiff92IsNegativeStem(q)
         ?`Afirmación incorrecta: «${String(q.options[q.correctIndex]).trim()}». `+
@@ -17268,7 +17376,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     LIMIT 1500`,[allowedTopicIds,difficulty]);
   const iiffTopicIds=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
   const blocked=(await Promise.all(iiffTopicIds.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
-  const usedQuestions=new Set(),usedCoverage=new Set(),pairs=[];
+  const usedQuestions=new Set(),usedCoverage=new Set(),usedScale204=new Set(),pairs=[];
   for(const r of result.rows){
     // qb.id y coverage_items.id pertenecen a tablas DISTINTAS. Las
     // comparaciones SRS/factuales usan exclusivamente coverage_item_id.
@@ -17290,11 +17398,15 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     const stem=R136_NORM(r.stem),ci=Number(r.correct_index),id=Number(r.coverage_item_id);
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
-    if(geo114QuestionIssue(r))continue;
+    if(geo114QuestionIssue(r)||t52MattsonExample204(r))continue;
+    if(specificQualityIssue204({options:r.options,stem:r.stem},r,difficulty))continue;
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
       (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
         [114,119].includes(Number(r.validation_version))})))||
       resetShape136({stem:r.stem,options:r.options,correctIndex:ci,ankiOriginalBank}))continue;
+    const scale204=t52ScaleConcept204(r);
+    if(scale204&&usedScale204.has(scale204))continue;
+    if(scale204)usedScale204.add(scale204);
     usedQuestions.add(stem);usedCoverage.add(id);
     const target={id,topic_id:Number(r.topic_id),topic_name:r.topic_name,
       topic_block:r.topic_block,section:r.section,concept:r.concept,
@@ -19401,9 +19513,73 @@ async function applyT37CorrectionsOnce172(){
   }finally{client.release();}
 }
 
+// SERVER204 — reparación documental + estadística, idempotente, reversible
+// mediante snapshot en app_state. Si cambia un registro, abortar SIN tocarlo.
+async function applyQualityCorrectionsOnce204(){
+  const marker='quality_t39_t52_t54_20261109_server204_v1';
+  const client=await db.connect();let active=false;
+  const exampleIds=[38550,38604,...Array.from({length:33},(_,i)=>38614+i),38830];
+  try{
+    await client.query('BEGIN');active=true;
+    if((await client.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[marker])).rowCount){
+      await client.query('COMMIT');active=false;return;
+    }
+    const t52=(await client.query('SELECT id,name,total_items FROM topics WHERE id=63 FOR UPDATE')).rows[0];
+    if(!t52||!/TEMA\s+52\b/i.test(t52.name))throw Error('T52 distinto al auditado');
+    const cover=(await client.query('SELECT * FROM coverage_items WHERE id=ANY($1::int[]) FOR UPDATE',[[...exampleIds,23374,54141]])).rows;
+    const byId=new Map(cover.map(x=>[Number(x.id),x]));
+    if(byId.size!==38||exampleIds.some(id=>byId.get(id)?.topic_id!==63||byId.get(id)?.exam_relevant!==true) ||
+       byId.get(23374)?.topic_id===63 || byId.get(54141)?.topic_id===63 ||
+       Number(byId.get(23374)?.times_correct)!==0 ||Number(byId.get(23374)?.times_wrong)!==1)
+      throw Error('Fichas T39/T52/T54 han cambiado: abortar');
+    const qrows=(await client.query('SELECT * FROM question_bank WHERE id=ANY($1::bigint[]) FOR UPDATE',[[2048,2056,1904]])).rows;
+    const q=new Map(qrows.map(x=>[Number(x.id),x]));
+    if(q.size!==3||q.get(2048)?.correct_index!==1||q.get(2048)?.options?.[3]!=='80 N'||
+      q.get(2048)?.options?.[1]!=='800 N'||q.get(2048)?.coverage_item_id!==23374 ||
+      q.get(2056)?.coverage_item_id!==54141||q.get(1904)?.coverage_item_id!==38830)
+      throw Error('Banco distinto del auditado: abortar');
+    const arows=(await client.query('SELECT * FROM test_session_questions WHERE question_id=2048 FOR UPDATE')).rows;
+    const ans=arows[0];
+    const session=(await client.query('SELECT * FROM test_sessions WHERE id=157 FOR UPDATE')).rows[0];
+    const review=(await client.query('SELECT * FROM coverage_review_state WHERE coverage_item_id=23374 FOR UPDATE')).rows[0];
+    if(arows.length!==1||ans.session_id!==157||ans.selected_index!==3||ans.is_correct!==false||ans.is_blank!==false||
+       !session||session.correct_answers!==15||session.wrong_answers!==3||session.blank_answers!==2||
+       !review||review.total_reviews!==1||review.total_wrong!==1||review.total_correct!==0||
+       Number(q.get(2048)?.times_shown)!==1||Number(q.get(2048)?.times_wrong)!==1)
+      throw Error('Intento o SRS modificados: abortar');
+    const eligible=(await client.query('SELECT COUNT(*)::int n FROM coverage_items WHERE topic_id=63 AND exam_relevant=TRUE')).rows[0].n;
+    if(Number(t52.total_items)!==Number(eligible))throw Error('Total T52 no coincide con cobertura elegible');
+    const snapshot={date:new Date().toISOString(),source:'capturas sesión157 y caso Mattson 09nov2026',
+      topic:t52,coverage:cover,questionBank:qrows,session,answer:ans,review,excluded:exampleIds};
+    const upd=async(sql,args,count)=>{
+      const r=await client.query(sql,args);if(r.rowCount!==count)throw Error('Filas inesperadas: '+r.rowCount+' vs '+count);
+    };
+    await upd('UPDATE coverage_items SET exam_relevant=FALSE WHERE topic_id=63 AND id=ANY($1::int[])',[exampleIds],36);
+    await upd('UPDATE topics SET total_items=total_items-36 WHERE id=63',[],1);
+    await upd('UPDATE question_bank SET active=FALSE,updated_at=NOW() WHERE id IN(1904,2056)',[],2);
+    await upd('UPDATE question_bank SET correct_index=3,times_correct=1,times_wrong=0,updated_at=NOW() WHERE id=2048',[],1);
+    await upd('UPDATE test_session_questions SET is_correct=TRUE WHERE id=$1',[ans.id],1);
+    await upd('UPDATE test_sessions SET correct_answers=16,wrong_answers=2 WHERE id=157',[],1);
+    await upd('UPDATE coverage_items SET times_correct=1,times_wrong=0 WHERE id=23374',[],1);
+    await upd(`UPDATE coverage_review_state SET consecutive_correct=1,consecutive_wrong=0,
+      total_correct=1,total_wrong=0,review_stage=1,
+      next_review_at=$1::timestamptz + INTERVAL '1 day',updated_at=NOW()
+      WHERE coverage_item_id=23374`,[ans.answered_at],1);
+    await client.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[marker,JSON.stringify(snapshot)]);
+    await client.query('COMMIT');active=false;
+    console.log('SERVER204_CORRECCIONES_APLICADAS:',JSON.stringify({t52Excluidas:36,t52Elegibles:eligible-36,
+      pascal2048:'80 N',session157:'16 aciertos, 2 errores, 2 blancos',mattson1904:'inactiva',motor2056:'inactiva'}));
+  }catch(e){if(active){try{await client.query('ROLLBACK')}catch{}}
+    throw e;
+  }finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  // SERVER204: datos corregidos mediante una sola transacción; no bloquear el servicio.
+  try{await applyQualityCorrectionsOnce204();}
+  catch(e){console.error('SERVER204_MIGRACION_NO_APLICADA:',String(e?.message||e));}
   // Una única reparación documental. Si la BD cambió, la aplicación sigue operativa.
   try{await applyT37CorrectionsOnce172();}
   catch(e){console.error('T37_172_NO_APLICADO:',String(e?.message||e));}
