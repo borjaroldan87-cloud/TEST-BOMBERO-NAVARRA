@@ -3414,6 +3414,73 @@ async function health198QualityOnce(){
     throw e;}finally{client.release();}
 }
 
+
+// SERVER199 — corrección EXCLUSIVA de las asociaciones documentales del Tema 52.
+// El CEIS es la única fuente; no altera PDFs, historial, test, SRS ni Gemini.
+const T52_CORRECTIONS_199 = [{"id":38510,"expectedMd5":"80926f2262e41da5c5f3072003337a3b","kind":"fix","newConcept":"Pautas de actuación ante niños de 1 a 6 años perdidos (ambos subgrupos de 1–3 y de 4–6): buscar refugios o escondites, incluso inverosímiles, con rastreo sistemático, equipos caninos cuando sea posible y respuesta inmediata.","newEvidence":"Actuación (CEIS p. 469): En ambos casos tienden a buscar refugios o escondites, a menudo inverosímiles, por lo que se precisa un rastreo sistemático, si es posible con equipos caninos de rastreo. Siempre que se trate de menores, la respuesta debe ser inmediata.","newMd5":"e77b4b354cd05743c8275a04c618ad78"},{"id":38511,"expectedMd5":"8811646fb1ce0f6fe1b3c684d0a1fa3a","kind":"fix","newConcept":"Estadística de localización de niños de 1 a 6 años (CEIS p. 469): edificación o refugio 25%, campo abierto 25%, lugares habitados 25%, junto a vallados 12%, cursos de agua 12%.","newEvidence":"Estadística de localización, grupo de 1 a 6 años (CEIS p. 469): Edificación o refugio 25%; Campo abierto 25%; Lugares habitados 25%; Junto a vallados 12%; En cursos de agua 12%.","newMd5":"e365ebb0230bd46357c9f8abf5b6d8e1"},{"id":38512,"expectedMd5":"ef5cd74706cb3cc0295cb4eca3e42c63","kind":"fix","newConcept":"Estadística de alejamiento desde ULC para niños de 1 a 6 años (CEIS p. 469): D50 1 km, D75 1,8 km y D99 2,7 km.","newEvidence":"Distancias desde ULC del grupo de niños de 1 a 6 años (CEIS p. 469): D50 1 Km; D75 1,8 Km; D99 2,7 Km.","newMd5":"6833dce3a60cd3f71be7b88c8dcdf3ee"},{"id":38515,"expectedMd5":"328aa960e961a574c4f98a983c3f66a3","kind":"disable","reason":"Gráfico de 1–6 años atribuido erróneamente a 7–12 años; existe ya el gráfico correcto"},{"id":38516,"expectedMd5":"e037ff9abce9082579885b123a92bdfa","kind":"disable","reason":"Tabla de adolescentes atribuida erróneamente a 7–12 años; existe ya la tabla correcta"},{"id":38519,"expectedMd5":"0fe64b4874c6f0f200f1d31023c7f7da","kind":"fix","newConcept":"Pautas de actuación y estadísticas de adolescentes de 13 a 17 años (CEIS p. 470): búsqueda probabilística y respuesta inmediata; localización en lugares habitados 35%, edificaciones o refugios 23%, carreteras o caminos 18%, campo abierto 12%, cursos de agua 12%, zonas arboladas 4%; alejamiento D50 1,8 km, D75 4,3 km y D99 7 km.","newEvidence":"Actuación (CEIS p. 470): agotar todas las hipótesis de búsqueda probabilística; respuesta inmediata para menores. Estadística de localización: lugares habitados 35%; edificación o refugio 23%; carreteras o caminos 18%; campo abierto 12%; cursos de agua 12%; zonas arboladas 4%. Estadística de alejamiento desde ULC: D50 1,8 Km; D75 4,3 Km; D99 7 Km.","newMd5":"c6725ba90c343a5e97b75ee73e026d16"},{"id":38597,"expectedMd5":"b65380f7135b32a7a36a8452c6701e82","kind":"disable","reason":"Resumen de depresivos asociado al cuadro de enfermedad mental; se conservan sus tres datos atómicos correctos"},{"id":38598,"expectedMd5":"5b5d9c8981177c1de251ade3a9c567b7","kind":"disable","reason":"Resumen de Alzheimer asociado al cuadro de depresivos; se conservan los tres datos atómicos correctos"},{"id":38599,"expectedMd5":"81ebfdae0c21b2651434cfdaea937","kind":"disable","reason":"Resumen de enfermedad mental asociado al cuadro de Alzheimer; se conservan los tres datos atómicos correctos"},{"id":38659,"expectedMd5":"1a32907e8ea2a3346927f4f59d897c20","kind":"fix","newConcept":"T52-EJ-MA-0075 · Personas depresivas | D50 = 0,3 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Personas depresivas: D50 0,3 Km.","newMd5":"dc9385e30c99ce768f3349d06adb74bd"},{"id":38660,"expectedMd5":"196e5aba940ef859d35ff941337d3bf6","kind":"fix","newConcept":"T52-EJ-MA-0076 · Personas depresivas | D75 = 1,6 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Personas depresivas: D75 1,6 Km.","newMd5":"5fc1a539745651a1387a3d2e75419fd1"},{"id":38661,"expectedMd5":"9b5eb5de1b48c19a7ee82a2cd77647d3","kind":"fix","newConcept":"T52-EJ-MA-0077 · Personas depresivas | D99 = 32 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Personas depresivas: D99 32 Km.","newMd5":"0355b2f800c22eb859eb6889490621f7"},{"id":38662,"expectedMd5":"9b3d45e06cc612906bc1fdea5f8eaf46","kind":"fix","newConcept":"T52-EJ-MA-0078 · Alzheimer y demencia | D50 = 0,8 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Alzheimer y demencia: D50 0,8 Km.","newMd5":"25ff675e8f16dfd5aab7c62219ce85a5"},{"id":38663,"expectedMd5":"08943016fa9398d2cb7e0174934c9dc8","kind":"fix","newConcept":"T52-EJ-MA-0079 · Alzheimer y demencia | D75 = 1,35 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Alzheimer y demencia: D75 1,35 Km.","newMd5":"f1ca53906e3512138fa22da4081c70fd"},{"id":38664,"expectedMd5":"75f231d0399d8167d7c2501a5a064e46","kind":"fix","newConcept":"T52-EJ-MA-0080 · Alzheimer y demencia | D99 = 3,2 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Alzheimer y demencia: D99 3,2 Km.","newMd5":"ef164312b4da157edb67e743bf2f81fa"},{"id":38665,"expectedMd5":"e2e35a4641aacccda9789a2e106699ee","kind":"fix","newConcept":"T52-EJ-MA-0081 · Enfermedad mental | D50 = 0,6 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Enfermedad mental: D50 0,6 Km.","newMd5":"e6d094265ce4856c5e1eeae74126efe3"},{"id":38666,"expectedMd5":"ab9b5be00393628e4ef144558ae23e84","kind":"fix","newConcept":"T52-EJ-MA-0082 · Enfermedad mental | D75 = 1,2 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Enfermedad mental: D75 1,2 Km.","newMd5":"274b8a2411a8ca4dc75adf17c35dfe0a"},{"id":38667,"expectedMd5":"d7eea6709417842241b54602728a863f","kind":"fix","newConcept":"T52-EJ-MA-0083 · Enfermedad mental | D99 = 6 km","newEvidence":"CEIS Guadalajara, página impresa 471, estadística de alejamiento desde ULC del perfil Enfermedad mental: D99 6 Km.","newMd5":"eaa8f0d9970438329eba9cdde9e71993"},{"id":38807,"expectedMd5":"bba96d46984363c7f36fa4fc5d6ee3a3","kind":"fix","newConcept":"T52-EJ-MA-0223 · Coordenadas UTM | límite norte según el CEIS = 80 grados N","newEvidence":"CEIS Guadalajara, página impresa 466: la proyección UTM alcanza desde los 80º sur hasta los 80º norte (literal del manual).","newMd5":"fe8e705830e2408f85fdbfdafeca3e46"},{"id":38817,"expectedMd5":"452bb91d388f6353f50aade155349c2f","kind":"fix","newConcept":"T52-EJ-MA-0233 · Brújula usada por bomberos | escala de la base = 1:25.000 para la cuadrícula UTM de 1000×1000 m","newEvidence":"CEIS Guadalajara, página impresa 468: la brújula usada por bomberos dispone de una base escalada y se suele utilizar en un mapa 1:25000 porque la base coincide con la cuadrícula 1000×1000 de coordenadas UTM.","newMd5":"7b462c71caffe9ffaa44501abb006fa4"}];
+const T52_EXPECTED_PDF_199='2e4cfe8a05ff75aca59312d58f43c84a3a3cc3d47409ee52379cd40f678fcbca';
+async function t52CorrectDocument199(topic){
+  if(healthTopicNumber192(topic)!==52)return {skipped:true};
+  const client=await db.connect();let started=false;
+  try{
+    await client.query('BEGIN');started=true;
+    const lock=await client.query(`SELECT id,name,block,topic_order,total_items
+      FROM topics WHERE id=$1 FOR UPDATE`,[topic.id]);
+    const t=lock.rows[0];
+    if(!t||healthTopicNumber192(t)!==52||Number(t.topic_order)!==52||Number(t.total_items)<1)
+      throw Error('SERVER199 T52: tema no coincide o no tiene cobertura');
+    const original=await client.query(`SELECT TRIM(pdf_sha256) AS sha,page_count,
+      ENCODE(SHA256(pdf_bytes),'hex') AS actual FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
+    if(original.rows.length!==1||original.rows[0].sha!==T52_EXPECTED_PDF_199||
+       original.rows[0].actual!==T52_EXPECTED_PDF_199||Number(original.rows[0].page_count)!==24)
+      throw Error('SERVER199 T52: PDF diferente del CEIS auditado');
+    const current=await client.query(`SELECT c.id,c.concept,c.source_evidence,c.exam_relevant,c.times_asked,
+      (SELECT COUNT(*)::int FROM question_bank q WHERE q.coverage_item_id=c.id) AS question_count
+      FROM coverage_items c WHERE c.topic_id=$1 FOR UPDATE`,[t.id]);
+    const byId=new Map(current.rows.map(r=>[Number(r.id),r]));
+    const result={revised:0,deactivated:0,alreadyCorrect:0,missing:0};
+    for(const correction of T52_CORRECTIONS_199){
+      const row=byId.get(correction.id);
+      // Las claves son registros del Tema 52 original: no se infieren cambios
+      // sobre IDs ausentes o fichas de otros temas.
+      if(!row){result.missing++;continue;}
+      const digest=createHash('md5').update(row.concept+'|'+row.source_evidence,'utf8').digest('hex');
+      if(correction.kind==='disable'){
+        if(digest!==correction.expectedMd5)throw Error('SERVER199 T52: ficha alterada '+correction.id);
+        if(!row.exam_relevant){result.alreadyCorrect++;continue;}
+        if(Number(row.times_asked||0)!==0||Number(row.question_count)!==0)
+          throw Error('SERVER199 T52: ficha ya utilizada '+correction.id);
+        await client.query(`UPDATE coverage_items SET exam_relevant=FALSE WHERE id=$1`,[row.id]);
+        result.deactivated++;
+      }else{
+        if(digest===correction.newMd5){result.alreadyCorrect++;continue;}
+        if(digest!==correction.expectedMd5||!row.exam_relevant)
+          throw Error('SERVER199 T52: contenido cambió '+correction.id);
+        if(Number(row.times_asked||0)!==0||Number(row.question_count)!==0)
+          throw Error('SERVER199 T52: ficha ya utilizada '+correction.id);
+        await client.query(`UPDATE coverage_items SET concept=$2,source_evidence=$3
+          WHERE id=$1`,[row.id,correction.newConcept,correction.newEvidence]);
+        result.revised++;
+      }
+    }
+    // En el tema instalado deben estar las 20 fichas; no declarar reparado si faltan.
+    if(Number(t.id)===63 && result.missing!==0)
+      throw Error('SERVER199 T52: faltan fichas auditadas '+result.missing);
+    const total=await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
+      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE)
+      WHERE id=$1 RETURNING total_items`,[t.id]);
+    const sig=createHash('sha256').update(JSON.stringify(T52_CORRECTIONS_199)).digest('hex');
+    await client.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`,
+      ['T52_CEIS_REPARACION_199',JSON.stringify({topic:t.id,hash:sig,
+       result,total:Number(total.rows[0].total_items),checkedAt:new Date().toISOString()})]);
+    await client.query('COMMIT');started=false;
+    console.log('SERVER199_T52_CORREGIDO',JSON.stringify({...result,total:total.rows[0].total_items}));
+    return {...result,total:Number(total.rows[0].total_items)};
+  }catch(e){if(started){try{await client.query('ROLLBACK')}catch(_){}}throw e;}
+  finally{client.release();}
+}
+
 async function healthGraphicBankPairs192(topicId,freshOnly,difficulty){
   if(difficulty!=='muy alta')return [];
   const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
@@ -8908,6 +8975,7 @@ const parsed={
     // por fallo de una pregunta grafica o de material adicional.
     if(healthTopicNumber192(topic)){
       try{const loaded=await healthImportOnce192(topic,pdfPath);
+        if(healthTopicNumber192(topic)===52)await t52CorrectDocument199(topic);
         console.log('HEALTH192_AUTOIMPORT',JSON.stringify(loaded));
       }catch(e){console.error('HEALTH192_IMPORT_PENDIENTE:',String(e?.message||e));}
     }
@@ -19329,6 +19397,7 @@ async function startServer(){
       name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-2])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
+          if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
