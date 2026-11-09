@@ -3008,14 +3008,15 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
   finally{client.release();}
 }
 
-// SERVER192: Temas sanitarios 46-53. Un importador reutilizado, sin filtros de
+// SERVER200: Temas 46-53. Se reutiliza el importador previo, sin filtros de
 // generación adicionales, sin segunda llamada a Gemini y sin alterar SRS.
 const HEALTH_NAMES_192={
   46:'SOPORTE VITAL',47:'URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS',
   48:'HERIDAS Y LESIONES DE TEJIDOS BLANDOS Y MOVILIZACION E INMOVILIZACION',
   49:'GRANDES EMERGENCIAS Y CATASTROFES TRIAJE',50:'PREVENCION Y APOYO PSICOLOGICO',
   51:'APERTURAS FORZADAS',
-  52:'RESCATE Y BUSQUEDA EN GRANDES AREAS'
+  52:'RESCATE Y BUSQUEDA EN GRANDES AREAS',
+  53:'RESCATE EN RIOS RIADAS E INUNDACIONES'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3024,7 +3025,8 @@ const HEALTH_ALIAS_192={
   49:/GRANDES EMERGENCIAS.*(?:TRIAJE|TRIAGE)/,
   50:/PREVENCION Y APOYO PSICOLOGICO/,
   51:/APERTURAS FORZADAS/,
-  52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/
+  52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/,
+  53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -3033,14 +3035,15 @@ const HEALTH_EXAM_STYLE_192={
   49:'MODELO (no repetir): asociar gravedad, prioridad, color y orden de evacuacion; mezclar solo dos atributos por distractor. La clave debe mantener la cadena correcta del CEIS.',
   50:'MODELO (no repetir): relacionar designacion de un solo comunicador, remision a él y lugar aislado para dar malas noticias; cada distractor cambia solo una condicion.',
   51:'MODELO DE ESTILO (no copiar literal): compara vidrio laminado con vidrio de cámara en una misma pregunta y permuta SOLO la forma de unión, el material PVB (1 mm), la presencia de cámara y el perfil hueco. Otro modelo: contrasta normas UNE EN 1627:2011, UNE 85160:2013 y UNE-EN 1303:2006 por su objeto exacto. En cada distractor altera solo una propiedad del CEIS, sin añadir fuentes; no dar instrucciones prácticas para abrir cerraduras.',
-  52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Otro modelo: deducir la prioridad de los sectores Mattson calculando media de cinco evaluaciones; un error habitual es intercambiar sectores 2 y 4 por un unico punto porcentual. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.'
+  52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Otro modelo: deducir la prioridad de los sectores Mattson calculando media de cinco evaluaciones; un error habitual es intercambiar sectores 2 y 4 por un unico punto porcentual. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
+  53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: diferenciar distribuciones de sacos para muros de diez metros y H=0,5 m: 500 frente a 900, sin incluir esos datos en el grafico. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas.'
 };
 const healthCache192=new Map();
 function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-2])\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-3])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3048,7 +3051,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3072,7 +3075,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
@@ -3155,8 +3158,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const uri=`/graphics/salud-t${n}/${asset.file}`;
-      const sourceId=`salud-t${n}/${asset.file}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':`salud-t${n}`;
+      const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
+      const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
         source_file,public_url,asset_index,asset_type,concept,description,
         source_evidence,crop_x,crop_y,crop_width,crop_height,mask_regions,
@@ -3167,7 +3171,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         concept=EXCLUDED.concept,description=EXCLUDED.description,
         source_evidence=EXCLUDED.source_evidence,public_url=EXCLUDED.public_url,
         is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
-        RETURNING id`,[sourceId,`salud-t${n}`,asset.file,uri,asset.concept,
+        RETURNING id`,[sourceId,topicGraphicFolder,asset.file,uri,asset.concept,
            `CEIS imagen original pagina ${asset.printed_page}`,
            `CEIS Guadalajara, pagina ${asset.printed_page}`]);
       graphicMap.set(asset.file,{id:Number(row.rows[0].id),sourceId,uri});
@@ -3227,6 +3231,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     console.log('HEALTH192_GRAFICOS_CARGADOS',JSON.stringify({topicId:topic.id,
       topic:n,images:data.images.length,questions:imported,
       documentaryAdditions:data.coverage_additions.length}));
+    if(n===53)console.log('SERVER200_T53_CARGADO',JSON.stringify({topicId:topic.id,
+      images:data.images.length,questions:imported,documentaryAdditions:data.coverage_additions.length}));
     return {ok:true,topic:n,images:data.images.length,questions:imported};
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
@@ -5903,6 +5909,33 @@ function coverageTopicNumber(topicName){
 function coverageTopicRulesPrompt(topicName){
   const topicNumber=
     coverageTopicNumber(topicName);
+
+  if(topicNumber===53)return `
+TEMA 53. RESCATE EN RIOS, RIADAS E INUNDACIONES (CEIS, edicion 2015).
+FUENTE FACTUAL EXCLUSIVA: PDF del usuario, caracterizacion (p.164–171) y
+tecnicas de intervencion (p.174–191). El PDF combinado tiene 31 paginas
+fisicas y reproduce fielmente ambas partes; algunas paginas originales solo
+tienen imagen y la segunda parte tenia extraccion textual mal codificada.
+No rellenar espacios, no inferir datos que no puedan leerse en la pagina.
+Extraer una UNIDAD ATOMICA por asociacion o celda de tabla con contexto:
+Tabla 1 p.165: criterio de clasificacion y cada tipo de rio, sin mezclar grupos.
+Tabla 2 p.165: regimen, subtipos y orden de alimentacion; p.166:
+maximos/minimos estacionales y los valores R y C de CADA hidrograma.
+Tabla 3 p.167: ano, lugar, suceso y consecuencias de cada fila.
+Tabla 4 p.183: cinco maquinas de achique x tres propiedades (fuerza motriz,
+gases toxicos, alimentacion exterior); no intercambiar filas o columnas.
+P.187: muro de diez metros lineales, dos disposiciones de H=0,5 m,
+500 frente a 900 sacos. P.189: separar un/dos/tres toques de silbato
+de tres toques en serie, y conservar direccion de corriente.
+P.174: profundidad 15 cm y riesgo por encima de rodillas segun CEIS.
+Separar tecnicas de entrada, presa, arrastre, cuerda, embarcaciones,
+control del agua, diques, comunicacion y accesibilidad cuando sean
+objetivamente examinables. Las imagenes graficas prefabricadas del modulo
+son preguntas de banco; Gemini NO las modifica ni improvisa otras.
+Conservar SIN CORREGIR desde fuentes externas las leyes, fechas y
+recomendaciones de esta edicion del manual. Modelos oficiales SOLO estilo.
+No fijar cantidad minima artificial ni introducir filtros o reintentos.
+`;
 
   if(topicNumber===44)return `
 REGLAS PRIORITARIAS TEMA 44 RESCATE EN ASCENSORES, CEIS GUADALAJARA 2015.
@@ -19394,7 +19427,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-2])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-3])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
