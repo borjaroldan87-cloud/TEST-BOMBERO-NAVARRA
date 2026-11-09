@@ -3122,17 +3122,21 @@ function optionTriplicate205(q){
   const signatures=q.options.map(v=>{
     const normalized=fold(v),words=normalized.split(' ').filter(Boolean);
     const numbers=(String(v).match(/[+-]?\d+(?:[.,]\d+)*/g)||[]).join('|');
-    const qualifiers=words.filter(w=>critical.has(w)).sort().join('|');
-    const meaningful=[...new Set(words.filter(w=>!fillers.has(w)&&!critical.has(w)))].sort();
+    // El ORDEN también forma parte de la relación: 'nieve antes que lluvia'
+    // no equivale a 'lluvia antes que nieve'. No ordenar calificadores.
+    const qualifiers=words.filter(w=>critical.has(w)).join('|');
+    // Preservar orden y multiplicidad de palabras técnicas relevantes.
+    // Sinonimias de introducción se resuelven con 'fillers', no por similitud
+    // estadística que confunde un cambio de régimen, objeto o relación.
+    const meaningful=words.filter(w=>!fillers.has(w)&&!critical.has(w));
     return {numbers,qualifiers,meaningful};
   });
   const matched=(a,b)=>{
     if(a.numbers!==b.numbers||a.qualifiers!==b.qualifiers||
        a.meaningful.length<3||b.meaningful.length<3)return false;
-    const aa=new Set(a.meaningful),bb=new Set(b.meaningful);
-    const intersection=[...aa].filter(x=>bb.has(x)).length;
-    // Un cambio de atributo, objeto o variable cuenta como alternativa REAL.
-    return intersection/Math.max(aa.size,bb.size)>=0.96;
+    // Tres paráfrasis con el MISMO contenido sí se rechazan; permutar
+    // 'máximo relativo' y 'máximo absoluto' NO es una repetición.
+    return a.meaningful.join('\u001f')===b.meaningful.join('\u001f');
   };
   for(let i=0;i<4;i++)for(let j=i+1;j<4;j++)for(let k=j+1;k<4;k++){
     if(matched(signatures[i],signatures[j])&&
@@ -19052,7 +19056,13 @@ app.post('/api/generate',async(req,res)=>{
         throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':targets.some(t39Hydraulica)?'los controles de evidencia, unidades o calidad':'verificación PDF'}. No se guardó un examen incompleto.`);
       }
     }
-    if(questions.some((q,i)=>!q||resetShape136(q))){
+    // SERVER207: si falla una validación final, registrar SOLO plaza y motivo.
+    // No registrar preguntas ni datos del PDF en logs, y no hacer más llamadas.
+    // El borrador queda intacto y reanudable con el MISMO runId.
+    const malformed207=questions.map((q,i)=>({slot:i+1,
+      reason:q?resetShape136(q):'Pregunta ausente'})).filter(x=>x.reason);
+    if(malformed207.length){
+      console.warn('SERVER207_MALFORMADA_FINAL:',JSON.stringify(malformed207));
       throw Error('Pregunta malformada detectada antes de guardar.');
     }
     const invalidGeo=questions.findIndex((q,i)=>geo114QuestionIssue({...q,topic_block:targets[i]?.topic_block,topic_name:targets[i]?.topic_name,concept:targets[i]?.concept}));
