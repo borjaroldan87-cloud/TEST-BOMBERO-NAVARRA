@@ -3291,6 +3291,43 @@ async function healthApplyCorrections205(client,topic,n){
 // protege los reactivos anteriores; nunca se sobrescribe el historial.
 // Si el contenido almacenado es desconocido, se conserva y se registra error.
 const HEALTH208_GRAPHIC_LEGACY_SHA=Object.freeze({"T53-GRAF-0001":"9b6de53f8473d16a8e0fe3dc3fc762e96f07a4c462aea7eedc3c663f90885c22","T55-GRAF-0011":"bcc5ac8434365993acf244a6932b3e584c64031fac927f9c67fb969b210461ae"});
+// SERVER213: Registrar SOLO el PDF local auditado del T56 sin sustituir Gemini ni cobertura.
+async function t56EnsureLocalPdf213(topic){
+  if(healthTopicNumber192(topic)!==56)return {skipped:true};
+  const data=healthLoadData192(56);
+  const file=path.join(process.cwd(),'t56_source_213.pdf');
+  if(!fs.existsSync(file))throw Error('T56_213: falta PDF fuente incluido en despliegue');
+  const bytes=fs.readFileSync(file);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256||bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw Error('T56_213: SHA o cabecera del PDF no coincide');
+  const parsed=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(parsed.getPageCount()!==data.pdf_page_count)
+    throw Error('T56_213: numero de paginas incorrecto');
+  const c=await db.connect();
+  try{
+    await c.query('BEGIN');
+    const t=await c.query('SELECT id,name,block,total_items FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(t.rowCount!==1||healthTopicNumber192(t.rows[0])!==56||Number(t.rows[0].total_items)<1)
+      throw Error('T56_213: identidad o indexacion no validas');
+    const prior=await c.query(`SELECT TRIM(pdf_sha256) sha,ENCODE(SHA256(pdf_bytes),'hex') actual_sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) actual_size FROM topic_local_pdfs WHERE topic_id=$1`,[topic.id]);
+    if(prior.rowCount){
+      const v=prior.rows[0];
+      if(v.sha!==sha||v.actual_sha!==sha||Number(v.page_count)!==data.pdf_page_count||
+         Number(v.size_bytes)!==bytes.length||Number(v.actual_size)!==bytes.length)
+        throw Error('T56_213: existe PDF local distinto o corrupto; no sobrescribir');
+    }else{
+      await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
+        [topic.id,sha,data.pdf_page_count,bytes.length,bytes]);
+    }
+    // Preservar topic_source_documents: el documento Gemini sigue siendo la fuente indexada.
+    await c.query('COMMIT');
+    console.log('T56_213_PDF_LOCAL_VERIFICADO',JSON.stringify({topicId:topic.id,pages:data.pdf_page_count,sha,bytes:bytes.length}));
+    return {ok:true,topicId:topic.id};
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+}
 async function healthImportOnce192(topic,uploadedPdfPath=null){
   const n=healthTopicNumber192(topic);
   if(!n)return {skipped:true};
@@ -3318,7 +3355,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     if(!l||!healthPdfApproved203(n,l.sha,data)||l.actual_sha!==l.sha||
        Number(l.page_count)!==data.pdf_page_count||
        Number(l.actual_size)!==Number(l.size_bytes)||
-       record.rows[0]?.document_name!==`local-pdf:sha256:${l.sha}`)
+       (record.rows[0]?.document_name!==`local-pdf:sha256:${l.sha}` &&
+        !(n===56 && /^fileSearchStores\//.test(String(record.rows[0]?.document_name||'')))))
       throw Error(`HEALTH192: T${n} fuente local no íntegra`);
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
@@ -19993,6 +20031,7 @@ async function startServer(){
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
+          if(healthTopicNumber192(t)===56)await t56EnsureLocalPdf213(t);
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
