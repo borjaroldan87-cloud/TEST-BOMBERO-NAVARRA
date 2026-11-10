@@ -3018,7 +3018,8 @@ const HEALTH_NAMES_192={
   52:'RESCATE Y BUSQUEDA EN GRANDES AREAS',
   53:'RESCATE EN RIOS RIADAS E INUNDACIONES',
   54:'VEHICULOS DE BOMBEROS',
-  55:'INCENDIOS INDUSTRIALES'
+  55:'INCENDIOS INDUSTRIALES',
+  56:'APEO Y PODA DE ARBOLADO'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3030,7 +3031,8 @@ const HEALTH_ALIAS_192={
   52:/RESCATE Y BUSQUEDA EN GRANDES AREAS/,
   53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/,
   54:/VEHICULOS DE BOMBEROS/,
-  55:/INCENDIOS INDUSTRIALES/
+  55:/INCENDIOS INDUSTRIALES/,
+  56:/APEO Y PODA DE ARBOLADO/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -3042,7 +3044,8 @@ const HEALTH_EXAM_STYLE_192={
   52:'MODELO DE ESTILO (no copiar literal): contrastar datos D50/D75/D99 del mismo perfil o de perfiles muy proximos, cambiando SOLO una distancia. Mattson: preguntar SOLO teoría general del método (equipos de 4–5, sectores, porcentajes que suman 100% y media como criterio de prioridad). PROHIBIDO preguntar datos, medias, cálculos, orden de los sectores o interpretar la tabla numérica demostrativa de la página 476. Distinguir perros de rastro y de venteo por origen del olor y orientacion de la batida. Conservar la discrepancia literal de Wartes, sin recomputarla. SOLO contenido CEIS.',
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: comparar la disposición a soga, piramidal o a escalera de los sacos según su función documentada, sin pedir memorizar los números del dibujo ilustrativo. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas. SILBATO del manual p.189: tres toques aislados indican hacia abajo/río abajo; tres toques EN SERIE indican emergencia/peligro. La referencia a "en serie" es imprescindible: no confundir ni omitir esa condición.',
   54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.',
-  55:'MODELO CEIS 2015 PARA T55 (no copiar): Tipos A-E: cruza ocupación del edificio, distancia exacta (mayor de 3 m o menor/igual), cerramiento lateral y máximo de cubierta (tipo E hasta 50%); distractor altera una condicion. Tabla 1 p.213: unir riesgo BAJO/MEDIO/ALTO, planta sotano/sobre rasante y tipos A-B-C con R30/R60/R90/R120/R180 y NO ADMITIDO; cuatro alternativas equilibradas. Carga de fuego Qe promedio ponderado por superficie. Qs=(Σ Gi qi Ci)/A * K * Ra: NO generar cálculos Qs porque K no está definido en el PDF; conservarla solo para identificación literal. Siempre unidades CEIS y factores dados. Espuma: comparar baja/media/alta expansion, 5 L/min/m2 de derrame, tecnica de cubricion simple y rebote, sistema Venturi, piezas del proporcionador, Pro-Pak y tabla 4 p.227. No preguntar valores de los EJEMPLOS resueltos de p.220. IMPORTANTE p.221 formula R=(V/T)*Cn*CL tiene variables C/Cn/CL incongruentes: no hacer problemas sobre ella. La deteccion de imágenes y preguntas GRAFICA de T55 esta prefabricada: reutilizarlas, NO interpretarlas otra vez ni generar imagenes. Sustituir distractores equivalentes por alternativas de magnitud, condicion, etapa o finalidad diferente pero plausible; NO usar tres afirmaciones semanticamente iguales. Referencia legislativa en este manual es histórica: NO preguntar por VIGENCIA ACTUAL, ni afirmar que RD2267/2004 siga vigente. La definición se pregunta solo SEGUN CEIS de este PDF. Fuentes exclusivamente PDF del usuario; no actualizar leyes ni incluir datos externos. El estilo mejora sin llamadas adicionales.'
+  55:'MODELO CEIS 2015 PARA T55 (no copiar): Tipos A-E: cruza ocupación del edificio, distancia exacta (mayor de 3 m o menor/igual), cerramiento lateral y máximo de cubierta (tipo E hasta 50%); distractor altera una condicion. Tabla 1 p.213: unir riesgo BAJO/MEDIO/ALTO, planta sotano/sobre rasante y tipos A-B-C con R30/R60/R90/R120/R180 y NO ADMITIDO; cuatro alternativas equilibradas. Carga de fuego Qe promedio ponderado por superficie. Qs=(Σ Gi qi Ci)/A * K * Ra: NO generar cálculos Qs porque K no está definido en el PDF; conservarla solo para identificación literal. Siempre unidades CEIS y factores dados. Espuma: comparar baja/media/alta expansion, 5 L/min/m2 de derrame, tecnica de cubricion simple y rebote, sistema Venturi, piezas del proporcionador, Pro-Pak y tabla 4 p.227. No preguntar valores de los EJEMPLOS resueltos de p.220. IMPORTANTE p.221 formula R=(V/T)*Cn*CL tiene variables C/Cn/CL incongruentes: no hacer problemas sobre ella. La deteccion de imágenes y preguntas GRAFICA de T55 esta prefabricada: reutilizarlas, NO interpretarlas otra vez ni generar imagenes. Sustituir distractores equivalentes por alternativas de magnitud, condicion, etapa o finalidad diferente pero plausible; NO usar tres afirmaciones semanticamente iguales. Referencia legislativa en este manual es histórica: NO preguntar por VIGENCIA ACTUAL, ni afirmar que RD2267/2004 siga vigente. La definición se pregunta solo SEGUN CEIS de este PDF. Fuentes exclusivamente PDF del usuario; no actualizar leyes ni incluir datos externos. El estilo mejora sin llamadas adicionales.',
+  56:'T56 APEO Y PODA (CEIS 2015): las fichas T56-EJ-MA-0038 a 0047 con evaluation_type=calculo corresponden a DIEZ PLANTILLAS NUMÉRICAS CERRADAS: altura H=h·D/d; distancia D=H·d/h; radio r=P/(2π); volumen V=πr²H; masa m=V·ρ; altura+volumen; perímetro+masa; altura+masa; volumen inverso V=m/ρ; densidad inversa ρ=m/V. Si un objetivo de estas diez fichas entra en test MIXTO, construir problema aritmético REAL con datos numéricos variables y solución calculada, NO pregunta teórica sobre la fórmula. Mantener una única clave, distractores de errores numéricos próximos, conversión cm/m y kg/dm³ a kg/m³ y explicación con cálculo completo. En botón CÁLCULOS el servidor resuelve localmente estas plantillas sin Gemini. No regalar resultados intermedios en el enunciado; no inventar fórmulas. Tablas Stuttgart y densidades solo con datos del PDF. Figuras prefabricadas, no generar nuevas. No preguntar el ejemplo editorial erróneo de p.360 (0,8 kg/dm³ × 3 m³=2800 kg), ni clasificar madera 0,7–0,8 kg/dm³ por tabla 4 p.359. Sin llamadas ni auditorías bloqueantes adicionales. Solo PDF CEIS del usuario.'
 };
 // SERVER204: ejemplo ilustrativo Mattson T52 no examinable. Los datos del
 // PDF permanecen; no deben ocupar plazas nuevas aunque se reimporte el tema.
@@ -3163,7 +3166,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-5])\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-6])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3171,7 +3174,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3195,7 +3198,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
@@ -3320,7 +3323,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54||n===55){
+    if(n===54||n===55||n===56){
       const records=[];
       for(const item of data.coverage_additions){
         if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
@@ -3329,14 +3332,15 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
           throw Error(`HEALTH192: ficha adicional T${n} inválida`);
         records.push({section:item.section,concept:item.external_key+' · '+item.concept,
           source_page:item.source_page,manual_page:item.manual_page,
-          source_evidence:item.source_evidence});
+          source_evidence:item.source_evidence,
+          evaluation_type:n===56&&item.evaluation_type==='calculo'?'calculo':'literal_documental'});
       }
       if(records.length)await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
         item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
-        SELECT $1,r.section,r.concept,'dato_salud_preparado','literal_documental',
+        SELECT $1,r.section,r.concept,'dato_salud_preparado',r.evaluation_type,
           r.source_page,r.manual_page,r.source_evidence,TRUE
         FROM jsonb_to_recordset($2::jsonb) AS r(section text,concept text,
-          source_page integer,manual_page text,source_evidence text)
+          source_page integer,manual_page text,source_evidence text,evaluation_type text)
         ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO NOTHING`,
         [topic.id,JSON.stringify(records)]);
     }else{
@@ -3364,7 +3368,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':`salud-t${n}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':`salud-t${n}`;
       const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
@@ -16982,10 +16986,10 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
       {figuraOriginal:{concepto:String(t.graphicAsset.concept||''),
         descripcion:String(t.graphicAsset.description||'').slice(0,450)}}:{}),
     }));
-  const onlyT55=targets.length>0 && targets.every(t=>healthTopicNumber192(t)===55);
-  const t55Styles=onlyT55?(healthLoadData192(55)?.style_examples||[]):[];
+  const calibratedTopic=targets.length>0 && targets.every(t=>[55,56].includes(healthTopicNumber192(t))) && targets.every(t=>healthTopicNumber192(t)===healthTopicNumber192(targets[0]));
+  const t55Styles=calibratedTopic?(healthLoadData192(healthTopicNumber192(targets[0]))?.style_examples||[]):[];
   // Dos modelos cortos, NO fuente de datos del objetivo; coste de prompt acotado.
-  const t55Calibration=t55Styles.length?`EJEMPLOS DE FORMATO DEL T55, NO HECHOS PARA LOS OBJETIVOS:
+  const t55Calibration=t55Styles.length?`EJEMPLOS DE FORMATO DEL TEMA, NO HECHOS PARA LOS OBJETIVOS:
 ${JSON.stringify([t55Styles[0],t55Styles[2]].filter(Boolean).map(x=>({
     stem:x.stem,options:x.options,explanation:x.explanation})))}
 No copies estos ejercicios, cifras ni respuestas: sirven SOLO para calibrar claridad y distractores.`:'';
@@ -18655,6 +18659,47 @@ app.post('/api/generate',async(req,res)=>{
         questions:publicManualPageQuestions(saved.questions),geminiCalls:0,
         coverage:{targeted:chosen.length,markedWorked:0},practice:true});
     }
+    // SERVER211: T56 Cálculos = plantillas CEIS resueltas localmente, sin Gemini.
+    // No modifica la ruta general de otros temas ni introduce reintentos.
+    if(mode==='calculos' && Array.isArray(topicIds) && topicIds.length===1){
+      const identity56=(await db.query(`SELECT id,block,topic_order,name
+        FROM topics WHERE id=$1`,[topicIds[0]])).rows[0];
+      const title56=String(identity56?.name||'').normalize('NFD')
+        .replace(/[\u0300-\u036f]/g,'').toUpperCase();
+      if(identity56?.block==='especifico' && Number(identity56.topic_order)===56 &&
+         /^TEMA\s*56\s+APEO Y PODA DE ARBOLADO/.test(title56)){
+        const t56Math=require('./t56_calculo_211.js');
+        const source56=await db.query(`SELECT id,topic_id,source_page,manual_page,
+          source_evidence,concept,exam_relevant FROM coverage_items
+          WHERE topic_id=$1 AND exam_relevant=TRUE
+            AND concept LIKE 'T56-EJ-MA-%'
+            AND evaluation_type='calculo' ORDER BY id`,[identity56.id]);
+        const byFamily=new Map();
+        for(const row of source56.rows){
+          const key=String(row.concept||'').split(' · ')[1]?.split(':')[0];
+          if(key&&!byFamily.has(key))byFamily.set(key,row);
+        }
+        const local=t56Math.generateSet(count).map(q=>{
+          const t=byFamily.get(q.mathFamily);
+          if(!t)throw Error('T56: plantilla sin fuente de cálculo indexada: '+q.mathFamily);
+          return {...q,sourceEvidence:String(t.source_evidence),
+            sourcePage:Number(t.source_page),manualPage:String(t.manual_page)};
+        });
+        const targets=local.map(q=>byFamily.get(q.mathFamily));
+        if(local.some(q=>resetShape136(q)) || local.some(q=>
+          q.options.length!==4 || new Set(q.options).size!==4 ||
+          q.correctIndex<0 || q.correctIndex>3))
+          throw Error('T56: plantilla de cálculo inválida');
+        const saved=await persistGeneratedTest({questions:local,targets,
+          requestedCount:count,difficulty,mode,testType:'practice_all',
+          runId,runSignature:signature,freshOnly111:false});
+        console.log('T56_211_CALCULOS_OK',JSON.stringify({count,
+          sessionId:saved.sessionId,geminiCalls:0,practice:true}));
+        return res.json({ok:true,sessionId:saved.sessionId,
+          questions:publicManualPageQuestions(saved.questions),geminiCalls:0,
+          coverage:{targeted:targets.length,markedWorked:0},practice:true});
+      }
+    }
     // El manual IIFF reside íntegro en PostgreSQL; no depende de File Search.
     // Se conserva la condición original para TODOS los demás ámbitos.
     if(!STORE){
@@ -19944,7 +19989,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-5])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-6])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
