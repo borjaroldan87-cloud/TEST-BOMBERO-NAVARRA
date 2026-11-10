@@ -3032,7 +3032,7 @@ const HEALTH_ALIAS_192={
   53:/RESCATE EN RIOS.*RIADAS.*INUNDACIONES/,
   54:/VEHICULOS DE BOMBEROS/,
   55:/INCENDIOS INDUSTRIALES/,
-  56:/APEO Y PODA DE ARBOLADO/
+  56:/APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/
 };
 const HEALTH_EXAM_STYLE_192={
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -18667,7 +18667,7 @@ app.post('/api/generate',async(req,res)=>{
       const title56=String(identity56?.name||'').normalize('NFD')
         .replace(/[\u0300-\u036f]/g,'').toUpperCase();
       if(identity56?.block==='especifico' && Number(identity56.topic_order)===56 &&
-         /^TEMA\s*56\s+APEO Y PODA DE ARBOLADO/.test(title56)){
+         /^TEMA\s*56\s+APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/.test(title56)){
         const t56Math=require('./t56_calculo_211.js');
         const source56=await db.query(`SELECT id,topic_id,source_page,manual_page,
           source_evidence,concept,exam_relevant FROM coverage_items
