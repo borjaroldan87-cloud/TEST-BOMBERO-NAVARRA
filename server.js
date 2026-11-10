@@ -17207,6 +17207,26 @@ municipio, nombre o conocimientos externos. Si la fuente solo da la
 agrupación administrativa y no distingue la sede física, NO inventes ni
 asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
+  // SERVER217: exigencia cognitiva en la misma generación, sin nuevas llamadas.
+  // No se inventa una segunda condición si el extracto no la documenta.
+  const qualityGuide217=difficulty==='muy alta' && group.some(t=>
+    String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
+CALIDAD MUY ALTA — BLOQUE ESPECÍFICO (MISMA LLAMADA, SIN FILTROS NUEVOS):
+Antes de emitir cada pregunta, determina qué error concreto cometería un opositor
+preparado: confundir dos condiciones del mismo concepto, intercambiar fases,
+atribuir una función a un componente próximo, aplicar una excepción al supuesto
+general, cambiar el orden de dos pasos, o equivocar magnitud/unidad de un dato.
+Construye los tres distractores a partir de tres confusiones técnicas DISTINTAS
+que sean plausibles y compatibles con el contexto del enunciado. Evita tres
+números elegidos al azar alrededor de la clave y alternativas que puedan
+eliminarse sin estudiar. En un cálculo, si los datos permiten dos operaciones,
+prioriza la composición autorizada de ambas, sin revelar el despeje.
+La dificultad debe proceder del contenido comprobable, NO de añadir palabras,
+hipótesis no documentadas ni relaciones externas al PDF. Si la evidencia
+sostiene solo una pregunta directa, consérvala fiel y sin falsas complicaciones.
+No hagas comprobaciones externas, no generes preguntas adicionales y mantén
+exactamente el número de preguntas solicitado.
+` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
       ? t39GenerationPrompt141(group,difficulty,mode)+
@@ -17214,7 +17234,7 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
       : resetPrompt136(group,difficulty,mode,comparisons)+
         (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
         iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
-        geoPhysical112+t40Guide157+t41Guide,config:{
+        geoPhysical112+t40Guide157+t41Guide+qualityGuide217,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:(geoHighChallenge||(iiffScope&&difficulty==='muy alta'))?'medium':'low'}}:{}),
