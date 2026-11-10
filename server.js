@@ -18771,13 +18771,27 @@ app.post('/api/generate',async(req,res)=>{
           WHERE topic_id=$1 AND exam_relevant=TRUE AND evaluation_type='calculo'
           AND concept LIKE 'T57-EJ-MA-CALC-%'`,[t57.id]);
         if(!refs.rows.length)throw Error('T57: no hay cobertura documental de cálculos indexada');
-        const local=Array.from({length:count},(_,i)=>{
-          const family=advanced.families[i%advanced.families.length];
-          const q=advanced.generate(family,Math.floor(i/advanced.families.length)+i);
+        // T57 FIX: no repetir siempre las primeras diez familias; excluir topología mixta
+        // por no estar justificada en el manual. Diversidad de familias en cada sesión.
+        const allowed=advanced.families.filter(f=>
+          f.startsWith('SERIE_')||f.startsWith('PARALELO_')||
+          f.startsWith('INVERSO_SERIE_')||f.startsWith('INVERSO_PAR_'));
+        if(count>allowed.length)throw Error(`T57: máximo ${allowed.length} familias distintas por test`);
+        const shuffled=[...allowed];
+        for(let i=shuffled.length-1;i>0;i--){
+          const j=Math.floor(Math.random()*(i+1));
+          [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];
+        }
+        const local=shuffled.slice(0,count).map((family,i)=>{
+          const variant=Math.floor(Math.random()*1000000);
+          const q=advanced.generate(family,variant);
           const ref=refs.rows[i%refs.rows.length];
           return {...q,sourceEvidence:ref.source_evidence,sourcePage:Number(ref.source_page),
             manualPage:String(ref.manual_page)};
         });
+        if(new Set(local.map(q=>q.mathFamily)).size!==count ||
+           local.some(q=>/mixt|serie con el paralelo/i.test(q.stem)))
+          throw Error('T57: diversidad o alcance documental incumplidos');
         if(local.some(q=>!Array.isArray(q.options)||q.options.length!==4||
           new Set(q.options).size!==4||!Number.isInteger(q.correctIndex)||
           q.correctIndex<0||q.correctIndex>3))throw Error('T57: ejercicio inválido');

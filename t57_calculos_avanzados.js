@@ -41,7 +41,7 @@ const defs=[
  ['INVERSO_PAR_I','En un circuito paralelo R1-R2-R3, R1 disipa la potencia indicada. ¿Qué corriente total entrega la fuente?', 'A',s=>Math.sqrt(s.pp1*s.a)*(1/s.a+1/s.b+1/s.c)],
  ['INVERSO_PAR_E','En un circuito paralelo R1-R2-R3, R3 disipa la potencia indicada. ¿Qué energía total consume el circuito en el intervalo indicado?', 'kJ',s=>s.pp3*s.c*(1/s.a+1/s.b+1/s.c)*s.t/1000]
 ];
-const families=Object.freeze(defs.map(d=>d[0]));
+const families=Object.freeze(defs.map(d=>d[0]).filter(f=>f.startsWith('SERIE_')||f.startsWith('PARALELO_')||f.startsWith('INVERSO_SERIE_')||f.startsWith('INVERSO_PAR_')));
 function generate(family,variant=0){
  const d=defs.find(x=>x[0]===family);if(!d)throw Error('Familia no reconocida');
  const v=sets[((variant%sets.length)+sets.length)%sets.length];
@@ -68,6 +68,6 @@ function generate(family,variant=0){
  const wrong=[value*0.75,value*1.25,value*1.5,value*0.5,value*2,value*0.9,value*1.1].map(x=>Number(x.toFixed(3))).filter(x=>x>0&&x!==correct);
  const distinct=[...new Set(wrong)].slice(0,3);if(distinct.length!==3)throw Error('Distractores insuficientes');
  const all=[correct,...distinct];const shift=((variant%4)+4)%4;const rotated=all.slice(shift).concat(all.slice(0,shift));
- return {stem,options:rotated.map(n=>`${fmt(n)} ${d[2]}`),correctIndex:rotated.indexOf(correct),explanation:`Topología: ${family}; Rpar=${fmt(rp)} Ω, Rmixta=${fmt(req)} Ω, I_mixta=${fmt(I)} A, Vpar=${fmt(vp)} V. Resultado: ${fmt(correct)} ${d[2]}.`,mathValue:correct,mathUnit:d[2],mathFamily:family,manualPages:[406,408,410],difficulty:'muy alta',questionFamily:'T57_CALCULO'};
+ return {stem,options:rotated.map(n=>`${fmt(n)} ${d[2]}`),correctIndex:rotated.indexOf(correct),explanation:`Topología: ${family}; resultado: ${fmt(correct)} ${d[2]}.`,mathValue:correct,mathUnit:d[2],mathFamily:family,manualPages:[406,408,410],difficulty:'muy alta',questionFamily:'T57_CALCULO'};
 }
 export default {families,generate};
