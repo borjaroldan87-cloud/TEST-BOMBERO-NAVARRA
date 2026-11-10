@@ -18760,30 +18760,28 @@ app.post('/api/generate',async(req,res)=>{
           coverage:{targeted:targets.length,markedWorked:0},practice:true});
       }
     }
-    // SERVER215: T57 - 24 familias simples y 8 combinadas, sin Gemini.
+    // T57: 30 ejercicios multietapa preconstruidos, 300 combinaciones verificadas.
+    // No se invoca Gemini en este modo: los datos y las respuestas se calculan localmente.
     if(mode==='calculos' && Array.isArray(topicIds) && topicIds.length===1){
       const t57=(await db.query('SELECT id,block,topic_order,name FROM topics WHERE id=$1',[topicIds[0]])).rows[0];
       if(t57?.block==='especifico' && Number(t57.topic_order)===57 &&
           /^TEMA\s*57\s+RIESGO ELECTRICO\b/.test(String(t57.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase())){
-        const base=(await import('./t57_calculos.js')).default;
-        const mix=(await import('./t57_calculos_combinados.js')).default;
-        const families=[...base.families.map(x=>[x[0],base.generate]),...mix.metadata.map(x=>[x[0],mix.generate])];
+        const advanced=(await import('./t57_calculos_avanzados.js')).default;
         const refs=await db.query(`SELECT id,concept,source_page,manual_page,source_evidence FROM coverage_items
           WHERE topic_id=$1 AND exam_relevant=TRUE AND evaluation_type='calculo'
           AND concept LIKE 'T57-EJ-MA-CALC-%'`,[t57.id]);
-        const byFamily=new Map();
-        for(const r of refs.rows){const m=String(r.concept).match(/(?:^| · )([A-Z0-9_]+):/);if(m)byFamily.set(m[1],r);}
-        if(families.some(([name])=>!byFamily.has(name)))throw Error('T57: falta indexación de familias de cálculo');
+        if(!refs.rows.length)throw Error('T57: no hay cobertura documental de cálculos indexada');
         const local=Array.from({length:count},(_,i)=>{
-          const [name,generate]=families[i%families.length],ref=byFamily.get(name);
-          const q=generate(name,i);
+          const family=advanced.families[i%advanced.families.length];
+          const q=advanced.generate(family,Math.floor(i/advanced.families.length)+i);
+          const ref=refs.rows[i%refs.rows.length];
           return {...q,sourceEvidence:ref.source_evidence,sourcePage:Number(ref.source_page),
-            manualPage:String(ref.manual_page),difficulty:'muy alta',questionFamily:'T57_CALCULO'};
+            manualPage:String(ref.manual_page)};
         });
         if(local.some(q=>!Array.isArray(q.options)||q.options.length!==4||
           new Set(q.options).size!==4||!Number.isInteger(q.correctIndex)||
-          q.correctIndex<0||q.correctIndex>3))throw Error('T57: pregunta matemática inválida');
-        const targets=local.map(q=>byFamily.get(q.mathFamily));
+          q.correctIndex<0||q.correctIndex>3))throw Error('T57: ejercicio inválido');
+        const targets=local.map((_,i)=>refs.rows[i%refs.rows.length]);
         const saved=await persistGeneratedTest({questions:local,targets,
           requestedCount:count,difficulty,mode,testType:'practice_all',
           runId,runSignature:signature,freshOnly111:false});
