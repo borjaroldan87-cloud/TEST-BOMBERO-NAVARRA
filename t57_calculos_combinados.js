@@ -32,4 +32,4 @@ function generate(family,variant=0,rng=Math.random){
  const m=metadata.find(x=>x[0]===family);
  return {stem,options:options.map(v=>`${format(v)} ${unit}`),correctIndex:options.indexOf(correct),explanation:`${steps}; resultado ${format(correct)} ${unit}.`,mathValue:correct,mathUnit:unit,mathFamily:family,manualPages:[...new Set(m.slice(1))],difficulty:'ALTA_COMBINADA_REQUIERE_REVISION_PEDAGOGICA',source:'CEIS Guadalajara, riesgo eléctrico'};
 }
-module.exports={metadata,generate};
+export default {metadata,generate};

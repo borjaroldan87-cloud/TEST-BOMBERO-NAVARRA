@@ -58,4 +58,4 @@ function generate(family,variant=0,rng=Math.random){
  return {stem,options:opts.map(x=>`${fmt(x,digits)} ${unit}`.trim()),correctIndex:opts.indexOf(val),explanation:`${proof} = ${fmt(val,digits)} ${unit}. Fuente: CEIS Guadalajara, p. ${familyMeta[1]}.`,sourcePage:familyMeta[1]-402,manualPage:String(familyMeta[1]),questionFamily:'CALCULO_FORMULACION',difficulty:'muy alta',mathFamily:family,mathValue:val,mathUnit:unit};
 }
 function generateSet(n=24,rng=Math.random){return Array.from({length:n},(_,i)=>generate(families[i%families.length][0],i,rng));}
-module.exports={families,generate,generateSet};
+export default {families,generate,generateSet};

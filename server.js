@@ -18745,13 +18745,14 @@ app.post('/api/generate',async(req,res)=>{
       const t57=(await db.query('SELECT id,block,topic_order,name FROM topics WHERE id=$1',[topicIds[0]])).rows[0];
       if(t57?.block==='especifico' && Number(t57.topic_order)===57 &&
           /^TEMA\s*57\s+RIESGO ELECTRICO\b/.test(String(t57.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase())){
-        const base=require('./t57_calculos.js'),mix=require('./t57_calculos_combinados.js');
+        const base=(await import('./t57_calculos.js')).default;
+        const mix=(await import('./t57_calculos_combinados.js')).default;
         const families=[...base.families.map(x=>[x[0],base.generate]),...mix.metadata.map(x=>[x[0],mix.generate])];
         const refs=await db.query(`SELECT id,concept,source_page,manual_page,source_evidence FROM coverage_items
           WHERE topic_id=$1 AND exam_relevant=TRUE AND evaluation_type='calculo'
           AND concept LIKE 'T57-EJ-MA-CALC-%'`,[t57.id]);
         const byFamily=new Map();
-        for(const r of refs.rows){const m=String(r.concept).match(/ · ([A-Z0-9_]+):/);if(m)byFamily.set(m[1],r);}
+        for(const r of refs.rows){const m=String(r.concept).match(/(?:^| · )([A-Z0-9_]+):/);if(m)byFamily.set(m[1],r);}
         if(families.some(([name])=>!byFamily.has(name)))throw Error('T57: falta indexación de familias de cálculo');
         const local=Array.from({length:count},(_,i)=>{
           const [name,generate]=families[i%families.length],ref=byFamily.get(name);
@@ -19087,7 +19088,14 @@ app.post('/api/generate',async(req,res)=>{
       // fabricar hechos y sin tocar el resto de materias. Cada ronda usa
       // nuevos objetivos elegibles, preserva lo ya validado y el SRS.
       const high119=difficulty==='muy alta'&&targets.length>0&&targets.every(iiff91Topic);
-      const maxRounds119=(targets.length>0&&targets.every(t39Hydraulica))?2:1; // T39: una recuperación adicional acotada; otros temas sin cambios.
+      // SERVER216: T57 puede necesitar sustituir más de una ficha rechazada.
+      // Conserva todas las preguntas ya auditadas y no repite objetivos fallidos.
+      // Resto de temas mantiene exactamente su presupuesto anterior.
+      const onlyT57Recovery216=targets.length>0&&targets.every(t=>
+        Number(coverageTopicNumber(t.topic_name))===57 &&
+        String(t.topic_block||'').toLowerCase()==='especifico');
+      const maxRounds119=(targets.length>0&&targets.every(t39Hydraulica))?2:
+        onlyT57Recovery216?3:1;
       const tried119=new Set(targets.map(t=>Number(t.id)));
       const blocked119=high119?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
