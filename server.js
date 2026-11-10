@@ -3284,6 +3284,10 @@ async function healthApplyCorrections205(client,topic,n){
     preguntaDesactivada:affectedQuestion}));
 }
 
+// SERVER208: revisión editorial de dos preguntas gráficas CEIS. El SHA
+// protege los reactivos anteriores; nunca se sobrescribe el historial.
+// Si el contenido almacenado es desconocido, se conserva y se registra error.
+const HEALTH208_GRAPHIC_LEGACY_SHA=Object.freeze({"T53-GRAF-0001":"9b6de53f8473d16a8e0fe3dc3fc762e96f07a4c462aea7eedc3c663f90885c22","T55-GRAF-0011":"bcc5ac8434365993acf244a6932b3e584c64031fac927f9c67fb969b210461ae"});
 async function healthImportOnce192(topic,uploadedPdfPath=null){
   const n=healthTopicNumber192(topic);
   if(!n)return {skipped:true};
@@ -3350,6 +3354,14 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
          item.source_page,item.manual_page,item.source_evidence]);
     }
     }
+    if(n===55){
+      // T55-EJ-MA-0425: CEIS impresa p.219 = hoja 11 del PDF original.
+      // Corrige metadatos, NO el PDF ni el texto factual del conocimiento.
+      await client.query(`UPDATE coverage_items SET source_page=11,manual_page='219'
+        WHERE topic_id=$1 AND concept LIKE 'T55-EJ-MA-0425 · %'
+        AND item_type='dato_salud_preparado' AND source_page=12
+        AND manual_page='220'`,[topic.id]);
+    }
     const graphicMap=new Map();
     for(const asset of data.images){
       const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':`salud-t${n}`;
@@ -3404,13 +3416,26 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const prior=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
         WHERE coverage_item_id=$1 AND question_family='GRAFICA'
         ORDER BY id DESC LIMIT 1 FOR UPDATE`,[cid]);
-      if(prior.rows.length){
-        const old=prior.rows[0];
-        if(old.stem!==item.stem||JSON.stringify(old.options)!==JSON.stringify(item.options)||
-           Number(old.correct_index)!==Number(item.correct_index))
+      let existing=prior.rows[0]||null;
+      if(existing && (existing.stem!==item.stem||
+          JSON.stringify(existing.options)!==JSON.stringify(item.options)||
+          Number(existing.correct_index)!==Number(item.correct_index))){
+        const expected=HEALTH208_GRAPHIC_LEGACY_SHA[item.external_key];
+        const actual=createHash('sha256').update(JSON.stringify([
+          existing.stem,existing.options,Number(existing.correct_index)]),'utf8')
+          .digest('hex');
+        if(!expected||actual!==expected)
           throw Error(`HEALTH192: pregunta prefabricada distinta ya existente ${item.external_key}`);
+        // Nunca cambiar una pregunta ya presentada: preserva sus intentos,
+        // errores, aciertos y sesiones; la nueva comparte la ficha de cobertura.
+        await client.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+          WHERE id=$1`,[existing.id]);
+        console.log('SERVER208_GRAFICA_REVISADA:',JSON.stringify({tema:n,clave:item.external_key}));
+        existing=null;
+      }
+      if(existing){
         await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
-          updated_at=NOW() WHERE id=$1`,[old.id,JSON.stringify(graphic)]);
+          updated_at=NOW() WHERE id=$1`,[existing.id,JSON.stringify(graphic)]);
       }else{
         await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
           correct_index,explanation,source_evidence,source_page,manual_page,
@@ -16954,6 +16979,13 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
       {figuraOriginal:{concepto:String(t.graphicAsset.concept||''),
         descripcion:String(t.graphicAsset.description||'').slice(0,450)}}:{}),
     }));
+  const onlyT55=targets.length>0 && targets.every(t=>healthTopicNumber192(t)===55);
+  const t55Styles=onlyT55?(healthLoadData192(55)?.style_examples||[]):[];
+  // Dos modelos cortos, NO fuente de datos del objetivo; coste de prompt acotado.
+  const t55Calibration=t55Styles.length?`EJEMPLOS DE FORMATO DEL T55, NO HECHOS PARA LOS OBJETIVOS:
+${JSON.stringify([t55Styles[0],t55Styles[2]].filter(Boolean).map(x=>({
+    stem:x.stem,options:x.options,explanation:x.explanation})))}
+No copies estos ejercicios, cifras ni respuestas: sirven SOLO para calibrar claridad y distractores.`:'';
   const styleTitle=geo
     ? 'MODELOS DE REDACCIÓN BASADOS EN LAS PREGUNTAS 26-50 DE GEOGRAFÍA 2026 (SOLO ESTILO, NO FUENTE FACTUAL)'
     : 'REFERENCIAS DE CALIBRACIÓN (SOLO ESTILO)';
@@ -16962,7 +16994,10 @@ NUNCA utilices conocimientos externos ni hechos de ejemplos de exámenes. La ÚN
 Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una correcta. Distractores plausibles pero falsos a la luz del texto. No inventes normas, cifras o excepciones.
 ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo||targets.every(iiff91Topic)?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
+${t55Calibration}
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
+REGLA EDITORIAL SERVER208 (sin comprobaciones adicionales):
+Antes de cerrar cada pregunta evita alternativas que compartan literalmente una descripción larga y únicamente intercambien etiquetas o dos palabras, salvo que el objetivo exija comparar valores o secuencias literales tan próximos. Si el objetivo es un régimen, técnica, vehículo o concepto clasificado, utiliza otros elementos de la MISMA categoría documentados en los extractos disponibles y establece diferencias sustantivas (causa, fase, función, condición o consecuencia), sin sumar hechos ajenos al PDF. No redactes distracciones grotescas (imposibilidades evidentes, negaciones absurdas ni relleno ajeno al tema). Detecta errores de lengua como «desorientación desorientada». Si el fragmento solo sustenta un dato sencillo, respétalo en vez de fabricar una dificultad ficticia. Todo esto se resuelve dentro de esta MISMA respuesta JSON, sin pedir nuevas llamadas ni añadir validaciones de bloqueo.
 ${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`Para conceptos técnicos, razonamientos y procedimientos prioriza enunciados y opciones desarrollados siguiendo el examen de 2026; para cifras, definiciones literales y relaciones exactas usa redacción breve precisa. No equipares longitud con dificultad ni extiendas datos simples artificialmente.
 ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
 2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION en modo cálculos T39 exige cálculo numérico REAL; en otros modos permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
