@@ -70,4 +70,4 @@ function generate(family,variant=0){
  const all=[correct,...distinct];const shift=((variant%4)+4)%4;const rotated=all.slice(shift).concat(all.slice(0,shift));
  return {stem,options:rotated.map(n=>`${fmt(n)} ${d[2]}`),correctIndex:rotated.indexOf(correct),explanation:`Topología: ${family}; Rpar=${fmt(rp)} Ω, Rmixta=${fmt(req)} Ω, I_mixta=${fmt(I)} A, Vpar=${fmt(vp)} V. Resultado: ${fmt(correct)} ${d[2]}.`,mathValue:correct,mathUnit:d[2],mathFamily:family,manualPages:[406,408,410],difficulty:'muy alta',questionFamily:'T57_CALCULO'};
 }
-module.exports={families,generate};
+export default {families,generate};
