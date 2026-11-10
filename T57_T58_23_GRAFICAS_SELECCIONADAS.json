@@ -1,0 +1,701 @@
+[
+  {
+    "external_key": "T57-GRAF-0005",
+    "graphic_file": "T57_FIG_05_P006.png",
+    "image_sha256": "005252a366563eecc2e0975e87ca9c24baee843905e48c8c42fc14821344ba28",
+    "stem": "En el circuito de la figura con dos resistencias de 5 Ω en serie y fuente de 10 V, ¿qué relación es correcta?",
+    "options": [
+      "Resistencia equivalente 2,5 Ω e intensidad 4 A",
+      "Resistencia equivalente 10 Ω e intensidad 1 A",
+      "Resistencia equivalente 10 Ω e intensidad 2 A",
+      "Resistencia equivalente 5 Ω e intensidad 1 A"
+    ],
+    "correct_index": 1,
+    "explanation": "R=5+5=10 Ω; I=10/10=1 A. Fuente CEIS, p. 408.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 5, página 408",
+    "source_pdf_page": 6,
+    "manual_page": "408",
+    "coverage_section": "Imagen 5 · p. 408",
+    "coverage_concept": "Interpretación de imagen 5",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 5",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_05_P006.png"
+  },
+  {
+    "external_key": "T57-GRAF-0006",
+    "graphic_file": "T57_FIG_06_P006.png",
+    "image_sha256": "36cd541808653898a00c2649671567622d19f5153780b903a5b6a07464561570",
+    "stem": "En el circuito de dos ramas de 5 Ω en paralelo alimentado a 10 V, ¿qué intensidad total resulta?",
+    "options": [
+      "1 A",
+      "2 A",
+      "4 A",
+      "10 A"
+    ],
+    "correct_index": 2,
+    "explanation": "Cada rama conduce 2 A; total 4 A. Fuente CEIS, p. 408.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 6, página 408",
+    "source_pdf_page": 6,
+    "manual_page": "408",
+    "coverage_section": "Imagen 6 · p. 408",
+    "coverage_concept": "Interpretación de imagen 6",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 6",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_06_P006.png"
+  },
+  {
+    "external_key": "T57-GRAF-0009",
+    "graphic_file": "T57_FIG_09_P007.png",
+    "image_sha256": "dce866d6a35d139d8c40980f4ab2de1e163cec550bf71ea8b5ec232c93c7edb6",
+    "stem": "En un sistema trifásico equilibrado como el representado, ¿qué desfase existe entre sus tres señales sinusoidales?",
+    "options": [
+      "90°",
+      "60°",
+      "120°",
+      "180°"
+    ],
+    "correct_index": 2,
+    "explanation": "Tres señales idénticas desfasadas 120°. Manual p. 409.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 9, página 409",
+    "source_pdf_page": 7,
+    "manual_page": "409",
+    "coverage_section": "Imagen 9 · p. 409",
+    "coverage_concept": "Interpretación de imagen 9",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 9",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_09_P007.png"
+  },
+  {
+    "external_key": "T57-GRAF-0010",
+    "graphic_file": "T57_FIG_10_P007.png",
+    "image_sha256": "a502d85345b0d4a23f5ad941b3704573fbd02d801e9630ad1896d6d7a35f3f15",
+    "stem": "¿Qué asociación entre conexiones trifásicas es correcta según los esquemas?",
+    "options": [
+      "Estrella: bobinas en triángulo cerrado; delta: extremos unidos a neutro",
+      "Estrella: retorno de fases unido en un punto común; delta: bobinas acopladas en triángulo",
+      "Estrella y delta requieren siempre conductor neutro independiente",
+      "Delta: corrientes equilibradas se suman obligatoriamente en el neutro"
+    ],
+    "correct_index": 1,
+    "explanation": "El texto describe punto común de neutro en estrella y acoplamiento triangular en delta. Fuente CEIS, p. 409.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 10, página 409",
+    "source_pdf_page": 7,
+    "manual_page": "409",
+    "coverage_section": "Imagen 10 · p. 409",
+    "coverage_concept": "Interpretación de imagen 10",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 10",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_10_P007.png"
+  },
+  {
+    "external_key": "T57-GRAF-0011",
+    "graphic_file": "T57_FIG_11_P008.png",
+    "image_sha256": "9e935c8a628b4f80867505c1209cf787eae48673b2174b2c8367ac1d37fcd748",
+    "stem": "En el triángulo de potencias, ¿qué correspondencia de magnitudes y unidades coincide con el manual?",
+    "options": [
+      "P reactiva en W; Q activa en VA; S aparente en VAr",
+      "P activa en W; Q reactiva en VAr; S aparente en VA",
+      "P aparente en W; Q activa en VAr; S reactiva en VA",
+      "P activa en VAr; Q reactiva en W; S aparente en VA"
+    ],
+    "correct_index": 1,
+    "explanation": "La figura y el texto asocian P a W, Q a VAr y S a VA. Fuente CEIS, p. 410.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 11, página 410",
+    "source_pdf_page": 8,
+    "manual_page": "410",
+    "coverage_section": "Imagen 11 · p. 410",
+    "coverage_concept": "Interpretación de imagen 11",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 11",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_11_P008.png"
+  },
+  {
+    "external_key": "T57-GRAF-0020",
+    "graphic_file": "T57_FIG_20_P011.png",
+    "image_sha256": "a3a7da7cf923b91e249b465f660e04ec8e8d6fe32cba576c26c5119d5227c13d",
+    "stem": "Según el esquema de centros de transformación, ¿qué caracteriza al CT de anillo?",
+    "options": [
+      "Se alimenta únicamente desde un extremo y no admite salida",
+      "Recibe alimentación por dos extremos, a diferencia del CT de punta",
+      "Solo dispone de una celda y carece de salida",
+      "Está siempre situado al final de una línea"
+    ],
+    "correct_index": 1,
+    "explanation": "El texto indica que el CT de anillo está alimentado por ambos extremos. Fuente CEIS, p. 413.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 20, página 413",
+    "source_pdf_page": 11,
+    "manual_page": "413",
+    "coverage_section": "Imagen 20 · p. 413",
+    "coverage_concept": "Interpretación de imagen 20",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 20",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_20_P011.png"
+  },
+  {
+    "external_key": "T57-GRAF-0024",
+    "graphic_file": "T57_FIG_24_P014.png",
+    "image_sha256": "4687e0b29e0b4588766d168efad9be2d30d47bfcb1400fd5bf3504373ad13ce1",
+    "stem": "En el esquema de instalación de enlace, ¿qué secuencia funcional es correcta?",
+    "options": [
+      "Derivación individual → CGP → acometida → LGA",
+      "Acometida → CGP → LGA → contadores → derivación individual",
+      "LGA → acometida → derivación individual → CGP",
+      "Contadores → CGP → acometida → derivación individual"
+    ],
+    "correct_index": 1,
+    "explanation": "Orden descrito en el apartado 2.4. Fuente CEIS, p. 416.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 24, página 416",
+    "source_pdf_page": 14,
+    "manual_page": "416",
+    "coverage_section": "Imagen 24 · p. 416",
+    "coverage_concept": "Interpretación de imagen 24",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 24",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_24_P014.png"
+  },
+  {
+    "external_key": "T57-GRAF-0025",
+    "graphic_file": "T57_FIG_25_P015.png",
+    "image_sha256": "237d3010940885b5eb56c79fb46458e22b029391837bd1cca220d0156354e5f1",
+    "stem": "¿Qué asociación de protecciones del cuadro eléctrico coincide con el manual?",
+    "options": [
+      "IGA: detecta fugas a tierra; diferencial: sobrecarga",
+      "Diferencial: fuga a tierra; IGA: sobrecarga y cortocircuito",
+      "ICP: solo fugas a tierra; PIA: sobretensión de red",
+      "PIA: contabiliza energía; diferencial: mide potencia"
+    ],
+    "correct_index": 1,
+    "explanation": "Diferencial detecta derivaciones y el IGA protege frente a sobrecargas y cortocircuitos. Fuente CEIS, p. 416.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 25, página 416",
+    "source_pdf_page": 15,
+    "manual_page": "416",
+    "coverage_section": "Imagen 25 · p. 416",
+    "coverage_concept": "Interpretación de imagen 25",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 25",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_25_P015.png"
+  },
+  {
+    "external_key": "T57-GRAF-0028",
+    "graphic_file": "T57_FIG_28_P017.png",
+    "image_sha256": "5afbf2165836ebe7c72f8b9bb45534d9831496ad152aeeee5221669221cc5ee1",
+    "stem": "En las distancias de seguridad representadas, ¿qué variable utiliza el manual para establecer los márgenes de aproximación?",
+    "options": [
+      "Solo la longitud del cable",
+      "La tensión de la instalación",
+      "Solo la frecuencia de 50 Hz",
+      "El número de abonados"
+    ],
+    "correct_index": 1,
+    "explanation": "Distancias de seguridad relacionadas con tensión. Manual pp. 419-420.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 28, página 419",
+    "source_pdf_page": 17,
+    "manual_page": "419",
+    "coverage_section": "Imagen 28 · p. 419",
+    "coverage_concept": "Interpretación de imagen 28",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 28",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_28_P017.png"
+  },
+  {
+    "external_key": "T57-GRAF-0030",
+    "graphic_file": "T57_FIG_30_P020.png",
+    "image_sha256": "5ddd6d70fe0c1e85deac063020fd690a6c84fb15331e2acdd5a72ab6823c9580",
+    "stem": "La figura de efectos fisiológicos de corriente alterna relaciona los daños con qué magnitudes?",
+    "options": [
+      "Solo tensión nominal de la red",
+      "Intensidad que atraviesa el cuerpo y tiempo de exposición",
+      "Solo sección de la acometida",
+      "Únicamente potencia de los receptores"
+    ],
+    "correct_index": 1,
+    "explanation": "Gráfico de efectos de corriente alterna. Manual p. 422.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 30, página 422",
+    "source_pdf_page": 20,
+    "manual_page": "422",
+    "coverage_section": "Imagen 30 · p. 422",
+    "coverage_concept": "Interpretación de imagen 30",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 30",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_30_P020.png"
+  },
+  {
+    "external_key": "T57-GRAF-0031",
+    "graphic_file": "T57_FIG_31_P020.png",
+    "image_sha256": "9fc64975fbd5137584fd0ea0d1fd37199b5e248efa60faddd2c6527df36bc375",
+    "stem": "¿Qué tipo de corriente representa el gráfico de efectos fisiológicos de la figura 31?",
+    "options": [
+      "Corriente alterna monofásica",
+      "Corriente continua",
+      "Corriente trifásica equilibrada",
+      "Corriente electrostática exclusivamente"
+    ],
+    "correct_index": 1,
+    "explanation": "Título de la figura 31: corriente continua. Manual p. 422.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "CEIS Riesgo eléctrico, imagen 31, página 422",
+    "source_pdf_page": 20,
+    "manual_page": "422",
+    "coverage_section": "Imagen 31 · p. 422",
+    "coverage_concept": "Interpretación de imagen 31",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 31",
+      "source": "CEIS Riesgo eléctrico"
+    },
+    "topic": 57,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T57/T57_FIG_31_P020.png"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0001",
+    "graphic_file": "Screenshot_20260924-123118-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "En los dos esquemas de efecto polea, ¿qué relación entre la fuerza sobre el anclaje y las tensiones de ambos ramales es correcta si son paralelos y de igual tensión?",
+    "options": [
+      "La carga sobre el anclaje es la suma de ambas tensiones, y puede duplicar la tensión de un ramal",
+      "La carga del anclaje siempre coincide con la de un solo ramal",
+      "El anclaje recibe la diferencia entre las dos tensiones",
+      "La fuerza sobre el anclaje es nula porque los ramales se compensan"
+    ],
+    "correct_index": 0,
+    "explanation": "La figura muestra la suma de fuerzas de ambos ramales sobre el anclaje.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #1, figura 11-12; cotejada visualmente; documento PDF página unificada 10",
+    "source_pdf_page": 10,
+    "manual_page": "10",
+    "source_pdf": "557311-8.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #1: En los dos esquemas de efecto polea, ¿qué relación entre la fuerza sobre el anclaje y las tensiones de ambos ramales es correcta si son paralelos y de igual tensión?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura 11-12",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 10,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123118-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123118-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0004",
+    "graphic_file": "Screenshot_20260924-123328-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "Comparando el aseguramiento estático y el dinámico, ¿qué pareja de fuerzas sobre el anclaje se representa en las dos situaciones?",
+    "options": [
+      "2000 daN en el estático y 875 daN en el dinámico",
+      "1200 daN en el estático y 525 daN en el dinámico",
+      "800 daN en el estático y 350 daN en el dinámico",
+      "2000 daN en el estático y 350 daN en el dinámico"
+    ],
+    "correct_index": 0,
+    "explanation": "La figura asigna 2000 daN y 875 daN a los anclajes; los otros valores corresponden a distintos puntos.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #4, figura 14-15; cotejada visualmente; documento PDF página unificada 11",
+    "source_pdf_page": 11,
+    "manual_page": "11",
+    "source_pdf": "557311-8.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #4: Comparando el aseguramiento estático y el dinámico, ¿qué pareja de fuerzas sobre el anclaje se representa en las dos situaciones?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura 14-15",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 11,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123328-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123328-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0006",
+    "graphic_file": "Screenshot_20260924-123438-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "Según el gráfico del desviador, ¿qué par ángulo–porcentaje de carga sobre su anclaje está correctamente asociado?",
+    "options": [
+      "110° → 122 % y 150° → 52 %",
+      "110° → 173 % y 150° → 100 %",
+      "90° → 122 % y 170° → 77 %",
+      "50° → 141 % y 135° → 52 %"
+    ],
+    "correct_index": 0,
+    "explanation": "Las etiquetas del gráfico muestran 110°=122 % y 150°=52 %; exige cruzar dos puntos.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #6, figura desviador; cotejada visualmente; documento PDF página unificada 13",
+    "source_pdf_page": 13,
+    "manual_page": "13",
+    "source_pdf": "557311-8.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #6: Según el gráfico del desviador, ¿qué par ángulo–porcentaje de carga sobre su anclaje está correctamente asociado?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura desviador",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 13,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123438-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123438-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0010",
+    "graphic_file": "Screenshot_20260924-123703-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "Comparando las dos disposiciones de tracción 2:1, ¿qué dispositivo se añade en el esquema de la derecha para modificar la dirección de tracción?",
+    "options": [
+      "Una polea de reenvío superior identificada como Protraxión",
+      "Una segunda polea móvil unida a la carga",
+      "Un segundo bloqueador colocado bajo la carga",
+      "Un nudo de unión en el ramal libre"
+    ],
+    "correct_index": 0,
+    "explanation": "El dibujo derecho añade la Protraxión en el punto superior.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #10, figura 47; cotejada visualmente; documento PDF página unificada 23",
+    "source_pdf_page": 23,
+    "manual_page": "45",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #10: Comparando las dos disposiciones de tracción 2:1, ¿qué dispositivo se añade en el esquema de la derecha para modificar la dirección de tracción?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura 47",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 9,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123703-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123703-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0011",
+    "graphic_file": "Screenshot_20260924-123830-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "Entre los tres sistemas dibujados, ¿qué configuración presenta una ventaja mecánica nominal 5:1 y dos poleas móviles en el conjunto de carga?",
+    "options": [
+      "La configuración central, rotulada 5:1",
+      "La configuración izquierda, rotulada 3:1",
+      "La configuración derecha, rotulada 9:1",
+      "Ninguna; las tres son 3:1"
+    ],
+    "correct_index": 0,
+    "explanation": "El sistema central está rotulado 5:1 y muestra dos poleas inferiores.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #11, figura 48-50; cotejada visualmente; documento PDF página unificada 24",
+    "source_pdf_page": 24,
+    "manual_page": "46",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #11: Entre los tres sistemas dibujados, ¿qué configuración presenta una ventaja mecánica nominal 5:1 y dos poleas móviles en el conjunto de carga?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura 48-50",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 10,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123830-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123830-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0012",
+    "graphic_file": "Screenshot_20260924-123837-display-0.png~2.jpg",
+    "image_sha256": null,
+    "stem": "En la imagen que compara 3:1, 5:1 y 9:1, ¿cuál utiliza dos etapas de multiplicación de fuerza en lugar de una sola disposición lineal?",
+    "options": [
+      "El sistema 9:1 de la derecha",
+      "El sistema 3:1 de la izquierda",
+      "La polea fija de la parte superior del 5:1",
+      "Los tres por igual"
+    ],
+    "correct_index": 0,
+    "explanation": "La representación de 9:1 combina una multiplicación adicional sobre el 3:1.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #12, figura 48-50; cotejada visualmente; documento PDF página unificada 24",
+    "source_pdf_page": 24,
+    "manual_page": "46",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #12: En la imagen que compara 3:1, 5:1 y 9:1, ¿cuál utiliza dos etapas de multiplicación de fuerza en lugar de una sola disposición lineal?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura 48-50",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 10,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-123837-display-0.png_2.jpg",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-123837-display-0.png~2.jpg"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0015",
+    "graphic_file": "Screenshot_20260924-142449.png",
+    "image_sha256": null,
+    "stem": "En el polipasto del examen mostrado, ¿cuántos ramales transmiten tensión ascendente a la carga, contando el extremo anclado directamente al bloque?",
+    "options": [
+      "Tres ramales",
+      "Dos ramales",
+      "Cuatro ramales",
+      "Un único ramal"
+    ],
+    "correct_index": 0,
+    "explanation": "Un extremo de la cuerda está fijado a la carga y otros dos tramos actúan sobre la polea móvil.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #15, ejemplo de examen; fundamentación: polipastos en manual de rescate y salvamento",
+    "source_pdf_page": 21,
+    "manual_page": "43",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #15: En el polipasto del examen mostrado, ¿cuántos ramales transmiten tensión ascendente a la carga, contando el extremo anclado directamente al bloque?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura examen-polipasto",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 7,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-142449.png",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-142449.png"
+  },
+  {
+    "external_key": "T58-GRAF-USER-0017",
+    "graphic_file": "Screenshot_20260924-173906-display-0.png.png",
+    "image_sha256": null,
+    "stem": "En este esquema recortado del examen, ¿qué valor de ventaja mecánica ideal se deduce de los ramales que sustentan el bloque de carga?",
+    "options": [
+      "3:1",
+      "2:1",
+      "4:1",
+      "1:1"
+    ],
+    "correct_index": 0,
+    "explanation": "Se cuentan tres tramos portantes, incluido el extremo fijado al bloque.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "Imagen seleccionada por usuario #17, ejemplo de examen; fundamentación: polipastos en manual de rescate y salvamento",
+    "source_pdf_page": 21,
+    "manual_page": "43",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Salvamento en altura · selección gráfica del usuario",
+    "coverage_concept": "Interpretación gráfica original #17: En este esquema recortado del examen, ¿qué valor de ventaja mecánica ideal se deduce de los ramales que sustentan el bloque de carga?",
+    "graphic": {
+      "type": "image",
+      "caption": "Figura examen-polipasto",
+      "source": "Selección del usuario"
+    },
+    "original_source_page": 7,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/Screenshot_20260924-173906-display-0.png.png",
+    "image_reference": "/graphics/salvamento-altura/Screenshot_20260924-173906-display-0.png.png"
+  },
+  {
+    "external_key": "T58-GRAF-0003",
+    "graphic_file": "T58_FIG_04_P006.png",
+    "image_sha256": "354bf2c86cca97f38182ecaa753cfcca14288f5a81bfc3e232243c72cfcd2e8d",
+    "stem": "En el esquema de altura libre, ¿qué componente NO puede omitirse al evaluar el despeje bajo el usuario?",
+    "options": [
+      "El margen de seguridad además de la detención y la altura del usuario",
+      "La resistencia nominal de la funda como sustituto de la distancia de parada",
+      "La longitud del mosquetón como único parámetro",
+      "El número de nudos sin atender a la elasticidad"
+    ],
+    "correct_index": 0,
+    "explanation": "La figura distingue A–E, incluyendo margen y eventual elasticidad.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "557311-8.pdf, página PDF 6, manual p. 28, imagen 4",
+    "source_pdf_page": 6,
+    "manual_page": "28",
+    "source_pdf": "557311-8.pdf",
+    "coverage_section": "Caracterización",
+    "coverage_concept": "En el esquema de altura libre, ¿qué componente NO puede omitirse al evaluar el despeje bajo el usuario?",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 4",
+      "source": "CEIS Guadalajara"
+    },
+    "original_source_page": 6,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/T58_FIG_04_P006.png"
+  },
+  {
+    "external_key": "T58-GRAF-0005",
+    "graphic_file": "T58_FIG_13_P011.png",
+    "image_sha256": "4376cfabaeeba021a3d8dd93667e03ab24dde1d969455e4baa6e64d63b3cf69b",
+    "stem": "En la representación de factores de caída, ¿qué comparación debe hacerse para interpretar correctamente el riesgo?",
+    "options": [
+      "La distancia de caída respecto de la longitud de cuerda disponible para absorber energía",
+      "Solo la masa del arnés sin considerar cuerda",
+      "Únicamente el diámetro del mosquetón",
+      "Solo el número de puntos de anclaje independientemente de la geometría"
+    ],
+    "correct_index": 0,
+    "explanation": "El factor de caída relaciona recorrido de caída y longitud de cuerda.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "557311-8.pdf, página PDF 11, manual p. 33, imagen 13",
+    "source_pdf_page": 11,
+    "manual_page": "33",
+    "source_pdf": "557311-8.pdf",
+    "coverage_section": "Caracterización",
+    "coverage_concept": "En la representación de factores de caída, ¿qué comparación debe hacerse para interpretar correctamente el riesgo?",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 13",
+      "source": "CEIS Guadalajara"
+    },
+    "original_source_page": 11,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/T58_FIG_13_P011.png"
+  },
+  {
+    "external_key": "T58-GRAF-0009",
+    "graphic_file": "T58_FIG_34_P019.png",
+    "image_sha256": "fdceeaf38a913e76911bcb6a8cd9185b42f90beaa1bb51dc6384b4a51f5bcd0e",
+    "stem": "En el nudo autoblocante ilustrado, ¿qué combinación de comportamiento y limitación corresponde al manual?",
+    "options": [
+      "Bloqueo bidireccional rápido y desbloqueo difícil después de cargarlo",
+      "Bloqueo solo ascendente y liberación inmediata bajo carga",
+      "Tensado sin mosquetones con ventaja mecánica 3:1",
+      "Fijación a pilar cilíndrico sin pérdida de resistencia"
+    ],
+    "correct_index": 0,
+    "explanation": "El Prusik bloquea en ambos sentidos y cuesta liberarlo tras carga.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "557315-7.pdf, página PDF 5, manual p. 41, imagen 34",
+    "source_pdf_page": 19,
+    "manual_page": "41",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Técnicas de intervención",
+    "coverage_concept": "En el nudo autoblocante ilustrado, ¿qué combinación de comportamiento y limitación corresponde al manual?",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 34",
+      "source": "CEIS Guadalajara"
+    },
+    "original_source_page": 5,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/T58_FIG_34_P019.png"
+  },
+  {
+    "external_key": "T58-GRAF-0010",
+    "graphic_file": "T58_FIG_36_P020.png",
+    "image_sha256": "399df62ac2dd11911225cb629399e73b5445a9db80165d9464cb2b874f17ce6b",
+    "stem": "En el sistema tensor representado, ¿qué ventaja mecánica indica el manual?",
+    "options": [
+      "3:1",
+      "1:1",
+      "2:1",
+      "6:1"
+    ],
+    "correct_index": 0,
+    "explanation": "El pico de pájaro emplea la gaza como polea móvil y el texto indica 3:1.",
+    "question_family": "GRAFICA",
+    "difficulty": "muy alta",
+    "source_evidence": "557315-7.pdf, página PDF 6, manual p. 42, imagen 36",
+    "source_pdf_page": 20,
+    "manual_page": "42",
+    "source_pdf": "557315-7.pdf",
+    "coverage_section": "Técnicas de intervención",
+    "coverage_concept": "En el sistema tensor representado, ¿qué ventaja mecánica indica el manual?",
+    "graphic": {
+      "type": "image",
+      "caption": "Imagen 36",
+      "source": "CEIS Guadalajara"
+    },
+    "original_source_page": 6,
+    "topic": 58,
+    "status": "PENDIENTE_COTEJO_VISUAL_INDIVIDUAL",
+    "image_path": "IMAGENES/T58/T58_FIG_36_P020.png"
+  }
+]

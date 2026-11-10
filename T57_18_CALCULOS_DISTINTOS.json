@@ -1,0 +1,308 @@
+[
+  {
+    "id": "T57-CAL-VALIDADO-01",
+    "family": "SERIE_POTENCIA_RECEPTOR",
+    "stem": "Dos resistencias de 8 Ω y 12 Ω están en serie con una fuente de 100 V CC. ¿Qué potencia disipa únicamente la resistencia de 12 Ω?",
+    "options": [
+      "300 W",
+      "500 W",
+      "120 W",
+      "833,3333 W"
+    ],
+    "correct_index": 0,
+    "explanation": "Rtotal=20 Ω; I=100/20=5 A; P12=I²·12=300 W.",
+    "source": "1.4.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-02",
+    "family": "SERIE_TENSION_INVERSA",
+    "stem": "Dos resistencias de 15 Ω y 25 Ω están en serie. La de 25 Ω disipa 225 W. ¿Qué tensión suministra la fuente?",
+    "options": [
+      "75 V",
+      "120 V",
+      "90 V",
+      "150 V"
+    ],
+    "correct_index": 1,
+    "explanation": "I=√(225/25)=3 A; Vtotal=3·(15+25)=120 V.",
+    "source": "1.4.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-03",
+    "family": "SERIE_CAIDA_DESCONOCIDA",
+    "stem": "Una fuente de 180 V CC alimenta dos resistencias en serie. La primera es de 18 Ω y disipa 162 W. ¿Cuál es la resistencia de la segunda?",
+    "options": [
+      "60 Ω",
+      "24 Ω",
+      "42 Ω",
+      "54 Ω"
+    ],
+    "correct_index": 2,
+    "explanation": "I=√(162/18)=3 A; Rtotal=180/3=60 Ω; R2=60−18=42 Ω.",
+    "source": "1.4.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-04",
+    "family": "SERIE_CARGA_TIEMPO",
+    "stem": "Dos resistencias de 20 Ω y 30 Ω están en serie con 150 V CC. ¿Qué carga atraviesa la primera en 4 minutos?",
+    "options": [
+      "12 C",
+      "480 C",
+      "1200 C",
+      "720 C"
+    ],
+    "correct_index": 3,
+    "explanation": "I=150/(20+30)=3 A; Q=I·t=3·240=720 C.",
+    "source": "1.1, 1.4.1",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-05",
+    "family": "PARALELO_INTENSIDAD_RAMAL",
+    "stem": "Dos receptores de 40 Ω y 60 Ω están conectados en paralelo a 240 V CC. ¿Qué diferencia hay entre sus intensidades de rama?",
+    "options": [
+      "2 A",
+      "4 A",
+      "6 A",
+      "10 A"
+    ],
+    "correct_index": 0,
+    "explanation": "I1=240/40=6 A; I2=240/60=4 A; diferencia=2 A.",
+    "source": "1.4.2, 1.1",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-06",
+    "family": "PARALELO_POTENCIA_RAMAL",
+    "stem": "Dos resistencias de 24 Ω y 48 Ω están en paralelo a una fuente de 96 V CC. ¿Qué potencia total consumen?",
+    "options": [
+      "384 W",
+      "576 W",
+      "192 W",
+      "768 W"
+    ],
+    "correct_index": 1,
+    "explanation": "P1=96²/24=384 W; P2=96²/48=192 W; total=576 W.",
+    "source": "1.4.2, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-07",
+    "family": "PARALELO_RESISTENCIA_DESCONOCIDA",
+    "stem": "Dos receptores están en paralelo a 120 V CC. Uno tiene 30 Ω y el conjunto consume 1 080 W. ¿Cuál es la resistencia del otro receptor?",
+    "options": [
+      "20 Ω",
+      "30 Ω",
+      "24 Ω",
+      "36 Ω"
+    ],
+    "correct_index": 2,
+    "explanation": "P1=120²/30=480 W; P2=1080−480=600 W; R2=120²/600=24 Ω.",
+    "source": "1.4.2, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-08",
+    "family": "PARALELO_CARGA",
+    "stem": "Dos ramas de 25 Ω y 100 Ω están en paralelo a 200 V CC. ¿Cuánta carga total suministra la fuente durante 45 segundos?",
+    "options": [
+      "360 C",
+      "90 C",
+      "900 C",
+      "450 C"
+    ],
+    "correct_index": 3,
+    "explanation": "I1=200/25=8 A; I2=200/100=2 A; Q=(8+2)·45=450 C.",
+    "source": "1.1, 1.4.2",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-09",
+    "family": "POTENCIA_CC_RESISTENCIA",
+    "stem": "Un equipo de CC trabaja a 48 V y consume 384 W. Si su resistencia se duplica y la tensión permanece constante, ¿cuál será su nueva potencia?",
+    "options": [
+      "192 W",
+      "768 W",
+      "384 W",
+      "96 W"
+    ],
+    "correct_index": 0,
+    "explanation": "R=V²/P=48²/384=6 Ω; R'=12 Ω; P'=48²/12=192 W.",
+    "source": "1.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-10",
+    "family": "POTENCIA_CC_VARIACION_TENSION",
+    "stem": "Una resistencia consume 450 W a 150 V CC. Si se alimenta a 90 V manteniendo su resistencia constante, ¿qué potencia disipa?",
+    "options": [
+      "270 W",
+      "162 W",
+      "450 W",
+      "90 W"
+    ],
+    "correct_index": 1,
+    "explanation": "R=150²/450=50 Ω; P'=90²/50=162 W.",
+    "source": "1.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-11",
+    "family": "CORRIENTE_CARGA_INVERSA",
+    "stem": "Por un conductor circulan 1 080 C en 3 minutos. Si su resistencia es 15 Ω, ¿qué tensión se aplica?",
+    "options": [
+      "60 V",
+      "135 V",
+      "90 V",
+      "180 V"
+    ],
+    "correct_index": 2,
+    "explanation": "I=Q/t=1080/180=6 A; V=I·R=6·15=90 V.",
+    "source": "1.1",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-12",
+    "family": "TIEMPO_CARGA_POTENCIA",
+    "stem": "Un receptor de CC funciona a 120 V y consume 720 W. ¿Cuánto tarda en circular una carga de 1 800 C?",
+    "options": [
+      "150 s",
+      "240 s",
+      "360 s",
+      "300 s"
+    ],
+    "correct_index": 3,
+    "explanation": "I=P/V=720/120=6 A; t=Q/I=1800/6=300 s.",
+    "source": "1.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-13",
+    "family": "CA_FACTOR_POTENCIA",
+    "stem": "Un receptor de CA funciona a 230 V, 12 A y factor de potencia 0,75. ¿Qué potencia activa consume?",
+    "options": [
+      "2070 W",
+      "2760 W",
+      "1552,5 W",
+      "2300 W"
+    ],
+    "correct_index": 0,
+    "explanation": "P=V·I·cosφ=230·12·0,75=2070 W.",
+    "source": "1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-14",
+    "family": "CA_FACTOR_POTENCIA_INVERSO",
+    "stem": "Un receptor monofásico de CA consume 1 840 W activos a 230 V y 10 A. ¿Cuál es su factor de potencia?",
+    "options": [
+      "0,6 ",
+      "0,8 ",
+      "0,7 ",
+      "0,9 "
+    ],
+    "correct_index": 1,
+    "explanation": "cosφ=P/(VI)=1840/(230·10)=0,8.",
+    "source": "1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-15",
+    "family": "CA_INTENSIDAD_INVERSA",
+    "stem": "Un receptor de CA desarrolla 3 450 W activos a 230 V y cosφ=0,75. ¿Qué intensidad absorbe?",
+    "options": [
+      "15 A",
+      "25 A",
+      "20 A",
+      "30 A"
+    ],
+    "correct_index": 2,
+    "explanation": "I=P/(V·cosφ)=3450/(230·0,75)=20 A.",
+    "source": "1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-16",
+    "family": "CA_VARIACION_FACTOR",
+    "stem": "Un receptor de CA trabaja a 200 V y 15 A. Su factor de potencia pasa de 0,6 a 0,9, sin cambiar V ni I. ¿Cuánto aumenta su potencia activa?",
+    "options": [
+      "300 W",
+      "600 W",
+      "2700 W",
+      "900 W"
+    ],
+    "correct_index": 3,
+    "explanation": "P1=200·15·0,6=1800 W; P2=200·15·0,9=2700 W; aumento=900 W.",
+    "source": "1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-17",
+    "family": "SERIE_POTENCIA_TOTAL",
+    "stem": "Dos resistencias en serie de 9 Ω y 21 Ω se alimentan con 90 V CC. ¿Qué potencia total disipan?",
+    "options": [
+      "270 W",
+      "189 W",
+      "81 W",
+      "300 W"
+    ],
+    "correct_index": 0,
+    "explanation": "Rtotal=9+21=30 Ω; I=90/30=3 A; P=90·3=270 W.",
+    "source": "1.4.1, 1.7",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  },
+  {
+    "id": "T57-CAL-VALIDADO-18",
+    "family": "PARALELO_FALLO_ABIERTO",
+    "stem": "Dos receptores de 30 Ω y 60 Ω están en paralelo a 120 V CC. Si se abre únicamente la rama de 30 Ω, ¿cuánto disminuye la intensidad total?",
+    "options": [
+      "2 A",
+      "4 A",
+      "3 A",
+      "6 A"
+    ],
+    "correct_index": 1,
+    "explanation": "Antes: I=120/30+120/60=6 A; después: I=120/60=2 A; disminuye 4 A.",
+    "source": "1.4.2",
+    "source_scope": "Fórmulas y relaciones del PDF T57; no se emplean equivalentes mixtos.",
+    "difficulty": "alta/muy alta",
+    "status": "AUDITADO_CALCULO"
+  }
+]
