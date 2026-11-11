@@ -3470,6 +3470,23 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
            `CEIS Guadalajara, pagina ${asset.printed_page}`]);
       graphicMap.set(asset.file,{id:Number(row.rows[0].id),sourceId,uri});
     }
+    // SERVER222: Retirar de nuevos test las 27 preguntas gráficas T58 anteriores.
+    // Conserva las filas y las respuestas históricas; solo desactiva su elegibilidad.
+    if(n===58){
+      const retired=await client.query(`UPDATE question_bank qb SET active=FALSE,updated_at=NOW()
+        FROM coverage_items ci
+        WHERE qb.coverage_item_id=ci.id AND ci.topic_id=$1
+          AND ci.item_type='grafica_salud_original'
+          AND ci.concept LIKE 'T58-GRAF-USER-%'
+          AND NOT (ci.concept LIKE ANY($2::text[]))
+          AND qb.active=TRUE RETURNING qb.id`,[topic.id,data.questions.map(q=>q.external_key+' · '+q.coverage_concept)]);
+      const oldCoverage=await client.query(`UPDATE coverage_items SET exam_relevant=FALSE
+        WHERE topic_id=$1 AND item_type='grafica_salud_original'
+          AND concept LIKE 'T58-GRAF-USER-%'
+          AND NOT (concept LIKE ANY($2::text[])) AND exam_relevant=TRUE`,
+        [topic.id,data.questions.map(q=>q.external_key+' · '+q.coverage_concept)]);
+      console.log('SERVER222_T58_GRAFICAS_ANTERIORES_DESACTIVADAS',retired.rowCount,'cobertura',oldCoverage.rowCount);
+    }
     let imported=0;
     for(const item of data.questions){
       // SERVER204: el ejemplo numérico de Mattson ya no es examinable;
