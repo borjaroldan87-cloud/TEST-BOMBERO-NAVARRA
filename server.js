@@ -3518,6 +3518,35 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const graphic={...item.graphic,assetId:g.id,publicUrl:g.uri,
         sourceId:g.sourceId,assetType:'individual',
         crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
+      if(n===58){
+        // SERVER223: preserve historical question IDs, answers and sessions.
+        // Select by exact content, never by a legacy checksum from a prior release.
+        const previous=await client.query(`SELECT id,stem,options,correct_index,active
+          FROM question_bank WHERE coverage_item_id=$1 AND question_family='GRAFICA'
+          ORDER BY id DESC FOR UPDATE`,[cid]);
+        const matching=previous.rows.find(row=>row.stem===item.stem &&
+          JSON.stringify(row.options)===JSON.stringify(item.options) &&
+          Number(row.correct_index)===Number(item.correct_index));
+        for(const row of previous.rows){
+          if(row.id!==matching?.id && row.active){
+            await client.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+              WHERE id=$1`,[row.id]);
+          }
+        }
+        if(matching){
+          await client.query(`UPDATE question_bank SET active=TRUE,graphic=$2::jsonb,
+            explanation=$3,source_evidence=$4,updated_at=NOW() WHERE id=$1`,
+            [matching.id,JSON.stringify(graphic),item.explanation,item.source_evidence]);
+        }else{
+          await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+            correct_index,explanation,source_evidence,source_page,manual_page,
+            question_family,difficulty,graphic,validation_version,active)
+            VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,7,TRUE)`,
+            [cid,item.stem,JSON.stringify(item.options),item.correct_index,
+             item.explanation,item.source_evidence,item.source_pdf_page,
+             item.manual_page,JSON.stringify(graphic)]);
+        }
+      }else{
       const prior=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
         WHERE coverage_item_id=$1 AND question_family='GRAFICA'
         ORDER BY id DESC LIMIT 1 FOR UPDATE`,[cid]);
@@ -3549,6 +3578,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         [cid,item.stem,JSON.stringify(item.options),item.correct_index,
          item.explanation,item.source_evidence,item.source_pdf_page,
          item.manual_page,JSON.stringify(graphic)]);
+      }
       }
       imported++;
     }
