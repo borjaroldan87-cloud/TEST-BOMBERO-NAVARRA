@@ -3020,7 +3020,7 @@ const HEALTH_NAMES_192={
   54:'VEHICULOS DE BOMBEROS',
   55:'INCENDIOS INDUSTRIALES',
   56:'APEO Y PODA DE ARBOLADO',
-  57:'RIESGO ELECTRICO'
+  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3034,9 +3034,10 @@ const HEALTH_ALIAS_192={
   54:/VEHICULOS DE BOMBEROS/,
   55:/INCENDIOS INDUSTRIALES/,
   56:/APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/,
-  57:/RIESGO ELECTRICO/
+  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/
 };
 const HEALTH_EXAM_STYLE_192={
+  58:'MODELO T58: relacionar nudo, uso y perdida de resistencia; distinguir retencion, sujecion y anticaidas; combinar la geometria de triangulaciones y fuerzas. Cuatro opciones tecnicamente plausibles y solo una correcta. Usar exclusivamente el PDF del tema.',
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
   47:'MODELO (no repetir): relacionar las tres fases de mortalidad traumática con lesiones y momento temporal; cambiar UNA fase o causa en cada distractor. Distinguir segundos/minutos, primeras horas y dias/semanas.',
   48:'MODELO (no repetir): contrastar lavado superficial desde centro a periferia frente a irrigacion de herida profunda con suero a presion; distractores que intercambien técnica y tipo.',
@@ -3168,7 +3169,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-7])\b/);
+  const m=name.match(/^TEMA\s*(4[6-9]|5[0-8])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3176,7 +3177,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3200,9 +3201,15 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
+      // T58: preserve user-selected GitHub images as-is, without overwriting.
+      if(n===58 && a.existing_github===true){
+        if(!/^[A-Za-z0-9_.~\-]+$/.test(a.file) || !fs.existsSync(path.join(dir,a.file)))
+          throw Error('T58: imagen original seleccionada ausente: '+a.file);
+        continue;
+      }
       if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
         throw Error(`HEALTH192: nombre de imagen no permitido T${n}`);
       const bytes=Buffer.from(a.base64,'base64');
@@ -3363,7 +3370,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54||n===55||n===56||n===57){
+    if(n===54||n===55||n===56||n===57||n===58){
       const records=[];
       for(const item of data.coverage_additions){
         if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
@@ -3373,7 +3380,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         records.push({section:item.section,concept:item.external_key+' · '+item.concept,
           source_page:item.source_page,manual_page:item.manual_page,
           source_evidence:item.source_evidence,
-          evaluation_type:(n===56||n===57)&&item.evaluation_type==='calculo'?'calculo':'literal_documental'});
+          evaluation_type:(n===56||n===57||n===58)&&item.evaluation_type==='calculo'?'calculo':'literal_documental'});
       }
       if(records.length)await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
         item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
@@ -3408,7 +3415,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':`salud-t${n}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':`salud-t${n}`;
       const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
@@ -18760,42 +18767,30 @@ app.post('/api/generate',async(req,res)=>{
           coverage:{targeted:targets.length,markedWorked:0},practice:true});
       }
     }
-    // T57: 30 ejercicios multietapa preconstruidos, 300 combinaciones verificadas.
-    // No se invoca Gemini en este modo: los datos y las respuestas se calculan localmente.
+    // SERVER215: T57 - 24 familias simples y 8 combinadas, sin Gemini.
     if(mode==='calculos' && Array.isArray(topicIds) && topicIds.length===1){
       const t57=(await db.query('SELECT id,block,topic_order,name FROM topics WHERE id=$1',[topicIds[0]])).rows[0];
       if(t57?.block==='especifico' && Number(t57.topic_order)===57 &&
           /^TEMA\s*57\s+RIESGO ELECTRICO\b/.test(String(t57.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase())){
-        const advanced=(await import('./t57_calculos_avanzados.js')).default;
+        const base=(await import('./t57_calculos.js')).default;
+        const mix=(await import('./t57_calculos_combinados.js')).default;
+        const families=[...base.families.map(x=>[x[0],base.generate]),...mix.metadata.map(x=>[x[0],mix.generate])];
         const refs=await db.query(`SELECT id,concept,source_page,manual_page,source_evidence FROM coverage_items
           WHERE topic_id=$1 AND exam_relevant=TRUE AND evaluation_type='calculo'
           AND concept LIKE 'T57-EJ-MA-CALC-%'`,[t57.id]);
-        if(!refs.rows.length)throw Error('T57: no hay cobertura documental de cálculos indexada');
-        // T57 FIX: no repetir siempre las primeras diez familias; excluir topología mixta
-        // por no estar justificada en el manual. Diversidad de familias en cada sesión.
-        const allowed=advanced.families.filter(f=>
-          f.startsWith('SERIE_')||f.startsWith('PARALELO_')||
-          f.startsWith('INVERSO_SERIE_')||f.startsWith('INVERSO_PAR_'));
-        if(count>allowed.length)throw Error(`T57: máximo ${allowed.length} familias distintas por test`);
-        const shuffled=[...allowed];
-        for(let i=shuffled.length-1;i>0;i--){
-          const j=Math.floor(Math.random()*(i+1));
-          [shuffled[i],shuffled[j]]=[shuffled[j],shuffled[i]];
-        }
-        const local=shuffled.slice(0,count).map((family,i)=>{
-          const variant=Math.floor(Math.random()*1000000);
-          const q=advanced.generate(family,variant);
-          const ref=refs.rows[i%refs.rows.length];
+        const byFamily=new Map();
+        for(const r of refs.rows){const m=String(r.concept).match(/(?:^| · )([A-Z0-9_]+):/);if(m)byFamily.set(m[1],r);}
+        if(families.some(([name])=>!byFamily.has(name)))throw Error('T57: falta indexación de familias de cálculo');
+        const local=Array.from({length:count},(_,i)=>{
+          const [name,generate]=families[i%families.length],ref=byFamily.get(name);
+          const q=generate(name,i);
           return {...q,sourceEvidence:ref.source_evidence,sourcePage:Number(ref.source_page),
-            manualPage:String(ref.manual_page)};
+            manualPage:String(ref.manual_page),difficulty:'muy alta',questionFamily:'T57_CALCULO'};
         });
-        if(new Set(local.map(q=>q.mathFamily)).size!==count ||
-           local.some(q=>/mixt|serie con el paralelo/i.test(q.stem)))
-          throw Error('T57: diversidad o alcance documental incumplidos');
         if(local.some(q=>!Array.isArray(q.options)||q.options.length!==4||
           new Set(q.options).size!==4||!Number.isInteger(q.correctIndex)||
-          q.correctIndex<0||q.correctIndex>3))throw Error('T57: ejercicio inválido');
-        const targets=local.map((_,i)=>refs.rows[i%refs.rows.length]);
+          q.correctIndex<0||q.correctIndex>3))throw Error('T57: pregunta matemática inválida');
+        const targets=local.map(q=>byFamily.get(q.mathFamily));
         const saved=await persistGeneratedTest({questions:local,targets,
           requestedCount:count,difficulty,mode,testType:'practice_all',
           runId,runSignature:signature,freshOnly111:false});
@@ -20100,7 +20095,7 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-7])([^0-9]|$)'`)
+      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-8])([^0-9]|$)'`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
