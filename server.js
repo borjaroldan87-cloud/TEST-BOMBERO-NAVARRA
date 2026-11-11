@@ -19205,8 +19205,10 @@ app.post('/api/generate',async(req,res)=>{
       const onlyT57Recovery216=targets.length>0&&targets.every(t=>
         Number(coverageTopicNumber(t.topic_name))===57 &&
         String(t.topic_block||'').toLowerCase()==='especifico');
-      const maxRounds119=(targets.length>0&&targets.every(t39Hydraulica))?2:
-        onlyT57Recovery216?3:1;
+      // SERVER224: rescate GLOBAL de huecos verificables para todos los temas.
+      // Preserva los 2/3 intentos previos de T39/T57 y amplía el resto a 3.
+      // No relaja ningún validador ni genera preguntas sin evidencia.
+      const maxRounds119=3;
       const tried119=new Set(targets.map(t=>Number(t.id)));
       const blocked119=high119?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
@@ -19223,7 +19225,7 @@ app.post('/api/generate',async(req,res)=>{
         }
         // No seguir sumando llamadas si el tiempo de esta petición se agota;
         // el borrador guardado se reanudará con el MISMO runId.
-        if(high119&&Date.now()-started>45000){
+        if(Date.now()-started>45000){
           console.warn('IIFF119_LIMITE_TIEMPO_REANUDABLE:',JSON.stringify({faltan:holes.length,round119}));
           break;
         }
@@ -19301,6 +19303,17 @@ app.post('/api/generate',async(req,res)=>{
         }
         holes=holes.filter(x=>!questions[x.index]&&!noReplacementT39.has(x.index));
         if(!holes.length)break;
+        // SERVER224: no reintentar objetivos sin evidencia PDF suficiente.
+        // Evita que una única ficha no verificable bloquee con llamadas inútiles.
+        const unsupported224=holes.filter(x=>
+          !specificEvidenceReady128(targets[x.index])&&
+          !geographyTableRecord135(targets[x.index]));
+        if(unsupported224.length){
+          console.warn('RESET_224_SIN_EVIDENCIA:',JSON.stringify({
+            round:round119+1,slots:unsupported224.map(x=>x.index+1)}));
+        }
+        holes=holes.filter(x=>!unsupported224.some(u=>u.index===x.index));
+        if(!holes.length)break;
         const repairGroups=resetGroups139(holes,difficulty);
         if(!repairGroups.length)break;
         const repaired=await resetPool136(repairGroups,async group=>
@@ -19316,6 +19329,11 @@ app.post('/api/generate',async(req,res)=>{
           });
         });
         draft136={targets,questions};
+        console.log('RESET_224_RECUPERACION_GLOBAL:',JSON.stringify({
+          round:round119+1,valid:questions.filter(Boolean).length,
+          pending:questions.filter(q=>!q).length,
+          slots:questions.flatMap((q,i)=>q?[]:[i+1]),
+          elapsedMs:Date.now()-started}));
         if(high119)console.log('IIFF119_RECUPERACION:',JSON.stringify({ronda:round119+1,
           objetivos:repairGroups.flat().length,validas:questions.filter(Boolean).length,
           faltantes:questions.filter(q=>!q).length}));
