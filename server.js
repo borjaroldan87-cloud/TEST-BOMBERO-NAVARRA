@@ -8745,7 +8745,7 @@ async function t59PreparedIndex226(topic,pdfPath){
     section:item.section,concept:item.external_key+' · '+item.concept,
     item_type:'dato_salud_preparado',evaluation_type:'literal_documental',
     source_page:item.source_page,manual_page:item.manual_page,
-    source_evidence:item.source_evidence
+    source_evidence:item.source_evidence,exam_relevant:item.exam_relevant!==false
   }));
   const c=await db.connect();
   let result;
@@ -8840,7 +8840,7 @@ async function t60PreparedIndex229(topic,pdfPath){
   try{
     await c.query('BEGIN');
     const lock=await c.query('SELECT id,name,block,topic_order FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
-    if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==59||
+    if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==60||
        Number(lock.rows[0].topic_order)!==60)throw Error('T60: identidad u orden de tema incorrectos');
     const prior=await c.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
     if(prior.rowCount&&prior.rows[0].sha!==sha)
