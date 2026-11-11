@@ -3169,7 +3169,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^TEMA\s*(4[6-9]|5[0-8])\b/);
+  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-8])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3337,6 +3337,43 @@ async function t56EnsureLocalPdf213(topic){
     return {ok:true,topicId:topic.id};
   }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
+// T58 repair: retain Gemini indexing and 227 existing facts; add exact original PDF locally.
+async function t58EnsureLocalPdf221(topic){
+  if(healthTopicNumber192(topic)!==58)return {skipped:true};
+  const data=healthLoadData192(58);
+  const file=path.join(process.cwd(),'t58_source_221.pdf');
+  const bytes=fs.readFileSync(file);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256||bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw Error('T58_221: PDF source SHA mismatch');
+  const pdf=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(pdf.getPageCount()!==data.pdf_page_count)throw Error('T58_221: page count mismatch');
+  const c=await db.connect();
+  try{
+    await c.query('BEGIN');
+    const rows=await c.query('SELECT id,name,block,total_items FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(rows.rowCount!==1||healthTopicNumber192(rows.rows[0])!==58||Number(rows.rows[0].total_items)<1)
+      throw Error('T58_221: topic identity not validated');
+    const prior=await c.query(`SELECT TRIM(pdf_sha256) sha,ENCODE(SHA256(pdf_bytes),'hex') actual_sha,
+      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) actual_size FROM topic_local_pdfs WHERE topic_id=$1`,[topic.id]);
+    if(prior.rowCount){
+      const v=prior.rows[0];
+      if(v.sha!==sha||v.actual_sha!==sha||Number(v.page_count)!==data.pdf_page_count||
+         Number(v.size_bytes)!==bytes.length||Number(v.actual_size)!==bytes.length)
+        throw Error('T58_221: preexisting local PDF differs; no overwrite');
+    }else{
+      await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
+        [topic.id,sha,data.pdf_page_count,bytes.length,bytes]);
+    }
+    await c.query(`UPDATE topics SET name='TEMA 58. SALVAMENTO EN ALTURA',topic_order=58
+      WHERE id=$1 AND block='especifico' AND name IN
+      ('T58 SALVAMENTO EN ALTURA TEMARIO','TEMA 58. SALVAMENTO EN ALTURA')`,[topic.id]);
+    await c.query('COMMIT');
+    console.log('T58_221_PDF_TEMA_REPARADOS',JSON.stringify({topicId:topic.id,pages:data.pdf_page_count,sha}));
+    return {ok:true};
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+}
 async function healthImportOnce192(topic,uploadedPdfPath=null){
   const n=healthTopicNumber192(topic);
   if(!n)return {skipped:true};
@@ -3365,7 +3402,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
        Number(l.page_count)!==data.pdf_page_count||
        Number(l.actual_size)!==Number(l.size_bytes)||
        (record.rows[0]?.document_name!==`local-pdf:sha256:${l.sha}` &&
-        !(n===56 && /^fileSearchStores\//.test(String(record.rows[0]?.document_name||'')))))
+        !((n===56||n===58) && /^fileSearchStores\//.test(String(record.rows[0]?.document_name||'')))))
       throw Error(`HEALTH192: T${n} fuente local no íntegra`);
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
@@ -20095,11 +20132,13 @@ async function startServer(){
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-8])([^0-9]|$)'`)
+      (name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-8])([^0-9]|$)' OR
+       name='T58 SALVAMENTO EN ALTURA TEMARIO')`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
           if(healthTopicNumber192(t)===56)await t56EnsureLocalPdf213(t);
+          if(healthTopicNumber192(t)===58)await t58EnsureLocalPdf221(t);
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
