@@ -15,6 +15,13 @@ const db = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+// T61-241: una desconexión de PG no debe convertirse en una excepción
+// sin manejador que termine también el proceso HTTP. Las consultas afectadas
+// siguen fallando y su transacción se revierte; no se oculta el error.
+db.on('error', error => console.error('[postgres/pool]', error));
+db.on('connect', client => {
+  client.on('error', error => console.error('[postgres/client]', error));
+});
 const app = express();
 const upload = multer({ dest: "uploads/" });
 app.use(express.json({limit:"2mb"}));
@@ -117,9 +124,10 @@ async function initDatabase(){
 await db.query(`
   ALTER TABLE topics ADD COLUMN IF NOT EXISTS block TEXT
 `);
-// SERVER 90: un PDF fuente del manual IIFF conservado en PostgreSQL.
-// Render Free tiene un sistema de ficheros efímero; nunca usar uploads/
-// como almacenamiento persistente. La fuente no se expone por HTTP.
+// SERVER 90: los PDF anteriores se conservan en PostgreSQL como BYTEA.
+// T61-241: su PDF de ~50 MB se conserva en fragmentos separados para
+// evitar una única consulta de escritura que agote el Postgres de 256 MiB.
+// Ninguna tabla ni procedimiento de los temas anteriores se modifica.
 await db.query(`
   CREATE TABLE IF NOT EXISTS topic_local_pdfs (
     topic_id INTEGER PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
@@ -128,6 +136,27 @@ await db.query(`
     size_bytes INTEGER NOT NULL CHECK(size_bytes > 0),
     pdf_bytes BYTEA NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`);
+await db.query(`
+  CREATE TABLE IF NOT EXISTS t61_pdf_manifest (
+    topic_id INTEGER PRIMARY KEY REFERENCES topics(id) ON DELETE CASCADE,
+    pdf_sha256 CHAR(64) NOT NULL,
+    page_count INTEGER NOT NULL CHECK(page_count=126),
+    size_bytes INTEGER NOT NULL CHECK(size_bytes>0),
+    chunk_size INTEGER NOT NULL CHECK(chunk_size>0 AND chunk_size<=262144),
+    chunk_count INTEGER NOT NULL CHECK(chunk_count>0),
+    verified_sha256 CHAR(64),
+    ready BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+`);
+await db.query(`
+  CREATE TABLE IF NOT EXISTS t61_pdf_chunks (
+    topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL CHECK(chunk_index>=0),
+    chunk_bytes BYTEA NOT NULL,
+    PRIMARY KEY(topic_id,chunk_index)
   )
 `);
 
@@ -3394,16 +3423,28 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     const t=rows.rows[0];
     if(!t||healthTopicNumber192(t)!==n||Number(t.total_items)<1)
       throw Error(`HEALTH192: T${n} no indexado`);
-    const local=await client.query(`SELECT TRIM(pdf_sha256) AS sha,
-      page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS actual_size,
-      ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
-      FROM topic_local_pdfs WHERE topic_id=$1`,[topic.id]);
+    // T61 usa fragmentos verificados; nunca leer ni calcular el SHA de un
+    // BYTEA de 50 MB en una sola consulta (el resto de temas sigue igual).
+    const local=n===61
+      ? await client.query(`SELECT BTRIM(m.pdf_sha256) AS sha,m.page_count,
+          m.size_bytes,z.actual_size,m.verified_sha256 AS actual_sha,
+          m.ready,z.actual_chunks,m.chunk_count
+          FROM t61_pdf_manifest m
+          CROSS JOIN LATERAL (SELECT COUNT(*)::int AS actual_chunks,
+            COALESCE(SUM(OCTET_LENGTH(chunk_bytes)),0)::bigint AS actual_size
+            FROM t61_pdf_chunks WHERE topic_id=m.topic_id) z
+          WHERE m.topic_id=$1`,[topic.id])
+      : await client.query(`SELECT TRIM(pdf_sha256) AS sha,
+          page_count,size_bytes,OCTET_LENGTH(pdf_bytes) AS actual_size,
+          ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
+          FROM topic_local_pdfs WHERE topic_id=$1`,[topic.id]);
     const l=local.rows[0];
     const record=await client.query(`SELECT document_name FROM topic_source_documents
       WHERE topic_id=$1`,[topic.id]);
     if(!l||!healthPdfApproved203(n,l.sha,data)||l.actual_sha!==l.sha||
        Number(l.page_count)!==data.pdf_page_count||
        Number(l.actual_size)!==Number(l.size_bytes)||
+       (n===61 && (l.ready!==true||Number(l.actual_chunks)!==Number(l.chunk_count)))||
        (record.rows[0]?.document_name!==`local-pdf:sha256:${l.sha}` &&
         !((n===56||n===58) && /^fileSearchStores\//.test(String(record.rows[0]?.document_name||'')))))
       throw Error(`HEALTH192: T${n} fuente local no íntegra`);
@@ -8912,6 +8953,60 @@ async function t60PreparedIndex229(topic,pdfPath){
 }
 
 
+// T61-241: fase reanudable de almacenamiento del PDF. Cada consulta
+// escribe COMO MÁXIMO 256 KiB en PG; no se envía un BYTEA de ~50 MB.
+// SHA global del fichero verificado contra el módulo y SHA de CADA fragmento
+// verificado por PG contra el original. ready pasa a TRUE solo en la
+// transacción final que activa los conocimientos.
+const T61_PDF_CHUNK_SIZE_241=256*1024;
+async function t61StorePdfChunks241(topicId,bytes,sha){
+  const size=T61_PDF_CHUNK_SIZE_241;
+  const count=Math.ceil(bytes.length/size);
+  const earlier=await db.query(`SELECT BTRIM(pdf_sha256) AS sha,
+    page_count,size_bytes,chunk_size,chunk_count,verified_sha256,ready
+    FROM t61_pdf_manifest WHERE topic_id=$1`,[topicId]);
+  const found=earlier.rows[0];
+  if(found && (found.sha!==sha || Number(found.size_bytes)!==bytes.length ||
+      Number(found.page_count)!==126 || Number(found.chunk_size)!==size ||
+      Number(found.chunk_count)!==count))
+    throw Error('T61: hay un PDF distinto almacenado; no sobrescribir');
+  if(!found){
+    await db.query(`INSERT INTO t61_pdf_manifest
+      (topic_id,pdf_sha256,page_count,size_bytes,chunk_size,chunk_count)
+      VALUES($1,$2,126,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
+      [topicId,sha,bytes.length,size,count]);
+  }
+  // La ruta /api/analyze-coverage ya dispone de un bloqueo asesor por tema.
+  // Una carga parcial puede retomarse sin borrar preguntas ni el PDF original.
+  if(!found?.ready){
+    for(let i=0;i<count;i++){
+      const chunk=bytes.subarray(i*size,Math.min((i+1)*size,bytes.length));
+      await db.query(`INSERT INTO t61_pdf_chunks(topic_id,chunk_index,chunk_bytes)
+        VALUES($1,$2,$3) ON CONFLICT(topic_id,chunk_index)
+        DO UPDATE SET chunk_bytes=EXCLUDED.chunk_bytes`,[topicId,i,chunk]);
+    }
+  }
+  // La consulta devuelve solo pequeños metadatos (índice, tamaño, SHA),
+  // nunca los 50 MB. PostgreSQL calcula cada digest independientemente.
+  const proof=await db.query(`SELECT chunk_index,
+    OCTET_LENGTH(chunk_bytes) AS chunk_length,
+    ENCODE(SHA256(chunk_bytes),'hex') AS chunk_sha256
+    FROM t61_pdf_chunks WHERE topic_id=$1 ORDER BY chunk_index`,[topicId]);
+  if(proof.rows.length!==count)throw Error('T61: falta algún fragmento del PDF');
+  let verifiedSize=0;
+  for(let i=0;i<count;i++){
+    const expected=bytes.subarray(i*size,Math.min((i+1)*size,bytes.length));
+    const part=proof.rows[i];
+    if(Number(part.chunk_index)!==i || Number(part.chunk_length)!==expected.length ||
+      part.chunk_sha256!==createHash('sha256').update(expected).digest('hex'))
+      throw Error(`T61: integridad del fragmento PDF ${i+1}/${count} no válida`);
+    verifiedSize+=expected.length;
+  }
+  if(verifiedSize!==bytes.length)throw Error('T61: longitud almacenada incorrecta');
+  console.log('T61_241_PDF_FRAGMENTOS_VERIFICADOS',JSON.stringify({topicId,count,bytes:verifiedSize}));
+  return count;
+}
+
 // T61: Indexación documental local sin invocar Gemini. Acepta solo el PDF
 // conjunto exacto de los dos documentos suministrados por el opositor.
 async function t61PreparedIndex(topic,pdfPath){
@@ -8933,6 +9028,9 @@ async function t61PreparedIndex(topic,pdfPath){
   const records=items.map(x=>({section:x.section,concept:x.external_key+' · '+x.concept,
     source_page:x.source_page,manual_page:x.manual_page,source_evidence:x.source_evidence,
     eligible:x.exam_eligible===true}));
+  // Primero verificar todos los fragmentos sin mantener una transacción
+  // gigante abierta. Si se interrumpe, el manifiesto sigue sin activar.
+  const chunkCount=await t61StorePdfChunks241(topic.id,bytes,sha);
   const c=await db.connect();
   let indexed;
   try{
@@ -8952,9 +9050,14 @@ async function t61PreparedIndex(topic,pdfPath){
       ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
         source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
         source_evidence=EXCLUDED.source_evidence,exam_relevant=EXCLUDED.exam_relevant`,[topic.id,JSON.stringify(records)]);
-    await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
-      VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
-      [topic.id,sha,126,bytes.length,bytes]);
+    // Publicación atómica del origen solo después de validar los 192
+    // fragmentos. No se inserta el PDF entero en topic_local_pdfs.
+    const published=await c.query(`UPDATE t61_pdf_manifest SET
+      verified_sha256=$2,ready=TRUE,updated_at=NOW()
+      WHERE topic_id=$1 AND BTRIM(pdf_sha256)=$2 AND size_bytes=$3
+        AND chunk_count=$4 RETURNING topic_id`,
+      [topic.id,sha,bytes.length,chunkCount]);
+    if(published.rowCount!==1)throw Error('T61: manifiesto no confirmado');
     await c.query(`INSERT INTO topic_source_documents(topic_id,document_name)
       VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
       document_name=EXCLUDED.document_name,updated_at=NOW()`,
