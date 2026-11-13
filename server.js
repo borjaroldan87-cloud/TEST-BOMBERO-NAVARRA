@@ -3020,7 +3020,7 @@ const HEALTH_NAMES_192={
   54:'VEHICULOS DE BOMBEROS',
   55:'INCENDIOS INDUSTRIALES',
   56:'APEO Y PODA DE ARBOLADO',
-  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES'
+  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES',61:'RESCATE EN ACCIDENTES DE TRAFICO'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3034,7 +3034,7 @@ const HEALTH_ALIAS_192={
   54:/VEHICULOS DE BOMBEROS/,
   55:/INCENDIOS INDUSTRIALES/,
   56:/APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/,
-  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/
+  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/
 };
 const HEALTH_EXAM_STYLE_192={
   58:'MODELO T58: relacionar nudo, uso y perdida de resistencia; distinguir retencion, sujecion y anticaidas; combinar la geometria de triangulaciones y fuerzas. Cuatro opciones tecnicamente plausibles y solo una correcta. Usar exclusivamente el PDF del tema.',
@@ -3048,6 +3048,7 @@ const HEALTH_EXAM_STYLE_192={
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: comparar la disposición a soga, piramidal o a escalera de los sacos según su función documentada, sin pedir memorizar los números del dibujo ilustrativo. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas. SILBATO del manual p.189: tres toques aislados indican hacia abajo/río abajo; tres toques EN SERIE indican emergencia/peligro. La referencia a "en serie" es imprescindible: no confundir ni omitir esa condición.',
   54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.',
   55:'MODELO CEIS 2015 PARA T55 (no copiar): Tipos A-E: cruza ocupación del edificio, distancia exacta (mayor de 3 m o menor/igual), cerramiento lateral y máximo de cubierta (tipo E hasta 50%); distractor altera una condicion. Tabla 1 p.213: unir riesgo BAJO/MEDIO/ALTO, planta sotano/sobre rasante y tipos A-B-C con R30/R60/R90/R120/R180 y NO ADMITIDO; cuatro alternativas equilibradas. Carga de fuego Qe promedio ponderado por superficie. Qs=(Σ Gi qi Ci)/A * K * Ra: NO generar cálculos Qs porque K no está definido en el PDF; conservarla solo para identificación literal. Siempre unidades CEIS y factores dados. Espuma: comparar baja/media/alta expansion, 5 L/min/m2 de derrame, tecnica de cubricion simple y rebote, sistema Venturi, piezas del proporcionador, Pro-Pak y tabla 4 p.227. No preguntar valores de los EJEMPLOS resueltos de p.220. IMPORTANTE p.221 formula R=(V/T)*Cn*CL tiene variables C/Cn/CL incongruentes: no hacer problemas sobre ella. La deteccion de imágenes y preguntas GRAFICA de T55 esta prefabricada: reutilizarlas, NO interpretarlas otra vez ni generar imagenes. Sustituir distractores equivalentes por alternativas de magnitud, condicion, etapa o finalidad diferente pero plausible; NO usar tres afirmaciones semanticamente iguales. Referencia legislativa en este manual es histórica: NO preguntar por VIGENCIA ACTUAL, ni afirmar que RD2267/2004 siga vigente. La definición se pregunta solo SEGUN CEIS de este PDF. Fuentes exclusivamente PDF del usuario; no actualizar leyes ni incluir datos externos. El estilo mejora sin llamadas adicionales.',
+  61:'T61 RESCATE EN ACCIDENTES DE TRAFICO: SOLO los dos PDF CEIS suministrados, unidos en un PDF de 126 paginas. Distinguir las fases del siniestro, zonas caliente/templada/fria, distancias, cronologias, colocacion de vehiculos, estabilizacion sobre ruedas/costado/techo, turismo/camion/autobus, HV/GNC/GLP, baterias, pretensores, airbags, acristalamientos, cortes de alivio, uso de cilindros y extraccion. Exigir cuatro respuestas proximas y una correcta; distractores que cambien UNA distancia, componente, ubicacion, momento, zona o secuencia. Las 27 preguntas graficas seleccionadas estan prefabricadas y deben servirse sin reinterpretar las imagenes. NO preguntar por vigencia normativa actual; las referencias del manual CEIS 2015 son historicas. No usar fuentes externas, no inventar procedimientos, no preguntar una contradiccion entre figura y texto del manual (p.315 angulos del airbag).',
   60:'T60 EDIFICACIONES: SOLO el PDF CEIS entregado (62 páginas, 2 capítulos). En Caracterización, distinguir causas internas/externas, patologías del agua, suelo y elementos constructivos, lesiones, estructuras, materiales, comportamientos y daños. En Estabilización, relacionar resistencia, geometría, escuadrías, puntales, apeos, entibaciones, uniones, codales, sopandas, durmientes y secuencias. Para cada pregunta, CUATRO alternativas técnicas plausibles del mismo ámbito, que varíen una única condición, cota, orientación, material, fase o carga. Evitar respuestas por descarte o absolutos. Priorizar tablas numéricas, relaciones cruzadas y consecuencias operativas. Las 12 figuras seleccionadas están preparadas con preguntas asociadas. Solo fuente CEIS 2015 del usuario; no extrapolar legislación vigente, no inventar fórmulas ni constantes. Prohibido usar ejemplos demostrativos como normas generales.',
   59:'T59 ESTRUCTURAS COLAPSADAS: SOLO PDF CEIS 2015 del usuario, capítulos Caracterización y Técnicas de intervención. Diferenciar tipologías por configuración de huecos de vida, localización de víctimas, secuencia de intervención y límites cuantitativos. Contrastar búsqueda, sectorización, señalización, equipos y cojines. Las figuras 7-18 tienen preguntas gráficas preparadas y recortadas, no reinterpretar ni generar imágenes externas. No emplear normativa ni fórmulas fuera del PDF. Evitar preguntas triviales de identificación visual; usar implicaciones documentales y distractores próximos.',
   56:'T56 APEO Y PODA (CEIS 2015): las fichas T56-EJ-MA-0038 a 0047 con evaluation_type=calculo corresponden a DIEZ PLANTILLAS NUMÉRICAS CERRADAS: altura H=h·D/d; distancia D=H·d/h; radio r=P/(2π); volumen V=πr²H; masa m=V·ρ; altura+volumen; perímetro+masa; altura+masa; volumen inverso V=m/ρ; densidad inversa ρ=m/V. Si un objetivo de estas diez fichas entra en test MIXTO, construir problema aritmético REAL con datos numéricos variables y solución calculada, NO pregunta teórica sobre la fórmula. Mantener una única clave, distractores de errores numéricos próximos, conversión cm/m y kg/dm³ a kg/m³ y explicación con cálculo completo. En botón CÁLCULOS el servidor resuelve localmente estas plantillas sin Gemini. No regalar resultados intermedios en el enunciado; no inventar fórmulas. Tablas Stuttgart y densidades solo con datos del PDF. Figuras prefabricadas, no generar nuevas. No preguntar el ejemplo editorial erróneo de p.360 (0,8 kg/dm³ × 3 m³=2800 kg), ni clasificar madera 0,7–0,8 kg/dm³ por tabla 4 p.359. Sin llamadas ni auditorías bloqueantes adicionales. Solo PDF CEIS del usuario.'
@@ -3171,7 +3172,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|60)\b/);
+  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[01])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3179,7 +3180,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3409,9 +3410,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54||n===55||n===56||n===57||n===58||n===60){
+    if(n===54||n===55||n===56||n===57||n===58||n===60||n===61){
       const records=[];
       for(const item of data.coverage_additions){
+        if(n===61 && item.exam_eligible!==true)continue;
         if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
            !Number.isInteger(item.source_page)||item.source_page<1||
            item.source_page>data.pdf_page_count||!item.concept||!item.source_evidence)
@@ -3472,6 +3474,20 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
            `CEIS Guadalajara, pagina ${asset.printed_page}`]);
       graphicMap.set(asset.file,{id:Number(row.rows[0].id),sourceId,uri});
     }
+    // T61: drop only old versions of the six visibly unsuitable graphics,
+    // and any obsolete source-bound graphic questions, preserving historical rows.
+    if(n===61){
+      const wanted=data.questions.map(q=>q.external_key+' · '+q.coverage_concept);
+      await client.query(`UPDATE question_bank qb SET active=FALSE,updated_at=NOW()
+        FROM coverage_items ci WHERE qb.coverage_item_id=ci.id
+          AND ci.topic_id=$1 AND ci.item_type='grafica_salud_original'
+          AND ci.concept LIKE 'T61-GRAF-%' AND NOT(ci.concept=ANY($2::text[]))
+          AND qb.active=TRUE`,[topic.id,wanted]);
+      await client.query(`UPDATE coverage_items SET exam_relevant=FALSE
+        WHERE topic_id=$1 AND item_type='grafica_salud_original'
+          AND concept LIKE 'T61-GRAF-%' AND NOT(concept=ANY($2::text[]))
+          AND exam_relevant=TRUE`,[topic.id,wanted]);
+    }
     // SERVER222: Retirar de nuevos test las 27 preguntas gráficas T58 anteriores.
     // Conserva las filas y las respuestas históricas; solo desactiva su elegibilidad.
     if(n===58){
@@ -3503,7 +3519,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
          new Set(item.options).size!==4||
          !Number.isInteger(item.correct_index)||item.correct_index<0||
          item.correct_index>3||item.question_family!=='GRAFICA'||
-         item.difficulty!=='muy alta'||!item.stem||!item.source_evidence||
+         !(n===61?['alta','muy alta'].includes(item.difficulty):item.difficulty==='muy alta')||!item.stem||!item.source_evidence||
          !Number.isInteger(item.source_pdf_page)||item.source_pdf_page<1||
          item.source_pdf_page>data.pdf_page_count)
         throw Error(`HEALTH192: pregunta grafica T${n} inválida`);
@@ -3520,8 +3536,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const graphic={...item.graphic,assetId:g.id,publicUrl:g.uri,
         sourceId:g.sourceId,assetType:'individual',
         crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
-      if(n===58){
-        // SERVER223: preserve historical question IDs, answers and sessions.
+      if(n===58||n===61){
+        // SERVER223/T61: preserve historical question IDs, answers and sessions.
         // Select by exact content, never by a legacy checksum from a prior release.
         const previous=await client.query(`SELECT id,stem,options,correct_index,active
           FROM question_bank WHERE coverage_item_id=$1 AND question_family='GRAFICA'
@@ -3543,10 +3559,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
           await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
             correct_index,explanation,source_evidence,source_page,manual_page,
             question_family,difficulty,graphic,validation_version,active)
-            VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,7,TRUE)`,
+            VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA',$10,$9::jsonb,7,TRUE)`,
             [cid,item.stem,JSON.stringify(item.options),item.correct_index,
              item.explanation,item.source_evidence,item.source_pdf_page,
-             item.manual_page,JSON.stringify(graphic)]);
+             item.manual_page,JSON.stringify(graphic),n===61?item.difficulty:'muy alta']);
         }
       }else{
       const prior=await client.query(`SELECT id,stem,options,correct_index FROM question_bank
@@ -8895,6 +8911,75 @@ async function t60PreparedIndex229(topic,pdfPath){
     preparedFigures:graphic.images,preparedQuestions:graphic.questions};
 }
 
+
+// T61: Indexación documental local sin invocar Gemini. Acepta solo el PDF
+// conjunto exacto de los dos documentos suministrados por el opositor.
+async function t61PreparedIndex(topic,pdfPath){
+  if(healthTopicNumber192(topic)!==61)throw Error('T61: tema incorrecto');
+  const data=healthLoadData192(61);
+  if(!data||data.coverage_additions.length<1000)throw Error('T61: modulo documental ausente');
+  const bytes=fs.readFileSync(pdfPath);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256||bytes.subarray(0,5).toString('latin1')!=='%PDF-'||bytes.length>100*1024*1024)
+    throw Error('T61: PDF diferente al documento preparado');
+  const doc=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(doc.getPageCount()!==126)throw Error('T61: paginas incorrectas');
+  const items=data.coverage_additions;
+  for(const x of items){
+    if(!/^T61-EJ-MA-\d{4}$/.test(x.external_key)||!x.concept||!x.source_evidence||
+      !Number.isInteger(x.source_page)||x.source_page<1||x.source_page>126)
+      throw Error('T61: ficha invalida '+x.external_key);
+  }
+  const records=items.map(x=>({section:x.section,concept:x.external_key+' · '+x.concept,
+    source_page:x.source_page,manual_page:x.manual_page,source_evidence:x.source_evidence,
+    eligible:x.exam_eligible===true}));
+  const c=await db.connect();
+  let indexed;
+  try{
+    await c.query('BEGIN');
+    const locked=await c.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(locked.rowCount!==1||healthTopicNumber192(locked.rows[0])!==61)
+      throw Error('T61: identidad de tema no confirmada');
+    const existing=await c.query('SELECT TRIM(pdf_sha256) sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
+    if(existing.rowCount&&existing.rows[0].sha!==sha)
+      throw Error('T61: existe otro PDF; no se sobrescribe');
+    await c.query(`INSERT INTO coverage_items(topic_id,section,concept,item_type,
+      evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+      SELECT $1,r.section,r.concept,'dato_salud_preparado','literal_documental',
+        r.source_page,r.manual_page,r.source_evidence,r.eligible
+      FROM jsonb_to_recordset($2::jsonb) r(section text,concept text,
+        source_page integer,manual_page text,source_evidence text,eligible boolean)
+      ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
+        source_evidence=EXCLUDED.source_evidence,exam_relevant=EXCLUDED.exam_relevant`,[topic.id,JSON.stringify(records)]);
+    await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
+      [topic.id,sha,126,bytes.length,bytes]);
+    await c.query(`INSERT INTO topic_source_documents(topic_id,document_name)
+      VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
+      document_name=EXCLUDED.document_name,updated_at=NOW()`,
+      [topic.id,'local-pdf:sha256:'+sha]);
+    await c.query(`UPDATE topics SET file_search_indexed=FALSE,
+      total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
+      worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
+      WHERE id=$1`,[topic.id]);
+    const result=await c.query('SELECT total_items,worked_items FROM topics WHERE id=$1',[topic.id]);
+    indexed=Number(result.rows[0].total_items);
+    await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+  // Release the coverage transaction/connection BEFORE importing the graphics.
+  // No pool starvation with max=1; documents persist even if figures fail.
+  const graphics=await healthImportOnce192({...topic,total_items:indexed},pdfPath);
+  const counted=await db.query('SELECT total_items,worked_items FROM topics WHERE id=$1',[topic.id]);
+    const total=Number(counted.rows[0].total_items),worked=Number(counted.rows[0].worked_items);
+    console.log('T61_INDEXACION_COMPLETA',JSON.stringify({topicId:topic.id,total,
+      preparedFigures:graphics.images,preparedQuestions:graphics.questions,sourceSha:sha}));
+    return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
+      workedItems:worked,pendingItems:total-worked,
+      coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
+      preparedQuestions:graphics.questions,preparedFigures:graphics.images,source:'PDF local T61'};
+}
+
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
@@ -8982,6 +9067,13 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+    if(healthTopicNumber192(topic)===61){
+      const done=await t61PreparedIndex(topic,pdfPath);
+      await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
+        topic:done.topic,totalItems:done.totalItems,workedItems:done.workedItems,
+        pendingItems:done.pendingItems,coveragePercentage:done.coveragePercentage});
+      res.json(done);return;
+    }
     if(healthTopicNumber192(topic)===60){
       const done=await t60PreparedIndex229(topic,pdfPath);
       await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
