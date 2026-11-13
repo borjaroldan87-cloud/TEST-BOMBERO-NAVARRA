@@ -3227,8 +3227,32 @@ function healthLoadData192(n){
      !Number.isInteger(data.pdf_page_count)||data.pdf_page_count<1)
     throw Error(`HEALTH192: modulo T${n} incompleto`);
   if(n===61)t61ApplyPreparedCorrections244(data);
+  if(n===62)t62BalanceAnswers245(data);
   healthCache192.set(n,data);return data;
 }
+// T62-245: equilibrar A/B/C/D de las 52 preguntas preparadas SIN cambiar
+// la respuesta correcta ni el contenido de ninguna opción. Una sola vez por
+// carga del módulo, de forma determinista; no introducir nuevos distractores.
+function t62BalanceAnswers245(data){
+  if(data.questions.length!==52)throw Error('T62-245: se esperan 52 preguntas');
+  const order=[2,0,3,1];
+  for(let i=0;i<data.questions.length;i++){
+    const q=data.questions[i];
+    if(!Array.isArray(q.options)||q.options.length!==4||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3)
+      throw Error('T62-245: respuesta incorrecta de origen '+q.external_key);
+    const originalCorrect=q.options[q.correct_index];
+    const target=order[i%4], shift=(target-q.correct_index+4)%4;
+    q.options=Array.from({length:4},(_,index)=>
+      q.options[(index-shift+4)%4]);
+    q.correct_index=target;
+    if(q.options[target]!==originalCorrect)
+      throw Error('T62-245: desplazamiento inconsistente '+q.external_key);
+  }
+  const letters=[0,1,2,3].map(index=>data.questions.filter(q=>q.correct_index===index).length);
+  if(letters.some(count=>count!==13))throw Error('T62-245: reparto de respuestas inconsistente');
+}
+
 function healthWriteImages192(onlyTopic=0){
   let count=0;
   for(const n of Object.keys(HEALTH_NAMES_192).map(Number)){
@@ -9016,13 +9040,63 @@ async function t61StorePdfChunks241(topicId,bytes,sha){
   return count;
 }
 
+// T62-245: el control consulta la base real, no las previsiones del frontend.
+// Permite recuperar una segunda fase incompleta sin repetir la extracción.
+async function t62VerifyStored245(topicId){
+  const result=await db.query(`SELECT
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1) AS records,
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1
+      AND exam_relevant IS TRUE) AS eligible,
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1
+      AND exam_relevant IS TRUE AND item_type='grafica_salud_original') AS graphics,
+    (SELECT COUNT(*)::int FROM question_bank q JOIN coverage_items c
+      ON c.id=q.coverage_item_id WHERE c.topic_id=$1 AND q.active IS TRUE
+      AND q.question_family='GRAFICA') AS graphic_questions,
+    (SELECT page_count FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_pages,
+    (SELECT BTRIM(pdf_sha256) FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_sha,
+    (SELECT size_bytes FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_size`,[topicId]);
+  return result.rows[0];
+}
+async function t62CompleteAndVerify245(topic,runId){
+  await setCoverageRunState(runId,{status:'processing',stage:'importando_52_graficos',
+    topicId:Number(topic.id),topic:topic.name});
+  // Sin uploadPath: la segunda fase se verifica contra el PDF YA guardado.
+  await healthImportOnce192({...topic,total_items:1},null);
+  const status=await t62VerifyStored245(topic.id);
+  if(Number(status?.records)!==1955||Number(status?.eligible)!==1180||
+     Number(status?.graphics)!==52||Number(status?.graphic_questions)!==52||
+     Number(status?.pdf_pages)!==92||Number(status?.pdf_size)!==4823661||
+     status?.pdf_sha!=='f81dcff31190f37a7f820eb04a1ffe7a2660eee15dfc1e3cf79ddc62529a9bbf')
+    throw Error('T62-245: indexación incompleta, no presentar como terminada '+JSON.stringify(status));
+  const upd=await db.query(`UPDATE topics SET total_items=$2 WHERE id=$1 RETURNING total_items,worked_items`,
+    [topic.id,Number(status.eligible)]);
+  console.log('T62_245_VERIFICADO',JSON.stringify({topicId:topic.id,...status}));
+  const total=Number(upd.rows[0]?.total_items||0),worked=Number(upd.rows[0]?.worked_items||0);
+  return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
+    workedItems:worked,pendingItems:total-worked,
+    coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
+    preparedFigures:Number(status.graphics),preparedQuestions:Number(status.graphic_questions),
+    pdfPages:Number(status.pdf_pages),pdfHashVerified:true,
+    documentaryCandidates:1903,documentaryEligible:1128,
+    documentaryNotEligiblePendingIndividualAudit:775};
+}
+async function t62ResumeSaved245(topic,runId){
+  const status=await t62VerifyStored245(topic.id);
+  if(Number(status?.pdf_pages)!==92||Number(status?.pdf_size)!==4823661||
+     status?.pdf_sha!=='f81dcff31190f37a7f820eb04a1ffe7a2660eee15dfc1e3cf79ddc62529a9bbf'||
+     Number(status?.records)<1903)throw Error('T62-245: no hay PDF/cobertura completa para reanudar');
+  return t62CompleteAndVerify245(topic,runId);
+}
+
 // T62 — NRBQ: local validated, prepared source. Do not invoke Gemini to re-extract
 // or regenerate the 52 image questions. All 52 user-selected images are compulsory.
-async function t62PreparedIndex(topic,pdfPath){
+async function t62PreparedIndex(topic,pdfPath,runId=""){
   if(healthTopicNumber192(topic)!==62)throw Error('T62: tema incorrecto');
   const data=healthLoadData192(62);
   if(!data||data.images.length!==52||data.questions.length!==52||
-     data.coverage_additions.length<1000)throw Error('T62: modulo documental/gráfico incompleto');
+     data.coverage_additions.length!==1903||
+     data.coverage_additions.filter(x=>x.exam_eligible===true).length!==1128)
+    throw Error('T62-245: paquete documental/gráfico incompleto o distinto');
   const bytes=fs.readFileSync(pdfPath);
   const sha=createHash('sha256').update(bytes).digest('hex');
   if(sha!==data.pdf_sha256||bytes.length>20*1024*1024||
@@ -9040,6 +9114,8 @@ async function t62PreparedIndex(topic,pdfPath){
       source_page:x.source_page,manual_page:x.manual_page,
       source_evidence:x.source_evidence,eligible:x.exam_eligible===true});
   }
+  await setCoverageRunState(runId,{status:'processing',stage:'guardando_1903_fichas_y_pdf',
+    topicId:Number(topic.id),topic:topic.name});
   const c=await db.connect();
   let indexed;
   try{
@@ -9077,17 +9153,9 @@ async function t62PreparedIndex(topic,pdfPath){
     if(indexed<1000)throw Error('T62: cobertura preparada incompleta');
     await c.query('COMMIT');
   }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
-  // Release DB lock before importing graphics. Any graphics import failure can
-  // be retried without paying for a new PDF extraction or rewriting the source.
-  const graphics=await healthImportOnce192({...topic,total_items:indexed},pdfPath);
-  const counted=await db.query('SELECT total_items,worked_items FROM topics WHERE id=$1',[topic.id]);
-  const total=Number(counted.rows[0]?.total_items||0),worked=Number(counted.rows[0]?.worked_items||0);
-  console.log('T62_NRBQ_INDEXACION_COMPLETA',JSON.stringify({topicId:topic.id,
-    total,graphics:graphics.images,questions:graphics.questions,pdfSha256:sha}));
-  return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
-    workedItems:worked,pendingItems:total-worked,
-    coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
-    preparedFigures:graphics.images,preparedQuestions:graphics.questions};
+  // La fase 1 es persistente. Si se corta la conexión antes de la fase 2,
+  // el siguiente intento reanuda los gráficos sin volver a leer con Gemini.
+  return t62CompleteAndVerify245(topic,runId);
 }
 
 // T61: Indexación documental local sin invocar Gemini. Acepta solo el PDF
@@ -9230,10 +9298,9 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         );
     }
 
-    if(!fs.existsSync(pdfPath)){
-      throw new Error(
-        "No se encuentra el PDF para analizar."
-      );
+    const t62LostTemp245=!fs.existsSync(pdfPath)&&healthTopicNumber192(topic)===62;
+    if(!fs.existsSync(pdfPath) && !t62LostTemp245){
+      throw new Error("No se encuentra el PDF para analizar.");
     }
     // Excluir dos reindexaciones simultáneas del mismo tema incluso con
     // varias instancias de Node. La sesión PG libera el bloqueo al terminar.
@@ -9254,7 +9321,9 @@ app.post("/api/analyze-coverage", async(req,res)=>{
       }
     );
     if(healthTopicNumber192(topic)===62){
-      const done=await t62PreparedIndex(topic,pdfPath);
+      const done=t62LostTemp245
+        ? await t62ResumeSaved245(topic,coverageRunId)
+        : await t62PreparedIndex(topic,pdfPath,coverageRunId);
       await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
         topic:done.topic,totalItems:done.totalItems,workedItems:done.workedItems,
         pendingItems:done.pendingItems,coveragePercentage:done.coveragePercentage});
@@ -10215,6 +10284,21 @@ app.get('/api/iiff-local-status',async(req,res)=>{
       source:d?.pdf_sha256?'postgresql':'not_ready'});
   }catch(e){return res.status(500).json({ok:false,error:String(e.message||e)});}
 });
+// T62-245: diagnóstico en lectura, para verificar la instalación en PostgreSQL.
+app.get('/api/t62-status',async(req,res)=>{
+  try{
+    const rows=await db.query(`SELECT id,name,total_items FROM topics
+      WHERE block='especifico' AND topic_order=62 ORDER BY id DESC LIMIT 1`);
+    if(!rows.rows.length)return res.json({ok:true,topicFound:false});
+    const t=rows.rows[0],state=await t62VerifyStored245(t.id);
+    const complete=Number(state.records)===1955&&Number(state.eligible)===1180&&
+      Number(state.graphics)===52&&Number(state.graphic_questions)===52&&
+      Number(state.pdf_pages)===92&&Number(state.pdf_size)===4823661&&
+      state.pdf_sha==='f81dcff31190f37a7f820eb04a1ffe7a2660eee15dfc1e3cf79ddc62529a9bbf';
+    return res.json({ok:true,topicFound:true,topicId:t.id,topic:t.name,
+      topicTotal:Number(t.total_items),installedAndVerified:complete,db:state});
+  }catch(error){return res.status(500).json({ok:false,error:String(error.message||error)});}
+});
 app.get("/api/coverage-run/:runId", async(req,res)=>{
   try{
     const runId=
@@ -10259,7 +10343,8 @@ app.get("/api/coverage-run/:runId", async(req,res)=>{
        Date.now()-Date.parse(state.updatedAt||'')>180000){
       const related=await db.query('SELECT name,block FROM topics WHERE id=$1 LIMIT 1',
         [Number(state.topicId)]);
-      if(t40Topic157(related.rows[0])){
+      const isT62Stale245=healthTopicNumber192(related.rows[0])===62;
+      if(t40Topic157(related.rows[0])||isT62Stale245){
       const probe=await db.connect();
       try{
         const lockId=900000000000+Number(state.topicId);
@@ -10267,7 +10352,9 @@ app.get("/api/coverage-run/:runId", async(req,res)=>{
         if(check.rows[0]?.free===true){
           await probe.query('SELECT pg_advisory_unlock($1::bigint)',[lockId]);
           return res.json({ok:true,found:true,...state,status:'error',
-            error:'El análisis se interrumpió tras un reinicio. Si existen bloques guardados, se reutilizarán al volver a cargar el mismo PDF; no crees otro tema.'});
+            error:isT62Stale245
+              ? 'El análisis de NRBQ se interrumpió por un reinicio. Reintenta sobre el MISMO tema; se recuperará el PDF persistido si existe.'
+              : 'El análisis se interrumpió tras un reinicio. Si existen bloques guardados, se reutilizarán al volver a cargar el mismo PDF; no crees otro tema.'});
         }
       }finally{probe.release();}
       }
