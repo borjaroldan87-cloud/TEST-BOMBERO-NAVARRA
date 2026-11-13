@@ -3049,7 +3049,7 @@ const HEALTH_NAMES_192={
   54:'VEHICULOS DE BOMBEROS',
   55:'INCENDIOS INDUSTRIALES',
   56:'APEO Y PODA DE ARBOLADO',
-  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES',61:'RESCATE EN ACCIDENTES DE TRAFICO'
+  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES',61:'RESCATE EN ACCIDENTES DE TRAFICO',62:'NRBQ'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3063,9 +3063,10 @@ const HEALTH_ALIAS_192={
   54:/VEHICULOS DE BOMBEROS/,
   55:/INCENDIOS INDUSTRIALES/,
   56:/APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/,
-  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/
+  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/,62:/NRBQ/
 };
 const HEALTH_EXAM_STYLE_192={
+  62:'T62 NRBQ: Exclusivamente manual CEIS NRBQ 92 paginas, sin fuentes externas. PRIORIDAD ALTA: numeros ONU y NIP, paneles naranjas, etiquetas ADR, divisiones 4.1/4.2/4.3 y 5.1/5.2, materia infecciosa y radioactiva, HAZCHEM, NFPA, riesgos CLP, tipos y secciones de cisterna, colores basico/complementario de tuberias, densidades, presion, temperatura, formulas del PDF y unidades. Preguntas de cuatro opciones tecnicamente cercanas y UNA correcta. Las 52 imagenes seleccionadas ya disponen de pregunta grafica preparada: no re-interpretar ni crear figuras. NO memorizar toda la tabla periodica. Numero 5.2 = peroxidos organicos y 5.1 = comburentes; no deducir la clase por colores de un esquema general no reglamentario. Referencia p. impresa 445-536. Preguntar con estilo 2026, 2024 y 2023. No inventar numeros ni procedimientos.',
   58:'MODELO T58: relacionar nudo, uso y perdida de resistencia; distinguir retencion, sujecion y anticaidas; combinar la geometria de triangulaciones y fuerzas. Cuatro opciones tecnicamente plausibles y solo una correcta. Usar exclusivamente el PDF del tema.',
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
   47:'MODELO (no repetir): relacionar las tres fases de mortalidad traumática con lesiones y momento temporal; cambiar UNA fase o causa en cada distractor. Distinguir segundos/minutos, primeras horas y dias/semanas.',
@@ -3201,7 +3202,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[01])\b/);
+  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[0-2])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3209,7 +3210,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':n===62?'t62_nrbq_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3233,7 +3234,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       // T58: preserve user-selected GitHub images as-is, without overwriting.
@@ -3251,8 +3252,10 @@ function healthWriteImages192(onlyTopic=0){
         throw Error(`HEALTH192: imagen o SHA invalido ${a.file}`);
       const dest=path.join(dir,a.file);
       if(fs.existsSync(dest)){
-        if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha)
-          throw Error(`HEALTH192: imagen distinta ya instalada ${a.file}`);
+        if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==sha){
+          if(n!==62)throw Error(`HEALTH192: imagen distinta ya instalada ${a.file}`);
+          fs.writeFileSync(dest,bytes);count++;
+        }
       }else{fs.writeFileSync(dest,bytes);count++;}
     }
   }
@@ -3451,11 +3454,11 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54||n===55||n===56||n===57||n===58||n===60||n===61){
+    if(n===54||n===55||n===56||n===57||n===58||n===60||n===61||n===62){
       const records=[];
       for(const item of data.coverage_additions){
-        if(n===61 && item.exam_eligible!==true)continue;
-        if(!item.external_key?.startsWith(`T${n}-EJ-MA-`)||
+        if((n===61||n===62) && item.exam_eligible!==true)continue;
+        if(!(n===62?/^T62-(?:EJ|REV)-MA-/.test(item.external_key||''):item.external_key?.startsWith(`T${n}-EJ-MA-`))||
            !Number.isInteger(item.source_page)||item.source_page<1||
            item.source_page>data.pdf_page_count||!item.concept||!item.source_evidence)
           throw Error(`HEALTH192: ficha adicional T${n} inválida`);
@@ -3497,7 +3500,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':`salud-t${n}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':`salud-t${n}`;
       const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
@@ -3577,7 +3580,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const graphic={...item.graphic,assetId:g.id,publicUrl:g.uri,
         sourceId:g.sourceId,assetType:'individual',
         crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
-      if(n===58||n===61){
+      if(n===58||n===61||n===62){
         // SERVER223/T61: preserve historical question IDs, answers and sessions.
         // Select by exact content, never by a legacy checksum from a prior release.
         const previous=await client.query(`SELECT id,stem,options,correct_index,active
@@ -3648,6 +3651,11 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         ['vehiculos/Screenshot_20260924-180917-display-0.png.png',
          'vehiculos/Screenshot_20260924-141506-display-0.png~3.jpg',
          'vehiculos/Screenshot_20260924-180959-display-0.png.png']]);
+    }
+    if(n===62){
+      await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+        WHERE topic_folder='nrbq' AND source_file LIKE 'Screenshot_%'
+        AND is_usable=TRUE`);
     }
     await healthApplyCorrections205(client,topic,n);
     await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
@@ -9007,6 +9015,80 @@ async function t61StorePdfChunks241(topicId,bytes,sha){
   return count;
 }
 
+// T62 — NRBQ: local validated, prepared source. Do not invoke Gemini to re-extract
+// or regenerate the 52 image questions. All 52 user-selected images are compulsory.
+async function t62PreparedIndex(topic,pdfPath){
+  if(healthTopicNumber192(topic)!==62)throw Error('T62: tema incorrecto');
+  const data=healthLoadData192(62);
+  if(!data||data.images.length!==52||data.questions.length!==52||
+     data.coverage_additions.length<1000)throw Error('T62: modulo documental/gráfico incompleto');
+  const bytes=fs.readFileSync(pdfPath);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(sha!==data.pdf_sha256||bytes.length>20*1024*1024||
+     bytes.subarray(0,5).toString('latin1')!=='%PDF-')
+    throw Error('T62: documento diferente del original CEIS');
+  const original=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(original.getPageCount()!==92)throw Error('T62: el PDF debe tener 92 paginas');
+  const records=[];
+  for(const x of data.coverage_additions){
+    if(!/^T62-(?:EJ|REV)-MA-\d{4}$/.test(x.external_key)||
+       !x.concept||!x.source_evidence||!Number.isInteger(x.source_page)||
+       x.source_page<1||x.source_page>92)
+      throw Error('T62: ficha inválida '+x.external_key);
+    records.push({section:x.section,concept:x.external_key+' · '+x.concept,
+      source_page:x.source_page,manual_page:x.manual_page,
+      source_evidence:x.source_evidence,eligible:x.exam_eligible===true});
+  }
+  const c=await db.connect();
+  let indexed;
+  try{
+    await c.query('BEGIN');
+    const lock=await c.query('SELECT id,name,block FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(lock.rowCount!==1||healthTopicNumber192(lock.rows[0])!==62)
+      throw Error('T62: tema no coincide');
+    const existing=await c.query('SELECT TRIM(pdf_sha256) sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
+    if(existing.rowCount&&existing.rows[0].sha!==sha)
+      throw Error('T62: existe otro documento; no sobrescribir');
+    // Coverage and original bytes committed in a single transaction.
+    await c.query(`INSERT INTO coverage_items(topic_id,section,concept,item_type,
+      evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+      SELECT $1,r.section,r.concept,'dato_salud_preparado','literal_documental',
+        r.source_page,r.manual_page,r.source_evidence,r.eligible
+      FROM jsonb_to_recordset($2::jsonb) r(section text,concept text,
+        source_page integer,manual_page text,source_evidence text,eligible boolean)
+      ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
+        source_evidence=EXCLUDED.source_evidence,exam_relevant=EXCLUDED.exam_relevant`,
+      [topic.id,JSON.stringify(records)]);
+    await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,92,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [topic.id,sha,bytes.length,bytes]);
+    await c.query(`INSERT INTO topic_source_documents(topic_id,document_name)
+      VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
+        document_name=EXCLUDED.document_name,updated_at=NOW()`,
+      [topic.id,'local-pdf:sha256:'+sha]);
+    await c.query(`UPDATE topics SET topic_order=62,file_search_indexed=FALSE,
+      total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
+      worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
+      WHERE id=$1`,[topic.id]);
+    const row=await c.query('SELECT total_items FROM topics WHERE id=$1',[topic.id]);
+    indexed=Number(row.rows[0]?.total_items||0);
+    if(indexed<1000)throw Error('T62: cobertura preparada incompleta');
+    await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+  // Release DB lock before importing graphics. Any graphics import failure can
+  // be retried without paying for a new PDF extraction or rewriting the source.
+  const graphics=await healthImportOnce192({...topic,total_items:indexed},pdfPath);
+  const counted=await db.query('SELECT total_items,worked_items FROM topics WHERE id=$1',[topic.id]);
+  const total=Number(counted.rows[0]?.total_items||0),worked=Number(counted.rows[0]?.worked_items||0);
+  console.log('T62_NRBQ_INDEXACION_COMPLETA',JSON.stringify({topicId:topic.id,
+    total,graphics:graphics.images,questions:graphics.questions,pdfSha256:sha}));
+  return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
+    workedItems:worked,pendingItems:total-worked,
+    coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
+    preparedFigures:graphics.images,preparedQuestions:graphics.questions};
+}
+
 // T61: Indexación documental local sin invocar Gemini. Acepta solo el PDF
 // conjunto exacto de los dos documentos suministrados por el opositor.
 async function t61PreparedIndex(topic,pdfPath){
@@ -9170,6 +9252,13 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+    if(healthTopicNumber192(topic)===62){
+      const done=await t62PreparedIndex(topic,pdfPath);
+      await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
+        topic:done.topic,totalItems:done.totalItems,workedItems:done.workedItems,
+        pendingItems:done.pendingItems,coveragePercentage:done.coveragePercentage});
+      res.json(done);return;
+    }
     if(healthTopicNumber192(topic)===61){
       const done=await t61PreparedIndex(topic,pdfPath);
       await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
@@ -17613,11 +17702,11 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
       {figuraOriginal:{concepto:String(t.graphicAsset.concept||''),
         descripcion:String(t.graphicAsset.description||'').slice(0,450)}}:{}),
     }));
-  const calibratedTopic=targets.length>0 && targets.every(t=>[55,56,60].includes(healthTopicNumber192(t))) && targets.every(t=>healthTopicNumber192(t)===healthTopicNumber192(targets[0]));
+  const calibratedTopic=targets.length>0 && targets.every(t=>[55,56,60,62].includes(healthTopicNumber192(t))) && targets.every(t=>healthTopicNumber192(t)===healthTopicNumber192(targets[0]));
   const t55Styles=calibratedTopic?(healthLoadData192(healthTopicNumber192(targets[0]))?.style_examples||[]):[];
   // Dos modelos cortos, NO fuente de datos del objetivo; coste de prompt acotado.
   const t55Calibration=t55Styles.length?`EJEMPLOS DE FORMATO DEL TEMA, NO HECHOS PARA LOS OBJETIVOS:
-${JSON.stringify([t55Styles[0],t55Styles[2]].filter(Boolean).map(x=>({
+${JSON.stringify([t55Styles[0],t55Styles[healthTopicNumber192(targets[0])===62?24:2]].filter(Boolean).map(x=>({
     stem:x.stem,options:x.options,explanation:x.explanation})))}
 No copies estos ejercicios, cifras ni respuestas: sirven SOLO para calibrar claridad y distractores.`:'';
   const styleTitle=geo
