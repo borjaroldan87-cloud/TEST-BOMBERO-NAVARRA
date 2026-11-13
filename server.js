@@ -3049,7 +3049,7 @@ const HEALTH_NAMES_192={
   54:'VEHICULOS DE BOMBEROS',
   55:'INCENDIOS INDUSTRIALES',
   56:'APEO Y PODA DE ARBOLADO',
-  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES',61:'RESCATE EN ACCIDENTES DE TRAFICO',62:'NRBQ'
+  57:'RIESGO ELECTRICO',58:'SALVAMENTO EN ALTURA',59:'ESTRUCTURAS COLAPSADAS',60:'EDIFICACIONES',61:'RESCATE EN ACCIDENTES DE TRAFICO',62:'NRBQ',63:'HERRAMIENTAS Y EQUIPOS OPERATIVOS'
 };
 const HEALTH_ALIAS_192={
   46:/SOPORTE VITAL/,
@@ -3063,9 +3063,10 @@ const HEALTH_ALIAS_192={
   54:/VEHICULOS DE BOMBEROS/,
   55:/INCENDIOS INDUSTRIALES/,
   56:/APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/,
-  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/,62:/NRBQ/
+  57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/,62:/NRBQ/,63:/HERRAMIENTAS Y EQUIPOS OPERATIVOS/
 };
 const HEALTH_EXAM_STYLE_192={
+  63:'T63 HERRAMIENTAS Y EQUIPOS OPERATIVOS: Solo 98 hojas del PDF CEIS y registros preparados. Siete bloques: proteccion respiratoria, extincion, corte, extricaje, arrastre/elevacion, proteccion electrica e instrumentos de medida. Priorizar asociaciones exactas de valores, limites, normativa citada, configuraciones, capacidades, componentes, secuencias, excepciones, tablas y ejercicios de autonomia ERA o presiones presentes en el texto. Diferenciar medidas y unidades; evitar textos genericos o preguntas resueltas por la imagen. Solo cinco graficas de recogida de mangueras elegidas por el usuario (doble, devanadera, madeja, zeta, Cleveland, pagina impresa 64). Preguntas graficas prefabricadas, nunca generadas desde figuras ajenas. Cuatro opciones tecnicamente cercanas y una respuesta demostrable exclusivamente con el PDF; no otras fuentes.',
   62:'T62 NRBQ: Exclusivamente manual CEIS NRBQ 92 paginas, sin fuentes externas. PRIORIDAD ALTA: numeros ONU y NIP, paneles naranjas, etiquetas ADR, divisiones 4.1/4.2/4.3 y 5.1/5.2, materia infecciosa y radioactiva, HAZCHEM, NFPA, riesgos CLP, tipos y secciones de cisterna, colores basico/complementario de tuberias, densidades, presion, temperatura, formulas del PDF y unidades. Preguntas de cuatro opciones tecnicamente cercanas y UNA correcta. Las 52 imagenes seleccionadas ya disponen de pregunta grafica preparada: no re-interpretar ni crear figuras. NO memorizar toda la tabla periodica. Numero 5.2 = peroxidos organicos y 5.1 = comburentes; no deducir la clase por colores de un esquema general no reglamentario. Referencia p. impresa 445-536. Preguntar con estilo 2026, 2024 y 2023. No inventar numeros ni procedimientos.',
   58:'MODELO T58: relacionar nudo, uso y perdida de resistencia; distinguir retencion, sujecion y anticaidas; combinar la geometria de triangulaciones y fuerzas. Cuatro opciones tecnicamente plausibles y solo una correcta. Usar exclusivamente el PDF del tema.',
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
@@ -3202,7 +3203,7 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
-  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[0-2])\b/);
+  const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[0-3])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
   return HEALTH_ALIAS_192[n]?.test(name)?n:0;
@@ -3210,7 +3211,7 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':n===62?'t62_nrbq_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':n===62?'t62_nrbq_data.js':n===63?'t63_herramientas_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
@@ -3259,7 +3260,7 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
-    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':`salud-t${n}`);
+    const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':n===63?'../t63-prepared':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
       // T58: preserve user-selected GitHub images as-is, without overwriting.
@@ -3479,10 +3480,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     // SERVER201: atomized tables from T54 are inserted in ONE SQL statement,
     // not hundreds of sequential calls at every server startup. Other themes
     // retain their original import path unchanged. No Gemini dependency here.
-    if(n===54||n===55||n===56||n===57||n===58||n===60||n===61||n===62){
+    if(n===54||n===55||n===56||n===57||n===58||n===60||n===61||n===62||n===63){
       const records=[];
       for(const item of data.coverage_additions){
-        if((n===61||n===62) && item.exam_eligible!==true)continue;
+        if((n===61||n===62||n===63) && item.exam_eligible!==true)continue;
         if(!(n===62?/^T62-(?:EJ|REV)-MA-/.test(item.external_key||''):item.external_key?.startsWith(`T${n}-EJ-MA-`))||
            !Number.isInteger(item.source_page)||item.source_page<1||
            item.source_page>data.pdf_page_count||!item.concept||!item.source_evidence)
@@ -3525,14 +3526,14 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
-      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':`salud-t${n}`;
-      const uri=`/graphics/${topicGraphicFolder}/${asset.file}`;
-      const sourceId=`${topicGraphicFolder}/${asset.file}`;
+      const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':n===63?'herramientas':`salud-t${n}`;
+      const uri=n===63?`/t63-prepared/${asset.file}`:`/graphics/${topicGraphicFolder}/${asset.file}`;
+      const sourceId=n===63?`herramientas/${asset.source_github_file}`:`${topicGraphicFolder}/${asset.file}`;
       const row=await client.query(`INSERT INTO graphic_assets(source_id,topic_folder,
         source_file,public_url,asset_index,asset_type,concept,description,
         source_evidence,crop_x,crop_y,crop_width,crop_height,mask_regions,
         is_official_reference,is_usable,analysis_status,sanitization_version)
-        VALUES($1,$2,$3,$4,0,'individual',$5,$6,$7,0,0,1,1,
+        VALUES($1,$2,$3,$4,${n===63?1:0},'individual',$5,$6,$7,0,0,1,1,
         '[]'::jsonb,FALSE,TRUE,'analyzed',2)
         ON CONFLICT(source_id,asset_index) DO UPDATE SET
         concept=EXCLUDED.concept,description=EXCLUDED.description,
@@ -3605,7 +3606,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const graphic={...item.graphic,assetId:g.id,publicUrl:g.uri,
         sourceId:g.sourceId,assetType:'individual',
         crop:{x:0,y:0,width:1,height:1},maskRegions:[]};
-      if(n===58||n===61||n===62){
+      if(n===58||n===61||n===62||n===63){
         // SERVER223/T61: preserve historical question IDs, answers and sessions.
         // Select by exact content, never by a legacy checksum from a prior release.
         const previous=await client.query(`SELECT id,stem,options,correct_index,active
@@ -3676,6 +3677,16 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
         ['vehiculos/Screenshot_20260924-180917-display-0.png.png',
          'vehiculos/Screenshot_20260924-141506-display-0.png~3.jpg',
          'vehiculos/Screenshot_20260924-180959-display-0.png.png']]);
+    }
+    if(n===63){
+      // Solo las cinco imágenes elegidas, pero ya extraídas sin pies de figura.
+      // Los originales GitHub se conservan intactos, pero no son utilizables
+      // por Gemini; tampoco lo son posibles análisis antiguos suplementarios.
+      await client.query(`UPDATE graphic_assets SET
+          is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+        WHERE topic_folder='herramientas'
+          AND NOT (asset_index=1 AND source_id=ANY($1::text[]))`,
+        [data.images.map(a=>'herramientas/'+a.source_github_file)]);
     }
     if(n===62){
       await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
@@ -9234,6 +9245,125 @@ async function t61PreparedIndex(topic,pdfPath){
       preparedQuestions:graphics.questions,preparedFigures:graphics.images,source:'PDF local T61'};
 }
 
+// T63-263: indexación preparada y cinco figuras EXACTAMENTE elegidas en GitHub.
+// No llama a Gemini, no introduce imágenes externas, no altera las filas de
+// otros temas y mantiene el PDF CEIS original byte a byte.
+async function t63Verify263(topicId){
+  const r=await db.query(`SELECT
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1
+      AND concept LIKE 'T63-EJ-MA-%') AS documentary_records,
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1
+      AND concept LIKE 'T63-EJ-MA-%' AND exam_relevant=TRUE) AS eligible_records,
+    (SELECT COUNT(*)::int FROM coverage_items WHERE topic_id=$1
+      AND concept LIKE 'T63-GRAF-%' AND item_type='grafica_salud_original'
+      AND exam_relevant=TRUE) AS graphics,
+    (SELECT COUNT(*)::int FROM question_bank qb JOIN coverage_items ci
+      ON ci.id=qb.coverage_item_id WHERE ci.topic_id=$1
+      AND ci.concept LIKE 'T63-GRAF-%' AND qb.question_family='GRAFICA'
+      AND qb.active=TRUE) AS questions,
+    (SELECT COUNT(*)::int FROM graphic_assets WHERE topic_folder='herramientas'
+      AND asset_index=1 AND source_id=ANY($2::text[]) AND is_usable=TRUE) AS clean_assets,
+    (SELECT page_count FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_pages,
+    (SELECT BTRIM(pdf_sha256) FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_sha,
+    (SELECT OCTET_LENGTH(pdf_bytes) FROM topic_local_pdfs WHERE topic_id=$1) AS pdf_bytes`,
+    [topicId,healthLoadData192(63).images.map(x=>'herramientas/'+x.source_github_file)]);
+  return r.rows[0]||{};
+}
+async function t63Finish263(topic,runId){
+  await setCoverageRunState(runId,{status:'processing',stage:'vinculando_cinco_figuras_preparadas',topicId:topic.id});
+  const imported=await healthImportOnce192({...topic,total_items:1},null);
+  const status=await t63Verify263(topic.id);
+  const data=healthLoadData192(63),expected=data.coverage_additions.length,
+        eligible=data.coverage_additions.filter(x=>x.exam_eligible===true).length;
+  if(Number(status.documentary_records)!==expected||Number(status.eligible_records)!==eligible||
+     Number(status.graphics)!==5||Number(status.questions)!==5||
+     Number(status.clean_assets)!==5||Number(status.pdf_pages)!==data.pdf_page_count||
+     String(status.pdf_sha)!==data.pdf_sha256||Number(status.pdf_bytes)<1000)
+    throw Error('T63-263: importación o integridad incompleta '+JSON.stringify(status));
+  const t=await db.query(`SELECT total_items,worked_items FROM topics WHERE id=$1`,[topic.id]);
+  const total=Number(t.rows[0]?.total_items||0),worked=Number(t.rows[0]?.worked_items||0);
+  if(total!==eligible+5)throw Error('T63-263: cobertura elegible discordante');
+  console.log('T63_263_VERIFICADO',JSON.stringify({topicId:topic.id,records:expected,eligible,figuras:5,questions:5,pdfSha:status.pdf_sha}));
+  return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
+    workedItems:worked,pendingItems:Math.max(0,total-worked),
+    coveragePercentage:total?Number((100*worked/total).toFixed(1)):0,
+    preparedFigures:5,preparedQuestions:5,pdfPages:98,pdfHashVerified:true,
+    documentaryCandidates:expected,documentaryEligibleProvisional:eligible,
+    documentaryPendingSemanticReview:expected-eligible};
+}
+async function t63ResumeSaved263(topic,runId){
+  const status=await t63Verify263(topic.id);
+  const data=healthLoadData192(63);
+  if(Number(status.pdf_pages)!==98||String(status.pdf_sha)!==data.pdf_sha256||
+     Number(status.documentary_records)!==data.coverage_additions.length)
+    throw Error('T63-263: falta el PDF o el inventario documental para reanudar. Reutiliza la subida original, sin borrar el tema.');
+  return t63Finish263(topic,runId);
+}
+async function t63PreparedIndex263(topic,pdfPath,runId){
+  if(healthTopicNumber192(topic)!==63)throw Error('T63-263: tema distinto de Herramientas');
+  const data=healthLoadData192(63);
+  if(!data||data.images.length!==5||data.questions.length!==5||
+     data.coverage_additions.length<1500||
+     new Set(data.images.map(x=>x.source_github_file)).size!==5)
+    throw Error('T63-263: paquete de las cinco imágenes o inventario incompleto');
+  const bytes=fs.readFileSync(pdfPath);
+  const sha=createHash('sha256').update(bytes).digest('hex');
+  if(bytes.subarray(0,5).toString('latin1')!=='%PDF-'||sha!==data.pdf_sha256||
+     bytes.length>20*1024*1024)throw Error('T63-263: documento distinto del manual verificado');
+  const doc=await PDFDocument.load(bytes,{updateMetadata:false});
+  if(doc.getPageCount()!==98)throw Error('T63-263: páginas PDF diferentes');
+  const seen=new Set(),records=[];
+  for(const x of data.coverage_additions){
+    if(!/^T63-EJ-MA-\d{4}$/.test(x.external_key)||seen.has(x.external_key)||
+       !x.section||!x.concept||!x.source_evidence||
+       !Number.isInteger(x.source_page)||x.source_page<4||x.source_page>97)
+       throw Error('T63-263: conocimiento documental inválido '+x.external_key);
+    seen.add(x.external_key);
+    records.push({section:x.section,concept:x.external_key+' · '+x.concept,
+      source_page:x.source_page,manual_page:x.manual_page,
+      source_evidence:x.source_evidence,eligible:x.exam_eligible===true});
+  }
+  await setCoverageRunState(runId,{status:'processing',stage:'guardando_fichas_y_pdf_t63',topicId:topic.id});
+  const c=await db.connect();let total=0;
+  try{
+    await c.query('BEGIN');
+    const locked=await c.query('SELECT * FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
+    if(locked.rowCount!==1||healthTopicNumber192(locked.rows[0])!==63)
+      throw Error('T63-263: identidad no comprobada');
+    const old=await c.query('SELECT BTRIM(pdf_sha256) sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
+    if(old.rowCount&&String(old.rows[0].sha)!==sha)
+      throw Error('T63-263: existe otro PDF; no se sobrescribe ni se borra');
+    await c.query(`INSERT INTO coverage_items(topic_id,section,concept,item_type,evaluation_type,
+      source_page,manual_page,source_evidence,exam_relevant)
+      SELECT $1,r.section,r.concept,'dato_salud_preparado','literal_documental',
+        r.source_page,r.manual_page,r.source_evidence,r.eligible
+      FROM jsonb_to_recordset($2::jsonb)
+        r(section text,concept text,source_page integer,manual_page text,
+          source_evidence text,eligible boolean)
+      ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+        source_page=EXCLUDED.source_page,manual_page=EXCLUDED.manual_page,
+        source_evidence=EXCLUDED.source_evidence,exam_relevant=EXCLUDED.exam_relevant`,
+      [topic.id,JSON.stringify(records)]);
+    await c.query(`INSERT INTO topic_local_pdfs(topic_id,pdf_sha256,page_count,size_bytes,pdf_bytes)
+      VALUES($1,$2,98,$3,$4) ON CONFLICT(topic_id) DO NOTHING`,
+      [topic.id,sha,bytes.length,bytes]);
+    await c.query(`INSERT INTO topic_source_documents(topic_id,document_name)
+      VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
+      document_name=EXCLUDED.document_name,updated_at=NOW()`,
+      [topic.id,'local-pdf:sha256:'+sha]);
+    await c.query(`UPDATE topics SET topic_order=63,file_search_indexed=FALSE,
+      total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
+      worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
+      WHERE id=$1`,[topic.id]);
+    total=Number((await c.query('SELECT total_items FROM topics WHERE id=$1',[topic.id])).rows[0]?.total_items||0);
+    if(total<1500)throw Error('T63-263: cobertura documental insuficiente');
+    await c.query('COMMIT');
+  }catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{c.release();}
+  // La transacción documental ya es persistente antes de cargar los gráficos.
+  return t63Finish263(topic,runId);
+}
+
 app.post("/api/analyze-coverage", async(req,res)=>{
   let uploadedPdfPath=null;
   let topic=null;
@@ -9299,7 +9429,8 @@ app.post("/api/analyze-coverage", async(req,res)=>{
     }
 
     const t62LostTemp245=!fs.existsSync(pdfPath)&&healthTopicNumber192(topic)===62;
-    if(!fs.existsSync(pdfPath) && !t62LostTemp245){
+    const t63LostTemp263=!fs.existsSync(pdfPath)&&healthTopicNumber192(topic)===63;
+    if(!fs.existsSync(pdfPath) && !t62LostTemp245 && !t63LostTemp263){
       throw new Error("No se encuentra el PDF para analizar.");
     }
     // Excluir dos reindexaciones simultáneas del mismo tema incluso con
@@ -9320,6 +9451,15 @@ app.post("/api/analyze-coverage", async(req,res)=>{
         topic:topic.name
       }
     );
+    if(healthTopicNumber192(topic)===63){
+      const done=t63LostTemp263
+        ? await t63ResumeSaved263(topic,coverageRunId)
+        : await t63PreparedIndex263(topic,pdfPath,coverageRunId);
+      await setCoverageRunState(coverageRunId,{status:'completed',topicId:done.topicId,
+        topic:done.topic,totalItems:done.totalItems,workedItems:done.workedItems,
+        pendingItems:done.pendingItems,coveragePercentage:done.coveragePercentage});
+      res.json(done);return;
+    }
     if(healthTopicNumber192(topic)===62){
       const done=t62LostTemp245
         ? await t62ResumeSaved245(topic,coverageRunId)
