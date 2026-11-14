@@ -2508,9 +2508,61 @@ async function loadStatistics(){
       api("/api/statistics/knowledge")
     ]);
 
-    topicCatalog=
-      (statistics.topics || [])
-        .sort(sortTopics);
+    
+    // FRONT247: orden y numeración exclusivamente visual.
+    // No modifica identificadores, conocimientos ni SRS.
+    const ordenEspecifico = new Map([
+      [48,  [38, "TEORÍA DEL FUEGO"]],
+      [49,  [39, "HIDRÁULICA"]],
+      [50,  [40, "INCENDIOS DE INTERIOR Y VENTILACIÓN"]],
+      [54,  [41, "INCENDIOS EN TÚNELES"]],
+      [66,  [42, "INCENDIOS INDUSTRIALES"]],
+      [52,  [43, "INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL"]],
+      [69,  [44, "SALVAMENTO EN ALTURA"]],
+      [64,  [45, "RESCATE EN RÍOS, RIADAS E INUNDACIONES"]],
+      [72,  [46, "RESCATE EN ACCIDENTES DE TRÁFICO"]],
+      [53,  [47, "RESCATE EN ACCIDENTES FERROVIARIOS"]],
+      [63,  [48, "RESCATE Y BÚSQUEDA EN GRANDES ÁREAS"]],
+      [56,  [49, "RESCATE APÍCOLA Y DE OTRAS ESPECIES"]],
+      [71,  [50, "EDIFICACIONES"]],
+      [70,  [51, "ESTRUCTURAS COLAPSADAS"]],
+      [62,  [52, "APERTURAS FORZADAS"]],
+      [55,  [53, "RESCATE EN ASCENSORES"]],
+      [67,  [54, "APEO Y PODA"]],
+      [68,  [55, "RIESGO ELÉCTRICO"]],
+      [105, [56, "NRBQ"]],
+      [57,  [57, "SOPORTE VITAL"]],
+      [58,  [58, "URGENCIAS TRAUMÁTICAS Y GRANDES EMERGENCIAS"]],
+      [59,  [59, "HERIDAS, LESIONES, MOVILIZACIÓN E INMOVILIZACIÓN"]],
+      [60,  [60, "GRANDES EMERGENCIAS, CATÁSTROFES Y TRIAJE"]],
+      [61,  [61, "PREVENCIÓN Y APOYO PSICOLÓGICO"]],
+      [106, [62, "HERRAMIENTAS Y EQUIPOS OPERATIVOS"]],
+      [65,  [63, "VEHÍCULOS DE BOMBEROS"]]
+    ]);
+
+    topicCatalog = (statistics.topics || [])
+      .map(topic => {
+        if (topicBlock(topic) !== "especifico") {
+          return topic;
+        }
+
+        // Manual IIFF: primero, sin numerar y sin cambiar nombre.
+        if (Number(topic.topicId) === 44) {
+          return {...topic, topicOrder: 0};
+        }
+
+        const nuevo = ordenEspecifico.get(Number(topic.topicId));
+
+        if (!nuevo) return topic;
+
+        return {
+          ...topic,
+          topicOrder: nuevo[0],
+          topic: `TEMA ${nuevo[0]}. ${nuevo[1]}`
+        };
+      })
+      .sort(sortTopics);
+
 
     sectionStatistics=
       sections.sections || [];
