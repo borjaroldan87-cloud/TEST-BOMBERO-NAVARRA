@@ -1450,6 +1450,7 @@ function t40Resources157Load(){
   return data;
 }
 function t40WriteImages157(){
+  if(t40SelectedMode272())return {total:0,skippedLegacy:true,selectedImages:32};
   const data=t40Resources157Load();
   if(!data)return {installed:0,missingBundle:true};
   const dir=path.join(process.cwd(),'public','graphics','incendios-interior');
@@ -1740,6 +1741,7 @@ async function t40EnsureFourOptions159(){
 }
 async function t40ImportOnce157(topic){
   if(!t40Topic157(topic))return {skipped:true};
+  if(t40SelectedMode272())return syncT40Selected32_272();
   const pack=t40Resources157Load();
   if(!pack)throw Error('T40: falta t40_graphics_data.js.');
   t40WriteImages157();
@@ -21505,6 +21507,196 @@ async function t38GraphicBankPairs270(topicId,freshOnly,difficulty){
     [Boolean(freshOnly)]);
   return rows.rows;
 }
+// T40-272: cierre de banco gráfico con SOLO los 32 Screenshot_ seleccionados.
+// Los 48 registros históricos se conservan, se sustituyen por 32 preguntas
+// gráficas nuevas y 16 preguntas de texto. Un solo COMMIT atómico.
+function t40SelectedMode272(){return fs.existsSync(path.join(process.cwd(),'t40_selected_32_data.js'));}
+function t40ReadOriginal272(){
+  const f=path.join(process.cwd(),'t40_selected_32_data.js');
+  if(!fs.existsSync(f))return null;
+  const raw=fs.readFileSync(f,'utf8');
+  if(!raw.startsWith('module.exports = '))throw Error('T40_272: formato incorrecto');
+  return JSON.parse(raw.slice('module.exports = '.length).trim().replace(/;\s*$/,''));
+}
+async function syncT40Selected32_272(){
+  const data=t40ReadOriginal272();
+  if(!data)return {skipped:true};
+  if(data.schema!==2||data.topic_id!==50||data.topic_number!==40||
+     data.selected_count!==32||data.original_user_images?.length!==32||
+     data.questions?.length!==32||data.legacy_graphic_ids?.length!==48||
+     data.text_conversions?.length!==16||data.converted_text_count!==16||
+     new Set(data.original_user_images.map(x=>x.file)).size!==32||
+     new Set(data.questions.map(q=>q.coverage_id)).size!==32||
+     new Set(data.questions.map(q=>q.external_key)).size!==32||
+     new Set(data.questions.map(q=>q.file)).size!==32||
+     new Set(data.legacy_graphic_ids).size!==48||
+     new Set(data.text_conversions.map(x=>x.old_question_id)).size!==16)
+     throw Error('T40_272: cardinalidad no válida; no se toca PostgreSQL');
+  const original=new Map();
+  for(const img of data.original_user_images){
+    if(!/^Screenshot_20260924-[\w.~-]+\.(?:png|jpg)$/.test(img.file)||
+       !/^[a-f0-9]{40}$/.test(img.git_blob_sha1)||
+       img.public_url!==`/graphics/incendios-interior/${img.file}`)
+       throw Error('T40_272: identidad de imagen inesperada '+img.file);
+    const f=path.join(process.cwd(),'public','graphics','incendios-interior',img.file);
+    if(!fs.existsSync(f))throw Error('T40_272: falta original de GitHub '+img.file);
+    const bytes=fs.readFileSync(f),gitHash=createHash('sha1')
+      .update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
+    if(gitHash!==img.git_blob_sha1)throw Error('T40_272: imagen alterada '+img.file);
+    const crop=img.crop||{};
+    if(![crop.x,crop.y,crop.width,crop.height].every(Number.isFinite)||
+       crop.x<0||crop.y<0||crop.width<=0||crop.height<=0||
+       crop.x+crop.width>1.000001||crop.y+crop.height>1.000001)
+       throw Error('T40_272: recorte fuera de límites '+img.file);
+    let width=img.sourceWidth,height=img.sourceHeight;
+    if(bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))){
+       width=bytes.readUInt32BE(16);height=bytes.readUInt32BE(20);
+    }
+    if(!(width>0&&height>0))throw Error('T40_272: dimensiones no válidas '+img.file);
+    original.set(img.file,{...img,sourceAspectRatio:width/height});
+  }
+  for(const q of data.questions){
+    if(!/^T40-SEL-2026-\d{2}$/.test(q.external_key)||!original.has(q.file)||
+       !data.legacy_graphic_ids.includes(q.old_graphic_id)||q.family!=='GRAFICA'||
+       q.difficulty!=='muy alta'||q.source_pdf_page<1||q.source_pdf_page>66||
+       !Number.isInteger(q.coverage_id)||q.coverage_id<1||
+       q.stem.length<90||!q.explanation||!q.source_evidence||
+       q.options?.length!==4||new Set(q.options.map(x=>String(x).trim())).size!==4||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3)
+       throw Error('T40_272: pregunta inválida '+q.external_key);
+  }
+  const conn=await db.connect();
+  try{
+    await conn.query('BEGIN');
+    await conn.query('SELECT pg_advisory_xact_lock(40,272)');
+    const topic=await conn.query('SELECT id,name,topic_order,source_file,block FROM topics WHERE id=50 FOR UPDATE');
+    const t=topic.rows[0];
+    if(topic.rowCount!==1||t.block!=='especifico'||Number(t.topic_order)!==40||
+       !/incendios?\s+de\s+interior/i.test(t.name)||
+       t.source_file!==data.pdf_source_name)
+       throw Error('T40_272: tema/fuente no coincidente; reversión');
+    const old=await conn.query(`SELECT q.id,q.stem,q.options,q.correct_index,q.explanation,
+       q.source_evidence,q.source_page,q.manual_page,q.coverage_item_id,q.active,q.graphic
+      FROM question_bank q JOIN coverage_items c ON q.coverage_item_id=c.id
+      WHERE c.topic_id=50 AND q.id=ANY($1::int[]) FOR UPDATE OF q`,
+      [data.legacy_graphic_ids]);
+    const byId=new Map(old.rows.map(r=>[Number(r.id),r]));
+    if(old.rows.length!==48||data.legacy_graphic_ids.some(id=>!byId.has(id))||
+       old.rows.some(q=>!q.graphic||!Array.isArray(q.options)||q.options.length!==4||
+         q.correct_index<0||q.correct_index>3))
+       throw Error('T40_272: cambió el banco histórico; se conservan las preguntas');
+    const offList=await conn.query(`SELECT q.id,q.graphic->>'sourceId' AS src
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=50 AND q.active AND q.graphic IS NOT NULL FOR UPDATE OF q`);
+    if(offList.rows.some(x=>!data.legacy_graphic_ids.includes(Number(x.id))&&
+      !String(x.src||'').startsWith('incendios-interior/Screenshot_20260924-')))
+      throw Error('T40_272: se hallaron gráficas ajenas; no desactivar a ciegas');
+    const cards=[];
+    for(const img of original.values()){
+      const found=await conn.query(`SELECT id,source_id,public_url,source_file,asset_index
+        FROM graphic_assets WHERE source_id=$1 AND asset_index=0 FOR UPDATE`,
+        ['incendios-interior/'+img.file]);
+      if(found.rowCount!==1||Number(found.rows[0].id)!==Number(img.asset_id_expected)||
+         found.rows[0].public_url!==img.public_url||found.rows[0].source_file!==img.file)
+         throw Error('T40_272: referencia original diferente '+img.file);
+      cards.push(found.rows[0].id);
+    }
+    const check=await conn.query(`SELECT c.id,c.source_page,c.manual_page,c.exam_relevant
+      FROM coverage_items c WHERE c.topic_id=50 AND c.id=ANY($1::int[]) FOR UPDATE`,
+      [data.questions.map(q=>q.coverage_id)]);
+    const cover=new Map(check.rows.map(x=>[Number(x.id),x]));
+    for(const q of data.questions){
+      const oldQ=byId.get(q.old_graphic_id),cv=cover.get(q.coverage_id);
+      if(!cv||!cv.exam_relevant||Number(cv.source_page)!==q.source_pdf_page||
+         Number(oldQ.coverage_item_id)!==q.coverage_id)
+        throw Error('T40_272: cobertura no verificable '+q.external_key);
+    }
+    // Se conservan las 48 preguntas con sus respuestas originales y estadísticas.
+    const retired=await conn.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+      WHERE id=ANY($1::int[]) AND active=TRUE RETURNING id`,[data.legacy_graphic_ids]);
+    // Conservar las 16 fichas sobrantes en modalidad texto autónoma.
+    let createdText=0,alreadyText=0;
+    for(const change of data.text_conversions){
+      const oldQ=byId.get(change.old_question_id);
+      if(!oldQ||data.questions.some(q=>q.old_graphic_id===change.old_question_id)||
+         !change.stem||change.stem.length<70)
+        throw Error('T40_272: conversión textual no válida '+change.old_question_id);
+      const exist=await conn.query(`SELECT id,options,correct_index,active FROM question_bank
+        WHERE coverage_item_id=$1 AND stem=$2 AND graphic IS NULL FOR UPDATE`,
+        [oldQ.coverage_item_id,change.stem]);
+      if(exist.rowCount>1)throw Error('T40_272: conversión duplicada '+change.old_question_id);
+      if(exist.rowCount===1){
+        if(JSON.stringify(exist.rows[0].options)!==JSON.stringify(oldQ.options)||
+           Number(exist.rows[0].correct_index)!==Number(oldQ.correct_index))
+          throw Error('T40_272: texto modificado '+change.old_question_id);
+        if(!exist.rows[0].active)await conn.query('UPDATE question_bank SET active=TRUE,updated_at=NOW() WHERE id=$1',[exist.rows[0].id]);
+        alreadyText++;
+      }else{
+        await conn.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+          correct_index,explanation,source_evidence,source_page,manual_page,
+          question_family,difficulty,graphic,validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'2026_RAZONAMIENTO',$9,NULL,8,TRUE)`,
+          [oldQ.coverage_item_id,change.stem,JSON.stringify(oldQ.options),
+           oldQ.correct_index,oldQ.explanation,oldQ.source_evidence,
+           oldQ.source_page,oldQ.manual_page,oldQ.difficulty]);
+        createdText++;
+      }
+    }
+    let createdGraphic=0,alreadyGraphic=0;
+    for(const q of data.questions){
+      const img=original.get(q.file);
+      const graphic={assetId:img.asset_id_expected,assetType:'individual',
+       sourceId:'incendios-interior/'+img.file,publicUrl:img.public_url,
+       crop:img.crop,maskRegions:img.maskRegions,
+       sourceAspectRatio:img.sourceAspectRatio,originalSelected:true,
+       externalKey:q.external_key,source_pdf_page:q.source_pdf_page,manual_page:q.manual_page};
+      const exist=await conn.query(`SELECT id,options,correct_index,graphic,active FROM question_bank
+        WHERE coverage_item_id=$1 AND stem=$2 FOR UPDATE`,[q.coverage_id,q.stem]);
+      if(exist.rowCount>1)throw Error('T40_272: pregunta duplicada '+q.external_key);
+      if(exist.rowCount===1){
+        if(JSON.stringify(exist.rows[0].options)!==JSON.stringify(q.options)||
+           Number(exist.rows[0].correct_index)!==q.correct_index||
+           exist.rows[0].graphic?.sourceId!==graphic.sourceId)
+           throw Error('T40_272: pregunta diverge '+q.external_key);
+        if(!exist.rows[0].active)await conn.query('UPDATE question_bank SET active=TRUE,updated_at=NOW() WHERE id=$1',[exist.rows[0].id]);
+        alreadyGraphic++;
+      }else{
+        await conn.query(`INSERT INTO question_bank (coverage_item_id,stem,options,
+          correct_index,explanation,source_evidence,source_page,manual_page,
+          question_family,difficulty,graphic,validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,8,TRUE)`,
+          [q.coverage_id,q.stem,JSON.stringify(q.options),q.correct_index,
+           q.explanation,q.source_evidence,q.source_pdf_page,q.manual_page,
+           JSON.stringify(graphic)]);
+        createdGraphic++;
+      }
+    }
+    // Una vez verificado todo, deshabilitar exclusivamente las figuras derivadas.
+    await conn.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='incendios-interior' AND source_file LIKE 'T40_GRAF_%'
+        AND is_usable=TRUE`);
+    await conn.query(`UPDATE graphic_assets SET is_usable=TRUE,
+       analysis_status='analyzed',updated_at=NOW()
+       WHERE id=ANY($1::int[])`,[cards]);
+    const tally=await conn.query(`SELECT COUNT(*)::int AS count,
+      COUNT(DISTINCT q.graphic->>'sourceId')::int AS sources,
+      COUNT(*) FILTER(WHERE q.difficulty<>'muy alta')::int AS low
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=50 AND q.active AND q.graphic IS NOT NULL`);
+    const counts=tally.rows[0];
+    if(counts.count!==32||counts.sources!==32||counts.low!==0)
+       throw Error('T40_272: total gráfico no es 32/32; ROLLBACK');
+    const oldActive=await conn.query(`SELECT COUNT(*)::int AS n FROM question_bank
+      WHERE id=ANY($1::int[]) AND active=TRUE`,[data.legacy_graphic_ids]);
+    if(oldActive.rows[0].n!==0)throw Error('T40_272: quedaron antiguas activas');
+    await conn.query('COMMIT');
+    return {topicId:50,selectedImages:32,graphicQuestions:32,convertedText:16,
+      historicalRetired:retired.rowCount,createdGraphic,alreadyGraphic,
+      createdText,alreadyText,historyDeleted:0};
+  }catch(err){await conn.query('ROLLBACK').catch(()=>{});throw err;}
+  finally{conn.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -21653,6 +21845,9 @@ async function startServer(){
         console.log('T46_MATRIZ_SINCRONIZADA',JSON.stringify(updated));
       })
       .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
+    syncT40Selected32_272()
+      .then(r=>console.log('T40_272_32_ORIGINALES_SINCRONIZADAS',JSON.stringify(r)))
+      .catch(e=>console.error('T40_272_REVISION_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e)));
     syncT39OriginalGraphics271()
       .then(r=>console.log('T39_271_5_ORIGINALES_CARGADAS',JSON.stringify(r)))
       .catch(e=>console.error('T39_271_SIN_CAMBIOS_POR_AUDITORIA:',String(e?.message||e)));
