@@ -3186,8 +3186,17 @@ function optionTriplicate205(q){
   return false;
 }
 function specificQualityIssue204(q,t,difficulty){
-  return difficulty==='muy alta' && String(t?.topic_block||'').toLowerCase()==='especifico' &&
-    !iiff91Topic(t) && specificEquivalentOptions204(q)?'alternativas_parafraseadas':null;
+  // CALIDAD T63-266: una cabecera editorial, una posición de tabla o una
+  // enumeración de columnas NUNCA es una competencia técnica examinable.
+  // No se penalizan preguntas sobre valores o correspondencias de tablas.
+  const specific=String(t?.topic_block||'').toLowerCase()==='especifico';
+  if(specific && !iiff91Topic(t)){
+    const stem=String(q?.stem||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+    if(/(?:que (?:columnas?|cabecera|encabezados?|rotulos?)|cuales? (?:columnas?|cabeceras?|encabezados?|rotulos?)|(?:que|cual es la) (?:informacion|magnitudes?|parametros?).{0,90}(?:fila\s*1|(?:se\s+relacionan|se\s+establece)\s+en\s+(?:la\s+)?tabla)|(?:cabecera|encabezado) correspondiente|(?:fila\s*1\s+de\s+la\s+tabla))/i.test(stem))
+      return 'metadatos_de_tabla_no_examinables';
+  }
+  return difficulty==='muy alta' && specific && !iiff91Topic(t) &&
+    specificEquivalentOptions204(q)?'alternativas_parafraseadas':null;
 }
 
 // SERVER203: Dos exportaciones byte-distintas del MISMO PDF T54, comprobadas
@@ -17090,6 +17099,7 @@ function reglasCalidadTransversal81(difficulty,leg,geo){
       : 'ESPECÍFICO: contrastar componentes, magnitudes, unidades o procedimientos documentados; no inventar límites.';
   return `CALIDAD TRANSVERSAL DE OPOSICIÓN:
 - Enunciado natural y directo, sin pistas, fórmulas vacías ni preguntas sobre tablas o páginas.
+- NO convertir en preguntas los METADATOS del documento: encabezados/cabeceras, títulos, números de tabla, numeración de filas, posiciones de columnas ni nombres de columnas. Nunca preguntar «qué columnas contiene», «qué aparece en la fila 1» o «qué parámetros se relacionan en la tabla». Si una ficha contiene SOLO esos rótulos, no extraigas ninguna pregunta de esos rótulos; selecciona datos técnico-operativos realmente presentes en otra ficha con respaldo documental. Pregunta por las correspondencias, valores, unidades, condiciones, maniobras o diferencias reales; no por la disposición editorial del manual. No inventar datos ausentes.
 - REGLA TRANSVERSAL SIN PISTAS (todos los temas y bloques): pregunta con la IDENTIFICACIÓN MÍNIMA del objeto y solo las condiciones necesarias para resolver una cuestión inequívoca. Si se pregunta por el parque que corresponde a un concejo, municipio, polígono, instalación solar/eólica, helisuperficie, accidente geográfico o lugar, NO anticipes en el enunciado su municipio padre, parque, rutas, carreteras, ubicación cardinal o datos relacionados que faciliten deducir la respuesta; tampoco añadas aclaraciones entre paréntesis. Todos esos datos se conservan completos en la EVIDENCIA y se pueden mostrar en la EXPLICACIÓN/FUENTE tras responder. El nombre auténtico del objeto sí se conserva. Si existe homonimia real que exige diferenciar dos asociaciones, usa SOLO un sector o vertiente imprescindible que NO revele la respuesta; si eso no basta, cambia la operación examinable sin inventar datos. Esta regla también afecta a enunciados con datos técnicos, fechas, organismos y fórmulas: nunca regales en el enunciado el dato que se pide, aunque puede contener las condiciones necesarias para cálculos y razonamientos legítimos.
 - Cuatro alternativas distintas de la MISMA categoría, extensión y precisión similares. Distractores cercanos: variar una propiedad significativa y comprobable, no añadir nombres ni hechos externos. Prohibidas pistas gramaticales y una opción desproporcionadamente detallada.
 ${geo ? `- GEOGRAFÍA (pistas): si preguntas QUÉ polígono está en el municipio X, NINGUNA alternativa puede revelar su municipio entre paréntesis ni incluir una etiqueta geográfica que permita contestar leyendo el propio nombre. NO cambies ni recortes denominaciones oficiales; si el nombre contiene esa pista de forma inherente, reformula la pregunta a otro atributo con evidencia.
@@ -21057,9 +21067,59 @@ async function t61RecoverEligibleCoverage244(){
   finally{client.release();}
 }
 
+// T63-266: reparación de 13 fichas que contienen EXCLUSIVAMENTE cabeceras,
+// rótulos editoriales o nombres de columnas; conserva fichas originales,
+// respuestas históricas, SRS y registros de sesión. Los datos reales de las
+// restantes filas siguen siendo examinables.
+const T63_NON_EXAM_HEADER_KEYS_266=Object.freeze([
+  'T63-EJ-MA-0162','T63-EJ-MA-0196','T63-EJ-MA-0267',
+  'T63-EJ-MA-0513','T63-EJ-MA-0635','T63-EJ-MA-0766',
+  'T63-EJ-MA-1142','T63-EJ-MA-1427','T63-EJ-MA-1970',
+  'T63-EJ-MA-1972','T63-EJ-MA-2081','T63-EJ-MA-2385',
+  'T63-EJ-MA-2456'
+]);
+async function t63RemoveNonExaminableHeaders266(){
+  const client=await db.connect(); let started=false;
+  try{
+    await client.query('BEGIN'); started=true;
+    const target=await client.query(`SELECT id,name,block FROM topics WHERE id=106 FOR UPDATE`);
+    const row=target.rows[0];
+    if(!row||row.block!=='especifico'||
+       !/HERRAMIENTAS Y EQUIPOS OPERATIVOS/i.test(row.name))
+      throw Error('T63-266: la identidad histórica de herramientas no coincide');
+    const found=await client.query(`SELECT id,split_part(concept,' · ',1) AS source_key,
+        source_evidence,concept FROM coverage_items
+      WHERE topic_id=$1 AND split_part(concept,' · ',1)=ANY($2::text[])
+      FOR UPDATE`,[row.id,T63_NON_EXAM_HEADER_KEYS_266]);
+    const keys=new Set(found.rows.map(r=>r.source_key));
+    if(found.rows.length!==T63_NON_EXAM_HEADER_KEYS_266.length||
+       T63_NON_EXAM_HEADER_KEYS_266.some(k=>!keys.has(k))||
+       found.rows.some(r=>!String(r.source_evidence||'').includes('fila 1:')))
+      throw Error('T63-266: fichas modificadas o ausentes; no se cambia nada');
+    const ids=found.rows.map(r=>Number(r.id));
+    const disabled=await client.query(`UPDATE question_bank SET active=FALSE,
+        updated_at=NOW() WHERE coverage_item_id=ANY($1::int[]) AND active=TRUE`,[ids]);
+    const excluded=await client.query(`UPDATE coverage_items SET exam_relevant=FALSE
+      WHERE id=ANY($1::int[]) AND exam_relevant=TRUE`,[ids]);
+    const total=await client.query(`UPDATE topics SET total_items=(SELECT COUNT(*)
+      FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE)
+      WHERE id=$1 RETURNING total_items,worked_items`,[row.id]);
+    await client.query('COMMIT');started=false;
+    const result={topicId:row.id,headers:ids.length,excluded:excluded.rowCount,
+      retiredQuestions:disabled.rowCount,totalExamItems:total.rows[0]?.total_items};
+    console.log('T63_266_METADATOS_RETIRADOS',JSON.stringify(result));
+    return result;
+  }catch(e){if(started)await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  // T63-266: corrección atómica, idempotente y específica; el fallo nunca
+  // impide que Render publique su puerto HTTP, pero se registra explícito.
+  try{await t63RemoveNonExaminableHeaders266();}
+  catch(error){console.error('T63_266_REPARACION_PENDIENTE:',String(error?.message||error));}
   // SERVER204: datos corregidos mediante una sola transacción; no bloquear el servicio.
   try{await applyQualityCorrectionsOnce204();}
   catch(e){console.error('SERVER204_MIGRACION_NO_APLICADA:',String(e?.message||e));}
