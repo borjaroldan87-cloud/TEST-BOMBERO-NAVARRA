@@ -34,6 +34,73 @@ function aiClient(){
 
 let STORE = null;
 let EXAM_STYLE_STORE = null;
+
+// SERVER268: identidad curricular canonica y compatibilidad con los modulos
+// historicos T41-T63. NO modifica ID de PostgreSQL, sesiones ni SRS.
+const SPEC_TOPIC_MAP_268 = Object.freeze([{"id":48,"num":38,"title":"TEMA 38. TEORÍA DEL FUEGO","oldName":"TEMA 38. TEORIA DEL FUEGO","legacy":38},{"id":49,"num":39,"title":"TEMA 39. HIDRÁULICA","oldName":"TEMA 39 HIDRAULICA CEIS GUADALAJARA COMPLETO","legacy":39},{"id":50,"num":40,"title":"TEMA 40. INCENDIOS DE INTERIOR Y VENTILACIÓN","oldName":"TEMA 40 INCENDIOS DE INTERIOR Y VENTILACION CEIS GUADALAJARA COMPLETO","legacy":40},{"id":54,"num":41,"title":"TEMA 41. INCENDIOS EN TÚNELES","oldName":"TEMA 42. INCENDIOS EN TÚNELES","legacy":42},{"id":66,"num":42,"title":"TEMA 42. INCENDIOS INDUSTRIALES","oldName":"TEMA 55 INCENDIOS INDUSTRIALES","legacy":55},{"id":52,"num":43,"title":"TEMA 43. INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL","oldName":"TEMA 41. INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL","legacy":41},{"id":69,"num":44,"title":"TEMA 44. SALVAMENTO EN ALTURA","oldName":"TEMA 58. SALVAMENTO EN ALTURA","legacy":58},{"id":64,"num":45,"title":"TEMA 45. RESCATE EN RÍOS, RIADAS E INUNDACIONES","oldName":"TEMA 53 RESCATE EN RIOS RIADAS E INUNDACIONES","legacy":53},{"id":72,"num":46,"title":"TEMA 46. RESCATE EN ACCIDENTES DE TRÁFICO","oldName":"TEMA 61 RESCATE EN ACCIDENTES DE TRAFICO","legacy":61},{"id":53,"num":47,"title":"TEMA 47. RESCATE EN ACCIDENTES FERROVIARIOS","oldName":"TEMA 43. RESCATE EN ACCIDENTES FERROVIARIOS","legacy":43},{"id":63,"num":48,"title":"TEMA 48. RESCATE Y BÚSQUEDA EN GRANDES ÁREAS","oldName":"TEMA 52 RESCATE Y BUSQUEDA EN GRANDES AREAS","legacy":52},{"id":56,"num":49,"title":"TEMA 49. RESCATE APÍCOLA Y DE OTRAS ESPECIES","oldName":"TEMA 45. RESCATE APÍCOLA Y DE OTRAS ESPECIES","legacy":45},{"id":71,"num":50,"title":"TEMA 50. EDIFICACIONES","oldName":"TEMA 60 EDIFICACIONES","legacy":60},{"id":70,"num":51,"title":"TEMA 51. ESTRUCTURAS COLAPSADAS","oldName":"TEMA 59 ESTRUCTURAS COLAPSADAS","legacy":59},{"id":62,"num":52,"title":"TEMA 52. APERTURAS FORZADAS","oldName":"TEMA 51 APERTURAS FORZADAS","legacy":51},{"id":55,"num":53,"title":"TEMA 53. RESCATE EN ASCENSORES","oldName":"TEMA 44. RESCATE EN ASCENSORES","legacy":44},{"id":67,"num":54,"title":"TEMA 54. APEO Y PODA","oldName":"TEMA 56 APEO Y PODA","legacy":56},{"id":68,"num":55,"title":"TEMA 55. RIESGO ELÉCTRICO","oldName":"TEMA 57 RIESGO ELECTRICO","legacy":57},{"id":105,"num":56,"title":"TEMA 56. NRBQ","oldName":"TEMA 62 NRBQ","legacy":62},{"id":57,"num":57,"title":"TEMA 57. SOPORTE VITAL","oldName":"TEMA 46 SOPORTE VITAL","legacy":46},{"id":58,"num":58,"title":"TEMA 58. URGENCIAS TRAUMÁTICAS Y GRANDES EMERGENCIAS","oldName":"TEMA 47 URGENCIAS TRAUMATICAS Y GRANDES EMERGENCIAS","legacy":47},{"id":59,"num":59,"title":"TEMA 59. HERIDAS, LESIONES, MOVILIZACIÓN E INMOVILIZACIÓN","oldName":"TEMA 48 HERIDAS Y LESIONES DE TEJIDOS BLANDOS Y MOVILIZACION E INMOVILIZACION","legacy":48},{"id":60,"num":60,"title":"TEMA 60. GRANDES EMERGENCIAS, CATÁSTROFES Y TRIAJE","oldName":"TEMA 49 GRANDES EMERGENCIAS Y CATASTROFES TRIAJE","legacy":49},{"id":61,"num":61,"title":"TEMA 61. PREVENCIÓN Y APOYO PSICOLÓGICO","oldName":"TEMA 50 PREVENCION Y APOYO PSICOLOGICO","legacy":50},{"id":106,"num":62,"title":"TEMA 62. HERRAMIENTAS Y EQUIPOS OPERATIVOS","oldName":"TEMA 63 HERRAMIENTAS Y EQUIPOS OPERATIVOS","legacy":63},{"id":65,"num":63,"title":"TEMA 63. VEHÍCULOS DE BOMBEROS","oldName":"TEMA 54 VEHICULOS DE BOMBEROS","legacy":54}]);
+const SPEC_TOPIC_BY_ID_268 = new Map(SPEC_TOPIC_MAP_268.map(x=>[x.id,x]));
+const SPEC_LEGACY_NUM_BY_ID_268 = new Map(SPEC_TOPIC_MAP_268.map(x=>[x.id,x.legacy]));
+function specNorm268(x){
+  return String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[_\-.]+/g,' ').replace(/[^a-zA-Z0-9 ]+/g,' ')
+    .replace(/\s+/g,' ').trim().toUpperCase();
+}
+const SPEC_TOPIC_ID_BY_NAME_268 = new Map(
+  SPEC_TOPIC_MAP_268.flatMap(x=>[[specNorm268(x.title),x.id],[specNorm268(x.oldName),x.id]])
+);
+// Aceptar tambien el nombre corto aprobado para el tema 46 sin duplicarlo.
+SPEC_TOPIC_ID_BY_NAME_268.set('TEMA 46 ACCIDENTES DE TRAFICO',72);
+function specExistingId268(name,block){
+  if(String(block||'').toLowerCase()!=='especifico')return null;
+  return SPEC_TOPIC_ID_BY_NAME_268.get(specNorm268(name))||null;
+}
+function specLegacy268(topic){
+  const id=Number(topic?.id??topic?.topic_id??topic?.topicId);
+  return SPEC_LEGACY_NUM_BY_ID_268.get(id)||0;
+}
+// Cada arranque preflight de los 26 temas, copia de metadatos y transaccion
+// atomica. NO toca PDFs, bancos de preguntas ni sus claves foraneas.
+async function syncSpecificTopicCatalog268(){
+  const client=await db.connect();let inTx=false;
+  try{
+    await client.query('BEGIN');inTx=true;
+    const present=await client.query(`SELECT id,name,topic_order,source_file,total_items,
+      worked_items,file_search_indexed,block FROM topics
+      WHERE id=ANY($1::int[]) ORDER BY id FOR UPDATE`,
+      [SPEC_TOPIC_MAP_268.map(x=>x.id)]);
+    if(present.rows.length!==26)throw Error('CAT268: faltan IDs historicos de algun tema');
+    const expected=new Map(SPEC_TOPIC_MAP_268.map(x=>[x.id,x]));
+    for(const row of present.rows){
+      const target=expected.get(Number(row.id));
+      if(!target || row.block!=='especifico' ||
+        ![specNorm268(target.oldName),specNorm268(target.title)].includes(specNorm268(row.name)))
+        throw Error('CAT268: tema alterado/incoherente; no renumerar ID '+row.id+' '+row.name);
+    }
+    const snapshotKey='CAT268_METADATOS_ORIGINALES_38_63';
+    await client.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,[snapshotKey,JSON.stringify({
+        date:new Date().toISOString(),records:present.rows})]);
+    const changed=await client.query(`UPDATE topics AS t SET name=x.title,
+      topic_order=x.num FROM jsonb_to_recordset($1::jsonb)
+      AS x(id integer,num integer,title text)
+      WHERE t.id=x.id AND t.block='especifico' AND
+      (t.name IS DISTINCT FROM x.title OR t.topic_order IS DISTINCT FROM x.num)`,
+      [JSON.stringify(SPEC_TOPIC_MAP_268)]);
+    const final=await client.query(`SELECT id,name,topic_order FROM topics
+      WHERE id=ANY($1::int[]) ORDER BY topic_order`,[SPEC_TOPIC_MAP_268.map(x=>x.id)]);
+    if(final.rows.length!==26 || final.rows.some((t,i)=>{
+      const target=SPEC_TOPIC_MAP_268[i];
+      return t.id!==target.id || t.name!==target.title || Number(t.topic_order)!==target.num;
+    }))throw Error('CAT268: comprobacion tras renumerar no coincide');
+    await client.query('COMMIT');inTx=false;
+    console.log('CAT268_ORDEN_POSTGRES_CONFIRMADO',JSON.stringify({
+      topics:26,changed:changed.rowCount,first:38,last:63,
+      stableTopicIds:true,snapshot:snapshotKey}));
+    return {ok:true,changed:changed.rowCount};
+  }catch(e){if(inTx)await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
 const GRAPHICS_ROOT = path.join(process.cwd(), "public", "graphics");
 
 const GRAPHIC_TOPIC_FOLDERS = Object.freeze([
@@ -1784,6 +1851,8 @@ async function t40ImportOnce157(topic){
  */
 let t41PreparedData=null;
 function t41Topic(topic){
+  if(Number(topic?.id??topic?.topic_id)===52 &&
+     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico')return true;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
   return /^\s*tema\s*41\b/i.test(name) &&
@@ -1982,7 +2051,7 @@ async function t41ImportOnce(topic){
       WHERE topic_folder='incendios-vegetacion' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
     await client.query(`UPDATE topics SET
-      name='TEMA 41. INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL',
+      name='TEMA 43. INCENDIOS DE VEGETACIÓN E INTERFAZ URBANO-FORESTAL',
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
@@ -2019,6 +2088,8 @@ async function t41GraphicBankPairs(topicId,freshOnly,difficulty){
 /* TEMA 42: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
 let t42PreparedData=null;
 function t42Topic(topic){
+  if(Number(topic?.id??topic?.topic_id)===54 &&
+     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico')return true;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
   return /^\s*tema\s*42\b/i.test(name) &&
@@ -2264,7 +2335,7 @@ async function t42ImportOnce(topic,uploadedPdfPath=null){
       WHERE topic_folder='incendios-tuneles' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
     await client.query(`UPDATE topics SET
-      name='TEMA 42. INCENDIOS EN TÚNELES',
+      name='TEMA 41. INCENDIOS EN TÚNELES',
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
@@ -2304,6 +2375,8 @@ async function t42GraphicBankPairs(topicId,freshOnly,difficulty){
 /* TEMA 43: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
 let t43PreparedData=null;
 function t43Topic(topic){
+  if(Number(topic?.id??topic?.topic_id)===53 &&
+     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico')return true;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
   return /^\s*tema\s*43\b/i.test(name) &&
@@ -2491,7 +2564,7 @@ async function t43ImportOnce(topic,uploadedPdfPath=null){
       WHERE topic_folder='ferroviarios' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
     await client.query(`UPDATE topics SET
-      name='TEMA 43. RESCATE EN ACCIDENTES FERROVIARIOS',
+      name='TEMA 47. RESCATE EN ACCIDENTES FERROVIARIOS',
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
@@ -2592,6 +2665,8 @@ async function t43AuditRepair187(topic){
 /* TEMA 44: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
 let t44PreparedData=null;
 function t44Topic(topic){
+  if(Number(topic?.id??topic?.topic_id)===55 &&
+     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico')return true;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ');
   // T44-188: admitir solamente el titulo CEIS definitivo o el titulo
@@ -2780,7 +2855,7 @@ async function t44ImportOnce(topic,uploadedPdfPath=null){
       WHERE topic_folder='ascensores' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
     await client.query(`UPDATE topics SET
-      name='TEMA 44. RESCATE EN ASCENSORES',
+      name='TEMA 53. RESCATE EN ASCENSORES',
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
@@ -2821,6 +2896,8 @@ async function t44GraphicBankPairs(topicId,freshOnly,difficulty){
 /* TEMA 45: SOLO importación documental/gráfica idempotente. Sin tocar otros temas. */
 let t45PreparedData=null;
 function t45Topic(topic){
+  if(Number(topic?.id??topic?.topic_id)===56 &&
+     String(topic?.block||topic?.topic_block||'').toLowerCase()==='especifico')return true;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]+/g,' ')
     .replace(/\s+/g,' ').trim();
@@ -3024,7 +3101,7 @@ async function t45ImportOnce(topic,uploadedPdfPath=null){
       WHERE topic_folder='apicola' AND source_file LIKE 'Screenshot_%'
       AND is_usable=TRUE`);
     await client.query(`UPDATE topics SET
-      name='TEMA 45. RESCATE APÍCOLA Y DE OTRAS ESPECIES',
+      name='TEMA 49. RESCATE APÍCOLA Y DE OTRAS ESPECIES',
       total_items=(SELECT COUNT(*) FROM coverage_items
         WHERE topic_id=$1 AND exam_relevant=TRUE) WHERE id=$1`,[t.id]);
     await client.query('COMMIT');
@@ -3066,8 +3143,8 @@ const HEALTH_ALIAS_192={
   57:/RIESGO ELECTRICO/,58:/SALVAMENTO EN ALTURA/,59:/ESTRUCTURAS COLAPSADAS/,60:/EDIFICACIONES/,61:/RESCATE EN ACCIDENTES DE TRAFICO/,62:/NRBQ/,63:/HERRAMIENTAS Y EQUIPOS OPERATIVOS/
 };
 const HEALTH_EXAM_STYLE_192={
-  63:'T63 HERRAMIENTAS Y EQUIPOS OPERATIVOS: Solo 98 hojas del PDF CEIS y registros preparados. Siete bloques: proteccion respiratoria, extincion, corte, extricaje, arrastre/elevacion, proteccion electrica e instrumentos de medida. Priorizar asociaciones exactas de valores, limites, normativa citada, configuraciones, capacidades, componentes, secuencias, excepciones, tablas y ejercicios de autonomia ERA o presiones presentes en el texto. Diferenciar medidas y unidades; evitar textos genericos o preguntas resueltas por la imagen. Solo cinco graficas de recogida de mangueras elegidas por el usuario (doble, devanadera, madeja, zeta, Cleveland, pagina impresa 64). Preguntas graficas prefabricadas, nunca generadas desde figuras ajenas. Cuatro opciones tecnicamente cercanas y una respuesta demostrable exclusivamente con el PDF; no otras fuentes.',
-  62:'T62 NRBQ: Exclusivamente manual CEIS NRBQ 92 paginas, sin fuentes externas. PRIORIDAD ALTA: numeros ONU y NIP, paneles naranjas, etiquetas ADR, divisiones 4.1/4.2/4.3 y 5.1/5.2, materia infecciosa y radioactiva, HAZCHEM, NFPA, riesgos CLP, tipos y secciones de cisterna, colores basico/complementario de tuberias, densidades, presion, temperatura, formulas del PDF y unidades. Preguntas de cuatro opciones tecnicamente cercanas y UNA correcta. Las 52 imagenes seleccionadas ya disponen de pregunta grafica preparada: no re-interpretar ni crear figuras. NO memorizar toda la tabla periodica. Numero 5.2 = peroxidos organicos y 5.1 = comburentes; no deducir la clase por colores de un esquema general no reglamentario. Referencia p. impresa 445-536. Preguntar con estilo 2026, 2024 y 2023. No inventar numeros ni procedimientos.',
+  63:'TEMA 62 HERRAMIENTAS Y EQUIPOS OPERATIVOS: Solo 98 hojas del PDF CEIS y registros preparados. Siete bloques: proteccion respiratoria, extincion, corte, extricaje, arrastre/elevacion, proteccion electrica e instrumentos de medida. Priorizar asociaciones exactas de valores, limites, normativa citada, configuraciones, capacidades, componentes, secuencias, excepciones, tablas y ejercicios de autonomia ERA o presiones presentes en el texto. Diferenciar medidas y unidades; evitar textos genericos o preguntas resueltas por la imagen. Solo cinco graficas de recogida de mangueras elegidas por el usuario (doble, devanadera, madeja, zeta, Cleveland, pagina impresa 64). Preguntas graficas prefabricadas, nunca generadas desde figuras ajenas. Cuatro opciones tecnicamente cercanas y una respuesta demostrable exclusivamente con el PDF; no otras fuentes.',
+  62:'TEMA 56 NRBQ: Exclusivamente manual CEIS NRBQ 92 paginas, sin fuentes externas. PRIORIDAD ALTA: numeros ONU y NIP, paneles naranjas, etiquetas ADR, divisiones 4.1/4.2/4.3 y 5.1/5.2, materia infecciosa y radioactiva, HAZCHEM, NFPA, riesgos CLP, tipos y secciones de cisterna, colores basico/complementario de tuberias, densidades, presion, temperatura, formulas del PDF y unidades. Preguntas de cuatro opciones tecnicamente cercanas y UNA correcta. Las 52 imagenes seleccionadas ya disponen de pregunta grafica preparada: no re-interpretar ni crear figuras. NO memorizar toda la tabla periodica. Numero 5.2 = peroxidos organicos y 5.1 = comburentes; no deducir la clase por colores de un esquema general no reglamentario. Referencia p. impresa 445-536. Preguntar con estilo 2026, 2024 y 2023. No inventar numeros ni procedimientos.',
   58:'MODELO T58: relacionar nudo, uso y perdida de resistencia; distinguir retencion, sujecion y anticaidas; combinar la geometria de triangulaciones y fuerzas. Cuatro opciones tecnicamente plausibles y solo una correcta. Usar exclusivamente el PDF del tema.',
   46:'MODELO de redaccion (no repetir): al aspirar secreciones, comparar conjuntamente segundos maximos y presión pediátrica en mm Hg; distractores que alteren solo uno de los valores. El CEIS indica 5 segundos y no mas de 100 mm Hg.',
   47:'MODELO (no repetir): relacionar las tres fases de mortalidad traumática con lesiones y momento temporal; cambiar UNA fase o causa en cada distractor. Distinguir segundos/minutos, primeras horas y dias/semanas.',
@@ -3079,8 +3156,8 @@ const HEALTH_EXAM_STYLE_192={
   53:'MODELO DE ESTILO (no copiar): en una misma pregunta comparar regimen nivopluvial y pluvionival combinando orden nieve-lluvia, mes de maximo y minimo absoluto/relativo de los graficos CEIS p.166; distracciones por permutar UNA relacion. Otra: comparar la disposición a soga, piramidal o a escalera de los sacos según su función documentada, sin pedir memorizar los números del dibujo ilustrativo. Dejar de lado la normativa externa; citar solo edicion CEIS 2015. Identificar valores de tablas, medidas de seguridad y secuencias con condiciones, no explicaciones generalistas. SILBATO del manual p.189: tres toques aislados indican hacia abajo/río abajo; tres toques EN SERIE indican emergencia/peligro. La referencia a "en serie" es imprescindible: no confundir ni omitir esa condición.',
   54:'MODELO DE ESTILO (no copiar): construir cuatro alternativas próximas que difieran en SOLO UNA cifra, relación, categoría, fase o unidad del CEIS. Contrastar para una misma bomba el par baja/alta: l/min, bar, cebado y altura; no permutar modelos sin respaldo. Combinar EN LA MISMA PREGUNTA índice de carga (tabla 24) con índice de velocidad (tabla 25) y/o porcentaje altura-anchura, sin depender de texto explicativo de imágenes. Otros modelos: nomenclatura vehículo-sigla-categoría; primera y segunda carrera, cambios de lumbreras; revisiones por día de semana y presión exacta según tabla 32. Las preguntas gráficas de figuras 48/49/55 están prefabricadas, con sus imágenes limpias; no regenerarlas. Preguntar estrictamente según manual CEIS 2015, incluso en tráfico; sin BOE ni normativa posterior. No añadir restricciones de generación ni llamadas a Gemini.',
   55:'MODELO CEIS 2015 PARA T55 (no copiar): Tipos A-E: cruza ocupación del edificio, distancia exacta (mayor de 3 m o menor/igual), cerramiento lateral y máximo de cubierta (tipo E hasta 50%); distractor altera una condicion. Tabla 1 p.213: unir riesgo BAJO/MEDIO/ALTO, planta sotano/sobre rasante y tipos A-B-C con R30/R60/R90/R120/R180 y NO ADMITIDO; cuatro alternativas equilibradas. Carga de fuego Qe promedio ponderado por superficie. Qs=(Σ Gi qi Ci)/A * K * Ra: NO generar cálculos Qs porque K no está definido en el PDF; conservarla solo para identificación literal. Siempre unidades CEIS y factores dados. Espuma: comparar baja/media/alta expansion, 5 L/min/m2 de derrame, tecnica de cubricion simple y rebote, sistema Venturi, piezas del proporcionador, Pro-Pak y tabla 4 p.227. No preguntar valores de los EJEMPLOS resueltos de p.220. IMPORTANTE p.221 formula R=(V/T)*Cn*CL tiene variables C/Cn/CL incongruentes: no hacer problemas sobre ella. La deteccion de imágenes y preguntas GRAFICA de T55 esta prefabricada: reutilizarlas, NO interpretarlas otra vez ni generar imagenes. Sustituir distractores equivalentes por alternativas de magnitud, condicion, etapa o finalidad diferente pero plausible; NO usar tres afirmaciones semanticamente iguales. Referencia legislativa en este manual es histórica: NO preguntar por VIGENCIA ACTUAL, ni afirmar que RD2267/2004 siga vigente. La definición se pregunta solo SEGUN CEIS de este PDF. Fuentes exclusivamente PDF del usuario; no actualizar leyes ni incluir datos externos. El estilo mejora sin llamadas adicionales.',
-  61:'T61 RESCATE EN ACCIDENTES DE TRAFICO: SOLO los dos PDF CEIS suministrados, unidos en un PDF de 126 paginas. Distinguir las fases del siniestro, zonas caliente/templada/fria, distancias, cronologias, colocacion de vehiculos, estabilizacion sobre ruedas/costado/techo, turismo/camion/autobus, HV/GNC/GLP, baterias, pretensores, airbags, acristalamientos, cortes de alivio, uso de cilindros y extraccion. Exigir cuatro respuestas proximas y una correcta; distractores que cambien UNA distancia, componente, ubicacion, momento, zona o secuencia. Las 27 preguntas graficas seleccionadas estan prefabricadas y deben servirse sin reinterpretar las imagenes. NO preguntar por vigencia normativa actual; las referencias del manual CEIS 2015 son historicas. No usar fuentes externas, no inventar procedimientos, no preguntar una contradiccion entre figura y texto del manual (p.315 angulos del airbag).',
-  60:'T60 EDIFICACIONES: SOLO el PDF CEIS entregado (62 páginas, 2 capítulos). En Caracterización, distinguir causas internas/externas, patologías del agua, suelo y elementos constructivos, lesiones, estructuras, materiales, comportamientos y daños. En Estabilización, relacionar resistencia, geometría, escuadrías, puntales, apeos, entibaciones, uniones, codales, sopandas, durmientes y secuencias. Para cada pregunta, CUATRO alternativas técnicas plausibles del mismo ámbito, que varíen una única condición, cota, orientación, material, fase o carga. Evitar respuestas por descarte o absolutos. Priorizar tablas numéricas, relaciones cruzadas y consecuencias operativas. Las 12 figuras seleccionadas están preparadas con preguntas asociadas. Solo fuente CEIS 2015 del usuario; no extrapolar legislación vigente, no inventar fórmulas ni constantes. Prohibido usar ejemplos demostrativos como normas generales.',
+  61:'TEMA 46 RESCATE EN ACCIDENTES DE TRAFICO: SOLO los dos PDF CEIS suministrados, unidos en un PDF de 126 paginas. Distinguir las fases del siniestro, zonas caliente/templada/fria, distancias, cronologias, colocacion de vehiculos, estabilizacion sobre ruedas/costado/techo, turismo/camion/autobus, HV/GNC/GLP, baterias, pretensores, airbags, acristalamientos, cortes de alivio, uso de cilindros y extraccion. Exigir cuatro respuestas proximas y una correcta; distractores que cambien UNA distancia, componente, ubicacion, momento, zona o secuencia. Las 5 preguntas graficas seleccionadas estan prefabricadas y deben servirse sin reinterpretar las imagenes. NO preguntar por vigencia normativa actual; las referencias del manual CEIS 2015 son historicas. No usar fuentes externas, no inventar procedimientos, no preguntar una contradiccion entre figura y texto del manual (p.315 angulos del airbag).',
+  60:'TEMA 50 EDIFICACIONES: SOLO el PDF CEIS entregado (62 páginas, 2 capítulos). En Caracterización, distinguir causas internas/externas, patologías del agua, suelo y elementos constructivos, lesiones, estructuras, materiales, comportamientos y daños. En Estabilización, relacionar resistencia, geometría, escuadrías, puntales, apeos, entibaciones, uniones, codales, sopandas, durmientes y secuencias. Para cada pregunta, CUATRO alternativas técnicas plausibles del mismo ámbito, que varíen una única condición, cota, orientación, material, fase o carga. Evitar respuestas por descarte o absolutos. Priorizar tablas numéricas, relaciones cruzadas y consecuencias operativas. Las 12 figuras seleccionadas están preparadas con preguntas asociadas. Solo fuente CEIS 2015 del usuario; no extrapolar legislación vigente, no inventar fórmulas ni constantes. Prohibido usar ejemplos demostrativos como normas generales.',
   59:'T59 ESTRUCTURAS COLAPSADAS: SOLO PDF CEIS 2015 del usuario, capítulos Caracterización y Técnicas de intervención. Diferenciar tipologías por configuración de huecos de vida, localización de víctimas, secuencia de intervención y límites cuantitativos. Contrastar búsqueda, sectorización, señalización, equipos y cojines. Las figuras 7-18 tienen preguntas gráficas preparadas y recortadas, no reinterpretar ni generar imágenes externas. No emplear normativa ni fórmulas fuera del PDF. Evitar preguntas triviales de identificación visual; usar implicaciones documentales y distractores próximos.',
   56:'T56 APEO Y PODA (CEIS 2015): las fichas T56-EJ-MA-0038 a 0047 con evaluation_type=calculo corresponden a DIEZ PLANTILLAS NUMÉRICAS CERRADAS: altura H=h·D/d; distancia D=H·d/h; radio r=P/(2π); volumen V=πr²H; masa m=V·ρ; altura+volumen; perímetro+masa; altura+masa; volumen inverso V=m/ρ; densidad inversa ρ=m/V. Si un objetivo de estas diez fichas entra en test MIXTO, construir problema aritmético REAL con datos numéricos variables y solución calculada, NO pregunta teórica sobre la fórmula. Mantener una única clave, distractores de errores numéricos próximos, conversión cm/m y kg/dm³ a kg/m³ y explicación con cálculo completo. En botón CÁLCULOS el servidor resuelve localmente estas plantillas sin Gemini. No regalar resultados intermedios en el enunciado; no inventar fórmulas. Tablas Stuttgart y densidades solo con datos del PDF. Figuras prefabricadas, no generar nuevas. No preguntar el ejemplo editorial erróneo de p.360 (0,8 kg/dm³ × 3 m³=2800 kg), ni clasificar madera 0,7–0,8 kg/dm³ por tabla 4 p.359. Sin llamadas ni auditorías bloqueantes adicionales. Solo PDF CEIS del usuario.'
 };
@@ -3212,6 +3289,12 @@ function healthTopicNumber192(topic){
   if(String(topic?.block||topic?.topic_block||'').trim().toLowerCase()!=='especifico')return 0;
   const name=String(topic?.name||topic?.topic_name||'').normalize('NFD')
     .replace(/[\u0300-\u036f]/g,'').replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase();
+  // La numeracion de los ficheros y preguntas fuente es historica; las
+  // fichas de topics se llaman y ordenan ahora segun el catalogo 38..63.
+  const legacy=specLegacy268(topic);
+  const canonical=SPEC_TOPIC_BY_ID_268.get(Number(topic?.id??topic?.topic_id));
+  if(legacy && (specNorm268(name)===specNorm268(canonical?.title) ||
+      HEALTH_ALIAS_192[legacy]?.test(name)))return legacy;
   const m=name.match(/^(?:TEMA\s*|T\s*)(4[6-9]|5[0-9]|6[0-3])\b/);
   if(!m)return 0;
   const n=Number(m[1]);
@@ -3436,7 +3519,7 @@ async function t58EnsureLocalPdf221(topic){
         VALUES($1,$2,$3,$4,$5) ON CONFLICT(topic_id) DO NOTHING`,
         [topic.id,sha,data.pdf_page_count,bytes.length,bytes]);
     }
-    await c.query(`UPDATE topics SET name='TEMA 58. SALVAMENTO EN ALTURA',topic_order=58
+    await c.query(`UPDATE topics SET name='TEMA 44. SALVAMENTO EN ALTURA',topic_order=44
       WHERE id=$1 AND block='especifico' AND name IN
       ('T58 SALVAMENTO EN ALTURA TEMARIO','TEMA 58. SALVAMENTO EN ALTURA')`,[topic.id]);
     await c.query('COMMIT');
@@ -3850,7 +3933,7 @@ async function t4650CoverageImport197(topic){
   await client.query('BEGIN');
   const tr=await client.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=$1 FOR UPDATE`,[topic.id]);
   const t=tr.rows[0];
-  if(!t || healthTopicNumber192(t)!==n || Number(t.topic_order)!==n || Number(t.total_items)<1)
+  if(!t || healthTopicNumber192(t)!==n || specLegacy268(t)!==n || Number(t.total_items)<1)
     throw Error('SERVER197: tema no indexado o no coincide T'+n);
   const src=await client.query(`SELECT pdf_sha256,page_count,ENCODE(SHA256(pdf_bytes),'hex') AS actual_sha
     FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
@@ -3906,16 +3989,17 @@ async function health198QualityOnce(){
     const pdfs=await client.query(`SELECT t.id,t.topic_order,TRIM(p.pdf_sha256) sha,
        ENCODE(SHA256(p.pdf_bytes),'hex') actual, p.page_count
        FROM topics t JOIN topic_local_pdfs p ON p.topic_id=t.id
-       WHERE t.block='especifico' AND t.topic_order BETWEEN 46 AND 50
+       WHERE t.block='especifico' AND t.id IN (57,58,59,60,61)
        FOR UPDATE OF t`);
     if(pdfs.rows.length!==5)throw Error('HEALTH198: faltan temas sanitarios originales');
     const ids=new Map();
     for(const t of pdfs.rows){
-       const expected=bundle.origin_pdf[String(t.topic_order)];
+       const legacyNum=specLegacy268(t);
+       const expected=bundle.origin_pdf[String(legacyNum)];
        if(!expected||t.sha!==expected.pdf_sha256||t.actual!==expected.pdf_sha256||
           Number(t.page_count)!==Number(expected.pdf_page_count))
-         throw Error('HEALTH198: PDF no coincide T'+t.topic_order);
-       ids.set(Number(t.topic_order),Number(t.id));
+         throw Error('HEALTH198: PDF no coincide ID '+t.id);
+       ids.set(legacyNum,Number(t.id));
     }
     const journal={references:0,contextualized:0,previouslyContextualized:0,notImported:0};
     // Primero comprobar todas las referencias sin cambios parciales.
@@ -3983,7 +4067,7 @@ async function t52CorrectDocument199(topic){
     const lock=await client.query(`SELECT id,name,block,topic_order,total_items
       FROM topics WHERE id=$1 FOR UPDATE`,[topic.id]);
     const t=lock.rows[0];
-    if(!t||healthTopicNumber192(t)!==52||Number(t.topic_order)!==52||Number(t.total_items)<1)
+    if(!t||healthTopicNumber192(t)!==52||specLegacy268(t)!==52||Number(t.total_items)<1)
       throw Error('SERVER199 T52: tema no coincide o no tiene cobertura');
     const original=await client.query(`SELECT TRIM(pdf_sha256) AS sha,page_count,
       ENCODE(SHA256(pdf_bytes),'hex') AS actual FROM topic_local_pdfs WHERE topic_id=$1`,[t.id]);
@@ -6452,9 +6536,9 @@ function coverageTopicNumber(topicName){
     /(?:^|\s)tema\s*(\d+)(?:\s|$)/
   );
 
-  return match
-    ? Number(match[1])
-    : null;
+  if(!match)return null;
+  const id=SPEC_TOPIC_ID_BY_NAME_268.get(specNorm268(topicName));
+  return id ? SPEC_LEGACY_NUM_BY_ID_268.get(id) : Number(match[1]);
 }
 function coverageTopicRulesPrompt(topicName){
   const topicNumber=
@@ -7546,7 +7630,7 @@ app.post('/api/admin/topics/1/retire',topicAdminAuth,async(req,res)=>{
     if(!old || old.name!=='Apeo y poda de arbolado' || old.block!=='especifico'){
       throw Object.assign(new Error('El tema 1 ya no existe o su identidad ha cambiado. No se ha alterado nada.'),{status:409});
     }
-    if(!replacement || replacement.block!=='especifico' || replacement.name!=='TEMA 56 APEO Y PODA' || Number(replacement.topic_order)!==56){
+    if(!replacement || replacement.block!=='especifico' || replacement.name!=='TEMA 54. APEO Y PODA' || Number(replacement.topic_order)!==54){
       throw Object.assign(new Error('Falta verificar el tema nuevo ID 67; operacion cancelada.'),{status:409});
     }
     const replacementBefore=await client.query('SELECT COUNT(*)::int AS n FROM coverage_items WHERE topic_id=$1',[67]);
@@ -7924,14 +8008,22 @@ if(!pdfHeader.includes("%PDF-")){
     let topic;
     if(isT46TrafficUpload){
       const previous=await db.query(`SELECT * FROM topics WHERE id=72 AND
-        block='especifico' AND name ~* '^TEMA[[:space:]]*61([^0-9]|$)'`);
+        block='especifico'`);
       if(previous.rowCount!==1)
         throw Error('T46 TRAFICO: tema histórico no encontrado; no se crea duplicado.');
       topic=previous.rows[0];
     }else{
-      topic=await getOrCreateTopic(canonicalTopicName86,req.file.originalname);
+      const knownId=specExistingId268(canonicalTopicName86,block);
+      if(knownId){
+        const current=await db.query("SELECT * FROM topics WHERE id=$1 AND block='especifico'",[knownId]);
+        if(current.rowCount!==1)throw Error('CAT268: ID original no encontrado. No crear tema duplicado');
+        topic=current.rows[0];
+      }else{
+        topic=await getOrCreateTopic(canonicalTopicName86,req.file.originalname);
+      }
     }
 
+    const knownCanon268=SPEC_TOPIC_BY_ID_268.get(Number(topic.id));
     const metadataResult=
       await db.query(
         `UPDATE topics
@@ -7946,7 +8038,7 @@ if(!pdfHeader.includes("%PDF-")){
           Number(topic.id),
           req.file.originalname,
           block,
-          isT46TrafficUpload ? 61 : topicOrder
+          knownCanon268?.num ?? topicOrder
         ]
       );
 
@@ -8855,7 +8947,7 @@ async function t55PreparedIndex206(topic,pdfPath){
     await c.query('BEGIN');
     const lock=await c.query('SELECT id,name,block,topic_order FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
     if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==55||
-       Number(lock.rows[0].topic_order)!==55)throw Error('T55: identidad u orden de tema incorrectos');
+       specLegacy268(lock.rows[0])!==55)throw Error('T55: identidad u orden de tema incorrectos');
     const prior=await c.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
     if(prior.rowCount&&prior.rows[0].sha!==sha)
       throw Error('T55: PDF previo diferente; se preserva el tema e historial');
@@ -8942,7 +9034,7 @@ async function t59PreparedIndex226(topic,pdfPath){
     await c.query('BEGIN');
     const lock=await c.query('SELECT id,name,block,topic_order FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
     if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==59||
-       Number(lock.rows[0].topic_order)!==59)throw Error('T59: identidad u orden de tema incorrectos');
+       specLegacy268(lock.rows[0])!==59)throw Error('T59: identidad u orden de tema incorrectos');
     const prior=await c.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
     if(prior.rowCount&&prior.rows[0].sha!==sha)
       throw Error('T59: PDF previo diferente; se preserva el tema e historial');
@@ -9030,7 +9122,7 @@ async function t60PreparedIndex229(topic,pdfPath){
     await c.query('BEGIN');
     const lock=await c.query('SELECT id,name,block,topic_order FROM topics WHERE id=$1 FOR UPDATE',[topic.id]);
     if(!lock.rowCount||healthTopicNumber192(lock.rows[0])!==60||
-       Number(lock.rows[0].topic_order)!==60)throw Error('T60: identidad u orden de tema incorrectos');
+       specLegacy268(lock.rows[0])!==60)throw Error('T60: identidad u orden de tema incorrectos');
     const prior=await c.query('SELECT TRIM(pdf_sha256) AS sha FROM topic_local_pdfs WHERE topic_id=$1',[topic.id]);
     if(prior.rowCount&&prior.rows[0].sha!==sha)
       throw Error('T60: PDF previo diferente; se preserva el tema e historial');
@@ -9243,7 +9335,7 @@ async function t62PreparedIndex(topic,pdfPath,runId=""){
       VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
         document_name=EXCLUDED.document_name,updated_at=NOW()`,
       [topic.id,'local-pdf:sha256:'+sha]);
-    await c.query(`UPDATE topics SET topic_order=62,file_search_indexed=FALSE,
+    await c.query(`UPDATE topics SET topic_order=56,file_search_indexed=FALSE,
       total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
       worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
       WHERE id=$1`,[topic.id]);
@@ -9442,7 +9534,7 @@ async function t63PreparedIndex263(topic,pdfPath,runId){
       VALUES($1,$2) ON CONFLICT(topic_id) DO UPDATE SET
       document_name=EXCLUDED.document_name,updated_at=NOW()`,
       [topic.id,'local-pdf:sha256:'+sha]);
-    await c.query(`UPDATE topics SET topic_order=63,file_search_indexed=FALSE,
+    await c.query(`UPDATE topics SET topic_order=62,file_search_indexed=FALSE,
       total_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE),
       worked_items=(SELECT COUNT(*) FROM coverage_items WHERE topic_id=$1 AND exam_relevant=TRUE AND worked=TRUE)
       WHERE id=$1`,[topic.id]);
@@ -10519,7 +10611,7 @@ app.get('/api/iiff-local-status',async(req,res)=>{
 app.get('/api/t62-status',async(req,res)=>{
   try{
     const rows=await db.query(`SELECT id,name,total_items FROM topics
-      WHERE block='especifico' AND topic_order=62 ORDER BY id DESC LIMIT 1`);
+      WHERE block='especifico' AND id=105 ORDER BY id DESC LIMIT 1`);
     if(!rows.rows.length)return res.json({ok:true,topicFound:false});
     const t=rows.rows[0],state=await t62VerifyStored245(t.id);
     const complete=Number(state.records)===1955&&Number(state.eligible)===1180&&
@@ -19701,7 +19793,7 @@ app.post('/api/generate',async(req,res)=>{
         FROM topics WHERE id=$1`,[50]);
       const row=identity.rows[0];
       if(row?.block!=='especifico'||Number(row.topic_order)!==40||
-         !String(row.name||'').toUpperCase().startsWith('TEMA 40 INCENDIOS DE INTERIOR'))
+         !/^(?:TEMA\s*40[.\s]+INCENDIOS DE INTERIOR)/i.test(String(row.name||'')))
         throw Error('T40_162: identidad del tema no verificada. No se generan preguntas.');
       // 167: práctica libre aislada del SRS, fuentes documentales verificadas.
       const rows167=await t40SourceRows167();
@@ -19737,8 +19829,8 @@ app.post('/api/generate',async(req,res)=>{
         FROM topics WHERE id=$1`,[topicIds[0]])).rows[0];
       const title56=String(identity56?.name||'').normalize('NFD')
         .replace(/[\u0300-\u036f]/g,'').toUpperCase();
-      if(identity56?.block==='especifico' && Number(identity56.topic_order)===56 &&
-         /^TEMA\s*56\s+APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/.test(title56)){
+      if(identity56?.block==='especifico' && Number(identity56.topic_order)===54 &&
+         /^TEMA\s*54\.?\s+APEO Y PODA(?: DE ARBOLADO)?(?:$|\b)/.test(title56)){
         const t56Math=require('./t56_calculo_211.js');
         const source56=await db.query(`SELECT id,topic_id,source_page,manual_page,
           source_evidence,concept,exam_relevant FROM coverage_items
@@ -19774,8 +19866,8 @@ app.post('/api/generate',async(req,res)=>{
     // SERVER215: T57 - 24 familias simples y 8 combinadas, sin Gemini.
     if(mode==='calculos' && Array.isArray(topicIds) && topicIds.length===1){
       const t57=(await db.query('SELECT id,block,topic_order,name FROM topics WHERE id=$1',[topicIds[0]])).rows[0];
-      if(t57?.block==='especifico' && Number(t57.topic_order)===57 &&
-          /^TEMA\s*57\s+RIESGO ELECTRICO\b/.test(String(t57.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase())){
+      if(t57?.block==='especifico' && Number(t57.topic_order)===55 &&
+          /^TEMA\s*55\.?\s+RIESGO ELECTRICO\b/.test(String(t57.name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase())){
         const base=(await import('./t57_calculos.js')).default;
         const mix=(await import('./t57_calculos_combinados.js')).default;
         const families=[...base.families.map(x=>[x[0],base.generate]),...mix.metadata.map(x=>[x[0],mix.generate])];
@@ -20546,7 +20638,7 @@ async function applyVerifiedFireTheoryRepairV1(){
     const t=await client.query(
       `SELECT id,name,block,topic_order,total_items,worked_items
        FROM topics WHERE id=$1 FOR UPDATE`,[plan.topicId]);
-    if(t.rows.length!==1 || t.rows[0].name!==plan.topicName ||
+    if(t.rows.length!==1 || ![plan.topicName,SPEC_TOPIC_BY_ID_268.get(Number(plan.topicId))?.title].includes(t.rows[0].name) ||
        t.rows[0].block!=='especifico' ||
        Number(t.rows[0].topic_order)!==plan.topicOrder){
       throw new Error('T38: identidad del tema distinta de la auditada');
@@ -20723,7 +20815,7 @@ async function applyT40DocumentalRepair161(){
       [plan.topicId]
     );
     const t=topicResult.rows[0];
-    if(!t || t.name!==plan.topicName || t.block!=='especifico' ||
+    if(!t || ![plan.topicName,SPEC_TOPIC_BY_ID_268.get(Number(plan.topicId))?.title].includes(t.name) || t.block!=='especifico' ||
        Number(t.topic_order)!==40){
       throw Error('T40 DOC 161: tema distinto del auditado; no modificar');
     }
@@ -21136,6 +21228,7 @@ async function startServer(){
   catch(e){console.error('T39 DEDUP CANCELADA sin cambios:',String(e?.message||e))}
   try{await t61RecoverEligibleCoverage244();}
   catch(error){console.error('T61_244_RECUPERACION_NO_APLICADA:',String(error?.message||error));}
+  await syncSpecificTopicCatalog268();
   console.log("STARTUP 1/4 OK");
   // SERVER 80: desactivar SOLO preguntas locales antiguas de tablas de
   // solares/eólicos. Sus territorios estaban desactualizados. No borra tests,
@@ -21196,18 +21289,18 @@ async function startServer(){
       EXAM_STYLE_STORE || "ninguno"
     );
     db.query(`SELECT id,name,block,total_items FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*41([^0-9]|$)'`)
+      id=52`)
       .then(r=>Promise.all(r.rows.filter(t41Topic).map(t=>t41ImportOnce(t))))
       .then(r=>console.log('T41_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T41_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items FROM topics WHERE block='especifico'
-       AND name ~* '^TEMA[[:space:]]*42([^0-9]|$)'`)
+       AND id=54`)
       .then(r=>Promise.all(r.rows.filter(t42Topic).map(t=>t42ImportOnce(t))))
       .then(r=>console.log('T42_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T42_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*43([^0-9]|$)'`)
+      id=53`)
       .then(r=>Promise.all(r.rows.filter(t43Topic).map(async t=>{
         const loaded=await t43ImportOnce(t);
         const audit=await t43AuditRepair187(t);
@@ -21216,20 +21309,19 @@ async function startServer(){
       .catch(e=>console.error('T43_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*44([^0-9]|$)'`)
+      id=55`)
       .then(r=>Promise.all(r.rows.filter(t44Topic).map(t=>t44ImportOnce(t))))
       .then(r=>console.log('T44_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T44_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      name ~* '^TEMA[[:space:]]*45([^0-9]|$)'`)
+      id=56`)
       .then(r=>Promise.all(r.rows.filter(t45Topic).map(t=>t45ImportOnce(t))))
       .then(r=>console.log('T45_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
-      (name ~* '^TEMA[[:space:]]*(4[6-9]|5[0-9])([^0-9]|$)' OR
-       name='T58 SALVAMENTO EN ALTURA TEMARIO')`)
+      id IN (57,58,59,60,61,62,63,64,65,66,67,68,69,70)`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
@@ -21250,7 +21342,7 @@ async function startServer(){
     // se sincronizan sobre el PDF original YA guardado en PostgreSQL.
     // No re-extrae páginas con Gemini, ni espera antes de abrir el puerto HTTP.
     db.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=72
-      AND block='especifico' AND name ~* '^TEMA[[:space:]]*61([^0-9]|$)'`)
+      AND block='especifico'`)
       .then(async r=>{
         const t=r.rows[0];
         if(!t || healthTopicNumber192(t)!==61){
