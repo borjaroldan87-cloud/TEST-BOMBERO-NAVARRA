@@ -22197,6 +22197,183 @@ async function syncT43Selected5_276(){
   finally{conn.release();}
 }
 
+// SERVER277. Tema 44 actual / T58 histórico, ID 69.
+// Solo las 18 capturas seleccionadas por el usuario; nunca las 9 T58_FIG_...
+// Las preguntas históricas, estadísticas, sesiones y SRS se conservan sin DELETE.
+function t44SelectedPack277(){
+  const f=path.join(process.cwd(),'t44_selected_18_data.js');
+  if(!fs.existsSync(f))throw Error('T44-277: falta t44_selected_18_data.js');
+  const raw=fs.readFileSync(f,'utf8'),mark='module.exports = ';
+  if(!raw.startsWith(mark))throw Error('T44-277: módulo no reconocido');
+  const d=JSON.parse(raw.slice(mark.length).trim().replace(/;\s*$/,''));
+  const unique=a=>Array.isArray(a)&&a.length===new Set(a).size;
+  if(d.schema!==1||d.topic_id!==69||d.topic_number!==44||
+     d.pdf_name!=='T58_SALVAMENTO_EN_ALTURA_TEMARIO.pdf'||
+     d.images?.length!==18||d.questions?.length!==18||d.texts?.length!==9||
+     d.old_ids?.length!==36||!unique(d.old_ids)||
+     !unique(d.images.map(x=>x.file))||!unique(d.images.map(x=>x.assetId))||
+     !unique(d.questions.map(x=>x.file))||!unique(d.questions.map(x=>x.original_id))||
+     !unique(d.texts.map(x=>x.original_id))||
+     d.old_ids.some((x,i)=>x!==(i<9?2365+i:2438+i-9))||
+     d.questions.some((x,i)=>x.original_id!==2438+i||x.file!==d.images[i].file)||
+     d.texts.some((x,i)=>x.original_id!==2365+i))
+    throw Error('T44-277: 18 capturas, 27 preguntas o 36 históricas incompletas');
+  for(const i of d.images){
+    if(!/^Screenshot_20260924-\d{6}(?:-display-0\.png)?(?:~2\.jpg|\.png)?$/.test(i.file)||
+       !Number.isInteger(i.assetId)||i.assetId<1||
+       !/^[0-9a-f]{40}$/.test(i.gitSha)||
+       !Number.isInteger(i.width)||!Number.isInteger(i.height)||
+       i.width<100||i.height<100||!i.crop||
+       ['x','y','width','height'].some(k=>!Number.isFinite(i.crop[k]))||
+       i.crop.x<0||i.crop.y<0||i.crop.width<=0||i.crop.height<=0||
+       i.crop.x+i.crop.width>1||i.crop.y+i.crop.height>1)
+      throw Error('T44-277: imagen no válida '+i.file);
+  }
+  for(const q of [...d.questions,...d.texts]){
+    if(typeof q.stem!=='string'||q.stem.length<95||
+       !Array.isArray(q.options)||q.options.length!==4||!unique(q.options)||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       !q.explanation||!q.source_evidence||!/^\d+$/.test(q.manual_page))
+      throw Error('T44-277: pregunta no válida '+q.key);
+  }
+  for(const q of d.texts)if(/\b(?:imagen|figura|dibujo|esquema)\b/i.test(q.stem))
+    throw Error('T44-277: pregunta textual depende de un dibujo '+q.key);
+  return d;
+}
+async function syncT44Selected18_277(){
+  const d=t44SelectedPack277();
+  // SHA de blob Git: el origen tiene que ser la fotografía seleccionada por el usuario.
+  for(const img of d.images){
+    const p=path.join(process.cwd(),'public','graphics','salvamento-altura',img.file);
+    if(!fs.existsSync(p))throw Error('T44-277: falta captura original '+img.file);
+    const b=fs.readFileSync(p);
+    const sha=createHash('sha1').update('blob '+b.length+'\0').update(b).digest('hex');
+    if(sha!==img.gitSha)throw Error('T44-277: la captura original fue modificada '+img.file);
+  }
+  const conn=await db.connect();
+  try{
+    await conn.query('BEGIN');
+    await conn.query('SELECT pg_advisory_xact_lock(44,277)');
+    const t=(await conn.query(`SELECT id,block,topic_order,name,source_file,total_items
+      FROM topics WHERE id=69 FOR UPDATE`)).rows[0];
+    if(!t||t.block!=='especifico'||Number(t.topic_order)!==44||
+       !/SALVAMENTO EN ALTURA/i.test(t.name)||t.source_file!==d.pdf_name||
+       Number(t.total_items)<1)
+      throw Error('T44-277: identidad curricular/PDF incorrecta');
+    const old=(await conn.query(`SELECT q.id,q.coverage_item_id,q.stem,q.options,
+      q.correct_index,q.graphic,q.source_page,q.manual_page,q.active
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.id=ANY($1::bigint[]) FOR UPDATE OF q`,[d.old_ids])).rows;
+    const byId=new Map(old.map(x=>[Number(x.id),x]));
+    if(old.length!==36||d.old_ids.some(x=>!byId.has(x))||
+       old.some(x=>!x.graphic||!Array.isArray(x.options)||x.options.length!==4||
+         !Number.isInteger(x.correct_index)||x.correct_index<0||x.correct_index>3))
+      throw Error('T44-277: banco histórico distinto de lo auditado');
+    const assetRows=(await conn.query(`SELECT id,source_file,source_id,public_url,asset_index
+       FROM graphic_assets WHERE topic_folder='salvamento-altura' AND asset_index=0
+       AND source_file=ANY($1::text[]) FOR UPDATE`,[d.images.map(x=>x.file)])).rows;
+    const assets=new Map(assetRows.map(x=>[x.source_file,x]));
+    if(assets.size!==18||assetRows.length!==18||d.images.some(x=>
+       assets.get(x.file)?.id!==x.assetId||
+       assets.get(x.file)?.source_id!=='salvamento-altura/'+x.file))
+       throw Error('T44-277: las 18 imágenes originales no coinciden en la matriz');
+    const curr=(await conn.query(`SELECT q.id,q.graphic FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.active AND q.graphic IS NOT NULL FOR UPDATE OF q`)).rows;
+    const historic=new Set(d.old_ids);
+    for(const row of curr){
+      if(historic.has(Number(row.id)))continue;
+      if(!d.questions.some(x=>row.graphic?.externalKey===x.key&&
+        row.graphic?.sourceId==='salvamento-altura/'+x.file))
+        throw Error('T44-277: existe otra gráfica activa no auditada '+row.id);
+    }
+    let graphicCreated=0,graphicReused=0;
+    for(const q of d.questions){
+      const oldq=byId.get(q.original_id),a=assets.get(q.file),img=d.images.find(x=>x.file===q.file);
+      if(!oldq||!a||oldq.graphic?.sourceId!==a.source_id)
+        throw Error('T44-277: la imagen no corresponde a la pregunta '+q.key);
+      const graphic={assetId:a.id,sourceId:a.source_id,publicUrl:a.public_url,
+        assetType:'individual',originalSelected:true,originalFile:q.file,
+        sourceAspectRatio:img.width/img.height,crop:img.crop,maskRegions:[],externalKey:q.key};
+      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active
+        FROM question_bank WHERE coverage_item_id=$1 AND stem=$2 FOR UPDATE`,
+        [oldq.coverage_item_id,q.stem]);
+      if(prev.rowCount>1)throw Error('T44-277: gráfica duplicada '+q.key);
+      if(prev.rowCount===1){
+        const existing=prev.rows[0];
+        if(JSON.stringify(existing.options)!==JSON.stringify(q.options)||
+           Number(existing.correct_index)!==q.correct_index||
+           existing.graphic?.sourceId!==graphic.sourceId||
+           existing.graphic?.originalSelected!==true)
+           throw Error('T44-277: pregunta existente divergente '+q.key);
+        if(!existing.active)await conn.query(`UPDATE question_bank SET active=TRUE,
+          updated_at=NOW() WHERE id=$1`,[existing.id]);
+        graphicReused++;
+      }else{
+        await conn.query(`INSERT INTO question_bank(coverage_item_id,stem,options,correct_index,
+          explanation,source_evidence,source_page,manual_page,question_family,
+          difficulty,graphic,validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,8,TRUE)`,
+          [oldq.coverage_item_id,q.stem,JSON.stringify(q.options),q.correct_index,
+            q.explanation,q.source_evidence,oldq.source_page,q.manual_page,JSON.stringify(graphic)]);
+        graphicCreated++;
+      }
+    }
+    let textCreated=0,textReused=0;
+    for(const q of d.texts){
+      const oldq=byId.get(q.original_id);
+      if(!oldq||!String(oldq.graphic?.sourceId||'').includes('/T58_FIG_'))
+        throw Error('T44-277: texto no vinculado al conocimiento previo '+q.key);
+      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active
+        FROM question_bank WHERE coverage_item_id=$1 AND stem=$2 FOR UPDATE`,
+        [oldq.coverage_item_id,q.stem]);
+      if(prev.rowCount>1)throw Error('T44-277: texto duplicado '+q.key);
+      if(prev.rowCount===1){
+        const existing=prev.rows[0];
+        if(existing.graphic!==null||JSON.stringify(existing.options)!==JSON.stringify(q.options)||
+           Number(existing.correct_index)!==q.correct_index)
+          throw Error('T44-277: texto divergente '+q.key);
+        if(!existing.active)await conn.query('UPDATE question_bank SET active=TRUE,updated_at=NOW() WHERE id=$1',[existing.id]);
+        textReused++;
+      }else{
+        await conn.query(`INSERT INTO question_bank(coverage_item_id,stem,options,correct_index,
+           explanation,source_evidence,source_page,manual_page,question_family,
+           difficulty,graphic,validation_version,active)
+           VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'2026_RAZONAMIENTO','muy alta',NULL,8,TRUE)`,
+           [oldq.coverage_item_id,q.stem,JSON.stringify(q.options),q.correct_index,
+             q.explanation,q.source_evidence,oldq.source_page,q.manual_page]);
+        textCreated++;
+      }
+    }
+    const retired=await conn.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+       WHERE id=ANY($1::bigint[]) AND active=TRUE`,[d.old_ids]);
+    await conn.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
+      WHERE topic_folder='salvamento-altura' AND is_usable=TRUE`);
+    await conn.query(`UPDATE graphic_assets SET is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
+      WHERE id=ANY($1::int[])`,[assetRows.map(x=>x.id)]);
+    const g=(await conn.query(`SELECT COUNT(*)::int n,
+      COUNT(DISTINCT q.graphic->>'sourceId')::int sources,
+      COUNT(*) FILTER(WHERE q.difficulty<>'muy alta')::int low
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.active AND q.graphic IS NOT NULL`)).rows[0];
+    const a=(await conn.query(`SELECT COUNT(*)::int n,COUNT(DISTINCT source_file)::int files
+      FROM graphic_assets WHERE topic_folder='salvamento-altura' AND is_usable=TRUE`)).rows[0];
+    const n=(await conn.query(`SELECT COUNT(*)::int n FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.active AND q.graphic IS NULL
+      AND q.stem=ANY($1::text[])`,[d.texts.map(x=>x.stem)])).rows[0].n;
+    const oldActive=(await conn.query(`SELECT COUNT(*)::int n FROM question_bank
+      WHERE id=ANY($1::bigint[]) AND active=TRUE`,[d.old_ids])).rows[0].n;
+    if(g.n!==18||g.sources!==18||g.low!==0||a.n!==18||a.files!==18||n!==9||oldActive!==0)
+      throw Error('T44-277: comprobación final 18 gráficas/9 textos fallida; ROLLBACK');
+    await conn.query('COMMIT');
+    return {ok:true,topicId:69,topicNumber:44,imagesOriginalSelected:18,
+      activeGraphics:18,textQuestionsRecovered:9,graphicCreated,graphicReused,
+      textCreated,textReused,retired:retired.rowCount,deletedHistory:0};
+  }catch(err){await conn.query('ROLLBACK').catch(()=>{});throw err;}
+  finally{conn.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -22322,6 +22499,13 @@ async function startServer(){
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
+          // Tema 44 actual (ID 69): cerrar el banco gráfico DESPUÉS del importador histórico.
+          if(Number(t.id)===69){
+            try{
+              const m=await syncT44Selected18_277();
+              console.log('T44_277_18_ORIGINALES_SINCRONIZADAS',JSON.stringify(m));
+            }catch(e){console.error('T44_277_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e));}
+          }
           // El tema curricular 42 es el ID histórico 66. Ejecutar la
           // sustitución seleccionada DESPUÉS del importador anterior.
           if(Number(t.id)===66){
