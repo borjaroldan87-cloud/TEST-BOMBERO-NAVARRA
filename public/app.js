@@ -1079,7 +1079,14 @@ function renderGraphic(q){
   const imageLeft=-(x/safeWidth)*100;
   const imageTop=-(y/safeHeight)*100;
 
-  const cropRatio=safeWidth/safeHeight;
+  // T39-271: las imágenes recortadas mantienen su relación ancho/alto original.
+  // Sin sourceAspectRatio no cambia el comportamiento de los temas anteriores.
+  const sourceRatio=Number(g.sourceAspectRatio);
+  const hasSourceRatio=Number.isFinite(sourceRatio) && sourceRatio>0;
+  const cropRatio=(safeWidth/safeHeight)*(hasSourceRatio?sourceRatio:1);
+  const frameWidth=hasSourceRatio
+    ? `min(100%,480px,${Math.min(480,320*cropRatio).toFixed(2)}px)`
+    : 'min(100%,480px)';
 
   const maskRegions=
     Array.isArray(g.maskRegions)
@@ -1151,7 +1158,7 @@ function renderGraphic(q){
     <div
       class="question-graphic"
       style="
-        width:min(100%,480px);
+        width:${frameWidth};
         aspect-ratio:${cropRatio};
         max-height:320px;
         overflow:hidden;
