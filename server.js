@@ -18779,6 +18779,102 @@ function resetBalanceNewAnswers83(questions){
   return result;
 }
 
+// SERVER278 — reparto de exámenes largos. No toca generación Gemini <=40.
+// Usa los temas y evidencias ya indexados. No crea conocimientos ni respuestas.
+function bank278Norm(x){
+  return String(x??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+}
+function bank278WeakText(r,difficulty){
+  if(difficulty!=='muy alta')return false;
+  const stem=bank278Norm(r.stem);
+  // Las 90 conversiones T41-274 no fueron objeto de una NUEVA auditoría
+  // pedagógica: se conservan en BD, pero NO se presentan como Muy alta.
+  if(Number(r.topic_id)===54 && /^segun el manual ceis guadalajara p /i.test(stem))return true;
+  // SERVER274/275/276: conversiones de gráficos a texto por migración,
+  // validadas estructuralmente (v8) pero SIN auditoría de distractores.
+  // Conservar para revisión y repaso; excluir SOLO de los exámenes Muy alta.
+  if([54,66,52].includes(Number(r.topic_id)) &&
+     Number(r.validation_version)===8 && !r.graphic &&
+     String(r.question_family)==='2026_RAZONAMIENTO')return true;
+  const answer=bank278Norm(r.options?.[Number(r.correct_index)]);
+  // Enunciados que contienen literalmente la respuesta (caso Q57 sesión 193).
+  if(answer.length>=12 && stem.includes(answer))return true;
+  // No se califica como alta dificultad una pregunta de mera identificación
+  // cuando la propia cabecera aporta el valor exacto solicitado.
+  const numerical=answer.match(/(?:^|\s)(\d+(?:[.,]\d+)?\s*(?:m s|km h|bar|mm|kw|kpa|pa|kg|litros?|l min))(?:$|\s)/i);
+  if(numerical && stem.includes(numerical[1]))return true;
+  return false;
+}
+function bank278PageKey(pair){
+  return String(pair.target.manual_page ?? pair.target.source_page ?? 'sin pagina').trim();
+}
+function bank278PickDiverse(pairs,count){
+  // Primero un tema diferente por vuelta; luego páginas y conceptos diferentes.
+  // Cubre las materias solicitadas ANTES de reutilizar un mismo ámbito.
+  const groups=new Map();
+  for(const pair of pairs){
+    const id=Number(pair.target.topic_id);
+    if(!groups.has(id))groups.set(id,[]);
+    groups.get(id).push(pair);
+  }
+  const ids=[...groups.keys()];
+  for(let i=ids.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));
+    [ids[i],ids[j]]=[ids[j],ids[i]];}
+  const byTopic=new Map(),byPage=new Map(),bySection=new Map(),usedConcept=new Set();
+  const selected=[];
+  let rounds=0;
+  while(selected.length<count){
+    let progress=false;
+    // Rotar el comienzo: los temas sin plazas previas vuelven a tener prioridad.
+    const offset=ids.length ? rounds%ids.length : 0;
+    const cycle=ids.slice(offset).concat(ids.slice(0,offset));
+    for(const id of cycle){
+      if(selected.length>=count)break;
+      const pool=groups.get(id);
+      if(!pool?.length)continue;
+      // La puntuación conserva la prioridad SRS histórica dentro de una misma
+      // página; favorece secciones y conceptos distintos cuando son posibles.
+      let winner=-1,score=Infinity;
+      for(let k=0;k<pool.length;k++){
+        const x=pool[k],page=bank278PageKey(x);
+        const key=`${id}|${page}`,sec=`${id}|${bank278Norm(x.target.section)}`;
+        const concept=`${id}|${bank278Norm(x.target.concept)}`;
+        const pageUsed=byPage.get(key)||0;
+        const sectionUsed=bySection.get(sec)||0;
+        const conceptUsed=usedConcept.has(concept)?1:0;
+        const times=Math.min(999,Number(x.question?.timesShown278||0));
+        const candidateScore=pageUsed*1000+sectionUsed*120+conceptUsed*300+
+          times*2+k*0.001;
+        if(candidateScore<score){score=candidateScore;winner=k;}
+      }
+      if(winner<0)continue;
+      const [chosen]=pool.splice(winner,1);
+      selected.push(chosen);progress=true;
+      byTopic.set(id,(byTopic.get(id)||0)+1);
+      const pageKey=`${id}|${bank278PageKey(chosen)}`;
+      const sectionKey=`${id}|${bank278Norm(chosen.target.section)}`;
+      byPage.set(pageKey,(byPage.get(pageKey)||0)+1);
+      bySection.set(sectionKey,(bySection.get(sectionKey)||0)+1);
+      usedConcept.add(`${id}|${bank278Norm(chosen.target.concept)}`);
+    }
+    if(!progress)break;
+    rounds++;
+  }
+  if(selected.length<count)
+    throw Error(`Banco insuficiente con controles de diversidad para ${count} preguntas: ${selected.length} aptas. No se construye un examen repetitivo.`);
+  // El orden de preguntas del test no delata páginas consecutivas ni ID de carga.
+  for(let i=selected.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));
+    [selected[i],selected[j]]=[selected[j],selected[i]];}
+  const countTopics=new Set(selected.map(x=>Number(x.target.topic_id))).size;
+  const pages=new Set(selected.map(x=>`${x.target.topic_id}|${bank278PageKey(x)}`)).size;
+  console.log('SERVER278_REPARTO_BANCO',JSON.stringify({count,
+    topics:countTopics,topicIds:[...new Set(selected.map(x=>x.target.topic_id))].sort((a,b)=>a-b),
+    distinctTopicPages:pages,highestTopicCount:Math.max(...byTopic.values()),
+    convertedUnreviewedT41Excluded:true}));
+  return selected;
+}
+
 async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false){
   // Tests >40: el banco dicta QUÉ conocimientos existen, no una selección
   // previa de cobertura que pudiera no tener preguntas almacenadas.
@@ -18803,7 +18899,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
       AND ($1::int[] IS NULL OR ci.topic_id=ANY($1::int[]))
       AND qb.difficulty=$2
     ORDER BY qb.times_shown ASC,qb.last_shown_at ASC NULLS FIRST,qb.id DESC
-    LIMIT 1500`,[allowedTopicIds,difficulty]);
+    LIMIT 10000`,[allowedTopicIds,difficulty]);
   const iiffTopicIds=[...new Set(result.rows.filter(iiff91Topic).map(r=>Number(r.topic_id)))];
   const blocked=(await Promise.all(iiffTopicIds.map(topicId=>iiff96BlockedHistory(topicId)))).flat();
   const usedQuestions=new Set(),usedCoverage=new Set(),usedScale204=new Set(),pairs=[];
@@ -18829,6 +18925,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
     const ankiOriginalBank=Boolean(r.source_anki_question_id &&
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
     if(geo114QuestionIssue(r)||t52MattsonExample204(r))continue;
+    if(bank278WeakText(r,difficulty))continue;
     if(specificQualityIssue204({options:r.options,stem:r.stem},r,difficulty))continue;
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
       (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
@@ -18849,11 +18946,11 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false)
       questionFamily:r.question_family,difficulty:r.difficulty,
       graphic:r.graphic||null,reused:true,questionId:Number(r.id),
       iiffHighBankVersion:iiff91Topic(r)?Number(r.validation_version):null,
-      ankiOriginalBank};
-    pairs.push({question,target});if(pairs.length>=count)break;
+      ankiOriginalBank,timesShown278:Number(r.times_shown||0)};
+    pairs.push({question,target});
   }
-  if(pairs.length!==count)throw Error(`Banco insuficiente para ${count} preguntas ${difficulty}; hay ${pairs.length} aptas en esta selección.`);
-  return pairs;
+  if(pairs.length<count)throw Error(`Banco insuficiente para ${count} preguntas ${difficulty}; hay ${pairs.length} aptas en esta selección. No se rellena con preguntas deficientes.`);
+  return bank278PickDiverse(pairs,count);
 }
 function publicManualPageQuestions(questions){
   return (questions||[]).map(q=>({...q,sourcePage:null,
