@@ -14144,6 +14144,10 @@ for(let i = 0; i < selected.length; i++){
   }
 
   const originalGraphicSlot = selected[i];
+  if(Number(originalGraphicSlot.topic_id)===48){
+    selected[i]={...originalGraphicSlot,t38PreparedGraphicSlot270:true};
+    continue;
+  }
   // T40: la imagen y la pregunta están asociadas de antemano en PostgreSQL.
   // No llamar a Gemini para un emparejamiento ya verificado.
   if(t40Topic157(originalGraphicSlot) && t40Resources157Load()){
@@ -20063,12 +20067,15 @@ app.post('/api/generate',async(req,res)=>{
       ?Array.from(resume136.questions):Array.from({length:targets.length},()=>null);
     // Una pregunta gráfica T40 ya archivada = cero llamadas a Gemini.
     // Solo usa preguntas del MISMO tema elegibles por SRS/frescura.
-    if(!resume136 && targets.some(t=>t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)){
-      const slots=targets.map((t,i)=>(t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)?i:-1)
+    if(!resume136 && targets.some(t=>t.t38PreparedGraphicSlot270||t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)){
+      const slots=targets.map((t,i)=>(t.t38PreparedGraphicSlot270||t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192)?i:-1)
         .filter(i=>i>=0);
       const grouped=new Map();
       for(const i of slots){
         const topicId=Number(targets[i].topic_id);
+        if(!grouped.has(topicId) && targets[i].t38PreparedGraphicSlot270){
+          grouped.set(topicId,await t38GraphicBankPairs270(topicId,freshOnly111,difficulty));
+        }
         if(!grouped.has(topicId))grouped.set(topicId,
           (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot||targets[i].healthPreparedGraphicSlot192)
             ?(targets[i].healthPreparedGraphicSlot192
@@ -20124,7 +20131,7 @@ app.post('/api/generate',async(req,res)=>{
         }else{
           // Si el banco está vacío, no fabricar una pregunta gráfica ajena.
           targets[i]={...targets[i],questionFamily:'2026_CORRECTA',
-            t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false,t45PreparedGraphicSlot:false,healthPreparedGraphicSlot192:false};
+            t38PreparedGraphicSlot270:false,t40PreparedGraphicSlot157:false,t41PreparedGraphicSlot:false,t42PreparedGraphicSlot:false,t43PreparedGraphicSlot:false,t44PreparedGraphicSlot:false,t45PreparedGraphicSlot:false,healthPreparedGraphicSlot192:false};
           console.warn('T40_157_GRAFICA_NO_ELEGIBLE',JSON.stringify({slot:i}));
         }
       }
@@ -21205,6 +21212,156 @@ async function t63RemoveNonExaminableHeaders266(){
   finally{client.release();}
 }
 
+
+// T38-270: solo tres imágenes seleccionadas del usuario, tres preguntas gráficas.
+// No regenerar, indexar, borrar ni tocar preguntas de otros temas.
+async function syncT38SelectedGraphics270(){
+  const modulePath=path.join(process.cwd(),'t38_graphics_data.js');
+  if(!fs.existsSync(modulePath)){
+    console.warn('T38_270_NO_INSTALADO: falta t38_graphics_data.js; servidor operativo');
+    return {skipped:true,reason:'missing_data'};
+  }
+  const raw=fs.readFileSync(modulePath,'utf8');
+  const marker='module.exports = ';
+  if(!raw.startsWith(marker)) throw Error('T38_270: cabecera de datos incorrecta');
+  const data=JSON.parse(raw.slice(marker.length).trim().replace(/;\s*$/,''));
+  if(data.schema!==1||data.topic_id!==48||data.topic_number!==38||
+     data.selected_count!==3||data.graphics_count!==3||
+     !Array.isArray(data.questions)||data.questions.length!==3||
+     !Array.isArray(data.original_user_images)||data.original_user_images.length!==3||
+     new Set(data.questions.map(q=>q.external_key)).size!==3||
+     new Set(data.questions.map(q=>q.file)).size!==3||
+     new Set(data.original_user_images.map(i=>i.file)).size!==3)
+    throw Error('T38_270: paquete incompleto o duplicado');
+
+  const imagesByFile=new Map();
+  for(const [n,img] of data.original_user_images.entries()){
+    if(!/^Screenshot_20260924-[0-9]{6}~2\.jpg$/.test(img.file))
+      throw Error('T38_270: nombre de imagen no autorizado');
+    const candidate=path.join(process.cwd(),'public','graphics','teoria-fuego',img.file);
+    if(!fs.existsSync(candidate)) throw Error('T38_270: falta imagen elegida: '+img.file);
+    const bytes=fs.readFileSync(candidate);
+    const blob=createHash('sha1').update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
+    if(blob!==img.git_blob_sha1)
+      throw Error('T38_270: imagen diferente de la seleccionada: '+img.file);
+    if(img.public_url!==`/graphics/teoria-fuego/${img.file}`)
+      throw Error('T38_270: URL de imagen inesperada');
+    imagesByFile.set(img.file,img);
+  }
+  for(const q of data.questions){
+    if(!/^T38-GRAF-00[123]$/.test(q.external_key)||
+       !imagesByFile.has(q.file)||
+       q.image_git_blob_sha1!==imagesByFile.get(q.file).git_blob_sha1||
+       ![22854,22917,23100].includes(q.coverage_id)||
+       q.family!=='GRAFICA'||q.difficulty!=='muy alta'||
+       !Array.isArray(q.options)||q.options.length!==4||
+       new Set(q.options.map(x=>String(x).trim())).size!==4||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       String(q.stem||'').length<40||q.options.some(x=>String(x||'').length<20)||
+       !q.source_evidence||!q.explanation)
+      throw Error('T38_270: pregunta no válida '+q.external_key);
+  }
+
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(38, 270)');
+    const tr=await client.query(`SELECT * FROM topics WHERE id=48 FOR UPDATE`);
+    const topic=tr.rows[0];
+    if(!topic||String(topic.block)!=='especifico'||Number(topic.topic_order)!==38||
+       !/teor[íi]a del fuego/i.test(String(topic.name))||
+       String(topic.source_file)!==data.source_pdf_name||!topic.file_search_indexed)
+      throw Error('T38_270: la identidad/fuente indexada no coincide; sin cambios');
+    const ref=await client.query(`SELECT document_name FROM topic_source_documents WHERE topic_id=48`);
+    if(!ref.rows[0]?.document_name)
+      throw Error('T38_270: falta documento indexado; sin cambios');
+    const allOld=await client.query(`SELECT q.id,q.stem,q.active,q.graphic FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=48 AND q.question_family='GRAFICA' FOR UPDATE OF q`);
+    const expectedStems=new Set(data.questions.map(q=>q.stem));
+    if(allOld.rows.some(q=>!expectedStems.has(q.stem)))
+      throw Error('T38_270: hay preguntas gráficas no reconocidas; no desactivar ninguna');
+
+    let created=0,previous=0;
+    for(const q of data.questions){
+      const img=imagesByFile.get(q.file);
+      const cv=await client.query(`SELECT * FROM coverage_items WHERE id=$1 AND topic_id=48 FOR UPDATE`,[q.coverage_id]);
+      const record=cv.rows[0];
+      if(!record||!record.exam_relevant||Number(record.source_page)!==Number(q.source_pdf_page))
+        throw Error('T38_270: cobertura/documentación cambiada '+q.external_key);
+      const assets=await client.query(`SELECT id,source_id,public_url,is_usable,asset_index
+         FROM graphic_assets WHERE source_id=$1 AND asset_index=0`,
+        ['teoria-fuego/'+q.file]);
+      if(assets.rowCount!==1||!assets.rows[0].is_usable||
+         assets.rows[0].public_url!==img.public_url)
+        throw Error('T38_270: imagen original no registrada '+q.file);
+      const graphic={assetId:assets.rows[0].id,assetType:'individual',
+        sourceId:assets.rows[0].source_id,publicUrl:assets.rows[0].public_url,
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+        originalSelected:true,externalKey:q.external_key};
+      const existing=await client.query(`SELECT * FROM question_bank
+        WHERE coverage_item_id=$1 AND question_family='GRAFICA' ORDER BY id FOR UPDATE`,
+        [q.coverage_id]);
+      if(existing.rowCount>1)throw Error('T38_270: duplicados gráficos ya existentes');
+      if(existing.rowCount===1){
+        const old=existing.rows[0];
+        if(old.stem!==q.stem||JSON.stringify(old.options)!==JSON.stringify(q.options)||
+           Number(old.correct_index)!==q.correct_index||
+           old.graphic?.sourceId!==graphic.sourceId)
+          throw Error('T38_270: pregunta preexistente no idéntica; sin sobrescribir');
+        if(!old.active)await client.query(`UPDATE question_bank SET active=TRUE,
+          updated_at=NOW() WHERE id=$1`,[old.id]);
+        previous++;
+      }else{
+        const inserted=await client.query(`INSERT INTO question_bank
+          (coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+           source_page,manual_page,question_family,difficulty,graphic,
+           validation_version,active)
+          VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,7,TRUE)
+          RETURNING id`,[
+            q.coverage_id,q.stem,JSON.stringify(q.options),q.correct_index,
+            q.explanation,q.source_evidence,q.source_pdf_page,q.manual_page,
+            JSON.stringify(graphic)
+          ]);
+        if(inserted.rowCount!==1)throw Error('T38_270: no se insertó pregunta');
+        created++;
+      }
+    }
+    const result=await client.query(`SELECT COUNT(*)::int AS active,
+       COUNT(DISTINCT graphic->>'sourceId')::int AS distinct_sources,
+       COUNT(*) FILTER(WHERE difficulty<>'muy alta')::int AS low_difficulty
+       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+       WHERE c.topic_id=48 AND q.active AND q.question_family='GRAFICA'`);
+    const check=result.rows[0];
+    if(check.active!==3||check.distinct_sources!==3||check.low_difficulty!==0)
+      throw Error('T38_270: cardinalidad final no es 3/3; transacción revertida');
+    await client.query('COMMIT');
+    return {topicId:48,images:3,activeGraphicQuestions:3,created,alreadyPresent:previous,
+       pdfIndexUnchanged:true,coverageUnchanged:true};
+  }catch(e){await client.query('ROLLBACK');throw e;}
+  finally{client.release();}
+}
+
+
+async function t38GraphicBankPairs270(topicId,freshOnly,difficulty){
+  if(Number(topicId)!==48||difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+      qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+      qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+      ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+      ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+      ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=48 AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version>=7 AND ${SRS96_ELIGIBLE_SQL}
+      AND ($1::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 3`,
+    [Boolean(freshOnly)]);
+  return rows.rows;
+}
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -21353,6 +21510,9 @@ async function startServer(){
         console.log('T46_MATRIZ_SINCRONIZADA',JSON.stringify(updated));
       })
       .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
+    syncT38SelectedGraphics270()
+      .then(r=>console.log('T38_270_3_ORIGINALES_CARGADAS',JSON.stringify(r)))
+      .catch(e=>console.error('T38_270_SIN_CAMBIOS_POR_AUDITORIA:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
