@@ -3211,14 +3211,14 @@ function healthTopicNumber192(topic){
 function healthLoadData192(n){
   if(healthCache192.has(n))return healthCache192.get(n);
   if(!HEALTH_NAMES_192[n])return null;
-  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t61_rescate_trafico_data.js':n===62?'t62_nrbq_data.js':n===63?'t63_herramientas_data.js':`t${n}_health_data.js`);
+  const file=path.join(process.cwd(), n===51?'t51_aperturas_data.js':n===52?'t52_busqueda_areas_data.js':n===53?'t53_rios_inundaciones_data.js':n===54?'t54_vehiculos_data.js':n===55?'t55_industriales_data.js':n===56?'t56_apeo_poda_data.js':n===57?'t57_riesgo_electrico_data.js':n===58?'t58_salvamento_altura_data.js':n===59?'t59_estructuras_colapsadas_data.js':n===60?'t60_edificaciones_data.js':n===61?'t46_accidentes_trafico_data.js':n===62?'t62_nrbq_data.js':n===63?'t63_herramientas_data.js':`t${n}_health_data.js`);
   if(!fs.existsSync(file))return null;
   const source=fs.readFileSync(file,'utf8').trim();
   const prefix='module.exports = ';
   if(!source.startsWith(prefix)||!source.endsWith(';'))
     throw Error(`HEALTH192: formato de modulo T${n} no reconocido`);
   const data=JSON.parse(source.slice(prefix.length,-1));
-  if(data?.schema!==1||data.topic_number!==n||
+  if(data?.schema!==1||data.topic_number!==(n===61?46:n)||
      !Array.isArray(data.images)||!Array.isArray(data.questions)||
      !Array.isArray(data.coverage_additions)||
      (data.questions.length<data.images.length)||
@@ -3269,7 +3269,7 @@ function healthWriteImages192(onlyTopic=0){
           throw Error('T58: imagen original seleccionada ausente: '+a.file);
         continue;
       }
-      if(!new RegExp(`^T${n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
+      if(!new RegExp(`^T${n===61?46:n}_FIG_\\d{2}_P\\d{3}\\.png$`).test(a.file))
         throw Error(`HEALTH192: nombre de imagen no permitido T${n}`);
       const bytes=Buffer.from(a.base64,'base64');
       const sha=createHash('sha256').update(bytes).digest('hex');
@@ -3584,7 +3584,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       const g=graphicMap.get(item.graphic_file);
       const asset=data.images.find(x=>x.file===item.graphic_file);
       if(!g||!asset||item.image_sha256!==asset.sha256||
-         !item.external_key?.startsWith(`T${n}-GRAF-`)||
+         !item.external_key?.startsWith(`T${n===61?46:n}-GRAF-`)||
          !Array.isArray(item.options)||item.options.length!==4||
          new Set(item.options).size!==4||
          !Number.isInteger(item.correct_index)||item.correct_index<0||
@@ -3670,6 +3670,76 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       }
       imported++;
     }
+    let preparedTextCount=0;
+    // T46 (identidad histórica DB T61 / topic_id=72): conservar exactamente
+    // las 5 figuras seleccionadas para próximos tests. Las otras 27 gráficas
+    // anteriores quedan INACTIVAS, nunca eliminadas (sesiones y estadísticas).
+    // Se realiza en la misma transacción que la importación del banco.
+    if(n===61){
+      if(Number(topic.id)!==72 || data.topic_number!==46 ||
+         data.images.length!==5 || data.questions.length!==5 ||
+         data.text_questions?.length!==26)
+        throw Error('T46: paquete o identidad incompatibles; cambios revertidos');
+      const keep=data.images.map(a=>'salud-t61/'+a.file);
+      await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+        analysis_status='superseded',updated_at=NOW()
+        WHERE topic_folder='salud-t61' AND NOT(source_id=ANY($1::text[]))
+        AND is_usable=TRUE`,[keep]);
+      const keys=new Set();
+      let preparedText=0;
+      for(const q of data.text_questions){
+        if(!/^T46-TXT-\d{3}$/.test(q.external_key)||keys.has(q.external_key)||
+           !/^T61-GRAF-\d{3}$/.test(q.legacy_external_key)||
+           !q.stem||!q.coverage_concept||!q.explanation||!q.source_evidence||
+           !Array.isArray(q.options)||q.options.length!==4||
+           new Set(q.options).size!==4||
+           !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+           q.question_family!=='CORRECTA'||!['alta','muy alta'].includes(q.difficulty)||
+           !Number.isInteger(q.source_pdf_page)||q.source_pdf_page<1||
+           q.source_pdf_page>data.pdf_page_count||
+           String(q.manual_page)!==String(q.source_pdf_page+276))
+          throw Error('T46: pregunta textual inválida '+String(q.external_key));
+        keys.add(q.external_key);
+        const key=q.external_key+' · '+q.coverage_concept;
+        const cv=await client.query(`INSERT INTO coverage_items(topic_id,section,concept,
+          item_type,evaluation_type,source_page,manual_page,source_evidence,exam_relevant)
+          VALUES($1,$2,$3,'texto_preparado_t46','literal_documental',$4,$5,$6,TRUE)
+          ON CONFLICT(topic_id,concept,item_type,evaluation_type) DO UPDATE SET
+            exam_relevant=TRUE,source_page=EXCLUDED.source_page,
+            manual_page=EXCLUDED.manual_page,source_evidence=EXCLUDED.source_evidence
+          RETURNING id`,[topic.id,q.coverage_section,key,q.source_pdf_page,
+            String(q.manual_page),q.source_evidence]);
+        const cid=Number(cv.rows[0].id);
+        const prior=await client.query(`SELECT id,stem,options,correct_index,active
+          FROM question_bank WHERE coverage_item_id=$1 AND question_family='CORRECTA'
+          ORDER BY id DESC FOR UPDATE`,[cid]);
+        const match=prior.rows.find(p=>p.stem===q.stem&&
+          JSON.stringify(p.options)===JSON.stringify(q.options)&&
+          Number(p.correct_index)===q.correct_index);
+        for(const p of prior.rows){
+          if(p.active && p.id!==match?.id)
+            await client.query(`UPDATE question_bank SET active=FALSE,updated_at=NOW()
+              WHERE id=$1`,[p.id]);
+        }
+        if(match){
+          await client.query(`UPDATE question_bank SET active=TRUE,graphic=NULL,
+            explanation=$2,source_evidence=$3,difficulty=$4,
+            updated_at=NOW() WHERE id=$1`,
+            [match.id,q.explanation,q.source_evidence,q.difficulty]);
+        }else{
+          await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+            correct_index,explanation,source_evidence,source_page,manual_page,
+            question_family,difficulty,graphic,validation_version,active)
+            VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'CORRECTA',$9,NULL,7,TRUE)`,
+            [cid,q.stem,JSON.stringify(q.options),q.correct_index,q.explanation,
+             q.source_evidence,q.source_pdf_page,String(q.manual_page),q.difficulty]);
+        }
+        preparedText++;
+      }
+      preparedTextCount=preparedText;
+      console.log('T46_PREGUNTAS_PREPARADAS',JSON.stringify({topicId:topic.id,
+        activeGraphics:imported,textQuestions:preparedText}));
+    }
     if(n===54){
       await client.query(`UPDATE graphic_assets SET is_usable=FALSE,updated_at=NOW()
         WHERE topic_folder='vehiculos' AND is_usable=TRUE
@@ -3704,7 +3774,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     if(n===54)console.log('SERVER201_T54_CARGADO',JSON.stringify({topicId:topic.id,images:data.images.length,questions:imported,documentaryAdditions:data.coverage_additions.length}));
     if(n===53)console.log('SERVER200_T53_CARGADO',JSON.stringify({topicId:topic.id,
       images:data.images.length,questions:imported,documentaryAdditions:data.coverage_additions.length}));
-    return {ok:true,topic:n,images:data.images.length,questions:imported};
+    return {ok:true,topic:n,images:data.images.length,questions:imported,textQuestions:preparedTextCount};
   }catch(e){await client.query('ROLLBACK');throw e;}
   finally{client.release();}
 }
@@ -7838,11 +7908,20 @@ if(!pdfHeader.includes("%PDF-")){
       if(Number(previous.rows[0]?.id)===24)
         throw new Error('T22: el tema antiguo (id 24) está protegido. Utiliza un nombre nuevo para la carga.');
     }
-    let topic=
-      await getOrCreateTopic(
-        canonicalTopicName86,
-        req.file.originalname
-      );
+    const isT46TrafficUpload=block==='especifico' &&
+      /^TEMA\s*46(?:\s*[.:-]\s*|\s+)(?:RESCATE\s+EN\s+)?ACCIDENTES\s+DE\s+TRAFICO\s*$/.test(
+        canonicalTopicName86.normalize('NFD').replace(/[̀-ͯ]/g,'')
+          .replace(/[_-]/g,' ').replace(/\s+/g,' ').trim().toUpperCase());
+    let topic;
+    if(isT46TrafficUpload){
+      const previous=await db.query(`SELECT * FROM topics WHERE id=72 AND
+        block='especifico' AND name ~* '^TEMA[[:space:]]*61([^0-9]|$)'`);
+      if(previous.rowCount!==1)
+        throw Error('T46 TRAFICO: tema histórico no encontrado; no se crea duplicado.');
+      topic=previous.rows[0];
+    }else{
+      topic=await getOrCreateTopic(canonicalTopicName86,req.file.originalname);
+    }
 
     const metadataResult=
       await db.query(
@@ -7858,7 +7937,7 @@ if(!pdfHeader.includes("%PDF-")){
           Number(topic.id),
           req.file.originalname,
           block,
-          topicOrder
+          isT46TrafficUpload ? 61 : topicOrder
         ]
       );
 
@@ -9238,11 +9317,14 @@ async function t61PreparedIndex(topic,pdfPath){
   const counted=await db.query('SELECT total_items,worked_items FROM topics WHERE id=$1',[topic.id]);
     const total=Number(counted.rows[0].total_items),worked=Number(counted.rows[0].worked_items);
     console.log('T61_INDEXACION_COMPLETA',JSON.stringify({topicId:topic.id,total,
-      preparedFigures:graphics.images,preparedQuestions:graphics.questions,sourceSha:sha}));
+      preparedFigures:graphics.images,preparedQuestions:graphics.questions+graphics.textQuestions,
+      preparedTextQuestions:graphics.textQuestions,sourceSha:sha}));
     return {ok:true,topicId:Number(topic.id),topic:topic.name,totalItems:total,
       workedItems:worked,pendingItems:total-worked,
       coveragePercentage:total?Number((worked/total*100).toFixed(1)):0,
-      preparedQuestions:graphics.questions,preparedFigures:graphics.images,source:'PDF local T61'};
+      preparedQuestions:graphics.questions+graphics.textQuestions,
+      preparedTextQuestions:graphics.textQuestions,preparedGraphicQuestions:graphics.questions,
+      preparedFigures:graphics.images,source:'PDF local T61'};
 }
 
 // T63-263: indexación preparada y cinco figuras EXACTAMENTE elegidas en GitHub.
@@ -21104,6 +21186,21 @@ async function startServer(){
          catch(e){console.error('HEALTH198_CALIDAD_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e));}
        })
       .catch(e=>console.error('HEALTH197_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    // T46 visible = ID 72 / T61 histórico. Las 5 figuras y 26 textuales
+    // se sincronizan sobre el PDF original YA guardado en PostgreSQL.
+    // No re-extrae páginas con Gemini, ni espera antes de abrir el puerto HTTP.
+    db.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=72
+      AND block='especifico' AND name ~* '^TEMA[[:space:]]*61([^0-9]|$)'`)
+      .then(async r=>{
+        const t=r.rows[0];
+        if(!t || healthTopicNumber192(t)!==61){
+          console.warn('T46_SINCRONIZACION_NO_APLICADA: falta el tema histórico ID 72');
+          return;
+        }
+        const updated=await healthImportOnce192(t);
+        console.log('T46_MATRIZ_SINCRONIZADA',JSON.stringify(updated));
+      })
+      .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
     console.log("STARTUP ANKI: sincronización post-arranque");
     // Conexión activa antes de comenzar el trabajo pesado. No se
     // modifica la base de preguntas ni su historial de validación.
