@@ -23096,6 +23096,120 @@ async function applyT43GraphicTextRevisions293(){
   finally{conn.release();}
 }
 
+// SERVER294: T44 — 18 originales y 13 textos, misma identidad de pregunta y estadísticas.
+async function applyT44GraphicTextRevisions294(){
+  const data=require('./t44_revisadas294_data.js');
+  const {createHash}=require('crypto');
+  const questions=[...data.graphics,...data.texts];
+  const ids=questions.map(x=>x.id);
+  const unique=a=>new Set(a).size===a.length;
+  if(data.schema!==1||data.revision!==294||data.topic_id!==69||
+     data.topic_number!==44||data.pdf_source_name!=='T58_SALVAMENTO_EN_ALTURA_TEMARIO.pdf'||
+     data.graphics.length!==18||data.texts.length!==13||
+     data.historical_mappings.length!==23||!unique(ids)||
+     !unique(questions.map(q=>q.coverage_id))||
+     !unique(data.graphics.map(q=>q.graphic_key))||
+     !unique(data.graphics.map(q=>q.original_file))||
+     questions.some(q=>!q.stem||q.stem.length<90||
+       !Array.isArray(q.options)||q.options.length!==4||!unique(q.options)||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       q.manual_page!==String(Number(q.source_page)+22)||
+       !/^[0-9a-f]{32}$/.test(q.old_stem_md5)))
+    throw Error('T44-294: paquete de revision incompleto');
+  const conn=await db.connect();
+  const md5=v=>createHash('md5').update(String(v)).digest('hex');
+  try{
+    await conn.query('BEGIN');
+    await conn.query('SELECT pg_advisory_xact_lock(44,294)');
+    const theme=(await conn.query(`SELECT id,topic_order,name,block,source_file
+      FROM topics WHERE id=69 FOR UPDATE`)).rows[0];
+    if(!theme||Number(theme.topic_order)!==44||theme.block!=='especifico'||
+       !/SALVAMENTO EN ALTURA/i.test(theme.name)||
+       theme.source_file!==data.pdf_source_name)
+      throw Error('T44-294: identidad de tema/PDF incompatible');
+    const found=(await conn.query(`SELECT q.id,q.coverage_item_id,q.active,q.stem,
+      q.options,q.correct_index,q.explanation,q.source_evidence,q.source_page,q.manual_page,
+      q.graphic,q.question_family,q.difficulty,q.validation_version,
+      c.exam_relevant
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.id=ANY($1::bigint[]) FOR UPDATE OF q`,[ids])).rows;
+    const byId=new Map(found.map(q=>[Number(q.id),q]));
+    if(found.length!==31||questions.some(q=>!byId.has(q.id)))
+      throw Error('T44-294: no existen las 31 preguntas origen');
+    const legacyIds=data.historical_mappings.map(m=>m.old_id);
+    if(!unique(legacyIds)||!unique(data.historical_mappings.map(m=>m.active_equivalent)))
+      throw Error('T44-294: correspondencias historicas repetidas');
+    const legacy=(await conn.query(`SELECT q.id,q.coverage_item_id,q.active,c.exam_relevant
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=69 AND q.id=ANY($1::bigint[]) FOR UPDATE OF q`,[legacyIds])).rows;
+    const byOld=new Map(legacy.map(v=>[Number(v.id),v]));
+    if(legacy.length!==23||data.historical_mappings.some(m=>
+       !byOld.has(m.old_id)||byOld.get(m.old_id).active||
+       byOld.get(m.old_id).exam_relevant!==m.historical_exam_relevant||
+       !byId.has(m.active_equivalent)))
+      throw Error('T44-294: historico no coincide con 23 equivalencias auditadas');
+    let changed=0,already=0;
+    for(const q of questions){
+      const row=byId.get(q.id);
+      if(Number(row.coverage_item_id)!==q.coverage_id||
+         !row.active||row.difficulty!=='muy alta'||
+         !row.source_evidence||
+         row.manual_page!==q.manual_page||
+         !Array.isArray(row.options)||row.options.length!==4||
+         (q.kind==='grafica' &&
+           (row.graphic?.externalKey!==q.graphic_key||
+            row.graphic?.originalFile!==q.original_file||
+            row.graphic?.originalSelected!==true||
+            row.graphic?.sourceId!=='salvamento-altura/'+q.original_file))||
+         (q.kind==='texto' && row.graphic!==null))
+        throw Error('T44-294: prueba de identidad/fuente incorrecta '+q.id);
+      if(Number(row.validation_version)===294){
+        if(row.stem!==q.stem||JSON.stringify(row.options)!==JSON.stringify(q.options)||
+           Number(row.correct_index)!==q.correct_index||
+           row.explanation!==q.explanation||row.question_family!==q.question_family||
+           Number(row.source_page)!==q.source_page)
+          throw Error('T44-294: version final divergente '+q.id);
+        already++;continue;
+      }
+      if(Number(row.validation_version)!==8||
+         md5(row.stem)!==q.old_stem_md5||
+         Number(row.correct_index)!==q.old_correct_index||
+         Number(row.source_page)!==q.old_source_page||
+         row.question_family!==(q.kind==='grafica'?'GRAFICA':
+           (q.id===3160?'CALCULO_FORMULACION':q.id===3162?'2026_CORRECTA':'2026_RAZONAMIENTO')))
+        throw Error('T44-294: pregunta antigua cambio inesperadamente '+q.id);
+      const duplicate=await conn.query(`SELECT id FROM question_bank
+        WHERE coverage_item_id=$1 AND id<>$2 AND active=TRUE AND stem=$3`,
+        [q.coverage_id,q.id,q.stem]);
+      if(duplicate.rowCount)throw Error('T44-294: texto revisado duplicado '+q.id);
+      const res=await conn.query(`UPDATE question_bank SET
+        stem=$2,options=$3::jsonb,correct_index=$4,explanation=$5,
+        question_family=$6,source_page=$7,validation_version=294,updated_at=NOW()
+        WHERE id=$1 RETURNING id`,
+        [q.id,q.stem,JSON.stringify(q.options),q.correct_index,q.explanation,
+         q.question_family,q.source_page]);
+      if(res.rowCount!==1)throw Error('T44-294: UPDATE incompleto '+q.id);
+      changed++;
+    }
+    const result=(await conn.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE graphic IS NOT NULL)::int graphics,
+      COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE graphic IS NOT NULL)::int source_count,
+      COUNT(*) FILTER(WHERE graphic IS NOT NULL AND graphic->>'originalSelected'='true')::int selected,
+      COUNT(*) FILTER(WHERE validation_version<>294 OR active=FALSE)::int invalid
+      FROM question_bank WHERE id=ANY($1::bigint[])`,[ids])).rows[0];
+    if(result.n!==31||result.texts!==13||result.graphics!==18||
+       result.source_count!==18||result.selected!==18||result.invalid!==0)
+      throw Error('T44-294: falta una de las 18 graficas o los 13 textos');
+    await conn.query('COMMIT');
+    return {ok:true,topicId:69,topicNumber:44,changed,already,
+      originalImages:18,revisedGraphics:18,revisedTexts:13,
+      historicalMappingReviewed:23,duplicateKnowledgeDeleted:0,
+      statisticsPreserved:true};
+  }catch(err){await conn.query('ROLLBACK').catch(()=>{});throw err;}
+  finally{conn.release();}
+}
+
 // SERVER277. Tema 44 actual / T58 histórico, ID 69.
 // Solo las 18 capturas seleccionadas por el usuario; nunca las 9 T58_FIG_...
 // Las preguntas históricas, estadísticas, sesiones y SRS se conservan sin DELETE.
@@ -23194,12 +23308,19 @@ async function syncT44Selected18_277(){
       const graphic={assetId:a.id,sourceId:a.source_id,publicUrl:a.public_url,
         assetType:'individual',originalSelected:true,originalFile:q.file,
         sourceAspectRatio:img.width/img.height,crop:img.crop,maskRegions:[],externalKey:q.key};
-      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active
-        FROM question_bank WHERE coverage_item_id=$1 AND stem=$2 FOR UPDATE`,
-        [oldq.coverage_item_id,q.stem]);
+      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active,validation_version,stem
+        FROM question_bank WHERE coverage_item_id=$1
+        AND (stem=$2 OR (validation_version=294 AND graphic->>'externalKey'=$3)) FOR UPDATE`,
+        [oldq.coverage_item_id,q.stem,q.key]);
       if(prev.rowCount>1)throw Error('T44-277: gráfica duplicada '+q.key);
       if(prev.rowCount===1){
         const existing=prev.rows[0];
+        if(Number(existing.validation_version)===294){
+          if(!existing.active||existing.graphic?.sourceId!==graphic.sourceId||
+             existing.graphic?.externalKey!==q.key||existing.graphic?.originalSelected!==true)
+            throw Error('T44-294: imagen revisada divergente '+q.key);
+          graphicReused++;continue;
+        }
         if(JSON.stringify(existing.options)!==JSON.stringify(q.options)||
            Number(existing.correct_index)!==q.correct_index||
            existing.graphic?.sourceId!==graphic.sourceId||
@@ -23223,12 +23344,18 @@ async function syncT44Selected18_277(){
       const oldq=byId.get(q.original_id);
       if(!oldq||!String(oldq.graphic?.sourceId||'').includes('/T58_FIG_'))
         throw Error('T44-277: texto no vinculado al conocimiento previo '+q.key);
-      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active
-        FROM question_bank WHERE coverage_item_id=$1 AND stem=$2 FOR UPDATE`,
+      const prev=await conn.query(`SELECT id,options,correct_index,graphic,active,validation_version,stem
+        FROM question_bank WHERE coverage_item_id=$1
+        AND (stem=$2 OR (validation_version=294 AND graphic IS NULL AND active=TRUE)) FOR UPDATE`,
         [oldq.coverage_item_id,q.stem]);
       if(prev.rowCount>1)throw Error('T44-277: texto duplicado '+q.key);
       if(prev.rowCount===1){
         const existing=prev.rows[0];
+        if(Number(existing.validation_version)===294){
+          if(!existing.active||existing.graphic!==null)
+            throw Error('T44-294: texto revisado divergente '+q.key);
+          textReused++;continue;
+        }
         if(existing.graphic!==null||JSON.stringify(existing.options)!==JSON.stringify(q.options)||
            Number(existing.correct_index)!==q.correct_index)
           throw Error('T44-277: texto divergente '+q.key);
@@ -23260,7 +23387,9 @@ async function syncT44Selected18_277(){
     const n=(await conn.query(`SELECT COUNT(*)::int n FROM question_bank q
       JOIN coverage_items c ON c.id=q.coverage_item_id
       WHERE c.topic_id=69 AND q.active AND q.graphic IS NULL
-      AND q.stem=ANY($1::text[])`,[d.texts.map(x=>x.stem)])).rows[0].n;
+      AND (q.stem=ANY($1::text[]) OR
+        (q.validation_version=294 AND q.coverage_item_id=ANY($2::int[])))`,
+      [d.texts.map(x=>x.stem),d.texts.map(x=>byId.get(x.original_id).coverage_item_id)])).rows[0].n;
     const oldActive=(await conn.query(`SELECT COUNT(*)::int n FROM question_bank
       WHERE id=ANY($1::bigint[]) AND active=TRUE`,[d.old_ids])).rows[0].n;
     if(g.n!==18||g.sources!==18||g.low!==0||a.n!==18||a.files!==18||n!==9||oldActive!==0)
@@ -23945,6 +24074,8 @@ async function startServer(){
             try{
               const m=await syncT44Selected18_277();
               console.log('T44_277_18_ORIGINALES_SINCRONIZADAS',JSON.stringify(m));
+              const audited=await applyT44GraphicTextRevisions294();
+              console.log('T44_294_18_GRAFICAS_13_TEXTOS_REVISADOS',JSON.stringify(audited));
               await t282After(44,m);
             }catch(e){console.error('T44_277_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e));}
           }
