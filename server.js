@@ -7455,9 +7455,9 @@ function topicAdminAuth(req,res,next){
 }
 function requireSafeCompare82(a,b){return timingSafeEqual(a,b);}
 // SERVER290: ensayo aislado y protegido, no cambia la configuración del generador.
-import('./carbon_benchmark290.mjs')
-  .then(({registerCarbonBenchmark290})=>registerCarbonBenchmark290(app,{aiClient,auth:topicAdminAuth}))
-  .catch(e=>console.error('CARBON290_ENSAYO_NO_DISPONIBLE_SIN_AFECTAR_PRODUCCION:',String(e?.message||e)));
+import('./carbon_benchmark291.mjs')
+  .then(({registerCarbonBenchmark291})=>registerCarbonBenchmark291(app,{auth:topicAdminAuth}))
+  .catch(e=>console.error('CARBON291_ENSAYO_NO_DISPONIBLE_SIN_AFECTAR_PRODUCCION:',String(e?.message||e)));
 
 function escapeTopicHtml82(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 app.get('/administrar-temas',topicAdminAuth,async(req,res)=>{

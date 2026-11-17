@@ -1,0 +1,282 @@
+{
+  "G38-01": {
+    "ok": true,
+    "caseId": "G38-01",
+    "kind": "grafica",
+    "theme": 38,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 16113,
+    "usage": {
+      "prompt": 1645,
+      "output": 519,
+      "thought": 2207,
+      "total": 4371
+    },
+    "warnings": [],
+    "question": {
+      "stem": "Atendiendo a la caracterización de la llama descrita y representada en la figura, ¿cuál es la relación correcta entre sus zonas, las temperaturas registradas y la disponibilidad de oxígeno?",
+      "options": [
+        "La zona interna es fría y oscura (800 °C) sin combustión por falta de oxígeno, mientras que la zona media muy luminosa alcanza los 1.200 °C en su franja amarilla con combustión incompleta por insuficiencia de oxígeno.",
+        "La zona interna es fría y oscura (800 °C) con combustión incompleta por falta de oxígeno, mientras que la zona media alcanza los 1.200 °C sin combustión por insuficiencia de oxígeno.",
+        "La zona interna es fría y oscura (600 °C) sin combustión por falta de oxígeno, mientras que la zona media alcanza los 1.200 °C con combustión completa por exceso de oxígeno.",
+        "La zona interna es fría y oscura (1.200 °C) sin combustión por falta de oxígeno, mientras que la zona media muy luminosa se sitúa a 800 °C con combustión incompleta por insuficiencia de oxígeno."
+      ],
+      "correctIndex": 0,
+      "explanation": "La primera opción es la correcta porque refleja exactamente la evidencia: la zona interna (oscura, 800 °C según la imagen) carece de combustión por falta de oxígeno, mientras que la zona media (muy luminosa, representada por el color amarillo a 1.200 °C) presenta combustión incompleta por insuficiencia de oxígeno. La segunda opción invierte erróneamente los tipos de combustión (atribuye combustión incompleta a la zona interna y sin combustión a la media). La tercera opción modifica la temperatura de la zona oscura a 600 °C y afirma falsamente que en la zona media hay combustión completa. La cuarta opción intercambia las temperaturas entre ambas zonas (asigna 1.200 °C a la interna y 800 °C a la media).",
+      "supportQuote": "Figura 12: zona amarilla a 1.200 °C, zona oscura a 800 °C, amarillo pálido a 600 °C y azul a 600 °C. Zona interna: fría y oscura, sin combustión por falta de oxígeno. Zona media: muy luminosa y combustión incompleta por insuficiencia de oxígeno."
+    }
+  },
+  "G38-02": {
+    "ok": true,
+    "caseId": "G38-02",
+    "kind": "grafica",
+    "theme": 38,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 15547,
+    "usage": {
+      "prompt": 1632,
+      "output": 480,
+      "thought": 2026,
+      "total": 4138
+    },
+    "warnings": [],
+    "question": {
+      "stem": "Considerando la disposición espacial de los componentes de la combustión representada en el triángulo del fuego y la definición formal de los mecanismos de extinción, ¿qué relación entre la posición en la figura, el elemento y el mecanismo es correcta?",
+      "options": [
+        "La base aloja el combustible, cuya dilución reduce su concentración; el lateral izquierdo aloja el comburente, cuya dilución de oxígeno es la inertización; el lateral derecho aloja el calor, cuyo enfriamiento exige descender por debajo del punto de ignición.",
+        "La base aloja el comburente, cuya dilución reduce la concentración de oxígeno; el lateral izquierdo aloja el combustible, cuya inertización actúa sobre la masa; el lateral derecho aloja el calor, cuyo enfriamiento busca descender por debajo del punto de ignición.",
+        "La base aloja el combustible, cuya dilución supone la inertización del medio; el lateral izquierdo aloja el comburente, cuya dilución reduce la concentración de combustible; el lateral derecho aloja el calor, cuyo enfriamiento requiere eliminar calor hasta descender por encima del punto de ignición.",
+        "La base aloja el calor, cuya eliminación exige descender por debajo del punto de ignición; el lateral izquierdo aloja el combustible, cuya dilución reduce su concentración; el lateral derecho aloja el comburente, cuya inertización actúa como enfriamiento primario."
+      ],
+      "correctIndex": 0,
+      "explanation": "La opción A relaciona fielmente la figura y el texto: la base corresponde al combustible (dilución = reducir su concentración), el lateral izquierdo al comburente/oxígeno (dilución del oxígeno = inertización) y el lateral derecho al calor (enfriamiento = eliminar calor hasta descender por debajo del punto de ignición). Las opciones restantes alteran la ubicación gráfica de los componentes o deforman las definiciones (como situar el comburente en la base, cambiar 'por debajo' por 'por encima', o invertir las acciones de inertización y dilución).",
+      "supportQuote": "El triángulo contiene combustible, comburente y calor; en la figura, combustible ocupa la base, comburente el lateral izquierdo y calor el derecho. Dilución del combustible: reducir la concentración de combustible; dilución del oxígeno: inertización; enfriamiento: eliminar calor hasta descender por debajo del punto de ignición."
+    }
+  },
+  "G39-01": {
+    "ok": true,
+    "caseId": "G39-01",
+    "kind": "grafica",
+    "theme": 39,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 25486,
+    "usage": {
+      "prompt": 1642,
+      "output": 571,
+      "thought": 4719,
+      "total": 6932
+    },
+    "warnings": [],
+    "question": {
+      "stem": "En un caso ideal de prensa hidráulica según el principio de Pascal (p1 = p2 y F1/A1 = F2/A2), se tiene una configuración inicial con émbolos de superficies A1 = 20 cm² y A2 = 200 cm². Si se realiza un cambio simultáneo reduciendo el émbolo mayor a A2' = 100 cm² e incrementando el menor a A1' = 40 cm², ¿qué fuerza F1' debe aplicarse en el émbolo menor para obtener una fuerza F2' = 2.000 N en el émbolo mayor, y cuál es la presión del fluido?",
+      "options": [
+        "800 N, con una presión en el sistema de 20 N/cm²",
+        "5.000 N, con una presión en el sistema de 50 N/cm²",
+        "400 N, con una presión en el sistema de 20 N/cm²",
+        "200 N, con una presión en el sistema de 5 N/cm²"
+      ],
+      "correctIndex": 0,
+      "explanation": "La opción 0 es correcta: al ser un caso ideal, p1 = p2. Con la nueva fuerza deseada F2' = 2.000 N y la nueva superficie A2' = 100 cm², la presión en el fluido es p = F2'/A2' = 2.000 / 100 = 20 N/cm². Despejando F1' en la relación de Pascal (F1' = p * A1'), obtenemos F1' = 20 N/cm² * 40 cm² = 800 N. La opción 1 comete el error matemático de invertir el cociente de áreas multiplicando F2' por (A2'/A1'). La opción 2 comete el error de calcular la fuerza empleando la superficie inicial A1 (20 cm²) en lugar del valor incrementado A1' (40 cm²). La opción 3 calcula erróneamente la fuerza asumiendo que la presión se mantiene fija en un supuesto estado previo (5 N/cm²).",
+      "supportQuote": "Prensa hidráulica: presiones iguales p1=p2 y F1/A1 = F2/A2. Si se mantiene la superficie del émbolo grande y se incrementa la del pequeño, se reduce la ventaja de fuerza; las pérdidas se despreciarán si se plantea un caso ideal."
+    }
+  },
+  "G39-02": {
+    "ok": true,
+    "caseId": "G39-02",
+    "kind": "grafica",
+    "theme": 39,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 18018,
+    "usage": {
+      "prompt": 1605,
+      "output": 440,
+      "thought": 1671,
+      "total": 3716
+    },
+    "warnings": [],
+    "question": {
+      "stem": "En el sistema hidráulico representado en la Imagen 21, la bomba 1 opera aportando un caudal de 1.800 l/min a una altura manométrica de 70 m, mientras que la bomba 2 aporta un caudal de 1.200 l/min a la misma altura manométrica común. De acuerdo con las reglas de acoplamiento indicadas, ¿cuáles son los valores resultantes de caudal total (Q) y altura manométrica (Hm) del conjunto?",
+      "options": [
+        "Q = 3.000 l/min y Hm = 70 m.",
+        "Q = 3.000 l/min y Hm = 140 m.",
+        "Q = 1.800 l/min y Hm = 70 m.",
+        "Q = 1.500 l/min y Hm = 140 m."
+      ],
+      "correctIndex": 0,
+      "explanation": "La opción 0 es la correcta porque en el acoplamiento en paralelo (Imagen 21), la altura manométrica total permanece constante y común (Hm = Hm1 = Hm2 = 70 m) sin duplicarse, mientras que los caudales individuales se suman (Q = Q1 + Q2 = 1.800 + 1.200 = 3.000 l/min). La opción 1 es incorrecta porque duplica erróneamente la altura manométrica (140 m). La opción 2 falla al no sumar el caudal de la segunda bomba. La opción 3 es incorrecta porque promedia los caudales y duplica la altura manométrica.",
+      "supportQuote": "Acoplamiento en paralelo: a una altura manométrica común Hm=Hm1=Hm2, el caudal total es Q=Q1+Q2. Debe comprobarse la modificación de caudal de una bomba sin duplicar la altura."
+    }
+  },
+  "G41-01": {
+    "ok": true,
+    "caseId": "G41-01",
+    "kind": "grafica",
+    "theme": 41,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 18380,
+    "usage": {
+      "prompt": 1639,
+      "output": 455,
+      "thought": 2510,
+      "total": 4604
+    },
+    "warnings": [],
+    "question": {
+      "stem": "Atendiendo a las especificaciones constructivas de la sección de un túnel e integrando la disposición funcional mostrada en la imagen, ¿cuál de las siguientes opciones caracteriza correctamente a sus elementos?",
+      "options": [
+        "El gálibo determina la anchura y altura libres para circular siendo inferior al límite de la clave, mientras que la acera debe permitir el paso de dos personas en paralelo con un pasamanos en el hastial.",
+        "El gálibo coincide verticalmente con el punto más alto de la sección denominado clave, mientras que la acera requiere anchura para dos personas en paralelo con el pasamanos instalado sobre la cuneta.",
+        "Las cunetas albergan el pasamanos como guía táctil para dos personas en paralelo, fijándose el gálibo como la anchura y altura libres situadas por encima de la cota de la clave.",
+        "La acera se dimensiona para el paso de una sola persona con pasamanos en el hastial, sirviendo la clave para definir las filtraciones que recogen las cunetas."
+      ],
+      "correctIndex": 0,
+      "explanation": "La opción 0 es correcta conforme a la evidencia: el gálibo indica la anchura y altura libres para circular siendo inferior al límite de la clave (punto más alto), y la acera debe ser ancha para dos personas en paralelo incorporando el pasamanos guía en el hastial. La opción 1 es incorrecta porque iguala el gálibo a la cota de la clave y ubica el pasamanos en la cuneta. La opción 2 ubica erróneamente el pasamanos en la cuneta y sitúa el gálibo por encima de la clave. La opción 3 reduce incorrectamente la anchura de la acera a una sola persona y altera la definición funcional de la clave.",
+      "supportQuote": "Clave: punto más alto de la sección. Gálibo: anchura y altura libres para circular, inferior al límite de clave. Acera: libre y suficientemente ancha para dos personas en paralelo, con pasamanos en el hastial como guía táctil. Cunetas: recogen filtraciones."
+    }
+  },
+  "T38-01": {
+    "ok": true,
+    "caseId": "T38-01",
+    "kind": "texto",
+    "theme": 38,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 16648,
+    "usage": {
+      "prompt": 539,
+      "output": 488,
+      "thought": 2951,
+      "total": 3978
+    },
+    "warnings": [],
+    "question": {
+      "stem": "Atendiendo a la relación entre el porcentaje de volumen real y el porcentaje de uso en la composición del aire, ¿cuál de las siguientes afirmaciones es correcta?",
+      "options": [
+        "El nitrógeno registra un 78,03% de volumen real y un 79% de uso, mientras que el argón se sitúa en un 0,94% de volumen real y un 0% de uso.",
+        "El oxígeno registra un 20,99% de volumen real y un 21% de uso, mientras que el dióxido de carbono se sitúa en un 0,03% de volumen real y un 1% de uso.",
+        "El nitrógeno registra un 78,03% de volumen real y un 78% de uso, mientras que los otros componentes se sitúan en un 0,01% de volumen real y un 0% de uso.",
+        "El oxígeno registra un 20,99% de volumen real y un 21% de uso, mientras que el argón se sitúa en un 0,94% de volumen real y un 1% de uso."
+      ],
+      "correctIndex": 0,
+      "explanation": "La primera opción es la correcta porque refleja fielmente los datos de la Tabla 5: nitrógeno con 78,03% real / 79% uso y argón con 0,94% real / 0% uso. La segunda opción falla al asignar un 1% de uso al CO2 (su porcentaje de uso es 0%). La tercera opción yerra al asignar un 78% de uso al nitrógeno (su uso redondeado es 79%). La cuarta opción yerra al asignar un 1% de uso al argón (su uso es 0%).",
+      "supportQuote": "Tabla 5, composición del aire (% volumen real / uso): Nitrógeno 78,03 / 79; Oxígeno 20,99 / 21; Argón 0,94 / 0; CO2 0,03 / 0; Otros 0,01 / 0."
+    }
+  },
+  "T39-01": {
+    "ok": true,
+    "caseId": "T39-01",
+    "kind": "texto",
+    "theme": 39,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 13903,
+    "usage": {
+      "prompt": 531,
+      "output": 393,
+      "thought": 2743,
+      "total": 3667
+    },
+    "warnings": [],
+    "question": {
+      "stem": "En un circuito con un fluido confinado se aplica una fuerza de 1.200 N sobre una sección de 0,04 m². Si la presión dependiente de la velocidad del fluido en dicho punto es de 6.000 Pa, ¿cuál es la presión total registrada en esa sección?",
+      "options": [
+        "36.000 Pa",
+        "30.000 Pa",
+        "24.000 Pa",
+        "54.000 Pa"
+      ],
+      "correctIndex": 0,
+      "explanation": "Según el principio de Pascal, la presión transmitida en el fluido confinado se obtiene como p1 = F1 / A1 = 1.200 N / 0,04 m² = 30.000 Pa, que corresponde a la presión estática. Como la presión total se define como la suma de la presión estática más la presión dinámica (que depende de la velocidad del fluido y vale 6.000 Pa), la presión total es 30.000 Pa + 6.000 Pa = 36.000 Pa. La opción de 30.000 Pa omite sumar la presión dinámica; la de 24.000 Pa la resta de forma errónea; y la de 54.000 Pa sobreestima el componente estático.",
+      "supportQuote": "Presión total se define como suma de presión estática más presión dinámica. La presión dinámica es la que depende de la velocidad del fluido. Según Pascal, la presión aplicada se transmite por igual en un fluido confinado: p1=p2=F1/A1=F2/A2."
+    }
+  },
+  "T40-01": {
+    "ok": true,
+    "caseId": "T40-01",
+    "kind": "texto",
+    "theme": 40,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 19574,
+    "usage": {
+      "prompt": 564,
+      "output": 261,
+      "thought": 3099,
+      "total": 3924
+    },
+    "warnings": [],
+    "question": {
+      "stem": "Durante la combustión de un compuesto orgánico se detecta una tasa de consumo de oxígeno de 180 g/s. Aplicando la regla de Thornton, ¿cuál es la potencia térmica liberada?",
+      "options": [
+        "2,358 MW",
+        "23,58 MW",
+        "0,235 MW",
+        "235,8 MW"
+      ],
+      "correctIndex": 0,
+      "explanation": "La regla de Thornton establece que se liberan 13,1 kJ por cada gramo de oxígeno consumido. Multiplicando la tasa de consumo (180 g/s) por 13,1 kJ/g se obtienen 2358 kJ/s (es decir, 2358 kW), lo que al convertir a megavatios equivale exactamente a 2,358 MW. Las demás opciones corresponden a errores en la conversión de unidades o desalineación de la coma decimal.",
+      "supportQuote": "Regla de Thornton: 13,1 kJ por cada gramo de oxígeno consumido en la combustión de compuestos orgánicos."
+    }
+  },
+  "T41-01": {
+    "ok": true,
+    "caseId": "T41-01",
+    "kind": "texto",
+    "theme": 41,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 13911,
+    "usage": {
+      "prompt": 557,
+      "output": 484,
+      "thought": 2031,
+      "total": 3072
+    },
+    "warnings": [],
+    "question": {
+      "stem": "En el control del flujo de aire en túneles y su efecto sobre la capa de humos, ¿qué relación es correcta respecto a las clases de velocidad y los límites de conservación de la estratificación en la zona superior?",
+      "options": [
+        "Se consideran velocidades moderadas las comprendidas entre 1 y 3 m/s, si bien la conservación de la estratificación requiere que el flujo sea siempre inferior a 2 m/s.",
+        "Las velocidades bajas se extienden hasta los 2 m/s, siendo este el límite máximo absoluto recomendado para garantizar que no descienda la capa por enfriamiento.",
+        "El rango de velocidades altas se establece por encima de los 2 m/s, recomendándose fijar el flujo en torno a dicho valor para preservar la estratificación superior.",
+        "La estratificación de humos se conserva adecuadamente dentro de todo el intervalo de velocidades moderadas, comprendido entre 1 y 3 m/s, recomendándose valores cercanos a 2 m/s."
+      ],
+      "correctIndex": 0,
+      "explanation": "La opción 0 es la única totalmente correcta: según el texto, las velocidades moderadas van de 1 a 3 m/s y la estratificación requiere mantenerse siempre por debajo de 2 m/s (alrededor de 1 m/s). La opción 1 falla porque las velocidades bajas son inferiores a 1 m/s, no hasta 2 m/s. La opción 2 es falsa porque las velocidades altas son las superiores a 3 m/s. La opción 3 yerra al afirmar que la estratificación se mantiene en todo el rango moderado (1-3 m/s) y al recomendar 2 m/s, cuando el límite debe ser siempre inferior a 2 m/s y la recomendación es alrededor de 1 m/s.",
+      "supportQuote": "Clases de velocidades según efecto en humos: bajas inferiores a 1 m/s; moderadas entre 1 y 3 m/s; altas superiores a 3 m/s. Para conservar estratificación de humos en la zona superior se recomienda alrededor de 1 m/s y siempre inferior a 2 m/s."
+    }
+  },
+  "T42-01": {
+    "ok": true,
+    "caseId": "T42-01",
+    "kind": "texto",
+    "theme": 42,
+    "model": "gemini-3.6-flash",
+    "modelVersion": "gemini-3.6-flash",
+    "ms": 18404,
+    "usage": {
+      "prompt": 600,
+      "output": 313,
+      "thought": 2979,
+      "total": 3892
+    },
+    "warnings": [],
+    "question": {
+      "stem": "En relación con la clasificación de los establecimientos industriales según su configuración física y cerramientos, ¿cuál de las siguientes afirmaciones es correcta?",
+      "options": [
+        "El establecimiento tipo C se define como un edificio completo situado a una distancia igual o superior a 3 m de otros establecimientos, libre de elementos propagadores intermedios.",
+        "Para naves adosadas con estructura compartida, la excepción dentro del tipo B requiere justificar la ausencia de colapso colindante y mantener una cubierta compartida.",
+        "El establecimiento tipo D consiste en un espacio abierto que puede estar totalmente cubierto, siempre que cuente con al menos una fachada sin cerramiento.",
+        "El establecimiento tipo E se caracteriza por ser un espacio abierto con una cubierta que abarca un porcentaje superior al 50 % de su superficie y fachada cubierta sin cerramiento."
+      ],
+      "correctIndex": 2,
+      "explanation": "La tercera opción es correcta ya que reproduce con exactitud las condiciones de la configuración tipo D. La primera opción falla porque el tipo C exige que la distancia sea mayor de 3 m (si fuera igual o inferior a 3 m se clasificaría como tipo B). La segunda opción es errónea porque la excepción del tipo B en naves adosadas requiere cubierta independiente (no compartida). La cuarta opción es falsa porque la cubierta del tipo E es de hasta el 50 %, no superior a dicho porcentaje.",
+      "supportQuote": "D: espacio abierto que puede estar totalmente cubierto con al menos una fachada sin cerramiento."
+    }
+  }
+}
