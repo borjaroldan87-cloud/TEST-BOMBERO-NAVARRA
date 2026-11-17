@@ -2950,6 +2950,9 @@ function t45WriteImages(){
 }
 async function t45ImportOnce(topic,uploadedPdfPath=null){
   if(!t45Topic(topic))return {skipped:true};
+  // SERVER299: No restaurar los 54 enunciados antiguos del importador
+  // cuando las 3 imágenes originales del usuario ya están sincronizadas.
+  if(await t299MigratedAlready())return {skipped:true,reason:'T49_299_PREPARADO'};
   const data=t45LoadData();if(!data)return {skipped:true,missing:true};
   t45WriteImages();
   const client=await db.connect();
@@ -24555,9 +24558,275 @@ async function applyT48Revisions298(){
   finally{client.release();}
 }
 
+// SERVER299. Tema curricular 49 / topic PostgreSQL 56 / legado T45.
+// Mantener exactamente TRES diagramas de ciclo escogidos por el usuario.
+// Convertir las OTRAS 51 preguntas graficas prefabricadas a texto IN PLACE.
+// Auditar las 20 textuales existentes. No insertar ni borrar conocimientos,
+// preguntas ni sesiones/SRS. Transacción y snapshot de recuperación.
+let T299_PACK_CACHE=null;
+function t299Md5(s){return createHash('md5').update(String(s),'utf8').digest('hex');}
+function t299Pack(){
+  if(T299_PACK_CACHE)return T299_PACK_CACHE;
+  const d=t279ReadPack('t49_revision299_data.js',49);
+  if(d.revision!==299||d.topic_id!==56||d.legacy_number!==45||d.pdf_pages!==32||
+     d.pdf_sha256!=='86938899d2c675772fb04bf83d78fac35d2c0d8aa6aff70538b00b177911c3b5'||
+     d.pdf_source_name!=='TEMA_45_RESCATE_APICOLA_Y_DE_OTRAS_ESPECIES_CEIS_PARA_INDEXAR.pdf'||
+     d.original_selected_screenshots!==3||d.historic_generated_images!==20||
+     d.graphic_questions_before!==54||d.active_text_questions_before!==20||
+     d.coverage_total_before!==355||d.coverage_relevant_before!==355||
+     d.images?.length!==3||d.graphic_conversions?.length!==54||d.existing_text_revisions?.length!==20)
+     throw Error('T299: paquete, fuente o inventario incompatibles');
+  const keys=['T45-GRAF-0019','T45-GRAF-0022','T45-GRAF-0025'];
+  if(JSON.stringify(d.images.map(x=>x.key))!==JSON.stringify(keys)||
+     JSON.stringify(d.original_figure_keys)!==JSON.stringify(keys)||
+     new Set(d.images.map(x=>x.file)).size!==3||
+     new Set(d.images.map(x=>x.selected_screenshot)).size!==3||
+     new Set(d.graphic_conversions.map(x=>x.id)).size!==54||
+     new Set(d.existing_text_revisions.map(x=>x.id)).size!==20)
+     throw Error('T299: imágenes o claves repetidas');
+  const expectedSource=['Screenshot_20260924-130021-display-0.png~2.jpg',
+     'Screenshot_20260924-130039-display-0.png~2.jpg',
+     'Screenshot_20260924-130056-display-0.png~2.jpg'];
+  for(let i=0;i<3;i++){
+    const x=d.images[i];
+    if(x.selected_screenshot!==expectedSource[i]||
+       !/^T49_SELECTED_(REINA|ZANGANO|OBRERA)\.png$/.test(x.file)||
+       !/^[0-9a-f]{40}$/.test(x.original_git_blob_sha)||
+       !/^[0-9a-f]{64}$/.test(x.sha256)||
+       !/^[A-Za-z0-9+/=]+$/.test(x.base64)||
+       !['546','547'].includes(x.manual_page))
+       throw Error('T299: figura original no acreditada '+x.key);
+  }
+  for(let i=0;i<54;i++){
+    const v=d.graphic_conversions[i],n=i+1;
+    if(v.id!==1809+n||v.coverage_id!==32037+n||
+       v.key!==`T45-GRAF-${String(n).padStart(4,'0')}`||
+       v.kind!==(keys.includes(v.key)?'grafica':'texto')||
+       !v.stem||v.stem.length<55||
+       v.options?.length!==4||new Set(v.options).size!==4||
+       v.options.some(x=>typeof x!=='string'||x.length<4)||
+       !Number.isInteger(v.correct_index)||v.correct_index<0||v.correct_index>3||
+       !/^[0-9a-f]{32}$/.test(v.original_stem_md5)||
+       !/^[0-9a-f]{32}$/.test(v.original_options_md5)||
+       !v.source_evidence||!v.manual_page||
+       (v.kind==='grafica')!==Boolean(v.graphic_file)||
+       (v.kind==='texto'&&/\b(?:imagen|figura|fotografía|esquema|ilustración|representado|diagrama)\b/i.test(v.stem))||
+       v.difficulty!=='muy alta')
+       throw Error('T299: pregunta inválida '+v?.key);
+  }
+  for(const v of d.existing_text_revisions){
+    if(!Number.isInteger(v.id)||v.options?.length!==4||
+       new Set(v.options).size!==4||!v.stem||v.stem.length<60||
+       !Number.isInteger(v.correct_index)||v.correct_index<0||v.correct_index>3||
+       !/^[0-9a-f]{32}$/.test(v.original_stem_md5)||
+       !/^[0-9a-f]{32}$/.test(v.original_options_md5)||
+       v.difficulty!=='muy alta')throw Error('T299: texto previo inválido '+v?.id);
+  }
+  T299_PACK_CACHE=d;return d;
+}
+function t299WriteSelectedImages(){
+  const d=t299Pack();
+  const dir=path.join(process.cwd(),'public','graphics','apicola');
+  fs.mkdirSync(dir,{recursive:true});let created=0;
+  for(const a of d.images){
+    const b=Buffer.from(a.base64,'base64');
+    const digest=createHash('sha256').update(b).digest('hex');
+    if(b.length<10000||digest!==a.sha256||!b.subarray(0,8)
+      .equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T299: PNG distinto de la captura CEIS validada '+a.file);
+    const f=path.join(dir,a.file);
+    if(fs.existsSync(f)){
+      if(createHash('sha256').update(fs.readFileSync(f)).digest('hex')!==digest)
+        throw Error('T299: PNG divergente ya instalado '+a.file);
+    }else{fs.writeFileSync(f,b);created++;}
+  }
+  return {images:3,created};
+}
+async function t299MigratedAlready(){
+  const r=(await db.query(`SELECT COUNT(*)::int n FROM question_bank
+    WHERE id BETWEEN 1810 AND 1863 AND active=TRUE AND validation_version=299`)).rows[0];
+  return Number(r?.n)===54;
+}
+async function applyT49Revision299(){
+  const d=t299Pack();t299WriteSelectedImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(49,299)');
+    const t=(await client.query(`SELECT id,name,block,topic_order,source_file,total_items
+      FROM topics WHERE id=56 FOR UPDATE`)).rows[0];
+    if(!t||t.block!=='especifico'||Number(t.topic_order)!==49||
+       t.name!==d.title||t.source_file!==d.pdf_source_name)
+      throw Error('T299: tema/PDF fuente cambiaron antes de actualizar');
+    const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,page_count,
+      size_bytes,encode(sha256(pdf_bytes),'hex') real FROM topic_local_pdfs
+      WHERE topic_id=56`)).rows[0];
+    if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+       Number(pdf.page_count)!==32)
+      throw Error('T299: identidad o integridad del PDF diferente');
+    const coverage=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE exam_relevant=TRUE)::int relevant
+      FROM coverage_items WHERE topic_id=56`)).rows[0];
+    if(coverage.total!==355||coverage.relevant!==355)
+      throw Error('T299: cobertura diferente; se detiene sin pérdidas');
+    const all=(await client.query(`SELECT q.id,q.coverage_item_id,q.stem,
+      q.options,md5(q.options::text) AS old_options_md5,q.correct_index,q.explanation,q.source_evidence,
+      q.source_page,q.manual_page,q.question_family,q.difficulty,q.graphic,
+      q.active,q.validation_version,c.concept,c.item_type,c.evaluation_type,
+      c.exam_relevant FROM question_bank q JOIN coverage_items c
+      ON c.id=q.coverage_item_id WHERE c.topic_id=56 FOR UPDATE OF q`)).rows;
+    if(all.length!==74||all.some(q=>!q.active))
+      throw Error('T299: preguntas añadidas/eliminadas o inactivas; revisión pendiente');
+    const map=new Map(all.map(q=>[Number(q.id),q]));
+    const expected=d.graphic_conversions.concat(d.existing_text_revisions);
+    if(expected.some(v=>!map.has(v.id)))
+      throw Error('T299: alguno de los 74 ID ha cambiado');
+    const assets=(await client.query(`SELECT id,source_id,source_file,asset_index,
+      is_usable,analysis_status FROM graphic_assets
+      WHERE topic_folder='apicola' FOR UPDATE`)).rows;
+    const priorSelection=new Set(assets.filter(a=>a.source_file.startsWith('Screenshot_'))
+      .map(x=>x.source_file));
+    if(priorSelection.size!==3||
+       d.images.some(x=>!priorSelection.has(x.selected_screenshot)))
+      throw Error('T299: las tres imágenes originales del usuario no coinciden');
+    // Respaldo previo en la propia BD, sin cambiar/insertar registros académicos.
+    const snap={version:299,createdAt:new Date().toISOString(),
+      topic:{id:t.id,name:t.name,source_file:t.source_file,total_items:t.total_items},
+      questions:all,assets,coverageBefore:coverage};
+    await client.query(`INSERT INTO app_state(key,value)
+      VALUES('T49_299_BACKUP_74_PREGUNTAS', $1)
+      ON CONFLICT(key) DO NOTHING`,[JSON.stringify(snap)]);
+    const assetByFile=new Map();
+    for(const img of d.images){
+      const uri='/graphics/apicola/'+img.file;
+      const sourceId='apicola/'+img.file;
+      const result=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,asset_type,
+        concept,description,source_evidence,crop_x,crop_y,crop_width,crop_height,
+        mask_regions,is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'apicola',$2,$3,0,'individual',$4,$5,$6,0,0,1,1,
+        '[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        public_url=EXCLUDED.public_url,concept=EXCLUDED.concept,
+        description=EXCLUDED.description,source_evidence=EXCLUDED.source_evidence,
+        is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
+        RETURNING id`,[sourceId,img.file,uri,
+        'Ciclo original seleccionado '+img.key,
+        'Recorte limpio y sin encabezado del diagrama seleccionado por el usuario.',
+        'Manual CEIS Guadalajara, Parte 8, pág. '+img.manual_page+'; Captura de referencia: '+img.selected_screenshot]);
+      assetByFile.set(img.file,{id:Number(result.rows[0].id),sourceId,uri,original:img.selected_screenshot,sha:img.sha256});
+    }
+    await client.query(`UPDATE graphic_assets SET
+      is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+      WHERE topic_folder='apicola' AND
+      source_file<>ALL($1::text[]) AND is_usable=TRUE`,[d.images.map(x=>x.file)]);
+    let converted=0,graphics=0,revisedExisting=0,already=0,updated=0;
+    for(const v of expected){
+      const q=map.get(v.id);
+      if(!q||!q.exam_relevant||q.difficulty!=='muy alta'||
+         Number(q.correct_index)!==v.correct_index||
+         !Array.isArray(q.options)||q.options.length!==4)
+        throw Error('T299: respuesta o formato original alterado '+v.id);
+      const old=Number(q.validation_version)!==299;
+      if(old){
+        if(q.validation_version!==6||t299Md5(q.stem)!==v.original_stem_md5||
+           q.old_options_md5!==v.original_options_md5)
+          throw Error('T299: enunciado/opciones originales ya no coinciden '+v.id);
+        if(v.key){
+          if(Number(q.coverage_item_id)!==v.coverage_id||
+             !String(q.concept).startsWith(v.key+' ·')||
+             q.item_type!=='grafica_t45_original'||
+             q.question_family!=='GRAFICA'||
+             !String(q.graphic?.sourceId||'').startsWith('apicola/T45_FIG_'))
+              throw Error('T299: procedencia de la gráfica alterada '+v.key);
+          if(String(q.manual_page)!==String(v.manual_page)||
+             Number(q.source_page)!==v.source_pdf_page||
+             q.graphic===null)
+            throw Error('T299: página o imagen histórica alterada '+v.key);
+        }else if(q.graphic!==null){
+          throw Error('T299: texto previo contiene una imagen no inventariada '+v.id);
+        }
+      }else if(q.stem!==v.stem||JSON.stringify(q.options)!==JSON.stringify(v.options)||
+         q.question_family!==v.question_family||
+         Boolean(q.graphic)!==(v.kind==='grafica')){
+        throw Error('T299: versión 299 previa divergente '+v.id);
+      }
+      if(v.kind==='grafica'){
+        const a=assetByFile.get(v.graphic_file);
+        if(!a)throw Error('T299: figura seleccionada sin fichero '+v.key);
+        const g={assetId:a.id,sourceId:a.sourceId,publicUrl:a.uri,
+          assetType:'individual',crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+          originalSelected:true,originalFile:a.original,selectedImageSha256:a.sha,
+          externalKey:v.key,printedPage:Number(v.manual_page),source:'CEIS original seleccionado'};
+        if(old){
+          await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+            question_family='GRAFICA',difficulty='muy alta',graphic=$4::jsonb,
+            validation_version=299,
+            explanation=$5,updated_at=NOW() WHERE id=$1`,[v.id,v.stem,
+            JSON.stringify(v.options),JSON.stringify(g),
+            'Conforme al esquema CEIS, pág. '+v.manual_page+': '+
+              v.options[v.correct_index]+'. '+v.source_evidence]);
+          updated++;
+        }
+        graphics++;
+      }else{
+        if(old){
+          const expl='Según el manual CEIS, pág. '+String(q.manual_page)+': '+
+            v.options[v.correct_index]+'. '+String(q.source_evidence||v.source_evidence||'');
+          await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+            question_family=$4,difficulty='muy alta',graphic=NULL,
+            validation_version=299,explanation=$5,updated_at=NOW() WHERE id=$1`,
+            [v.id,v.stem,JSON.stringify(v.options),v.question_family,expl]);
+          if(v.key){
+            await client.query(`UPDATE coverage_items SET item_type='dato_t49_convertido',
+              evaluation_type='comprension' WHERE id=$1 AND topic_id=56`,[v.coverage_id]);
+            converted++;
+          }else revisedExisting++;
+          updated++;
+        }
+      }
+      if(!old)already++;
+    }
+    const final=(await client.query(`SELECT COUNT(*)::int allq,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=299)::int revised,
+      COUNT(DISTINCT q.graphic->>'sourceId') FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int distinct_images,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL AND q.graphic->>'originalSelected'='true')::int selected
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=56`)).rows[0];
+    const avail=(await client.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE source_file=ANY($1::text[]))::int selected
+      FROM graphic_assets WHERE topic_folder='apicola' AND is_usable=TRUE`,
+      [d.images.map(x=>x.file)])).rows[0];
+    const cov=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant,
+      COUNT(*) FILTER(WHERE item_type='dato_t49_convertido')::int converted
+      FROM coverage_items WHERE topic_id=56`)).rows[0];
+    if(final.allq!==74||final.active!==74||final.graphics!==3||
+       final.texts!==71||final.distinct_images!==3||final.selected!==3||
+       final.revised!==74||avail.n!==3||avail.selected!==3||
+       cov.total!==355||cov.relevant!==355||cov.converted!==51)
+      throw Error('T299: discrepancia de integridad; ROLLBACK '+
+        JSON.stringify({final,avail,cov}));
+    await client.query('COMMIT');
+    return {ok:true,topic:49,updated,already,revisedGraphics:3,
+      convertedToText:51,revisedExistingText:20,totalText:71,
+      oldQuestionRowsDeleted:0,questionsInserted:0,knowledgeRemoved:0,
+      totalKnowledge:355,originalImagesUsed:3};
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
+  // SERVER299: material original seleccionado del T49; de la misma fuente CEIS.
+  try{const a=t299WriteSelectedImages();
+    console.log('T49_299_3_IMAGENES_CEIS_PREPARADAS',JSON.stringify(a));
+  }catch(e){console.error('T49_299_IMAGENES_PENDIENTES:',String(e?.message||e));}
   // T63-266: corrección atómica, idempotente y específica; el fallo nunca
   // impide que Render publique su puerto HTTP, pero se registra explícito.
   try{await t63RemoveNonExaminableHeaders266();}
@@ -24701,9 +24970,19 @@ async function startServer(){
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
       id=56`)
-      .then(r=>Promise.all(r.rows.filter(t45Topic).map(t=>t45ImportOnce(t))))
+      .then(r=>Promise.all(r.rows.filter(t45Topic).map(async t=>{
+        const previouslyDone=await t299MigratedAlready();
+        const loaded=previouslyDone
+          ?{skipped:true,reason:'T49_299_3_ORIGINALES_Y_51_TEXTOS_PREPARADOS'}
+          :await t45ImportOnce(t);
+        // Ejecutar inmediatamente después del importador antiguo, no al final
+        // de otras migraciones concurrentes ni de la cadena sanitaria.
+        const reviewed=await applyT49Revision299();
+        console.log('T49_299_3_GRAFICAS_71_TEXTOS_REVISADOS',JSON.stringify(reviewed));
+        return {loaded,reviewed};
+      })))
       .then(r=>console.log('T45_ARRANQUE',JSON.stringify(r)))
-      .catch(e=>console.error('T45_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+      .catch(e=>console.error('T49_299_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e)));
     db.query(`SELECT id,name,block,topic_order,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
       id IN (57,58,59,60,61,62,63,64,65,66,67,68,69,70)`)
