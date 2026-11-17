@@ -3358,6 +3358,9 @@ function healthWriteImages192(onlyTopic=0){
     if(onlyTopic && n!==onlyTopic)continue;
     const data=healthLoadData192(n);
     if(!data)continue;
+    // SERVER298: T48 has zero selected graphic images. The historic T52 Mattson
+    // illustration remains available in its original PDF, but is never rebuilt.
+    if(n===52)continue;
     const dir=path.join(process.cwd(),'public','graphics',n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':n===63?'../t63-prepared':`salud-t${n}`);
     fs.mkdirSync(dir,{recursive:true});
     for(const a of data.images){
@@ -3868,6 +3871,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
     }
     const graphicMap=new Map();
     for(const asset of data.images){
+      // SERVER298: the only T52 graphic is an illustrative Mattson example,
+      // not a user-selected image. Do not reactivate its legacy asset.
+      if(n===52)continue;
       const topicGraphicFolder=n===53?'rios-inundaciones-t53':n===54?'vehiculos-t54':n===55?'incendios-industriales-t55':n===56?'apeo-poda-t56':n===58?'salvamento-altura':n===62?'nrbq':n===63?'herramientas':`salud-t${n}`;
       const uri=n===63?`/t63-prepared/${asset.file}`:`/graphics/${topicGraphicFolder}/${asset.file}`;
       const sourceId=n===63?`herramientas/${asset.source_github_file}`:`${topicGraphicFolder}/${asset.file}`;
@@ -24397,6 +24403,158 @@ async function t297VerifyPostImport(){
      retiredPreserved:86,originals:8,checkedKeys:p.questions.length};
 }
 
+
+// SERVER298 — T48. RESCATE Y BÚSQUEDA EN GRANDES ÁREAS.
+// Read-only baseline of 26 live text questions verified against local 24-page
+// CEIS Guadalajara PDF. No graphic questions selected in this topic.
+// Historical Mattson image/example is non-examinable; its method remains in
+// coverage T52-EJ-MA-0019. No deletion/INSERT of question_bank or coverage.
+let T298_PACK_CACHE=null;
+function t298Pack(){
+  if(T298_PACK_CACHE)return T298_PACK_CACHE;
+  const pack=t279ReadPack('t48_revision298_data.js',48);
+  if(pack.schema!==1||pack.revision!==298||pack.topic_id!==63||
+     pack.legacy_number!==52||pack.original_images!==0||
+     pack.pdf_sha256!=='2e4cfe8a05ff75aca59312d58f43c84a3a3cc3d47409ee52379cd40f678fcbca'||
+     pack.pdf_pages!==24||pack.historic_graphic_id!==1904||
+     pack.historic_graphic_asset!=='salud-t52/T52_FIG_01_P476.png'||
+     pack.questions_active_before!==26||pack.coverage_before!==365||
+     pack.exam_relevant_before!==324||!Array.isArray(pack.questions)||
+     pack.questions.length!==26||new Set(pack.questions.map(x=>x.id)).size!==26)
+    throw Error('T298: archivo o inventario original T48 inconsistente');
+  const expectedIds=[1982,1983,1984,1985,1986,1987,1988,1989,1990,
+    1991,1992,1993,1994,1995,1996,1997,1998,1999,2000,2124,2127,
+    2130,2133,2136,2139,2142];
+  for(let i=0;i<expectedIds.length;i++){
+    const q=pack.questions[i];
+    if(q.id!==expectedIds[i]||!Number.isInteger(q.correct_index)||
+       q.correct_index<0||q.correct_index>3||
+       !/^\d{3}$/.test(q.manual_page)||
+       ![q.expected_options_md5,q.expected_stem_md5,q.expected_correct_md5].every(x=>/^[a-f0-9]{32}$/.test(x))||
+       !q.distractors||Object.keys(q.distractors).length!==3||
+       Object.keys(q.distractors).some(k=>Number(k)===q.correct_index||
+         !Number.isInteger(Number(k))||Number(k)<0||Number(k)>3||
+         String(q.distractors[k]).trim().length<3)||
+       (q.stem!==null&&(typeof q.stem!=='string'||q.stem.length<85)))
+      throw Error('T298: item de revisión inválido '+q?.id);
+  }
+  T298_PACK_CACHE=pack;
+  return pack;
+}
+async function applyT48Revisions298(){
+  const pack=t298Pack(),client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(48,298)');
+    const topic=(await client.query(`SELECT id,name,source_file,topic_order,block,total_items
+      FROM topics WHERE id=63 FOR UPDATE`)).rows[0];
+    if(!topic||topic.block!=='especifico'||topic.topic_order!==48||
+       topic.name!=='TEMA 48. RESCATE Y BÚSQUEDA EN GRANDES ÁREAS'||
+       topic.source_file!=='TEMA_52_RESCATE_Y_BUSQUEDA_EN_GRANDES_AREAS.pdf')
+      throw Error('T298: no coincide la identidad curricular y documental');
+    const pdf=(await client.query(`SELECT BTRIM(pdf_sha256) sha,page_count,size_bytes
+      FROM topic_local_pdfs WHERE topic_id=63`)).rows[0];
+    if(!pdf||pdf.sha!==pack.pdf_sha256||Number(pdf.page_count)!==24||
+       Number(pdf.size_bytes)!==2680457)
+      throw Error('T298: documento local de producción no es el PDF auditado');
+    const cov=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant
+      FROM coverage_items WHERE topic_id=63`)).rows[0];
+    if(cov.total!==365||cov.relevant!==324||Number(topic.total_items)!==324)
+      throw Error('T298: cobertura cambiada antes de la revisión');
+    const mattson=(await client.query(`SELECT concept,exam_relevant FROM coverage_items
+      WHERE topic_id=63 AND (concept LIKE 'T52-EJ-MA-0019 · %' OR
+        concept LIKE 'T52-EJ-MA-0020 · %' OR concept LIKE 'T52-GRAF-0001 · %')`)).rows;
+    if(mattson.length!==3||
+       !mattson.some(x=>x.concept.startsWith('T52-EJ-MA-0019 · ')&&x.exam_relevant===true)||
+       mattson.filter(x=>!x.concept.startsWith('T52-EJ-MA-0019 · ')).some(x=>x.exam_relevant!==false))
+      throw Error('T298: teoría de Mattson o exclusión del ejemplo alterada');
+    const historical=(await client.query(`SELECT q.id,q.active,q.question_family,
+      c.exam_relevant,q.graphic FROM question_bank q JOIN coverage_items c
+      ON c.id=q.coverage_item_id WHERE q.id=1904 AND c.topic_id=63 FOR UPDATE OF q`)).rows;
+    if(historical.length!==1||historical[0].active!==false||
+       historical[0].question_family!=='GRAFICA'||
+       historical[0].exam_relevant!==false||
+       historical[0].graphic?.sourceId!==pack.historic_graphic_asset)
+      throw Error('T298: pregunta gráfica histórica distinta; no tocar');
+    const assets=(await client.query(`SELECT id,source_id,is_usable,analysis_status FROM
+      graphic_assets WHERE topic_folder='salud-t52' FOR UPDATE`)).rows;
+    if(assets.length!==1||assets[0].source_id!==pack.historic_graphic_asset)
+      throw Error('T298: inventario gráfico T48 divergente');
+    const questions=(await client.query(`SELECT q.id,q.stem,q.options,q.correct_index,
+      q.question_family,q.difficulty,q.validation_version,q.manual_page,q.graphic,
+      md5(q.options::text) AS options_md5,md5(q.stem) AS stem_md5,
+      md5(q.options->>q.correct_index) AS correct_md5
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=63 AND q.active=TRUE ORDER BY q.id FOR UPDATE OF q`)).rows;
+    if(questions.length!==26||questions.some(x=>x.graphic!==null||
+        x.difficulty!=='muy alta'||!Array.isArray(x.options)||x.options.length!==4))
+      throw Error('T298: aparecen preguntas sin auditar o gráficas activas');
+    const byId=new Map(questions.map(x=>[Number(x.id),x]));
+    // Backup once, in the same transaction. Includes every original option
+    // and original statement, enabling a supervised rollback if necessary.
+    if(questions.some(x=>x.validation_version!==298)){
+      await client.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+        ON CONFLICT(key) DO NOTHING`,[
+        'T48_SERVER298_26_Q_SNAPSHOT_BEFORE_REVIEW',
+        JSON.stringify({topicId:63,revision:298,
+          capturedAt:new Date().toISOString(),questions:questions.map(x=>({
+            id:x.id,stem:x.stem,options:x.options,
+            correct_index:x.correct_index,manual_page:x.manual_page,
+            question_family:x.question_family,difficulty:x.difficulty,
+            validation_version:x.validation_version
+          })),historicGraphicId:1904,originalImages:0})
+      ]);
+    }
+    let updated=0,already=0,stemsChanged=0;
+    for(const v of pack.questions){
+      const q=byId.get(v.id);
+      if(!q||q.correct_index!==v.correct_index||
+         String(q.manual_page)!==v.manual_page||
+         q.correct_md5!==v.expected_correct_md5)
+        throw Error('T298: respuesta correcta o página alterada '+v.id);
+      const targetOptions=q.options.map((x,i)=>i===q.correct_index?x:v.distractors[i]);
+      const targetStem=v.stem||q.stem;
+      if(new Set(targetOptions.map(x=>x.toLowerCase().trim())).size!==4||
+         targetOptions.some(x=>typeof x!=='string'||!x.trim())||
+         targetOptions[q.correct_index]!==q.options[q.correct_index])
+        throw Error('T298: distractores duplicados o clave modificada '+v.id);
+      if(q.validation_version===298){
+        if(JSON.stringify(q.options)!==JSON.stringify(targetOptions)||
+           q.stem!==targetStem||q.question_family==='GRAFICA')
+          throw Error('T298: versión posterior divergente '+v.id);
+        already++;continue;
+      }
+      if(q.validation_version!==6||q.options_md5!==v.expected_options_md5||
+         q.stem_md5!==v.expected_stem_md5)
+        throw Error('T298: una pregunta cambió tras el corte de auditoría '+v.id);
+      await client.query(`UPDATE question_bank SET options=$2::jsonb,
+        stem=$3,validation_version=298,updated_at=NOW()
+        WHERE id=$1`,[v.id,JSON.stringify(targetOptions),targetStem]);
+      if(v.stem)stemsChanged++;
+      updated++;
+    }
+    const hidden=await client.query(`UPDATE graphic_assets SET
+      is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+      WHERE id=$1 AND is_usable=TRUE RETURNING id`,[assets[0].id]);
+    const after=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=298)::int revised,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int graphics
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=63`)).rows[0];
+    if(after.total!==27||after.active!==26||after.revised!==26||after.graphics!==0)
+      throw Error('T298: preguntas no preservadas '+JSON.stringify(after));
+    await client.query('COMMIT');
+    return {ok:true,topic:48,updated,already,stemsChanged,
+      activeTextQuestions:26,activeGraphics:0,
+      historicGraphicRowsPreserved:1,historicImageHidden:hidden.rowCount,
+      knowledgeTotal:365,examRelevant:324,
+      originalAnswersChanged:0,rowsInserted:0,rowsDeleted:0};
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -24497,8 +24655,27 @@ async function startServer(){
       FROM topics WHERE block='especifico' AND
       id=53`)
       .then(r=>Promise.all(r.rows.filter(t43Topic).map(async t=>{
-        const loaded=await t43ImportOnce(t);
-        const audit=await t43AuditRepair187(t);
+        // SERVER298: when the verified eight user-selected T47 figures are
+        // already migrated, the legacy importer MUST NOT reinsert/reconcile
+        // 86 superseded graphic questions; it otherwise rejects T43-GRAF-0076
+        // and prevents the reviewed SERVER297 corrections from executing.
+        const before47=(await db.query(`SELECT
+          (SELECT COUNT(*)::int FROM question_bank
+            WHERE id BETWEEN 1486 AND 1571 AND active=FALSE) retired,
+          (SELECT COUNT(*)::int FROM question_bank q
+            JOIN coverage_items c ON c.id=q.coverage_item_id
+            WHERE c.topic_id=53 AND q.active AND
+            q.graphic->>'originalSelected'='true') originals,
+          (SELECT COUNT(*)::int FROM graphic_assets
+            WHERE topic_folder='ferroviarios' AND is_usable=TRUE) assets`)).rows[0];
+        const previouslySelected=before47.retired===86&&before47.originals===8&&
+          before47.assets===8;
+        const loaded=previouslySelected
+          ?{skipped:true,reason:'SERVER298: 86 legacy T43 graphics already superseded'}
+          :await t43ImportOnce(t);
+        const audit=previouslySelected
+          ?{skipped:true,reason:'T47 selected-eight migration already in place'}
+          :await t43AuditRepair187(t);
         // SERVER280: auditar imágenes DESPUÉS del importador histórico.
         let imageReview=null;
         try{
@@ -24538,6 +24715,17 @@ async function startServer(){
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
+          // SERVER298: run T48 immediately after its own successful import.
+          // Another theme (e.g. old T55) may reject the outer Promise.all;
+          // such an unrelated rejection must not prevent this revision.
+          if(Number(t.id)===63){
+            try{
+              const audited=await applyT48Revisions298();
+              console.log('T48_298_26_TEXTOS_CERO_GRAFICAS_REVISADOS',JSON.stringify(audited));
+            }catch(e){
+              console.error('T48_298_REVISION_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e));
+            }
+          }
           // Tema 45 actual (ID 64): no hay Screenshot seleccionado del usuario.
           // Los dos recortes T53_FIG_... añadidos después no son originales.
           if(Number(t.id)===64){
