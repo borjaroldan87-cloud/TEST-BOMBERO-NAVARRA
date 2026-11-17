@@ -22835,6 +22835,24 @@ async function syncT43Selected5_276(){
   }
   // Write cropped CEIS visuals only; no changes in DB until PNG integrity verified.
   const prepared=t43WriteSelectedImages276(d);
+  // T43-293: no recrear los 50 textos ni 5 graficas con enunciados del 276
+  // en los siguientes arranques. El material visual SI se materializa antes.
+  const reviewed293=await db.query(`SELECT
+      COUNT(*) FILTER(WHERE validation_version=293)::int AS revised,
+      COUNT(*) FILTER(WHERE validation_version=293 AND active=TRUE
+        AND graphic IS NOT NULL AND graphic->>'originalSelected'='true')::int AS graphics,
+      COUNT(*) FILTER(WHERE validation_version=293 AND active=TRUE
+        AND graphic IS NULL)::int AS texts
+    FROM question_bank WHERE id=ANY($1::bigint[])`,
+    [[...require('./t43_revisadas293_data.js').texts,
+      ...require('./t43_revisadas293_data.js').graphics].map(q=>q.id)]);
+  const status293=reviewed293.rows[0];
+  if(status293.revised>0){
+    if(status293.revised!==55||status293.graphics!==5||status293.texts!==50)
+      throw Error('T43-293: version parcial, NO se reimportan originales');
+    return {ok:true,topicId:52,topicNumber:43,images:5,graphicQuestions:5,
+      preservedAsText:50,alreadyRevised293:true,prepared};
+  }
   const conn=await db.connect();
   try{
     await conn.query('BEGIN');
@@ -22957,6 +22975,124 @@ async function syncT43Selected5_276(){
       historicalGraphicsRetired:retired.rowCount,
       graphicsCreated:createdGraphic,graphicsExisting:existingGraphic,prepared};
   }catch(e){await conn.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{conn.release();}
+}
+
+
+
+// SERVER293: Auditoria documental y visual de T43 (ID52, visible 43).
+// 50 conversiones graficas -> texto; 5 graficas con imagen original.
+// SOLO UPDATE: sin INSERT ni DELETE, sin cambiar cobertura, grafico, SRS,
+// historial de respuestas, paginas, fuente original ni la seleccion de imagenes.
+// Si cualquier comprobacion falla, ROLLBACK de las 55 preguntas.
+async function applyT43GraphicTextRevisions293(){
+  const pack=require('./t43_revisadas293_data.js');
+  if(pack.schema!==1||pack.revision!==293||pack.topic_id!==52||
+     pack.topic_number!==43||pack.texts?.length!==50||pack.graphics?.length!==5)
+    throw Error('T43-293: manifiesto incompleto');
+  const all=[...pack.texts,...pack.graphics];
+  const ids=all.map(q=>q.id);
+  if(new Set(ids).size!==55 || new Set(pack.graphics.map(q=>q.graphic_key)).size!==5 ||
+     new Set(pack.graphics.map(q=>q.original_file)).size!==5)
+    throw Error('T43-293: graficas/identidades repetidas');
+  for(const q of all){
+    if(!Number.isInteger(q.id)||!Number.isInteger(q.coverage_id)||
+       !q.stem||q.stem.length<95||!Array.isArray(q.options)||
+       q.options.length!==4||new Set(q.options.map(x=>String(x).trim())).size!==4||
+       q.options.some(x=>!String(x).trim()||String(x).length<48)||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       !Number.isInteger(q.old_correct_index)||!q.old_stem_md5||
+       !q.explanation||!q.source_evidence||!q.manual_page||
+       q.difficulty!=='muy alta'||
+       !['2026_RAZONAMIENTO','2026_INCORRECTA'].includes(q.question_family)||
+       (q.question_family==='2026_INCORRECTA')!==/INCORRECTA/.test(q.stem)||
+       (q.kind==='grafica')!==Boolean(q.graphic_key)||
+       (q.kind==='texto' && /\b(?:imagen|figura|dibujo|croquis|esquema)\b/i.test(q.stem)))
+      throw Error('T43-293: formato de pregunta invalido '+q.id);
+  }
+  const md5=v=>createHash('md5').update(String(v),'utf8').digest('hex');
+  const conn=await db.connect();
+  try{
+    await conn.query('BEGIN');
+    await conn.query('SELECT pg_advisory_xact_lock(43,293)');
+    const topic=(await conn.query(`SELECT id,topic_order,block,name,source_file
+      FROM topics WHERE id=52 FOR UPDATE`)).rows[0];
+    if(!topic||topic.block!=='especifico'||Number(topic.topic_order)!==43||
+       !/INCENDIOS DE VEGETACI[OÓ]N/i.test(topic.name)||
+       topic.source_file!==pack.pdf_source_name)
+      throw Error('T43-293: tema y PDF no coinciden');
+    const r=await conn.query(`SELECT q.id,q.coverage_item_id,q.stem,q.options,
+      q.correct_index,q.explanation,q.source_evidence,q.source_page,
+      q.manual_page,q.question_family,q.difficulty,q.graphic,q.active,
+      q.validation_version,c.topic_id,c.exam_relevant
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE q.id=ANY($1::bigint[]) AND c.topic_id=52 FOR UPDATE OF q`,[ids]);
+    if(r.rowCount!==55)throw Error('T43-293: faltan registros del banco');
+    const byId=new Map(r.rows.map(x=>[Number(x.id),x]));
+    const hist=await conn.query(`SELECT id,coverage_item_id,active,graphic,
+      source_evidence,manual_page FROM question_bank
+      WHERE id BETWEEN 1409 AND 1458 FOR UPDATE`);
+    if(hist.rowCount!==50 || hist.rows.some(x=>x.active||!x.graphic)||
+       new Set(hist.rows.map(x=>x.coverage_item_id)).size!==50)
+      throw Error('T43-293: preguntas graficas historicas alteradas');
+    const originals=new Map(hist.rows.map(x=>[Number(x.coverage_item_id),x]));
+    let updated=0,already=0;
+    for(const q of all){
+      const row=byId.get(q.id);
+      if(!row||!row.active||!row.exam_relevant||
+         Number(row.coverage_item_id)!==q.coverage_id||
+         Number(row.source_page)!==q.source_page||
+         String(row.manual_page)!==q.manual_page||
+         row.difficulty!=='muy alta'||
+         Boolean(row.graphic)!==(q.kind==='grafica'))
+        throw Error('T43-293: identidad, pagina o estado divergente '+q.id);
+      if(q.kind==='texto'){
+        const original=originals.get(q.coverage_id);
+        if(!original||original.source_evidence!==row.source_evidence||
+           String(original.manual_page)!==q.manual_page)
+          throw Error('T43-293: origen textual perdido '+q.id);
+      }else if(row.graphic?.originalSelected!==true||
+               row.graphic?.externalKey!==q.graphic_key||
+               row.graphic?.originalFile!==q.original_file)
+        throw Error('T43-293: imagen original cambiada '+q.id);
+      if(Number(row.validation_version)===293){
+        if(row.stem!==q.stem || JSON.stringify(row.options)!==JSON.stringify(q.options)||
+           Number(row.correct_index)!==q.correct_index||row.explanation!==q.explanation||
+           row.question_family!==q.question_family)
+          throw Error('T43-293: version revisada divergente '+q.id);
+        already++;continue;
+      }
+      if(Number(row.validation_version)!==8||md5(row.stem)!==q.old_stem_md5||
+         Number(row.correct_index)!==q.old_correct_index||
+         row.question_family!==(q.kind==='grafica'?'GRAFICA':'2026_RAZONAMIENTO'))
+        throw Error('T43-293: original del banco modificado '+q.id);
+      const dupe=await conn.query(`SELECT id FROM question_bank
+        WHERE coverage_item_id=$1 AND id<>$2 AND active=TRUE AND stem=$3`,
+        [q.coverage_id,q.id,q.stem]);
+      if(dupe.rowCount)throw Error('T43-293: enunciado duplicado '+q.id);
+      const result=await conn.query(`UPDATE question_bank SET
+        stem=$2,options=$3::jsonb,correct_index=$4,explanation=$5,
+        question_family=$6,validation_version=293,updated_at=NOW()
+        WHERE id=$1 RETURNING id`,
+        [q.id,q.stem,JSON.stringify(q.options),q.correct_index,
+         q.explanation,q.question_family]);
+      if(result.rowCount!==1)throw Error('T43-293: fallo en UPDATE '+q.id);
+      updated++;
+    }
+    const final=(await conn.query(`SELECT
+      COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE graphic IS NOT NULL)::int graphics,
+      COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE graphic IS NOT NULL)::int sources,
+      COUNT(*) FILTER(WHERE validation_version<>293 OR active=FALSE)::int invalid
+      FROM question_bank WHERE id=ANY($1::bigint[])`,[ids])).rows[0];
+    if(final.n!==55||final.texts!==50||final.graphics!==5||
+       final.sources!==5||final.invalid!==0)
+      throw Error('T43-293: no se conservan 50 textos y 5 graficas');
+    await conn.query('COMMIT');
+    return {ok:true,topicId:52,topicNumber:43,updated,already,
+      textQuestions:50,originalGraphicQuestions:5,statisticsPreserved:true};
+  }catch(err){await conn.query('ROLLBACK').catch(()=>{});throw err;}
   finally{conn.release();}
 }
 
@@ -23852,8 +23988,13 @@ async function startServer(){
       })
       .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
     syncT43Selected5_276()
-      .then(async r=>{console.log('T43_276_5_ORIGINALES_SINCRONIZADAS',JSON.stringify(r));await t282After(43,r);})
-      .catch(e=>console.error('T43_276_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e)));
+      .then(async r=>{
+        console.log('T43_276_5_ORIGINALES_SINCRONIZADAS',JSON.stringify(r));
+        const review=await applyT43GraphicTextRevisions293();
+        console.log('T43_293_50_TEXTOS_5_GRAFICAS_REVISADAS',JSON.stringify(review));
+        await t282After(43,r);
+      })
+      .catch(e=>console.error('T43_293_REVISION_PENDIENTE_SIN_CAMBIOS:',String(e?.message||e)));
     syncT41FiveImages274()
       .then(async r=>{
         console.log('T41_274_5_ORIGINALES_SINCRONIZADAS',JSON.stringify(r));
