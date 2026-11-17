@@ -3533,10 +3533,254 @@ async function t58EnsureLocalPdf221(topic){
     return {ok:true};
   }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
+// SERVER296 - T46 (topic ID 72): 5 verified selected graphics and 36 conversions.
+// The model-generated questions are sourced only from CEIS PDF and the supplied exam 2026.
+// Update existing rows (never INSERT/DELETE) with independent preflight, transaction and
+// idempotent startup. Protect the importer from reinserting old wordings on subsequent boots.
+let T296_READY=false;
+let T296_CACHE=null;
+function t296Pack(){
+  if(T296_CACHE)return T296_CACHE;
+  const p=t279ReadPack('t46_revisadas296_data.js',46);
+  const q=p?.questions||[];
+  if(p.schema!==1||p.revision!==296||p.topic_id!==72||p.topic_number!==46||
+     p.pdf_source_name!=='TEMA_61_RESCATE_EN_ACCIDENTES_DE_TRAFICO.pdf'||
+     p.pdf_sha256!=='a477de3df3f263c3f95ca2c20d0c4b3a43f618f0cef1dc6df4448d5ec29c2bff'||
+     p.pdf_page_count!==126||
+     q.length!==41||p.original_images!==5||p.legacy_inactive_graphics!==32||
+     q.filter(x=>x.kind==='grafica').length!==5||
+     q.filter(x=>x.kind==='texto').length!==36||
+     new Set(q.map(x=>x.id)).size!==41||
+     new Set(q.map(x=>x.coverage_id)).size!==41)
+    throw Error('T296: inventario incompleto/diferente');
+  const required=[...Array.from({length:26},(_,i)=>2863+i),
+    ...Array.from({length:15},(_,i)=>3144+i)];
+  if(JSON.stringify(q.map(x=>x.id))!==JSON.stringify(required))
+    throw Error('T296: ID originales o cobertura alterados');
+  for(const v of q){
+    if(!v.stem||v.stem.length<108||!Array.isArray(v.options)||v.options.length!==4||
+       v.options.some(s=>typeof s!=='string'||s.length<34)||
+       new Set(v.options.map(s=>s.toLocaleLowerCase('es').trim())).size!==4||
+       !Number.isInteger(v.correct_index)||v.correct_index<0||v.correct_index>3||
+       v.difficulty!=='muy alta'||!v.explanation||v.explanation.length<62||
+       !v.old_stem_md5||!/^[a-f0-9]{32}$/.test(v.old_stem_md5)||
+       !Number.isInteger(v.coverage_id)||!Number.isInteger(v.source_page)||
+       v.source_page<1||String(v.source_page+276)!==String(v.manual_page)||
+       !['CORRECTA','GRAFICA','2026_CORRECTA','2026_INCORRECTA','2026_RAZONAMIENTO'].includes(v.question_family)||
+       (v.kind==='grafica')!==(v.id>=3144&&v.id<=3148)||
+       (v.kind==='texto'&&/\b(?:imagen|figura|dibujo|croquis|esquema|fotograf[ií]a)\b/i.test(v.stem)))
+      throw Error('T296: pregunta inválida '+v.id);
+    if(v.question_family==='2026_INCORRECTA' && !/INCORRECTA/.test(v.stem))
+      throw Error('T296: familia incorrecta sin enunciado INCORRECTA '+v.id);
+  }
+  T296_CACHE=p;return p;
+}
+function t296MD5(s){return createHash('md5').update(String(s),'utf8').digest('hex');}
+function t296ById(){return new Map(t296Pack().questions.map(q=>[q.id,q]));}
+// Preflight against the actual source modules (not just current database).
+function t296SourcePreflight(){
+  const by=t296ById();
+  const h=healthLoadData192(61);
+  if(!h||h.topic_number!==46||h.text_questions?.length!==26||h.questions?.length!==5)
+    throw Error('T296: importador histórico T61 distinto');
+  const base=new Map(by.values().filter(q=>q.id>=2863&&q.id<=2888).map(q=>[q.old_stem_md5,q]));
+  if(base.size!==26)throw Error('T296: huellas históricas de 26 textos repetidas');
+  const matched=new Set();
+  for(const row of h.text_questions){
+    const key=t296MD5(row.stem),revision=base.get(key);
+    if(!revision||String(row.manual_page)!==revision.manual_page||matched.has(revision.id))
+      throw Error('T296: texto histórico T46 cambiado: '+row.external_key);
+    matched.add(revision.id);
+  }
+  if(matched.size!==26)throw Error('T296: no se reconocen los 26 textos de origen');
+  const d=t279ReadPack('t46_selected_5_data.js',46);
+  const oldGraph=[2858,2859,2860,2861,2862];
+  const oldText=[2701,2702,2703,2704,2706,2707,2693,2696,2700];
+  if(d.images?.length!==5||d.questions?.length!==5||d.texts?.length!==9||
+     JSON.stringify(d.old_ids)!==JSON.stringify(oldGraph))
+    throw Error('T296: selección de 5 imágenes alterada');
+  for(let i=0;i<5;i++){
+    const v=by.get(3144+i),x=d.questions[i];
+    if(x.original_id!==oldGraph[i]||t296MD5(x.stem)!==v.old_stem_md5||
+       x.key!==v.externalKey||d.images[i]?.file!==x.file||
+       !fs.existsSync(path.join(process.cwd(),'public','graphics','trafico',x.file)))
+      throw Error('T296: imagen original no comprobada '+(i+1));
+  }
+  for(let i=0;i<9;i++){
+    const v=by.get(3149+i),x=d.texts[i];
+    if(x.original_id!==oldText[i]||t296MD5(x.stem)!==v.old_stem_md5)
+      throw Error('T296: conversión original 279 alterada '+(i+1));
+  }
+  const recover=t282ReadRecovery(46);
+  const q=recover.questions.filter(x=>x.topic===46);
+  if(q.length!==1||q[0].original_id!==2682||
+     t296MD5(q[0].stem)!==by.get(3158).old_stem_md5)
+    throw Error('T296: texto de recuperación 282 alterado');
+  return true;
+}
+function t296OverlayHealthData(data){
+  if(!T296_READY)return data;
+  const records=new Map(t296Pack().questions
+    .filter(q=>q.id>=2863&&q.id<=2888).map(q=>[q.old_stem_md5,q]));
+  return {...data,text_questions:data.text_questions.map(old=>{
+    const revision=records.get(t296MD5(old.stem));
+    if(!revision||revision.manual_page!==String(old.manual_page))
+      throw Error('T296: texto del importador no reconocido');
+    return {...old,stem:revision.stem,options:revision.options,
+      correct_index:revision.correct_index,explanation:revision.explanation,
+      difficulty:'muy alta'};
+  })};
+}
+function t296OverlaySelected(d){
+  if(!T296_READY)return d;
+  const by=t296ById();
+  const change=(orig,v)=>{
+    if(t296MD5(orig.stem)!==v.old_stem_md5)
+      throw Error('T296: pregunta gráfica 279 diferente '+orig.key);
+    return {...orig,stem:v.stem,options:v.options,
+      correct_index:v.correct_index,explanation:v.explanation,difficulty:'muy alta'};
+  };
+  return {...d,questions:d.questions.map((x,i)=>change(x,by.get(3144+i))),
+      texts:d.texts.map((x,i)=>change(x,by.get(3149+i)))};
+}
+function t296OverlayRecovered(d){
+  if(!T296_READY)return d;
+  const v=t296ById().get(3158);
+  const newqs=d.questions.map(q=>{
+    if(q.topic!==46)return q;
+    if(q.original_id!==2682||t296MD5(q.stem)!==v.old_stem_md5)
+      throw Error('T296: texto recuperado 282 diferente');
+    return {...q,stem:v.stem,options:v.options,correct_index:v.correct_index,
+      explanation:v.explanation,difficulty:'muy alta'};
+  });
+  return {...d,questions:newqs};
+}
+async function applyT46GraphicAndTextRevisions296(){
+  const pack=t296Pack();
+  t296SourcePreflight(); // ALL external sources checked before touching database.
+  const ids=pack.questions.map(x=>x.id),by=t296ById();
+  const conn=await db.connect();
+  try{
+    await conn.query('BEGIN');
+    await conn.query('SELECT pg_advisory_xact_lock(46,296)');
+    const topic=(await conn.query(`SELECT id,block,topic_order,name,source_file
+       FROM topics WHERE id=72 FOR UPDATE`)).rows[0];
+    if(!topic||topic.block!=='especifico'||Number(topic.topic_order)!==46||
+       !/RESCATE EN ACCIDENTES DE TRÁFICO/i.test(topic.name)||
+       topic.source_file!==pack.pdf_source_name)
+      throw Error('T296: identidad o PDF de tema distintos');
+    const manifest=(await conn.query(`SELECT BTRIM(pdf_sha256) AS sha,
+       BTRIM(verified_sha256) AS verified,page_count,ready
+       FROM t61_pdf_manifest WHERE topic_id=72`)).rows[0];
+    if(!manifest||manifest.sha!==pack.pdf_sha256||
+       manifest.verified!==pack.pdf_sha256||Number(manifest.page_count)!==126||
+       manifest.ready!==true)
+      throw Error('T296: el PDF original almacenado no coincide con el auditado');
+    const r=await conn.query(`SELECT q.id,q.coverage_item_id,q.stem,q.options,
+       q.correct_index,q.explanation,q.source_page,q.manual_page,q.question_family,
+       q.difficulty,q.graphic,q.validation_version,q.active,c.exam_relevant,c.topic_id
+       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+       WHERE q.id=ANY($1::bigint[]) FOR UPDATE OF q`,[ids]);
+    if(r.rowCount!==41)throw Error('T296: pregunta original desaparecida');
+    const oldhist=(await conn.query(`SELECT COUNT(*)::int n,
+       COUNT(*) FILTER(WHERE active=FALSE AND graphic IS NOT NULL)::int retired,
+       COUNT(DISTINCT coverage_item_id)::int concepts
+       FROM question_bank WHERE id BETWEEN 2682 AND 2713`)).rows[0];
+    if(oldhist.n<27||oldhist.retired<27)
+      throw Error('T296: históricos antiguos no conservados');
+    const byOld=new Map(r.rows.map(x=>[Number(x.id),x]));
+    let updated=0,already=0;
+    for(const v of pack.questions){
+      const row=byOld.get(v.id);
+      if(!row||row.active!==true||Number(row.coverage_item_id)!==v.coverage_id||
+         Number(row.source_page)!==v.source_page||String(row.manual_page)!==v.manual_page||
+         (row.exam_relevant!==true && !(v.id>=3149&&v.id<=3157&&row.exam_relevant===false))||
+         row.topic_id!==72||Boolean(row.graphic)!==(v.kind==='grafica'))
+        throw Error('T296: relación conocimiento/página/imagen no coincide '+v.id);
+      if(v.kind==='grafica' &&
+         (row.graphic.originalSelected!==true ||
+          row.graphic.externalKey!==v.externalKey||
+          !String(row.graphic.sourceId).startsWith('trafico/Screenshot_20260924-')))
+        throw Error('T296: imagen original alterada '+v.id);
+      if(Number(row.validation_version)===296){
+        if(row.stem!==v.stem||JSON.stringify(row.options)!==JSON.stringify(v.options)||
+           Number(row.correct_index)!==v.correct_index||
+           row.question_family!==v.question_family||row.explanation!==v.explanation||
+           row.difficulty!==v.difficulty)
+          throw Error('T296: ya revisada, contenido divergente '+v.id);
+        already++;continue;
+      }
+      if(Number(row.validation_version)!==v.old_validation_version||
+         t296MD5(row.stem)!==v.old_stem_md5||
+         row.question_family!==v.old_family)
+        throw Error('T296: fuente original alterada '+v.id);
+      const same=await conn.query(`SELECT id FROM question_bank
+        WHERE id<>$1 AND coverage_item_id=$2 AND active=TRUE AND stem=$3`,
+        [v.id,v.coverage_id,v.stem]);
+      if(same.rowCount)throw Error('T296: duplicado de texto revisado '+v.id);
+      const result=await conn.query(`UPDATE question_bank SET
+        stem=$2,options=$3::jsonb,correct_index=$4,explanation=$5,
+        question_family=$6,difficulty='muy alta',validation_version=296,
+        updated_at=NOW() WHERE id=$1 RETURNING id`,
+        [v.id,v.stem,JSON.stringify(v.options),v.correct_index,
+         v.explanation,v.question_family]);
+      if(result.rowCount!==1)throw Error('T296: UPDATE no efectuado '+v.id);
+      updated++;
+    }
+    // SERVER279 created nine valid stand-alone textual conversions on legacy
+    // graphics' coverage IDs. They were active but marked non-examinable:
+    // restore eligibility only after validating each source above.
+    const reenableIds=pack.questions.filter(q=>q.id>=3149&&q.id<=3157).map(q=>q.coverage_id);
+    if(reenableIds.length!==9||new Set(reenableIds).size!==9)
+      throw Error('T296: no coincide el inventario de recuperaciones examinables');
+    const back=await conn.query(`UPDATE coverage_items SET exam_relevant=TRUE
+      WHERE topic_id=72 AND id=ANY($1::int[]) AND exam_relevant=FALSE
+      RETURNING id`,[reenableIds]);
+    if(back.rowCount>9)throw Error('T296: cobertura restaurada inesperada');
+    const restored=(await conn.query(`SELECT COUNT(*)::int n FROM coverage_items
+      WHERE topic_id=72 AND exam_relevant=TRUE AND id=ANY($1::int[])`,[reenableIds])).rows[0].n;
+    if(restored!==9)throw Error('T296: nueve conocimientos aún fuera del examen');
+    const final=(await conn.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL
+        AND graphic->>'originalSelected'='true')::int graphics,
+      COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts,
+      COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE graphic IS NOT NULL)::int images,
+      COUNT(*) FILTER(WHERE validation_version<>296)::int invalid
+      FROM question_bank WHERE id=ANY($1::bigint[])`,[ids])).rows[0];
+    if(final.n!==41||final.graphics!==5||final.images!==5||
+       final.texts!==36||final.invalid!==0)
+      throw Error('T296: estado final incumple 5 imágenes + 36 textos');
+    await conn.query('COMMIT');
+    T296_READY=true;
+    return {ok:true,topicId:72,updated,already,originalImages:5,
+      recoveredTexts:36,updatedRows:41,restoredExamKnowledge:9,deleted:0,statisticsPreserved:true};
+  }catch(e){await conn.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{conn.release();}
+}
+async function t296VerifyAfterImport(){
+  if(!T296_READY)throw Error('T296: no se ha aplicado la revisión');
+  const ids=t296Pack().questions.map(x=>x.id);
+  const r=(await db.query(`SELECT COUNT(*)::int n,
+    COUNT(*) FILTER(WHERE active AND validation_version=296)::int revised,
+    COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL
+      AND graphic->>'originalSelected'='true')::int graphics,
+    COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts
+    FROM question_bank WHERE id=ANY($1::bigint[])`,[ids])).rows[0];
+  const old=(await db.query(`SELECT COUNT(*)::int n FROM question_bank
+     WHERE id BETWEEN 2858 AND 2862 AND active`)).rows[0];
+  const eligible=(await db.query(`SELECT COUNT(*)::int n FROM coverage_items
+      WHERE topic_id=72 AND exam_relevant=TRUE
+      AND id=ANY($1::int[])`,
+      [t296Pack().questions.filter(x=>x.id>=3149&&x.id<=3157).map(x=>x.coverage_id)])).rows[0].n;
+  if(r.n!==41||r.revised!==41||r.graphics!==5||r.texts!==36||old.n!==0||eligible!==9)
+    throw Error('T296: los importadores posteriores han alterado el resultado '+JSON.stringify({r,old}));
+  return {ok:true,questions:41,graphics:5,texts:36,oldLegacyActive:old.n,restoredExamKnowledge:eligible};
+}
+
 async function healthImportOnce192(topic,uploadedPdfPath=null){
   const n=healthTopicNumber192(topic);
   if(!n)return {skipped:true};
-  const data=healthLoadData192(n);
+  const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
   if(uploadedPdfPath){
@@ -3654,7 +3898,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
       await client.query(`UPDATE coverage_items SET exam_relevant=FALSE
         WHERE topic_id=$1 AND item_type='grafica_salud_original'
           AND concept LIKE 'T61-GRAF-%' AND NOT(concept=ANY($2::text[]))
-          AND exam_relevant=TRUE`,[topic.id,wanted]);
+          AND NOT(id=ANY($3::int[])) AND exam_relevant=TRUE`,
+        [topic.id,wanted,[246205,246206,246207,246208,246210,246211,246197,246200,246204]]);
     }
     // SERVER222: Retirar de nuevos test las 27 preguntas gráficas T58 anteriores.
     // Conserva las filas y las respuestas históricas; solo desactiva su elegibilidad.
@@ -23526,7 +23771,7 @@ async function syncT45NoOriginalGraphics279(){
   finally{conn.release();}
 }
 async function syncT46Selected5_279(){
-  const d=t279ReadPack('t46_selected_5_data.js',46);
+  const d=t296OverlaySelected(t279ReadPack('t46_selected_5_data.js',46));
   if(d.topic_id!==72||d.pdf_name!=='TEMA_61_RESCATE_EN_ACCIDENTES_DE_TRAFICO.pdf'||
      d.images?.length!==5||d.questions?.length!==5||d.texts?.length!==9||
      JSON.stringify(d.old_ids)!=='[2858,2859,2860,2861,2862]'||
@@ -23816,7 +24061,7 @@ function t282ReadRecovery(topicNum){
   for(const q of d.questions)t279CheckQuestion(q,'T282');
   const keys=d.questions.map(x=>x.key);
   if(new Set(keys).size!==keys.length)throw Error('T282: clave duplicada');
-  return d;
+  return t296OverlayRecovered(d);
 }
 async function t282RecoverTopic(topicNum){
   const d=t282ReadRecovery(topicNum);
@@ -23988,6 +24233,9 @@ async function startServer(){
   try{await t61RecoverEligibleCoverage244();}
   catch(error){console.error('T61_244_RECUPERACION_NO_APLICADA:',String(error?.message||error));}
   await syncSpecificTopicCatalog268();
+  try{const r=await applyT46GraphicAndTextRevisions296();
+    console.log('T46_296_41_PREGUNTAS_REVISADAS',JSON.stringify(r));}
+  catch(e){console.error('T46_296_NO_APLICADA_SIN_CAMBIOS:',String(e?.message||e));}
   console.log("STARTUP 1/4 OK");
   // SERVER 80: desactivar SOLO preguntas locales antiguas de tablas de
   // solares/eólicos. Sus territorios estaban desactualizados. No borra tests,
@@ -24154,6 +24402,8 @@ async function startServer(){
         const selected=await syncT46Selected5_279();
         console.log('T46_279_5_CAPTURAS_AUDITADAS',JSON.stringify(selected));
         await t282After(46,selected);
+        const check296=await t296VerifyAfterImport();
+        console.log('T46_296_VERIFICACION_POSTERIOR',JSON.stringify(check296));
       })
       .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
     syncT43Selected5_276()
