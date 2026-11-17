@@ -23408,6 +23408,29 @@ async function syncT44Selected18_277(){
 // T46: cinco Screenshot originales seleccionados; cinco gráficas auditadas y
 // nueve conocimientos textuales independientes de las figuras retiradas.
 // Solo transacciones idempotentes; no DELETE, no tocar historial de sesiones.
+// SERVER295: dos conversiones documentales del T45 y corrección del fallo SQL
+// de SERVER279. Se aplica SOLO al tema curricular 45, sin tocar otros bancos.
+function t295ReadCorrections(){
+  const f=path.join(process.cwd(),'t45_revisadas295_data.js');
+  if(!fs.existsSync(f))throw Error('T295: falta t45_revisadas295_data.js');
+  const raw=fs.readFileSync(f,'utf8').trim(),prefix='module.exports = ';
+  if(!raw.startsWith(prefix)||!raw.endsWith(';'))throw Error('T295: formato inválido');
+  const d=JSON.parse(raw.slice(prefix.length,-1));
+  if(d.schema!==1||d.version!==295||d.topic_id!==64||d.topic_number!==45||
+     d.pdf_name!=='TEMA_53_RESCATE_EN_RIOS_RIADAS_E_INUNDACIONES.pdf'||
+     d.original_selected_screenshots!==0||
+     JSON.stringify(d.graphic_assets_to_exclude)!=='[113580,113581]'||
+     JSON.stringify(d.legacy_graphics)!=='[2039,2040,2144]'||
+     d.nivopluvial?.original_id!==2144||d.sacos?.original_id!==2040||
+     d.nivopluvial?.manual_page!=='166'||d.sacos?.manual_page!=='187')
+    throw Error('T295: inventario/documentación incompatibles');
+  for(const q of [d.nivopluvial,d.sacos]){
+    t279CheckQuestion(q,'T295');
+    if(/\b(?:imagen|figura|dibujo|gráfico|esquema)\b/i.test(q.stem))
+      throw Error('T295: una pregunta textual sigue dependiendo de imagen');
+  }
+  return d;
+}
 function t279ReadPack(file,number){
   const f=path.join(process.cwd(),file);
   if(!fs.existsSync(f))throw Error(`T${number}-279: falta ${file}`);
@@ -23416,6 +23439,14 @@ function t279ReadPack(file,number){
   const data=JSON.parse(raw.slice(prefix.length,-1));
   if(data.schema!==1||data.topic_number!==number)
     throw Error(`T${number}-279: número curricular incorrecto`);
+  if(number===45){
+    const v=t295ReadCorrections();
+    if(data.topic_id!==64||data.original_selected_screenshots!==0||
+       data.legacy_graphic_id!==2144||
+       JSON.stringify(data.legacy_graphic_assets)!=='[113580,113581]')
+      throw Error('T295: el módulo histórico T45 no coincide con el inventario de imágenes');
+    data.text={...data.text,...v.nivopluvial};
+  }
   return data;
 }
 function t279CheckQuestion(q,label){
@@ -23477,7 +23508,7 @@ async function syncT45NoOriginalGraphics279(){
       FROM question_bank WHERE id=2144 FOR UPDATE`)).rows[0];
     if(!old||old.graphic?.sourceId!=='rios-inundaciones-t53/T53_FIG_01_P166.png')
       throw Error('T45-279: no coincide la gráfica histórica');
-    const other=(await conn.query(`SELECT id FROM question_bank q JOIN coverage_items c
+    const other=(await conn.query(`SELECT q.id FROM question_bank q JOIN coverage_items c
       ON c.id=q.coverage_item_id WHERE c.topic_id=64 AND q.active AND q.graphic IS NOT NULL
       AND q.id<>2144 LIMIT 1`)).rows;
     if(other.length)throw Error('T45-279: hay otras gráficas activas sin auditar');
@@ -23760,7 +23791,7 @@ async function syncT47Selected8_280(){
 // SERVER282: auditoría completa desde el tema 38 y recuperación de datos que
 // quedaban sin pregunta textual equivalente. No elimina datos históricos,
 // no importa imágenes nuevas, no cambia IDs de temas ni toca SRS o sesiones.
-function t282ReadRecovery(){
+function t282ReadRecovery(topicNum){
   const f=path.join(process.cwd(),'t38_47_recuperacion282_data.js');
   if(!fs.existsSync(f))throw Error('T282: falta el módulo de auditoría');
   const raw=fs.readFileSync(f,'utf8').trim(),pref='module.exports = ';
@@ -23775,13 +23806,20 @@ function t282ReadRecovery(){
     if(ids.length!==count||new Set(ids).size!==count||ids.some(x=>!Number.isInteger(x)))
       throw Error('T282: faltan preguntas del inventario '+t);
   }
+  if(topicNum===45){
+    const correction=t295ReadCorrections();
+    const idx=d.questions.findIndex(q=>q.topic===45&&q.original_id===2040);
+    if(idx<0||d.questions.filter(q=>q.topic===45).length!==1)
+      throw Error('T295: falta el origen de sacos terreros (2040)');
+    d.questions[idx]={...d.questions[idx],...correction.sacos};
+  }
   for(const q of d.questions)t279CheckQuestion(q,'T282');
   const keys=d.questions.map(x=>x.key);
   if(new Set(keys).size!==keys.length)throw Error('T282: clave duplicada');
   return d;
 }
 async function t282RecoverTopic(topicNum){
-  const d=t282ReadRecovery();
+  const d=t282ReadRecovery(topicNum);
   if(![44,45,46].includes(topicNum))throw Error('T282: tema de recuperación no permitido');
   const topicId={44:69,45:64,46:72}[topicNum];
   const items=d.questions.filter(q=>q.topic===topicNum);
@@ -23849,7 +23887,7 @@ async function t282RecoverTopic(topicNum){
   finally{conn.release();}
 }
 async function t282AuditTopic(topicNum){
-  const d=t282ReadRecovery(),ids=d.legacy_ids_audited[String(topicNum)];
+  const d=t282ReadRecovery(topicNum),ids=d.legacy_ids_audited[String(topicNum)];
   const map={38:48,39:49,40:50,41:54,42:66,43:52,44:69,45:64,46:72,47:53};
   const topicId=map[topicNum];
   if(!topicId||!Array.isArray(ids))throw Error('T282: tema no auditado '+topicNum);
