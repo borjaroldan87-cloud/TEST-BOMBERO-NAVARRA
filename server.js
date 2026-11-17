@@ -20534,7 +20534,9 @@ app.post('/api/generate',async(req,res)=>{
         if(!grouped.has(topicId))grouped.set(topicId,
           (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot||targets[i].healthPreparedGraphicSlot192)
             ?(targets[i].healthPreparedGraphicSlot192
-              ?await healthGraphicBankPairs192(topicId,freshOnly111,difficulty)
+              ?(Number(topicId)===71
+                ?await t50GraphicBankPairs300(topicId,freshOnly111,difficulty)
+                :await healthGraphicBankPairs192(topicId,freshOnly111,difficulty))
               :targets[i].t45PreparedGraphicSlot
               ?await t45GraphicBankPairs(topicId,freshOnly111,difficulty)
               :targets[i].t44PreparedGraphicSlot
@@ -24820,6 +24822,260 @@ async function applyT49Revision299(){
 }
 
 
+
+/* SERVER300 — T50 EDIFICACIONES. SOLO fuentes de usuario: PDF CEIS y examen 2026.
+   18 capturas seleccionadas; una referencia duplicada de cercha => 17 dibujos diferentes.
+   12 antiguas preguntas graficas prefabricadas -> texto; 27 textos previos auditados;
+   17 preguntas graficas NUEVAS, cada una ligada a un dibujo seleccionado original.
+   Sin borrado de conocimientos, IDs historicos, respuestas ni sesiones/SRS.
+*/
+let T300_PACK_CACHE=null;
+function t300Pack(){
+  if(T300_PACK_CACHE)return T300_PACK_CACHE;
+  const d=t279ReadPack('t50_revision300_data.js',50);
+  if(d.revision!==300||d.topic_id!==71||d.legacy_number!==60||d.pdf_pages!==62||
+     d.title!=='TEMA 50. EDIFICACIONES'||d.pdf_source_name!=='TEMA_60_EDIFICACIONES.pdf'||
+     d.pdf_sha256!=='337d0ed13c9d3c7b48c712d0c351ad7e11c643f440fe7c2cafa2cac137811e7b'||
+     d.coverage_total_before!==834||d.coverage_relevant_before!==834||
+     d.graphic_questions_before!==12||d.active_text_questions_before!==27||
+     d.user_original_screenshots?.length!==18||d.images?.length!==17||
+     d.new_graphic_questions?.length!==17||d.existing_question_revisions?.length!==39||
+     d.duplicates?.length!==1)
+    throw Error('T300: paquete o identidad documental incompatible');
+  const names=new Set(),keys=new Set();
+  for(let i=0;i<17;i++){
+    const im=d.images[i],q=d.new_graphic_questions[i];
+    const exp=`T50-ORIG-${String(i+1).padStart(4,'0')}`;
+    if(im.key!==exp||q.key!==exp||q.image_file!==im.file||
+       im.selected_screenshot!==d.user_original_screenshots[i]||
+       im.file!==`T50_SELECTED_${String(i+1).padStart(2,'0')}.png`||
+       !/^[a-f0-9]{64}$/.test(im.sha256)||!im.base64||
+       !q.stem||q.stem.length<90||q.options?.length!==4||
+       new Set(q.options).size!==4||q.options.some(a=>a.length<30)||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       !q.source_evidence||q.difficulty!=='muy alta'||
+       !Number.isInteger(q.source_pdf_page)||q.source_pdf_page<1||
+       !Number.isInteger(q.coverage_id)||q.coverage_id<1||
+       keys.has(exp)||names.has(im.file))
+      throw Error('T300: figura/pregunta nueva incompatible '+exp);
+    names.add(im.file);keys.add(exp);
+  }
+  const ids=new Set();
+  for(const e of d.existing_question_revisions){
+    if(ids.has(e.id)||!Number.isInteger(e.id)||!Number.isInteger(e.coverage_id)||
+       !/^[0-9a-f]{32}$/.test(e.old_stem_md5)||
+       !/^[0-9a-f]{32}$/.test(e.old_options_md5)||
+       e.correct_index<0||e.correct_index>3||
+       e.wrong_options?.length!==3||e.wrong_options.some(x=>x.length<18)||
+       e.converted_from_graphic!==(e.id>=2555&&e.id<=2566)||
+       e.difficulty!=='muy alta')
+       throw Error('T300: edición histórica inválida '+e.id);
+    ids.add(e.id);
+  }
+  if(d.existing_question_revisions.filter(x=>x.converted_from_graphic).length!==12||
+     d.existing_question_revisions.filter(x=>!x.converted_from_graphic).length!==27||
+     new Set(d.user_original_screenshots).size!==18)
+    throw Error('T300: inventario original distinto');
+  T300_PACK_CACHE=d;return d;
+}
+function t300WriteImages(){
+  const d=t300Pack();
+  const dir=path.join(process.cwd(),'public','graphics','edificacion-apeos');
+  fs.mkdirSync(dir,{recursive:true});let installed=0;
+  for(const im of d.images){
+    const bytes=Buffer.from(im.base64,'base64');
+    const h=createHash('sha256').update(bytes).digest('hex');
+    if(bytes.length<9000||h!==im.sha256||
+      !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T300: PNG/suma distinto '+im.file);
+    const f=path.join(dir,im.file);
+    if(fs.existsSync(f)){
+      if(createHash('sha256').update(fs.readFileSync(f)).digest('hex')!==h)
+        throw Error('T300: imagen local divergente '+im.file);
+    }else{fs.writeFileSync(f,bytes);installed++;}
+  }
+  return {figures:17,installed};
+}
+async function t50GraphicBankPairs300(topicId,freshOnly,difficulty){
+  if(Number(topicId)!==71||difficulty!=='muy alta')return [];
+  const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+    qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+    qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+    ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+    ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+    ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=71 AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version=300 AND qb.graphic->>'originalSelected'='true'
+      AND qb.graphic->>'externalKey' LIKE 'T50-ORIG-%'
+      AND ${SRS96_ELIGIBLE_SQL}
+      AND ($1::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 80`,
+    [Boolean(freshOnly)]);
+  return rows.rows;
+}
+async function applyT50Revision300(){
+  const d=t300Pack();t300WriteImages();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(50,300)');
+    const t=(await client.query(`SELECT id,name,block,topic_order,source_file,total_items
+       FROM topics WHERE id=71 FOR UPDATE`)).rows[0];
+    if(!t||t.name!==d.title||t.block!=='especifico'||
+       Number(t.topic_order)!==50||t.source_file!==d.pdf_source_name||
+       Number(t.total_items)!==834)
+      throw Error('T300: el tema curricular o archivo indexado difiere');
+    const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,
+       encode(sha256(pdf_bytes),'hex') real,page_count,size_bytes
+       FROM topic_local_pdfs WHERE topic_id=71`)).rows[0];
+    if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+       Number(pdf.page_count)!==62||Number(pdf.size_bytes)!==3318050)
+      throw Error('T300: PDF distinto del CEIS validado');
+    const cv=(await client.query(`SELECT COUNT(*)::int n,
+       COUNT(*) FILTER(WHERE exam_relevant)::int r
+       FROM coverage_items WHERE topic_id=71`)).rows[0];
+    if(cv.n!==834||cv.r!==834)throw Error('T300: cobertura distinta; transacción cancelada');
+    const orig=await client.query(`SELECT q.id,q.coverage_item_id,q.stem,
+       q.options,md5(q.options::text) opts_md5,q.correct_index,
+       q.question_family,q.difficulty,q.graphic,q.validation_version,q.active,
+       q.explanation,q.source_evidence,q.source_page,q.manual_page,
+       c.item_type,c.exam_relevant FROM question_bank q JOIN coverage_items c
+       ON c.id=q.coverage_item_id WHERE c.topic_id=71
+       ORDER BY q.id FOR UPDATE OF q`);
+    const olds=d.existing_question_revisions;
+    const activeOld=orig.rows.filter(x=>olds.some(e=>e.id===Number(x.id)));
+    if(activeOld.length!==39||activeOld.some(x=>!x.active||!x.exam_relevant))
+      throw Error('T300: alguna de las 39 preguntas previas ha cambiado/desaparecido');
+    const prevNew=orig.rows.filter(x=>String(x.graphic?.externalKey||'').startsWith('T50-ORIG-'));
+    const already=prevNew.length===17&&activeOld.every(x=>Number(x.validation_version)===300);
+    if(!already && (prevNew.length!==0||orig.rows.length!==39))
+      throw Error('T300: preguntas ajenas o nueva gráfica parcialmente importada');
+    if(already){
+      const graphActive=orig.rows.filter(x=>x.active&&x.question_family==='GRAFICA');
+      if(graphActive.length!==17||orig.rows.filter(x=>x.active).length!==56)
+        throw Error('T300: version 300 existente divergente');
+      await client.query('COMMIT');return {skipped:true,reason:'T300_YA_VALIDADO',images:17,graphic:17,texts:39};
+    }
+    const origById=new Map(activeOld.map(x=>[Number(x.id),x]));
+    for(const e of olds){
+      const q=origById.get(e.id);
+      if(!q||q.coverage_item_id!==e.coverage_id||q.correct_index!==e.correct_index||
+         q.validation_version!==6||q.difficulty!=='muy alta'||
+         createHash('md5').update(q.stem).digest('hex')!==e.old_stem_md5||
+         q.opts_md5!==e.old_options_md5||
+         !Array.isArray(q.options)||q.options.length!==4||
+         e.converted_from_graphic!==(q.question_family==='GRAFICA' && q.graphic!==null))
+        throw Error('T300: version previa no coincide ID '+e.id);
+    }
+    const oldAssets=(await client.query(`SELECT * FROM graphic_assets
+      WHERE topic_folder IN('edificacion-apeos','salud-t60') FOR UPDATE`)).rows;
+    const originalScreenshots=new Set(oldAssets.filter(x=>x.topic_folder==='edificacion-apeos' &&
+       x.source_file.startsWith('Screenshot_')).map(x=>x.source_file));
+    if(originalScreenshots.size!==18 ||
+       d.user_original_screenshots.some(x=>!originalScreenshots.has(x)))
+      throw Error('T300: carpetas originales no contienen las 18 capturas exactas');
+    // La instantánea se inserta ANTES de modificar, dentro de la misma transacción.
+    const backup={revision:300,createdAt:new Date().toISOString(),
+      topic:{id:t.id,name:t.name,source_file:t.source_file},pdfSha256:pdf.sha,
+      coverage:cv,oldQuestions:activeOld,oldAssets,
+      sourceScreenshots:d.user_original_screenshots};
+    await client.query(`INSERT INTO app_state(key,value)
+      VALUES('T50_300_BACKUP_39_PREGUNTAS_18_CAPTURAS',$1)
+      ON CONFLICT(key) DO NOTHING`,[JSON.stringify(backup)]);
+    let changed=0;
+    for(const e of olds){
+      const q=origById.get(e.id),fresh=q.options.slice();
+      let k=0;for(let i=0;i<4;i++)if(i!==e.correct_index)fresh[i]=e.wrong_options[k++];
+      if(new Set(fresh).size!==4||fresh[e.correct_index]!==q.options[e.correct_index])
+        throw Error('T300: cuatro alternativas o respuesta correcta incorrectas '+e.id);
+      const stem=e.stem||q.stem;
+      if(e.converted_from_graphic&&/\b(imagen|figura|esquema|representad[ao])\b/i.test(stem))
+        throw Error('T300: texto convertido aún depende de imagen '+e.id);
+      const family=e.converted_from_graphic?'2026_CORRECTA':q.question_family;
+      const expl='Según CEIS Guadalajara, p. '+q.manual_page+': '+
+        q.options[q.correct_index]+'. Respaldo: '+String(q.source_evidence||'');
+      await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+        graphic=NULL,question_family=$4,explanation=$5,
+        difficulty='muy alta',validation_version=300,updated_at=NOW()
+        WHERE id=$1`,[e.id,stem,JSON.stringify(fresh),family,expl]);
+      if(e.converted_from_graphic){
+        await client.query(`UPDATE coverage_items SET item_type='dato_t50_convertido',
+          evaluation_type='comprension' WHERE id=$1 AND topic_id=71`,[e.coverage_id]);
+      }
+      changed++;
+    }
+    await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+      analysis_status='superseded',updated_at=NOW()
+      WHERE topic_folder IN('edificacion-apeos','salud-t60')
+      AND is_usable=TRUE`);
+    const assets=new Map();
+    for(const im of d.images){
+      const uri='/graphics/edificacion-apeos/'+im.file;
+      const sid='edificacion-apeos/'+im.file;
+      const a=await client.query(`INSERT INTO graphic_assets(
+        source_id,topic_folder,source_file,public_url,asset_index,
+        asset_type,concept,description,source_evidence,
+        crop_x,crop_y,crop_width,crop_height,mask_regions,
+        is_official_reference,is_usable,analysis_status,sanitization_version)
+        VALUES($1,'edificacion-apeos',$2,$3,0,'individual',$4,$5,$6,
+          0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+        ON CONFLICT(source_id,asset_index) DO UPDATE SET
+          public_url=EXCLUDED.public_url,description=EXCLUDED.description,
+          source_evidence=EXCLUDED.source_evidence,crop_x=0,crop_y=0,
+          crop_width=1,crop_height=1,mask_regions='[]'::jsonb,
+          is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
+        RETURNING id`,[sid,im.file,uri,
+          'Figura original seleccionada '+im.key,
+          'Recorte del PDF entregado; pregunta exige interpretacion grafica.',
+          'Fuente: '+im.source+'; captura seleccionada '+im.selected_screenshot]);
+      assets.set(im.file,{id:Number(a.rows[0].id),uri,sid});
+    }
+    for(const v of d.new_graphic_questions){
+      const linked=(await client.query(`SELECT id,topic_id,exam_relevant
+        FROM coverage_items WHERE id=$1 AND topic_id=71`,[v.coverage_id])).rows[0];
+      if(!linked||!linked.exam_relevant)throw Error('T300: cobertura gráfica no examinable '+v.key);
+      const im=assets.get(v.image_file),g={assetId:im.id,
+        sourceId:im.sid,publicUrl:im.uri,assetType:'individual',
+        externalKey:v.key,originalSelected:true,
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+        source:'CEIS original/Examen oficial 2026 usuario'};
+      await client.query(`INSERT INTO question_bank(
+        coverage_item_id,stem,options,correct_index,explanation,
+        source_evidence,source_page,manual_page,question_family,difficulty,
+        graphic,validation_version,active)
+        VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,300,TRUE)`,
+        [v.coverage_id,v.stem,JSON.stringify(v.options),v.correct_index,
+          'Conforme a '+v.source_evidence+' Respuesta: '+v.options[v.correct_index],
+          v.source_evidence,v.source_pdf_page,String(v.manual_page),JSON.stringify(g)]);
+    }
+    const final=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=300)::int revised
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=71`)).rows[0];
+    const assetFinal=(await client.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder IN('edificacion-apeos','salud-t60') AND is_usable`)).rows[0];
+    const cf=(await client.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int r FROM coverage_items
+      WHERE topic_id=71`)).rows[0];
+    if(final.total!==56||final.active!==56||final.graphics!==17||
+       final.texts!==39||final.revised!==56||assetFinal.n!==17||
+       cf.n!==834||cf.r!==834)
+      throw Error('T300: comprobacion final inconsistente, rollback sin cambios');
+    await client.query('COMMIT');
+    return {ok:true,revision:300,sourceQuestions:39,converted:12,
+       textQuestions:39,newGraphicQuestions:17,originalScreenshots:18,
+       distinctFigures:17,updated:changed,coverage:834};
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -25045,6 +25301,10 @@ async function startServer(){
          catch(e){console.error('HEALTH198_CALIDAD_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e));}
        })
       .catch(e=>console.error('HEALTH197_ARRANQUE_PENDIENTE:',String(e?.message||e)));
+    // SERVER300 T50: importación independiente, sin bloqueo de otras 26 especialidades.
+    applyT50Revision300()
+      .then(r=>console.log('T50_300_17_GRAFICAS_39_TEXTOS_AUDITADOS',JSON.stringify(r)))
+      .catch(e=>console.error('T50_300_NO_APLICADO_ROLLBACK:',String(e?.message||e)));
     // T46 visible = ID 72 / T61 histórico. Las 5 figuras y 26 textuales
     // se sincronizan sobre el PDF original YA guardado en PostgreSQL.
     // No re-extrae páginas con Gemini, ni espera antes de abrir el puerto HTTP.
