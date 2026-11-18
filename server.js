@@ -3800,6 +3800,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   // SERVER308: T58 curricular, antes T47. No reinstalar su figura CEIS retirada.
   if(n===47 && await t308UrgenciasMigratedAlready())
     return {skipped:true,reason:'T308_URGENCIAS_TRAUMATICAS_10_TEXTOS_CERO_GRAFICAS'};
+  // SERVER309: no reintroducir las cinco preguntas antiguas tras auditar T62.
+  if(n===63 && await t309HerramientasMigratedAlready())
+    return {skipped:true,reason:'T309_HERRAMIENTAS_5_CAPTURAS_17_PREGUNTAS_AUDITADAS'};
   // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
   if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
   if(n===62 && await t306MigratedAlready())return {skipped:true,reason:'T306_52_IMAGENES_USUARIO_AUDITADAS'};
@@ -26716,6 +26719,181 @@ async function applyT58UrgenciasRevision308(){
   finally{cl.release();}
 }
 
+
+/* SERVER309 — revisión por orden curricular.
+ * T59 / T60 / T61: módulos gráficos históricos con images=[],questions=[];
+ * sin gráficos ni preguntas activos. Solo auditoría; no se cambian datos.
+ * T62 / ID 106 (antiguo T63): conservar exactamente las 5 imágenes de
+ * Screenshot_... y sus preguntas; auditar 12 preguntas textuales activas.
+ * No altera respuestas correctas ni correct_index. La antigua respuesta
+ * no respaldada ID 2846 se mantiene literalmente, pero se convierte en
+ * pregunta de tipo INCORRECTA para no enseñar tipos ausentes del PDF.
+ * La pregunta 2841 pasa a orden de tabla y la 2848 a fila de la tabla.
+ * Mantener 23 preguntas (17 activas, 6 históricas inactivas), todos los
+ * 2527 conocimientos, 2309 elegibles, cálculos y SRS. Solo PDF CEIS.
+ * Transacción, copia en app_state, reversión en toda discrepancia.
+ */
+const T309_TOOLS_FILE=path.join(process.cwd(),'t62_herramientas_revision309_data.js');
+const T309_TOOLS_MARKER='t62_herramientas_309_aplicada_v1';
+let T309_TOOLS_CACHE=null;
+function t309HerramientasPack(){
+  if(T309_TOOLS_CACHE)return T309_TOOLS_CACHE;
+  const raw=fs.readFileSync(T309_TOOLS_FILE,'utf8').trim();
+  const pre='module.exports = ';
+  if(!raw.startsWith(pre)||!raw.endsWith(';'))throw Error('T309: formato de fichero inválido');
+  const d=JSON.parse(raw.slice(pre.length,-1));
+  if(d.schema!==1||d.revision!==309||d.topic_id!==106||
+    d.curricular_number!==62||d.legacy_number!==63||
+    d.title!=='TEMA 62. HERRAMIENTAS Y EQUIPOS OPERATIVOS'||
+    d.pdf_sha256!=='ddc55cb2f89374ef9bc450d42fc91d085eed0a4f5f52d867ef4169c018c20612'||
+    d.pdf_pages!==98||d.pdf_size_bytes!==7093437||
+    d.coverage_total!==2527||d.coverage_examinable!==2309||
+    d.question_bank_total!==23||d.question_bank_active!==17||
+    d.question_bank_inactive!==6||d.graphics_selected!==5||
+    d.graphical_active!==5||d.text_active!==12||d.calculation_active!==0||
+    d.selected_source_ids?.length!==5||
+    d.selected_png_sha256?.length!==5||
+    d.graphic_question_ids?.length!==5||
+    d.inactive_preserved_ids?.length!==6||
+    JSON.stringify(d.no_graphics_topics?.map(x=>x.topic))!=='[59,60,61]'||
+    JSON.stringify(d.graphic_question_ids)!=='[2835,2836,2837,2838,2839]'||
+    JSON.stringify(d.inactive_preserved_ids)!=='[2842,2845,2852,2854,2855,2856]'||
+    d.reviewed_questions?.length!==17||
+    new Set(d.reviewed_questions.map(x=>x.id)).size!==17||
+    d.reviewed_questions.some(x=>!Number.isInteger(x.correct_index)||
+      x.correct_index<0||x.correct_index>3||x.wrong?.length!==3||
+      typeof x.expected_correct!=='string'||!x.expected_correct||
+      new Set([x.expected_correct,...x.wrong]).size!==4||
+      typeof x.audit_note!=='string'||x.audit_note.length<30)||
+    d.reviewed_questions.filter(x=>x.new_family).map(x=>x.id).join(',')!=='2846')
+     throw Error('T309: el inventario o la auditoría no concuerdan');
+  T309_TOOLS_CACHE=d;return d;
+}
+async function t309HerramientasMigratedAlready(){
+  const r=await db.query('SELECT 1 FROM app_state WHERE key=$1',[T309_TOOLS_MARKER]);
+  return r.rowCount>0;
+}
+async function applyT62HerramientasRevision309(){
+  const d=t309HerramientasPack();const cl=await db.connect();
+  try{
+    await cl.query('BEGIN');
+    await cl.query('SELECT pg_advisory_xact_lock($1)',[309062]);
+    const t=(await cl.query(`SELECT id,name,block,topic_order,total_items
+      FROM topics WHERE id=106 FOR UPDATE`)).rows[0];
+    if(!t||t.block!=='especifico'||Number(t.topic_order)!==62||
+      t.name!==d.title||Number(t.total_items)!==2309)
+      throw Error('T309: ID / orden / título / conocimiento no coinciden');
+    const pdf=(await cl.query(`SELECT TRIM(pdf_sha256) AS hash,
+      ENCODE(SHA256(pdf_bytes),'hex') AS real,page_count,size_bytes,
+      OCTET_LENGTH(pdf_bytes) AS bytes FROM topic_local_pdfs WHERE topic_id=106`)).rows[0];
+    if(!pdf||pdf.hash!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+       Number(pdf.page_count)!==98||Number(pdf.size_bytes)!==7093437||
+       Number(pdf.bytes)!==7093437)
+       throw Error('T309: PDF original o integridad documental diferente');
+    const cov=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant,
+      COUNT(*) FILTER(WHERE source_evidence IS NULL OR BTRIM(source_evidence)='')::int empty
+      FROM coverage_items WHERE topic_id=106`)).rows[0];
+    if(cov.n!==2527||cov.relevant!==2309||cov.empty!==0)
+      throw Error('T309: cobertura documental no verificada');
+    const rows=(await cl.query(`SELECT q.* FROM question_bank q JOIN coverage_items c
+      ON c.id=q.coverage_item_id WHERE c.topic_id=106
+      ORDER BY q.id FOR UPDATE OF q`)).rows;
+    const assets=(await cl.query(`SELECT * FROM graphic_assets
+      WHERE topic_folder='herramientas' ORDER BY id FOR UPDATE`)).rows;
+    const marker=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',
+      [T309_TOOLS_MARKER])).rowCount;
+    const active=rows.filter(x=>x.active),inactive=rows.filter(x=>!x.active),
+      graphics=active.filter(x=>x.graphic!==null),text=active.filter(x=>x.graphic===null),
+      activeAssets=assets.filter(x=>x.is_usable), byId=new Map(rows.map(x=>[Number(x.id),x]));
+    if(rows.length!==23||active.length!==17||inactive.length!==6||
+       graphics.length!==5||text.length!==12||assets.length!==10||activeAssets.length!==5||
+       JSON.stringify(inactive.map(x=>Number(x.id)))!==JSON.stringify(d.inactive_preserved_ids)||
+       d.reviewed_questions.some(x=>!byId.has(x.id))||
+       JSON.stringify(graphics.map(x=>Number(x.id)))!==JSON.stringify(d.graphic_question_ids)||
+       d.selected_source_ids.some((sid,i)=>
+         activeAssets[i]?.source_id!==sid||
+         graphics[i]?.graphic?.sourceId!==sid||
+         Number(graphics[i]?.graphic?.assetId)!==Number(activeAssets[i]?.id)||
+         !sid.includes('/Screenshot_')))
+      throw Error('T309: capturas originales / preguntas distintas: no modificar');
+    if(marker){
+      if(active.some(x=>Number(x.validation_version)!==309))
+        throw Error('T309: marcador presente, pero preguntas no auditadas');
+      await cl.query('COMMIT');
+      return {ok:true,skipped:true,topic:62,graphics:5,texts:12,coverage:2309};
+    }
+    for(const r of d.reviewed_questions){
+      const q=byId.get(r.id);
+      if(!q||!q.active||!Array.isArray(q.options)||q.options.length!==4||
+         Number(q.correct_index)!==r.correct_index||
+         q.options[r.correct_index]!==r.expected_correct||
+         Number(q.validation_version)!==(r.id<=2839?7:6)||
+         !q.source_evidence||!q.stem||
+         (r.id<=2839)!==(q.graphic!==null))
+         throw Error('T309: la versión, clave o evidencia ha cambiado, ID '+r.id);
+    }
+    // Copia inmutable previa al primer cambio; sin borrar registros.
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,[
+      't62_herramientas_309_respaldo_23_preguntas',
+      JSON.stringify({topic:t,pdf,cov,rows,assets,source:'PDF CEIS original'})]);
+    let reviewed=0;
+    for(const item of d.reviewed_questions){
+      const q=byId.get(item.id),options=q.options.slice();let index=0;
+      for(let i=0;i<4;i++)if(i!==Number(q.correct_index))options[i]=item.wrong[index++];
+      if(index!==3||options[q.correct_index]!==item.expected_correct||
+         new Set(options).size!==4)
+        throw Error('T309: respuesta u opciones inválidas '+item.id);
+      const updated=await cl.query(`UPDATE question_bank SET
+        stem=$2,options=$3::jsonb,question_family=$4,
+        explanation=$5,source_evidence=$6,difficulty='muy alta',
+        validation_version=309,updated_at=NOW()
+        WHERE id=$1 AND active=TRUE`,[
+        item.id,item.new_stem||q.stem,JSON.stringify(options),
+        item.new_family||q.question_family,item.new_explanation||q.explanation,
+        item.new_evidence||q.source_evidence]);
+      if(updated.rowCount!==1)throw Error('T309: no pudo actualizar '+item.id);
+      reviewed++;
+    }
+    const final=(await cl.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE NOT q.active)::int inactive,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=309)::int revised,
+      COUNT(*) FILTER(WHERE q.active AND q.question_family='CALCULO_FORMULACION')::int calc
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id WHERE c.topic_id=106`)).rows[0];
+    const assetsFinal=(await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder='herramientas' AND is_usable=TRUE`)).rows[0].n;
+    const altered=(await cl.query(`SELECT id,stem,options,correct_index,graphic,active,
+      validation_version FROM question_bank WHERE id=ANY($1::bigint[]) ORDER BY id`,
+      [d.reviewed_questions.map(x=>x.id)])).rows;
+    if(reviewed!==17||final.total!==23||final.active!==17||final.inactive!==6||
+       final.graphics!==5||final.texts!==12||final.revised!==17||
+       final.calc!==0||assetsFinal!==5||
+       altered.some((x,i)=>!x.active||Number(x.validation_version)!==309||
+         Number(x.correct_index)!==d.reviewed_questions[i].correct_index||
+         x.options[x.correct_index]!==d.reviewed_questions[i].expected_correct||
+         (x.graphic!==null)!==(i<5)))
+       throw Error('T309: fallo de auditoría de salida; ROLLBACK');
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+      T309_TOOLS_MARKER,
+      JSON.stringify({topicId:106,topicNumber:62,graphicsPreserved:5,
+        textRevised:12,reviewed:17,nonActivePreserved:6,coverage:2309,
+        sourcePdfSha256:d.pdf_sha256,
+        correctedAmbiguous: [2841,2846,2848],
+        correctedUnsupportedAnswerByIncorrectQuestion:2846,
+        backup:'t62_herramientas_309_respaldo_23_preguntas'})]);
+    await cl.query('COMMIT');
+    return {ok:true,topicNumber:62,topicId:106,graphicsPreserved:5,
+      textsRevised:12,questionsAudited:17,coveragePreserved:2309,
+      historicalQuestionsPreserved:6,answersChanged:0,
+      sourceIssuesReframed:[2841,2846,2848],deletedHistory:0};
+  }catch(e){await cl.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -26931,6 +27109,16 @@ async function startServer(){
             }catch(error){
               console.error('T58_308_PENDIENTE_TRANSACCION_REVERTIDA:',
                 String(error?.message||error));
+            }
+          }
+          // SERVER309: T62 curricular (antiguo 63), conservar cinco capturas
+          // originales y revisar todas las 17 preguntas activas.
+          if(Number(t.id)===106){
+            try{
+              const verified=await applyT62HerramientasRevision309();
+              console.log('T62_309_5_GRAFICAS_ORIGINALES_12_TEXTOS_AUDITADOS',JSON.stringify(verified));
+            }catch(error){
+              console.error('T62_309_NO_APLICADO_TRANSACCION_REVERTIDA:',String(error?.message||error));
             }
           }
           // Importar cobertura DESPUÉS de finalizar la importación existente.
