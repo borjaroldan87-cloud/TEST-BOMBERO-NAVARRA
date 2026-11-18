@@ -3793,6 +3793,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   if(n===51 && await t302MigrationAlready())return {skipped:true,reason:'T302_1_GRAFICA_19_TEXTOS_ACTIVOS'};
   // SERVER304: nunca restaurar las 37 gráficas de origen después de la auditoría.
   if(n===56 && await t304MigratedAlready())return {skipped:true,reason:'T304_10_GRAFICAS_ORIGINALES_CONSERVADAS'};
+  // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
+  if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
   const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
@@ -26023,6 +26025,200 @@ async function applyT54Revision304(){
  finally{client.release();}
 }
 
+'use strict';
+'use strict';
+'use strict';
+'use strict';
+/* SERVER305 — Tema curricular 55, RIESGO ELÉCTRICO.
+   31 preguntas gráficas automáticas convertidas a texto, sin pérdida de filas.
+   Solo 7 capturas distintas elegidas por el usuario como gráficas.
+   Los 74 cálculos y sus módulos t57_calculos*.js se excluyen de esta migración.
+   Auditoría y respaldo antes de cambios. Control de concurrencia y rollback.
+*/
+let T55_305_START_PROMISE=Promise.resolve();
+function t305Pack(){
+ const d=require(path.join(process.cwd(),'t55_revision305_data.js'));
+ if(!d||d.revision!==305||d.schema!==1||d.topic_number!==55||d.legacy_number!==57||
+    d.topic_id!==68||d.title!=='TEMA 55. RIESGO ELÉCTRICO'||
+    d.pdf_sha256!=='ec4f2407fbf537e3a93d3df8a62ef2714fa7853e3f848f8477d2fe489270c77a'||
+    d.pdf_pages!==24||d.pdf_size!==1094805||d.coverage_total!==707||
+    d.initial_bank_count!==139||d.initial_graphic_count!==31||
+    d.initial_calculation_count!==74||d.initial_text_count!==34||
+    d.initial_bank_fingerprint!=='5bc17bec32e84f1fb9bf8edc006371a2'||
+    !Array.isArray(d.convert_graphics)||d.convert_graphics.length!==31||
+    !Array.isArray(d.images)||d.images.length!==7)throw Error('T305: inventario incorrecto');
+ const expectedIds=Array.from({length:31},(_,i)=>2238+i);
+ const oldIds=d.convert_graphics.map(e=>e.id);
+ if(expectedIds.some(id=>!oldIds.includes(id))||new Set(oldIds).size!==31||
+    new Set(d.images.map(e=>e.filename)).size!==7||
+    new Set(d.images.map(e=>e.asset_id)).size!==7||
+    new Set(d.images.map(e=>e.coverage_item_id)).size!==7)
+    throw Error('T305: selección o banco gráfico incorrecto');
+ for(const e of d.convert_graphics){
+   if(!Number.isInteger(e.id)||typeof e.stem!=='string'||e.stem.length<35||
+      (e.explanation_override!==undefined && (typeof e.explanation_override!=='string'||e.explanation_override.length<70))||
+      (e.correct_override!==undefined && (!Number.isInteger(e.id)||!([2239,2243,2246,2249,2250,2259,2268].includes(e.id))||
+        typeof e.correct_override!=='string'||e.correct_override.length<70||
+        typeof e.original_correct_text!=='string'||e.original_correct_text.length<2))||
+      /\b(figura|representad[ao]|en el dibujo|en la imagen|esquema de la imagen)\b/i.test(e.stem)||
+      !Array.isArray(e.wrong_options)||e.wrong_options.length!==3||
+      e.wrong_options.some(o=>typeof o!=='string'||o.length<3)||
+      new Set(e.wrong_options).size!==3)
+      throw Error('T305: pregunta textual no válida '+e.id);
+ }
+ for(const [i,e] of d.images.entries()){
+   if(e.role!==i+1||typeof e.stem!=='string'||e.stem.length<80||
+     !Number.isInteger(e.asset_id)||!Number.isInteger(e.coverage_item_id)||
+     !Array.isArray(e.options)||e.options.length!==4||
+     new Set(e.options).size!==4||e.options.some(o=>typeof o!=='string'||o.length<12)||
+     !Number.isInteger(e.correct_index)||e.correct_index<0||e.correct_index>3||
+     !/^Screenshot_20260924-/.test(e.filename))throw Error('T305: pregunta seleccionada defectuosa '+(i+1));
+ }
+ return d;
+}
+async function t305MigratedAlready(){
+ const q=(await db.query(`SELECT COUNT(*)::int n,
+   COUNT(*) FILTER (WHERE active AND graphic IS NOT NULL)::int g,
+   COUNT(*) FILTER (WHERE active AND graphic IS NULL)::int t,
+   COUNT(*) FILTER (WHERE active AND id BETWEEN 2238 AND 2268 AND graphic IS NULL AND validation_version=305)::int converted,
+   COUNT(*) FILTER (WHERE active AND graphic->>'originalSelected'='true')::int selected,
+   COUNT(*) FILTER (WHERE active AND question_family IN('T57_CALCULO','CALCULO_FORMULACION'))::int calc
+   FROM question_bank q WHERE q.coverage_item_id IN
+     (SELECT id FROM coverage_items WHERE topic_id=68)`)).rows[0];
+ return q.n===146&&q.g===7&&q.t===139&&q.converted===31&&q.selected===7&&q.calc===74;
+}
+async function applyT55Revision305(){
+ const d=t305Pack(),cl=await db.connect();
+ try{
+  await cl.query('BEGIN');
+  await cl.query('SELECT pg_advisory_xact_lock(55,305)');
+  const topic=(await cl.query('SELECT * FROM topics WHERE id=68 FOR UPDATE')).rows[0];
+  if(!topic||Number(topic.topic_order)!==55||topic.name!==d.title||Number(topic.total_items)!==707)
+    throw Error('T305: número real o identidad del tema no coincide');
+  const pdf=(await cl.query(`SELECT pdf_sha256 AS sha,
+     encode(sha256(pdf_bytes),'hex') AS real,page_count,size_bytes FROM topic_local_pdfs WHERE topic_id=68`)).rows[0];
+  if(!pdf||pdf.sha.trim()!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+    Number(pdf.page_count)!==24||Number(pdf.size_bytes)!==1094805)
+    throw Error('T305: PDF indexado incompatible con el original');
+  const cov=(await cl.query(`SELECT COUNT(*)::int n,
+    COUNT(*) FILTER(WHERE exam_relevant)::int r FROM coverage_items WHERE topic_id=68`)).rows[0];
+  if(cov.n!==707||cov.r!==707)throw Error('T305: cobertura incompleta o alterada');
+  const bank=(await cl.query(`SELECT q.* FROM question_bank q
+    WHERE q.coverage_item_id IN(SELECT id FROM coverage_items WHERE topic_id=68)
+    ORDER BY q.id FOR UPDATE OF q`)).rows;
+  const assets=(await cl.query(`SELECT * FROM graphic_assets WHERE topic_folder IN('electricidad','salud-t57') FOR UPDATE`)).rows;
+  const selected=new Map(d.images.map(e=>[e.asset_id,e]));
+  if(d.images.some(e=>!assets.some(a=>Number(a.id)===e.asset_id&&a.source_id===`electricidad/${e.filename}`)))
+    throw Error('T305: falta una captura que seleccionó el usuario');
+  if(assets.filter(a=>a.topic_folder==='salud-t57').length!==31||
+     assets.filter(a=>a.topic_folder==='electricidad').length!==15)
+    throw Error('T305: inventario gráfico original ha cambiado');
+  const converted=bank.filter(q=>q.id>=2238&&q.id<=2268&&q.graphic===null&&q.validation_version===305);
+  const added=bank.filter(q=>q.graphic?.externalKey?.startsWith('T55-USER-SELECTED-'));
+  const already=bank.length===146&&converted.length===31&&added.length===7&&
+    bank.filter(q=>q.active&&q.graphic!==null).length===7&&
+    bank.filter(q=>q.active&&q.graphic===null).length===139&&
+    bank.filter(q=>q.active&&['T57_CALCULO','CALCULO_FORMULACION'].includes(q.question_family)).length===74;
+  if(already){
+    // Tras cada arranque syncGraphicAssets puede reetiquetar recursos.
+    // Reafirmar siempre que SOLO estén utilizables las siete capturas del usuario.
+    await cl.query(`UPDATE graphic_assets SET is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+      WHERE topic_folder IN('electricidad','salud-t57')`);
+    for(const e of d.images)await cl.query(`UPDATE graphic_assets SET is_usable=TRUE,
+      analysis_status='analyzed',updated_at=NOW() WHERE id=$1`,[e.asset_id]);
+    const activeAssets=(await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder IN('electricidad','salud-t57') AND is_usable=TRUE`)).rows[0]?.n;
+    if(activeAssets!==7)throw Error('T305: selección gráfica no restaurada al reiniciar');
+    await cl.query('COMMIT');
+    return {ok:true,skipped:true,reason:'T55_305_YA_APLICADO',questions:146,graphics:7,texts:139};
+  }
+  if(bank.length!==139||bank.some(q=>!q.active||Number(q.validation_version)!==6)||
+     bank.filter(q=>q.graphic!==null).length!==31||
+     bank.filter(q=>['T57_CALCULO','CALCULO_FORMULACION'].includes(q.question_family)).length!==74)
+    throw Error('T305: datos en producción distintos de los auditados; no modificar');
+  const oldById=new Map(bank.map(q=>[Number(q.id),q]));
+  if(d.convert_graphics.some(e=>!oldById.has(e.id)||oldById.get(e.id).question_family!=='GRAFICA'||
+     oldById.get(e.id).graphic===null))throw Error('T305: preguntas gráficas históricas no coinciden');
+  const md5=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||
+      md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) AS fp
+      FROM question_bank q WHERE q.coverage_item_id IN
+      (SELECT id FROM coverage_items WHERE topic_id=68)`)).rows[0]?.fp;
+  if(md5!==d.initial_bank_fingerprint)throw Error('T305: huella original divergente '+md5);
+  const preservation=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||
+     md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) AS fp
+     FROM question_bank q WHERE q.coverage_item_id IN
+       (SELECT id FROM coverage_items WHERE topic_id=68) AND NOT(q.id BETWEEN 2238 AND 2268)`)).rows[0]?.fp;
+  await cl.query(`INSERT INTO app_state(key,value)
+    VALUES('T55_305_RESPALDO_139_PREGUNTAS_7_CAPTURAS',$1)
+    ON CONFLICT(key) DO NOTHING`,[JSON.stringify({revision:305,source:'SERVER304',createdAt:new Date().toISOString(),
+      pdf:pdf.sha,coverage:cov,preservation,originalQuestions:bank,originalAssets:assets})]);
+  await cl.query(`UPDATE graphic_assets SET is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+      WHERE topic_folder IN('electricidad','salud-t57')`);
+  for(const e of d.images)await cl.query(`UPDATE graphic_assets SET is_usable=TRUE,
+    analysis_status='analyzed',source_evidence=$2,updated_at=NOW() WHERE id=$1`,[
+    e.asset_id,`Captura de imagen seleccionada por el usuario. Texto contrastado con CEIS, página impresa ${e.manual_page}.`]);
+  for(const e of d.convert_graphics){
+    const q=oldById.get(e.id),opts=q.options.slice();let j=0;
+    if(e.correct_override && opts[q.correct_index]!==e.original_correct_text)
+      throw Error('T305: fuente original de respuesta ampliada no coincide '+e.id);
+    for(let k=0;k<4;k++)if(k!==q.correct_index)opts[k]=e.wrong_options[j++];
+    if(e.correct_override)opts[q.correct_index]=e.correct_override;
+    if((!e.correct_override&&opts[q.correct_index]!==q.options[q.correct_index])||
+       new Set(opts).size!==4||
+       opts.some(o=>typeof o!=='string'||o.length<3))
+      throw Error('T305: distractores o respuesta correcta inválidos en '+e.id);
+    await cl.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+      explanation=$4,source_evidence=$5,graphic=NULL,
+      question_family='2026_RAZONAMIENTO',difficulty='muy alta',
+      validation_version=305,updated_at=NOW() WHERE id=$1`,[e.id,e.stem,JSON.stringify(opts),
+      e.explanation_override||q.explanation,
+      `CEIS Riesgo eléctrico, página impresa ${q.manual_page}; conocimiento textual conservado`]);
+  }
+  for(const e of d.images){
+    const coverage=(await cl.query(`SELECT id,topic_id,exam_relevant,manual_page
+      FROM coverage_items WHERE id=$1`,[e.coverage_item_id])).rows[0];
+    if(!coverage||coverage.topic_id!==68||!coverage.exam_relevant||
+       String(coverage.manual_page)!==e.manual_page)
+       throw Error('T305: conocimiento original de la imagen no validado '+e.role);
+    const gr={assetId:e.asset_id,sourceId:`electricidad/${e.filename}`,
+      publicUrl:`/graphics/electricidad/${e.filename}`,assetType:'individual',
+      originalSelected:true,originalFile:e.filename,
+      externalKey:'T55-USER-SELECTED-'+String(e.role).padStart(2,'0'),
+      crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+      source:`Captura seleccionada por usuario, CEIS ${e.manual_page}`};
+    await cl.query(`INSERT INTO question_bank(coverage_item_id,stem,options,correct_index,
+      explanation,source_evidence,source_page,manual_page,question_family,difficulty,
+      graphic,active,validation_version) VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,
+      'GRAFICA','muy alta',$9::jsonb,TRUE,305)`,[
+      e.coverage_item_id,e.stem,JSON.stringify(e.options),e.correct_index,e.explanation,
+      `Captura seleccionada por el usuario: ${e.filename}; CEIS p.${e.manual_page}.`,
+      Number(e.manual_page)-402,e.manual_page,JSON.stringify(gr)]);
+  }
+  const stats=(await cl.query(`SELECT COUNT(*)::int total,
+    COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL)::int graphics,
+    COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts,
+    COUNT(*) FILTER(WHERE active AND id BETWEEN 2238 AND 2268 AND graphic IS NULL AND validation_version=305)::int converted,
+    COUNT(*) FILTER(WHERE active AND question_family IN('T57_CALCULO','CALCULO_FORMULACION'))::int calculations,
+    COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE active AND graphic IS NOT NULL)::int image_files
+    FROM question_bank WHERE coverage_item_id IN
+    (SELECT id FROM coverage_items WHERE topic_id=68)`)).rows[0];
+  const after=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||
+     md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) AS fp
+     FROM question_bank q WHERE q.coverage_item_id IN
+      (SELECT id FROM coverage_items WHERE topic_id=68) AND NOT(q.id BETWEEN 2238 AND 2268) AND validation_version=6`)).rows[0]?.fp;
+  const usable=(await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+    WHERE topic_folder IN('salud-t57','electricidad') AND is_usable=TRUE`)).rows[0]?.n;
+  if(stats.total!==146||stats.graphics!==7||stats.texts!==139||stats.converted!==31||
+     stats.calculations!==74||stats.image_files!==7||usable!==7||after!==preservation)
+     throw Error('T305: fallo de validación final, cambios revertidos '+JSON.stringify({stats,usable,after,preservation}));
+  await cl.query('COMMIT');
+  return {ok:true,revision:305,questions:146,graphics:7,converted_to_text:31,
+     historical_text_preserved:34,calculations_untouched:74,coverage:707,
+     original_selected_images:7};
+ }catch(err){await cl.query('ROLLBACK').catch(()=>{});throw err;}
+ finally{cl.release();}
+}
+
 let T54_304_START_PROMISE=Promise.resolve();
 let T53_303_START_PROMISE=Promise.resolve();
 let T51_301_RETRY_PROMISE=Promise.resolve();
@@ -26122,6 +26318,10 @@ async function startServer(){
     T54_304_START_PROMISE=T53_303_START_PROMISE.then(()=>applyT54Revision304())
       .then(r=>console.log('T54_304_10_GRAFICAS_82_TEXTOS_AUDITADOS',JSON.stringify(r)))
       .catch(e=>{console.error('T54_304_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
+    // SERVER305: cadena independiente; no depender del éxito de T54.
+    T55_305_START_PROMISE=T54_304_START_PROMISE.then(()=>applyT55Revision305())
+      .then(r=>console.log('T55_305_7_GRAFICAS_31_CONVERTIDAS_74_CALCULOS_INTACTOS',JSON.stringify(r)))
+      .catch(e=>{console.error('T55_305_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
     console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
     console.log(
       "EXAM STYLE STORE recuperado:",
