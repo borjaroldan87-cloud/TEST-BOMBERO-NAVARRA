@@ -3786,6 +3786,8 @@ async function t296VerifyAfterImport(){
 async function healthImportOnce192(topic,uploadedPdfPath=null){
   const n=healthTopicNumber192(topic);
   if(!n)return {skipped:true};
+  // SERVER301: tras migrar T51, no reactivar su banco histórico (36 gráficas).
+  if(n===59 && await t301MigrationAlready())return {skipped:true,reason:'T301_GRAFICAS_ORIGINALES_ACTIVAS'};
   const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
@@ -20534,7 +20536,9 @@ app.post('/api/generate',async(req,res)=>{
         if(!grouped.has(topicId))grouped.set(topicId,
           (mode==='mixto'||targets[i].t43PreparedGraphicSlot||targets[i].t44PreparedGraphicSlot||targets[i].t45PreparedGraphicSlot||targets[i].healthPreparedGraphicSlot192)
             ?(targets[i].healthPreparedGraphicSlot192
-              ?(Number(topicId)===71
+              ?(Number(topicId)===70
+                ?await t51GraphicBankPairs301(topicId,freshOnly111,difficulty)
+                :Number(topicId)===71
                 ?await t50GraphicBankPairs300(topicId,freshOnly111,difficulty)
                 :await healthGraphicBankPairs192(topicId,freshOnly111,difficulty))
               :targets[i].t45PreparedGraphicSlot
@@ -25076,6 +25080,262 @@ async function applyT50Revision300(){
   finally{client.release();}
 }
 
+
+/* SERVER301 — T51 ESTRUCTURAS COLAPSADAS; BASE SERVER300 INTACTA.
+   21 imágenes seleccionadas: figuras CEIS 7-18 + nueve originales adicionales.
+   72 preguntas existentes (36 gráficas,36 textuales): 12 gráficas conservadas,
+   24 gráficas convertidas a texto y 36 textos revisados. Nueve gráficas nuevas.
+   Solo fuente documental del usuario y exámenes oficiales facilitados por él.
+   No borrar conocimientos, sesiones, respuestas correctas, estadísticas ni SRS.
+*/
+let T301_PACK_CACHE=null;
+function t301Pack(){
+ if(T301_PACK_CACHE)return T301_PACK_CACHE;
+ const d=t279ReadPack('t51_revision301_data.js',51);
+ if(d.revision!==301||d.topic_id!==70||d.legacy_number!==59||
+    d.title!=='TEMA 51. ESTRUCTURAS COLAPSADAS'||
+    d.pdf_source_name!=='TEMA_59_ESTRUCTURAS_COLAPSADAS.pdf'||
+    d.pdf_sha256!=='62dc306c26aa3a5ed69be7fb9fa375fb6c666f7fd0613e69a72bce5cd51a1c26'||
+    d.pdf_pages!==32||d.coverage_total_before!==701||d.coverage_relevant_before!==701||
+    d.original_bank_fingerprint!=='68113207ae1663d0c517e7bac92e59ff'||
+    d.graphic_questions_before!==36||d.active_text_questions_before!==36||
+    d.images?.length!==21||d.user_original_screenshots?.length!==21||
+    new Set(d.user_original_screenshots).size!==21||
+    d.existing_question_revisions?.length!==72||d.new_graphic_questions?.length!==9)
+    throw Error('T301: paquete o fuente no coinciden con T51 verificado');
+ const ids=new Set();for(const e of d.existing_question_revisions){
+   if(!Number.isInteger(e.id)||e.id<2483||e.id>2554||ids.has(e.id)||
+      typeof e.stem!=='string'||e.stem.length<55||
+      !Array.isArray(e.wrong_options)||e.wrong_options.length!==3||
+      new Set(e.wrong_options).size!==3||e.wrong_options.some(x=>x.length<(e.id>=2531&&e.id<=2542?7:18))||
+      e.retain_as_original_graphic!==(e.id>=2483&&e.id<=2494)||
+      e.converted_from_graphic!==(e.id>=2531&&e.id<=2554))
+     throw Error('T301: revisión histórica inválida '+e.id);
+   ids.add(e.id);
+ }
+ const keys=new Set(),files=new Set();for(let i=0;i<21;i++){
+   const im=d.images[i],key=`T51-ORIG-${String(i+1).padStart(4,'0')}`;
+   if(im.key!==key||im.file!==`T51_SELECTED_${String(i+1).padStart(2,'0')}.png`||
+      im.selected_screenshot!==d.user_original_screenshots[i]||
+      !/^[0-9a-f]{64}$/.test(im.sha256)||!im.base64||
+      !Number.isInteger(im.manual_page)||keys.has(key)||files.has(im.file))
+     throw Error('T301: imagen original inválida '+key);
+   keys.add(key);files.add(im.file);
+ }
+ for(let i=0;i<9;i++){
+   const q=d.new_graphic_questions[i],n=i+13,im=d.images[n-1];
+   if(q.key!==im.key||q.image_file!==im.file||
+      q.stem?.length<85||q.options?.length!==4||
+      new Set(q.options).size!==4||q.options.some(s=>s.length<60)||
+      !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+      !Number.isInteger(q.coverage_id)||!q.source_evidence||
+      !Number.isInteger(q.source_pdf_page)||q.source_pdf_page!==q.manual_page-238||
+      im.manual_page!==q.manual_page||q.difficulty!=='muy alta')
+      throw Error('T301: nueva pregunta gráfica inválida '+q?.key);
+ }
+ T301_PACK_CACHE=d;return d;
+}
+function t301WriteImages(){
+ const d=t301Pack();const dir=path.join(process.cwd(),'public','graphics','estructuras-colapsadas');
+ fs.mkdirSync(dir,{recursive:true});let created=0;
+ for(const im of d.images){
+   const b=Buffer.from(im.base64,'base64');const sha=createHash('sha256').update(b).digest('hex');
+   if(b.length<6500||sha!==im.sha256||!b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+      throw Error('T301: PNG o firma incompatibles '+im.file);
+   const f=path.join(dir,im.file);
+   if(fs.existsSync(f)){
+      if(createHash('sha256').update(fs.readFileSync(f)).digest('hex')!==sha)
+         throw Error('T301: imagen existente divergente '+im.file);
+   }else{fs.writeFileSync(f,b);created++;}
+ }
+ return {figures:21,new_files:created};
+}
+async function t51GraphicBankPairs301(topicId,freshOnly,difficulty){
+ if(Number(topicId)!==70||difficulty!=='muy alta')return [];
+ const rows=await db.query(`SELECT qb.id AS question_id,qb.stem,qb.options,
+    qb.correct_index,qb.explanation,qb.source_evidence,qb.source_page,
+    qb.manual_page,qb.question_family,qb.difficulty,qb.graphic,qb.validation_version,
+    ci.id AS coverage_id,ci.topic_id,ci.section,ci.concept,ci.item_type,
+    ci.evaluation_type,ci.source_evidence AS ci_evidence,ci.source_page AS ci_page,
+    ci.manual_page AS ci_manual,t.name AS topic_name,t.block AS topic_block
+    FROM question_bank qb JOIN coverage_items ci ON ci.id=qb.coverage_item_id
+    JOIN topics t ON t.id=ci.topic_id
+    LEFT JOIN coverage_review_state crs ON crs.coverage_item_id=ci.id
+    WHERE ci.topic_id=70 AND ci.exam_relevant=TRUE AND qb.active=TRUE
+      AND qb.question_family='GRAFICA' AND qb.difficulty='muy alta'
+      AND qb.validation_version=301 AND qb.graphic->>'originalSelected'='true'
+      AND qb.graphic->>'externalKey' LIKE 'T51-ORIG-%'
+      AND ${SRS96_ELIGIBLE_SQL}
+      AND ($1::boolean=FALSE OR (${FRESH111_SQL}))
+    ORDER BY ci.times_asked ASC,qb.times_shown ASC,qb.id ASC LIMIT 80`,[Boolean(freshOnly)]);
+ return rows.rows;
+}
+async function t301MigrationAlready(){
+ const r=await db.query(`SELECT COUNT(*)::int n FROM question_bank q
+    JOIN coverage_items c ON c.id=q.coverage_item_id
+    WHERE c.topic_id=70 AND q.id BETWEEN 2483 AND 2554
+      AND q.active=TRUE AND q.validation_version=301`);
+ return r.rows[0]?.n===72;
+}
+async function applyT51Revision301(){
+ const d=t301Pack();t301WriteImages();
+ const client=await db.connect();
+ try{
+  await client.query('BEGIN');
+  await client.query('SELECT pg_advisory_xact_lock(51,301)');
+  const t=(await client.query(`SELECT id,name,block,topic_order,source_file,total_items
+    FROM topics WHERE id=70 FOR UPDATE`)).rows[0];
+  if(!t||t.name!==d.title||t.block!=='especifico'||
+     Number(t.topic_order)!==51||t.source_file!==d.pdf_source_name||
+     Number(t.total_items)!==701)throw Error('T301: identidad del tema distinta');
+  const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,
+    encode(sha256(pdf_bytes),'hex') real,page_count,size_bytes
+    FROM topic_local_pdfs WHERE topic_id=70`)).rows[0];
+  if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+     Number(pdf.page_count)!==32||Number(pdf.size_bytes)!==1544801)
+    throw Error('T301: PDF CEIS distinto del recibido');
+  const cv=(await client.query(`SELECT COUNT(*)::int n,
+    COUNT(*) FILTER(WHERE exam_relevant)::int relevant
+    FROM coverage_items WHERE topic_id=70`)).rows[0];
+  if(cv.n!==701||cv.relevant!==701)throw Error('T301: cobertura distinta; no modificar');
+  const found=await client.query(`SELECT q.*, md5(q.options::text) options_md5,
+    c.item_type AS cover_type,c.exam_relevant AS cover_relevant
+    FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+    WHERE c.topic_id=70 ORDER BY q.id FOR UPDATE OF q`);
+  const rows=found.rows,known=rows.filter(q=>q.id>=2483&&q.id<=2554);
+  const migrated=known.length===72&&known.every(q=>q.active&&q.validation_version===301);
+  if(migrated){
+    const counts={total:rows.length,active:rows.filter(q=>q.active).length,
+      graphics:rows.filter(q=>q.active&&q.question_family==='GRAFICA'&&q.graphic).length,
+      texts:rows.filter(q=>q.active&&!q.graphic).length};
+    if(counts.total!==81||counts.active!==81||counts.graphics!==21||counts.texts!==60||
+       rows.some(q=>!q.active||q.validation_version!==301))
+      throw Error('T301: importación anterior incompleta, no sobreescribir');
+    await client.query('COMMIT');return {skipped:true,reason:'T301_YA_VALIDADO',...counts};
+  }
+  if(rows.length!==72||known.length!==72||rows.some(q=>!q.active||q.validation_version!==6))
+     throw Error('T301: las 72 preguntas históricas cambiaron; revisión cancelada');
+  const digest=(await client.query(`SELECT md5(string_agg(
+    q.id::text||'|'||md5(q.stem)||'|'||md5(q.options::text)||'|'||q.correct_index::text,
+    ';' ORDER BY q.id)) AS fingerprint FROM question_bank q
+    JOIN coverage_items c ON c.id=q.coverage_item_id WHERE c.topic_id=70`)).rows[0]?.fingerprint;
+  if(digest!==d.original_bank_fingerprint)
+     throw Error('T301: huella de banco diferente; rollback '+String(digest));
+  const byId=new Map(rows.map(q=>[Number(q.id),q]));
+  for(let id=2483;id<=2554;id++){
+    const q=byId.get(id),graphicExpected=(id<=2494||id>=2531);
+    if(!q||!q.cover_relevant||!Array.isArray(q.options)||q.options.length!==4||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       (q.question_family==='GRAFICA')!==graphicExpected||
+       (q.graphic!==null)!==graphicExpected)
+      throw Error('T301: clasificación o registro histórico incoherente '+id);
+  }
+  const oldAssets=(await client.query(`SELECT * FROM graphic_assets
+    WHERE topic_folder IN('estructuras-colapsadas','salud-t59') FOR UPDATE`)).rows;
+  const orig=new Set(oldAssets.filter(a=>a.topic_folder==='estructuras-colapsadas'&&
+    a.source_file?.startsWith('Screenshot_')).map(a=>a.source_file));
+  if(orig.size!==21||d.user_original_screenshots.some(s=>!orig.has(s)))
+    throw Error('T301: no están las 21 capturas seleccionadas del usuario');
+  const backup={revision:301,createdAt:new Date().toISOString(),topic:t,
+    shaPdf:pdf.sha,coverage:cv,questionBank:rows,graphicAssets:oldAssets,
+    originalScreenshots:d.user_original_screenshots};
+  await client.query(`INSERT INTO app_state(key,value)
+    VALUES('T51_301_BACKUP_72_PREGUNTAS_21_CAPTURAS',$1)
+    ON CONFLICT(key) DO NOTHING`,[JSON.stringify(backup)]);
+  // Ninguna imagen anterior se borra; solo deja de ser elegible.
+  await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+    analysis_status='superseded',updated_at=NOW()
+    WHERE topic_folder IN('estructuras-colapsadas','salud-t59')
+    AND is_usable=TRUE`);
+  const assets=new Map();
+  for(const im of d.images){
+    const sourceId='estructuras-colapsadas/'+im.file;
+    const url='/graphics/estructuras-colapsadas/'+im.file;
+    const a=await client.query(`INSERT INTO graphic_assets(
+      source_id,topic_folder,source_file,public_url,asset_index,
+      asset_type,concept,description,source_evidence,
+      crop_x,crop_y,crop_width,crop_height,mask_regions,
+      is_official_reference,is_usable,analysis_status,sanitization_version)
+      VALUES($1,'estructuras-colapsadas',$2,$3,0,'individual',$4,$5,$6,
+        0,0,1,1,'[]'::jsonb,FALSE,TRUE,'analyzed',2)
+      ON CONFLICT(source_id,asset_index) DO UPDATE SET
+        public_url=EXCLUDED.public_url,description=EXCLUDED.description,
+        source_evidence=EXCLUDED.source_evidence,crop_x=0,crop_y=0,
+        crop_width=1,crop_height=1,mask_regions='[]'::jsonb,
+        is_usable=TRUE,analysis_status='analyzed',updated_at=NOW()
+      RETURNING id`,[sourceId,im.file,url,
+        'Figura CEIS original seleccionada '+im.key,
+        'Recorte limpio de la lámina CEIS, sin título que revele la tipología.',
+        `CEIS Guadalajara p.${im.manual_page}; captura usuario ${im.selected_screenshot}`]);
+    assets.set(im.file,{id:Number(a.rows[0].id),sourceId,url});
+  }
+  let nConverted=0,nRevised=0;
+  for(const e of d.existing_question_revisions){
+    const q=byId.get(e.id),options=q.options.slice();let k=0;
+    for(let j=0;j<4;j++)if(j!==q.correct_index)options[j]=e.wrong_options[k++];
+    if(new Set(options).size!==4||options[q.correct_index]!==q.options[q.correct_index]||
+       !e.stem||e.stem.length<55)throw Error('T301: opciones o respuesta incompatibles '+e.id);
+    const original=e.retain_as_original_graphic;
+    let graphic=null,family=q.question_family;
+    if(original){
+      const i=e.id-2483,im=d.images[i],asset=assets.get(im.file);
+      graphic={assetId:asset.id,sourceId:asset.sourceId,publicUrl:asset.url,
+        assetType:'individual',externalKey:im.key,originalSelected:true,
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+        source:'CEIS original seleccionado por usuario'};
+    }else if(e.converted_from_graphic){
+      family=e.id<=2542?'2026_CORRECTA':'2026_RAZONAMIENTO';nConverted++;
+      await client.query(`UPDATE coverage_items SET
+        item_type='dato_t51_convertido',evaluation_type='comprension'
+        WHERE id=$1 AND topic_id=70`,[q.coverage_item_id]);
+    }
+    await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+      graphic=$4::jsonb,question_family=$5,difficulty='muy alta',
+      validation_version=301,updated_at=NOW()
+      WHERE id=$1`,[e.id,e.stem,JSON.stringify(options),
+        graphic?JSON.stringify(graphic):null,family]);
+    nRevised++;
+  }
+  for(const q of d.new_graphic_questions){
+    const linked=(await client.query(`SELECT id,exam_relevant,topic_id
+      FROM coverage_items WHERE id=$1 AND topic_id=70`,[q.coverage_id])).rows[0];
+    if(!linked?.exam_relevant)throw Error('T301: conocimiento no examinable '+q.key);
+    const asset=assets.get(q.image_file);
+    const graphic={assetId:asset.id,sourceId:asset.sourceId,publicUrl:asset.url,
+      assetType:'individual',externalKey:q.key,originalSelected:true,
+      crop:{x:0,y:0,width:1,height:1},maskRegions:[],source:'CEIS Guadalajara PDF usuario'};
+    await client.query(`INSERT INTO question_bank(
+      coverage_item_id,stem,options,correct_index,explanation,
+      source_evidence,source_page,manual_page,question_family,difficulty,
+      graphic,validation_version,active)
+      VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,301,TRUE)`,
+      [q.coverage_id,q.stem,JSON.stringify(q.options),q.correct_index,
+       q.source_evidence+' Respuesta: '+q.options[q.correct_index],
+       q.source_evidence,q.source_pdf_page,String(q.manual_page),JSON.stringify(graphic)]);
+  }
+  const final=(await client.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE q.active AND q.question_family='GRAFICA' AND q.graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=301)::int revised
+    FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+    WHERE c.topic_id=70`)).rows[0];
+  const cf=(await client.query(`SELECT COUNT(*)::int n,
+    COUNT(*) FILTER(WHERE exam_relevant)::int r FROM coverage_items WHERE topic_id=70`)).rows[0];
+  const imageCount=(await client.query(`SELECT COUNT(*)::int n FROM graphic_assets
+    WHERE topic_folder IN('estructuras-colapsadas','salud-t59') AND is_usable`)).rows[0];
+  if(final.total!==81||final.active!==81||final.graphics!==21||
+     final.texts!==60||final.revised!==81||cf.n!==701||cf.r!==701||
+     imageCount.n!==21||nConverted!==24||nRevised!==72)
+     throw Error('T301: comprobación de salida fallida. ROLLBACK completo');
+  await client.query('COMMIT');
+  return {ok:true,revision:301,graphicOriginal:21,
+    historicGraphicPreserved:12,convertedToText:24,oldTextsRevised:36,
+    addedSelectedGraphics:9,activeQuestions:81,coverage:701};
+ }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -25250,6 +25510,11 @@ async function startServer(){
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
+          if(Number(t.id)===70){
+            try{const audited=await applyT51Revision301();
+              console.log('T51_301_21_GRAFICAS_60_TEXTOS_AUDITADOS',JSON.stringify(audited));
+            }catch(e){console.error('T51_301_NO_APLICADO_ROLLBACK:',String(e?.message||e));}
+          }
           // SERVER298: run T48 immediately after its own successful import.
           // Another theme (e.g. old T55) may reject the outer Promise.all;
           // such an unrelated rejection must not prevent this revision.

@@ -573,7 +573,7 @@ module.exports = {
       "old_stem_md5": "96cbdc8ca2da05016dead96dd88bb5cf",
       "old_options_md5": "786e5b1e6ae32771373e1ef07dca62ef",
       "correct_index": 0,
-      "stem": "De acuerdo con la clase visual de madera ME-2 del manual CEIS (p. 159), ¿qué relación de los cuatro límites geométricos X, Y, Z y U es CORRECTA?",
+      "stem": "De acuerdo con la clasificación visual de madera ME-2 del CEIS (p. 159), ¿qué límites corresponden a la curvatura de cara, la curvatura de canto, el alabeo y el abarquillado?",
       "wrong_options": [
         "Cara <12 mm; canto <20 mm; alabeo <2 mm por 25 mm; abarquillado <1/25 del ancho.",
         "Cara <20 mm; canto <12 mm; alabeo <1/25 del ancho; abarquillado <2 mm por cada 25 mm.",
@@ -693,7 +693,7 @@ module.exports = {
       "old_stem_md5": "5c3a450b645857afbc40034551a1e2e3",
       "old_options_md5": "431d95d700803b2be94d2b0e954d66a5",
       "correct_index": 0,
-      "stem": "En el esquema normalizado de apeo con puntales C30 recogido por CEIS (p. 185), ¿qué combinación de extensión, resistencia nominal y separación de apoyos corresponde al ejemplo del manual?",
+      "stem": "En la información técnica del CEIS sobre el puntal C30 conforme a EN 1065 (p. 185), ¿qué combinación de extensión máxima, resistencia nominal y separación de apoyos está documentada?",
       "wrong_options": [
         "C30: extensión 3 m, nominal 25,5 kN, apoyos 3 m.",
         "C30: extensión 3,5 m, nominal 34 kN, apoyos 3 m.",
