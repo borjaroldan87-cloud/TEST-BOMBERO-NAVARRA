@@ -3803,6 +3803,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   // SERVER309: no reintroducir las cinco preguntas antiguas tras auditar T62.
   if(n===63 && await t309HerramientasMigratedAlready())
     return {skipped:true,reason:'T309_HERRAMIENTAS_5_CAPTURAS_17_PREGUNTAS_AUDITADAS'};
+  // SERVER310: conservar las tres gráficas seleccionadas y distractores auditados.
+  if(n===54 && await t310VehiculosMigratedAlready())
+    return {skipped:true,reason:'T310_VEHICULOS_3_ORIGINALES_13_DISTRACTORES_AUDITADOS'};
   // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
   if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
   if(n===62 && await t306MigratedAlready())return {skipped:true,reason:'T306_52_IMAGENES_USUARIO_AUDITADAS'};
@@ -26894,6 +26897,184 @@ async function applyT62HerramientasRevision309(){
   finally{cl.release();}
 }
 
+
+/* SERVER310: corrección curricular T63, anterior T54, topic_id PostgreSQL 65.
+ * Fuente factual única: PDF CEIS Guadalajara, 38 hojas, SHA-256 cerrado.
+ * Preserve three user-supplied screenshots / cropped views exactly. Rewrite
+ * only 3 false options for 13 verified questions (3 graphic + 10 text).
+ * Protect 2 numerical calculations and 1 formulation question, including
+ * stem, correct_index, options, evidence and validation_version.
+ * Keep all 698 coverage entries, 690 relevant, 16 active questions,
+ * 1 inactive historic, figures, sessions, SRS and previous topic migrations.
+ * Transactional, idempotent, with immutable snapshot and strong preflight.
+ */
+const T310_VEHICULOS_FILE=path.join(process.cwd(),'t63_vehiculos_revision310_data.js');
+const T310_VEHICULOS_MARKER='t63_vehiculos_310_aplicada_v1';
+let T310_VEHICULOS_CACHE=null;
+function t310VehiculosPack(){
+  if(T310_VEHICULOS_CACHE)return T310_VEHICULOS_CACHE;
+  const raw=fs.readFileSync(T310_VEHICULOS_FILE,'utf8').trim();
+  const prefix='module.exports = ';
+  if(!raw.startsWith(prefix)||!raw.endsWith(';'))
+    throw Error('T310: módulo de revisión ilegible, se cancela');
+  const d=JSON.parse(raw.slice(prefix.length,-1));
+  const ids=[2041,2042,2043,2045,2047,2051,2058,2060,2126,2129,2135,2138,2141];
+  const calcs=[2049,2054,2132];
+  if(d.schema!==1||d.revision!==310||d.topic_id!==65||
+    d.curricular_number!==63||d.legacy_number!==54||
+    d.topic_title!=='TEMA 63. VEHÍCULOS DE BOMBEROS'||
+    d.pdf_sha256!=='06a0768038f7c1dd1979579d39dfbb9e1e12f310eed4eff2c3824076d5e58cb6'||
+    d.pdf_pages!==38||d.pdf_size_bytes!==2606377||
+    d.coverage_total!==698||d.coverage_examinable!==690||
+    d.original_questions_total!==17||d.original_questions_active!==16||
+    d.original_graphic_count!==3||d.original_text_count!==13||
+    JSON.stringify(d.original_inactive_ids)!=='[2056]'||
+    JSON.stringify(d.graphic_question_ids)!=='[2041,2042,2043]'||
+    d.selected_source_ids?.length!==3||d.graphic_png_sha256?.length!==3||
+    d.reviewed_questions?.length!==13||
+    JSON.stringify(d.reviewed_questions.map(x=>x.id))!==JSON.stringify(ids)||
+    JSON.stringify(d.preserved_formulas_and_calculations?.map(x=>x.id))!==JSON.stringify(calcs)||
+    d.reviewed_questions.some(x=>!Number.isInteger(x.correct_index)||
+      x.correct_index<0||x.correct_index>3||x.wrong?.length!==3||
+      !x.expected_correct||!x.audit_note||x.audit_note.length<35||
+      !x.manual_page||new Set([x.expected_correct,...x.wrong]).size!==4))
+      throw Error('T310: inventario o claves inválidas; no modificar');
+  T310_VEHICULOS_CACHE=d;return d;
+}
+async function t310VehiculosMigratedAlready(){
+  const r=await db.query('SELECT 1 FROM app_state WHERE key=$1',[T310_VEHICULOS_MARKER]);
+  return r.rowCount>0;
+}
+async function applyT63VehiculosRevision310(){
+  const d=t310VehiculosPack(),cl=await db.connect();
+  try{
+    await cl.query('BEGIN');
+    await cl.query('SELECT pg_advisory_xact_lock($1)',[310063]);
+    const t=(await cl.query(`SELECT id,name,block,topic_order,total_items
+      FROM topics WHERE id=65 FOR UPDATE`)).rows[0];
+    if(!t||t.name!==d.topic_title||t.block!=='especifico'||
+      Number(t.topic_order)!==63||Number(t.total_items)!==690)
+      throw Error('T310: tema incorrecto o cobertura alterada');
+    const pdf=(await cl.query(`SELECT TRIM(pdf_sha256) AS sha,
+      ENCODE(SHA256(pdf_bytes),'hex') AS real,page_count,size_bytes,
+      OCTET_LENGTH(pdf_bytes) AS bytes FROM topic_local_pdfs WHERE topic_id=65`)).rows[0];
+    if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+      Number(pdf.page_count)!==38||Number(pdf.size_bytes)!==2606377||
+      Number(pdf.bytes)!==2606377)
+      throw Error('T310: PDF original o SHA no coinciden');
+    const cv=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant,
+      COUNT(*) FILTER(WHERE source_evidence IS NULL OR BTRIM(source_evidence)='')::int empty
+      FROM coverage_items WHERE topic_id=65`)).rows[0];
+    if(cv.n!==698||cv.relevant!==690||cv.empty!==0)
+      throw Error('T310: fichas de cobertura alteradas');
+    const rows=(await cl.query(`SELECT q.* FROM question_bank q JOIN coverage_items c
+      ON c.id=q.coverage_item_id WHERE c.topic_id=65
+      ORDER BY q.id FOR UPDATE OF q`)).rows;
+    const assets=(await cl.query(`SELECT * FROM graphic_assets
+      WHERE topic_folder IN ('vehiculos','vehiculos-t54')
+      ORDER BY id FOR UPDATE`)).rows;
+    const active=rows.filter(x=>x.active),inactive=rows.filter(x=>!x.active),
+      graphic=active.filter(x=>x.graphic!==null),texts=active.filter(x=>x.graphic===null),
+      activeAssets=assets.filter(x=>x.is_usable),byId=new Map(rows.map(x=>[Number(x.id),x]));
+    if(rows.length!==17||active.length!==16||inactive.length!==1||
+      Number(inactive[0].id)!==2056||graphic.length!==3||texts.length!==13||
+      activeAssets.length!==3||assets.length!==8||
+      JSON.stringify(graphic.map(x=>Number(x.id)))!=='[2041,2042,2043]'||
+      JSON.stringify(activeAssets.map(x=>Number(x.id)))!=='[114054,114055,114056]'||
+      d.graphic_question_ids.some((id,i)=>Number(graphic[i]?.id)!==id||
+        Number(graphic[i]?.graphic?.assetId)!==Number(activeAssets[i]?.id)||
+        graphic[i]?.graphic?.sourceId!==activeAssets[i]?.source_id||
+        !activeAssets[i]?.source_id?.startsWith('vehiculos-t54/'))||
+      d.selected_source_ids.some((sid)=>!assets.some(x=>x.source_id===sid)))
+      throw Error('T310: las tres capturas originales o las preguntas cambiaron');
+    const marker=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',
+      [T310_VEHICULOS_MARKER])).rowCount;
+    if(marker){
+      if(d.reviewed_questions.some(x=>Number(byId.get(x.id)?.validation_version)!==310))
+        throw Error('T310: marcador presente pero revisión incoherente');
+      await cl.query('COMMIT');
+      return {ok:true,skipped:true,topic:63,graphics:3,texts:13,calculationsKept:3};
+    }
+    for(const r of d.reviewed_questions){
+      const q=byId.get(r.id);
+      if(!q||!q.active||!Array.isArray(q.options)||q.options.length!==4||
+        Number(q.correct_index)!==r.correct_index||
+        q.options[r.correct_index]!==r.expected_correct||
+        Number(q.validation_version)!==6||!q.source_evidence||
+        (r.id<=2043)!==(q.graphic!==null))
+        throw Error('T310: respuesta / versión alterada, pregunta '+r.id);
+    }
+    for(const r of d.preserved_formulas_and_calculations){
+      const q=byId.get(r.id);
+      if(!q||!q.active||q.graphic!==null||
+        Number(q.correct_index)!==r.correct_index||
+        q.options[r.correct_index]!==r.value||Number(q.validation_version)!==6||
+        !q.source_evidence||!q.stem)
+        throw Error('T310: cálculo anterior no coincide; no modificar ID '+r.id);
+    }
+    // Backup entire original state, before ANY question changes.
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,[
+      't63_vehiculos_310_respaldo_17_preguntas',
+      JSON.stringify({topic:t,pdf,coverage:cv,questions:rows,assets,
+        source:'Manual CEIS suministrado; sin BOE, imagen nueva ni nuevos datos'})]);
+    let reviewed=0;
+    for(const r of d.reviewed_questions){
+      const q=byId.get(r.id),options=q.options.slice();let j=0;
+      for(let i=0;i<4;i++)if(i!==r.correct_index)options[i]=r.wrong[j++];
+      if(j!==3||options[r.correct_index]!==r.expected_correct||
+        new Set(options).size!==4)
+        throw Error('T310: alternativas no unívocas '+r.id);
+      const u=await cl.query(`UPDATE question_bank
+        SET options=$2::jsonb,difficulty='muy alta',validation_version=310,
+            updated_at=NOW() WHERE id=$1 AND active=TRUE`,
+        [r.id,JSON.stringify(options)]);
+      if(u.rowCount!==1)throw Error('T310: fallo actualización '+r.id);
+      reviewed++;
+    }
+    const fin=(await cl.query(`SELECT COUNT(*)::int total,
+      COUNT(*) FILTER(WHERE q.active)::int active,
+      COUNT(*) FILTER(WHERE NOT q.active)::int inactive,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int graphic,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int text,
+      COUNT(*) FILTER(WHERE q.active AND q.validation_version=310)::int revised,
+      COUNT(*) FILTER(WHERE q.active AND q.question_family='CALCULO_FORMULACION')::int formulation
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=65`)).rows[0];
+    const after=(await cl.query(`SELECT id,correct_index,options,graphic,active,
+      validation_version,source_evidence FROM question_bank
+      WHERE id=ANY($1::bigint[]) ORDER BY id`,
+      [d.reviewed_questions.map(x=>x.id).concat(d.preserved_formulas_and_calculations.map(x=>x.id))])).rows;
+    const afterById=new Map(after.map(x=>[Number(x.id),x]));
+    const changed=await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder='vehiculos-t54' AND is_usable=TRUE`);
+    if(reviewed!==13||fin.total!==17||fin.active!==16||fin.inactive!==1||
+      fin.graphic!==3||fin.text!==13||fin.revised!==13||fin.formulation!==1||
+      changed.rows[0].n!==3||
+      d.reviewed_questions.some(r=>!afterById.get(r.id)?.active||
+        Number(afterById.get(r.id).correct_index)!==r.correct_index||
+        afterById.get(r.id).options[r.correct_index]!==r.expected_correct||
+        Number(afterById.get(r.id).validation_version)!==310)||
+      d.preserved_formulas_and_calculations.some(r=>!afterById.get(r.id)?.active||
+        Number(afterById.get(r.id).validation_version)!==6||
+        afterById.get(r.id).options[r.correct_index]!==r.value))
+      throw Error('T310: auditoría SQL de salida fallida; rollback');
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+      T310_VEHICULOS_MARKER,
+      JSON.stringify({topicId:65,topic:63,formerTopic:54,coverage:690,
+        graphicsPreserved:3,textQuestionsReviewed:10,graphicsQuestionsReviewed:3,
+        calculationsUnchanged:3,questionsActive:16,historyPreserved:1,
+        manualSha256:d.pdf_sha256,
+        backup:'t63_vehiculos_310_respaldo_17_preguntas',deletedHistory:0})]);
+    await cl.query('COMMIT');
+    return {ok:true,topic:63,topicId:65,graphicsPreserved:3,textReviewed:10,
+      graphicQuestionsReviewed:3,calculationsUnchanged:3,knowledgePreserved:690,
+      questionHistoryDeleted:0,correctAnswersChanged:0};
+  }catch(error){await cl.query('ROLLBACK').catch(()=>{});throw error;}
+  finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -26999,6 +27180,12 @@ async function startServer(){
     T56_306_START_PROMISE=T55_305_START_PROMISE.then(()=>applyT56Revision306())
       .then(r=>console.log('T56_306_52_IMAGENES_52_PREGUNTAS_AUDITADAS',JSON.stringify(r)))
       .catch(e=>{console.error('T56_306_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
+    // SERVER310: reparar punto de ejecución de SERVER309. El ID 106 NO se
+    // encuentra en la lista histórica 57..70: se audita de manera separada.
+    // Idempotente por app_state; no volver a importar imágenes ni tocar otros temas.
+    T56_306_START_PROMISE.then(()=>applyT62HerramientasRevision309())
+      .then(r=>console.log('T62_309_REINTENTO_ID106_CORRECTO',JSON.stringify(r)))
+      .catch(e=>console.error('T62_309_REINTENTO_ROLLBACK:',String(e?.message||e)));
     console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
     console.log(
       "EXAM STYLE STORE recuperado:",
@@ -27087,6 +27274,17 @@ async function startServer(){
           if(healthTopicNumber192(t)===56)await t56EnsureLocalPdf213(t);
           if(healthTopicNumber192(t)===58)await t58EnsureLocalPdf221(t);
           const base=await healthImportOnce192(t);
+          // SERVER310: Tema 63 actual, Vehículos de bomberos (ID 65,
+          // antiguo T54), DESPUÉS del importador legacy pero sin modificar
+          // la fuente PDF, las 3 imágenes seleccionadas ni cálculos existentes.
+          if(Number(t.id)===65){
+            try{
+              const audit=await applyT63VehiculosRevision310();
+              console.log('T63_310_3_ORIGINALES_13_DISTRACTORES_3_CALCULOS_INTACTOS',JSON.stringify(audit));
+            }catch(e){
+              console.error('T63_310_NO_APLICADO_ROLLBACK:',String(e?.message||e));
+            }
+          }
           // SERVER307: T57 curricular/soporte vital, ID 57; antiguo T46.
           // Ejecutar despues del importador historico y ANTES de tareas
           // suplementarias independientes para no reactivar graficas de PDF.
