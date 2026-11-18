@@ -2721,6 +2721,7 @@ function t44WriteImages(){
 }
 async function t44ImportOnce(topic,uploadedPdfPath=null){
   if(!t44Topic(topic))return {skipped:true};
+  if(await t303MigratedAlready())return {skipped:true,reason:'T303_2_IMAGENES_ORIGINALES_AUDITADAS'};
   const data=t44LoadData();if(!data)return {skipped:true,missing:true};
   t44WriteImages();
   const client=await db.connect();
@@ -25528,6 +25529,249 @@ async function applyT51Revision301(){
  finally{client.release();}
 }
 
+/* SERVER303 — T53 RESCATE EN ASCENSORES (T44 del PDF original).
+   Auditoría documental y editorial individual de 104 preguntas.
+   2 imágenes del usuario, 71 gráficas históricas convertidas a texto,
+   31 preguntas textuales reforzadas; cero pérdidas de conocimiento, respuesta o ID.
+   Nunca sobrescribe un estado ajeno al banco original cotejado.
+*/
+let T303_PACK_CACHE=null;
+function t303Pack(){
+ if(T303_PACK_CACHE)return T303_PACK_CACHE;
+ const d=t279ReadPack('t53_revision303_data.js',53);
+ if(!d||d.schema!==1||d.revision!==303||d.topic_number!==53||d.topic_id!==55||
+   d.legacy_number!==44||d.title!=='TEMA 53. RESCATE EN ASCENSORES'||
+   d.pdf_source_name!=='TEMA44_ASCENSORES_PARA_INDEXAR.pdf'||
+   d.pdf_sha256!=='ecdfe969192d95deb93e3e6fa53c1ef9d841146aabe71e6d26fac14892012d8b'||
+   d.pdf_pages!==14||d.pdf_size!==1052921||
+   d.coverage_total_before!==262||d.coverage_relevant_before!==262||
+   d.question_count_before!==104||d.original_graphic_questions!==73||
+   d.original_bank_fingerprint!=='19d8c88befa85c115d815c53ef3741c1'||
+   d.converted_graphics!==71||d.original_text_revised!==31||
+   d.original_assets_to_retire!==26||d.selected_images?.length!==2||
+   d.revisions?.length!==104)
+   throw Error('T303: catálogo, documento o banco de origen incongruente');
+ const originals=[
+  ['Screenshot_20260924-140048-display-0.png.png',17,1747,1,332,7],
+  ['Screenshot_20260924-140117-display-0.png.png',2375,1759,2,337,12]
+ ];
+ const imageIds=new Set(),sourceNames=new Set();
+ for(const [idx,img] of d.selected_images.entries()){
+   const [file,assetId,questionId,role,page,pdfPage]=originals[idx];
+   if(img.role!==role||img.asset_id!==assetId||
+      img.original_source_file!==file||
+      img.original_source_id!=='ascensores/'+file||
+      img.file!==`T53_SELECTED_0${role}.png`||
+      img.source_id!==`ascensores/T53_SELECTED_0${role}.png`||
+      img.public_url!==`/graphics/ascensores/T53_SELECTED_0${role}.png`||
+      img.printed_page!==page||img.pdf_page!==pdfPage||
+      !/^[a-f0-9]{64}$/.test(img.sha256)||
+      imageIds.has(img.asset_id)||sourceNames.has(img.original_source_file))
+     throw Error('T303: imagen no coincide con la selección original '+file);
+   imageIds.add(img.asset_id);sourceNames.add(img.original_source_file);
+ }
+ if(d.selected_original_screenshots?.join('|')!==originals.map(x=>x[0]).join('|'))
+   throw Error('T303: capturas originales divergentes');
+ let nc=0,ng=0,nt=0;
+ const ids=new Set();
+ for(const e of d.revisions){
+   if(!Number.isInteger(e.id)||ids.has(e.id)||
+      !Number.isInteger(e.correct_index)||e.correct_index<0||e.correct_index>3||
+      !/^[a-f0-9]{32}$/.test(e.original_correct_md5)||
+      !Number.isInteger(e.manual_page)||e.manual_page<328||e.manual_page>338||
+      typeof e.stem!=='string'||e.stem.length<65||
+      !Array.isArray(e.wrong_options)||e.wrong_options.length!==3||
+      e.wrong_options.some(x=>typeof x!=='string'||x.length<7)||
+      new Set(e.wrong_options).size!==3)
+      throw Error('T303: campo inválido en pregunta '+e?.id);
+   const graphic=e.image_role>0;
+   if(e.id>=1701&&e.id<=1773){
+      if(!e.was_graphic||![0,1,2].includes(e.image_role)||
+          (graphic&& ![1747,1759].includes(e.id))||
+          ((!graphic)&&(e.id===1747||e.id===1759)))
+        throw Error('T303: pregunta original no respetada '+e.id);
+      ng+=graphic?1:0;nc+=graphic?0:1;
+      if(!graphic&&/\b(imagen|figura|esquema|representad[ao]|ilustraci[oó]n|dibujo)\b/i.test(e.stem))
+        throw Error('T303: el texto todavía depende de figura '+e.id);
+   }else{
+      if(e.was_graphic||e.image_role!==0||
+         !((e.id>=1774&&e.id<=1782)||(e.id>=1885&&e.id<=1899)||(e.id>=2062&&e.id<=2079)))
+        throw Error('T303: pregunta textual ajena '+e.id);
+      nt++;
+   }
+   ids.add(e.id);
+ }
+ if(ids.size!==104||nc!==71||ng!==2||nt!==31)
+   throw Error('T303: inventario no conserva las 104 preguntas');
+ T303_PACK_CACHE=d;return d;
+}
+function t303WriteImages(){
+ const d=t303Pack(),out=[];
+ for(const img of d.selected_images){
+    const bytes=Buffer.from(img.base64,'base64');
+    if(bytes.length!==img.size_bytes||bytes.length<8000||
+      createHash('sha256').update(bytes).digest('hex')!==img.sha256||
+      !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+       throw Error('T303: imagen corrupta o no corresponde al PDF '+img.file);
+    const dir=path.join(process.cwd(),'public','graphics','ascensores');
+    fs.mkdirSync(dir,{recursive:true});
+    const dest=path.join(dir,img.file);
+    if(fs.existsSync(dest)){
+       if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==img.sha256)
+         throw Error('T303: recorte diferente encontrado; se conserva el existente '+img.file);
+    }else fs.writeFileSync(dest,bytes);
+    out.push({file:img.file,sha256:img.sha256,bytes:bytes.length});
+ }
+ return out;
+}
+async function t303MigratedAlready(){
+ const r=await db.query(`SELECT COUNT(*)::int n,
+     COUNT(*) FILTER(WHERE question_family='GRAFICA' AND graphic IS NOT NULL)::int graphics,
+     COUNT(*) FILTER(WHERE graphic IS NULL)::int texts
+     FROM question_bank WHERE id=ANY($1::int[]) AND active=TRUE AND validation_version=303`,
+     [[...Array.from({length:73},(_,i)=>1701+i),
+       ...Array.from({length:9},(_,i)=>1774+i),
+       1885,1890,1894,1899,...Array.from({length:18},(_,i)=>2062+i)]]);
+ return r.rows[0]?.n===104&&r.rows[0]?.graphics===2&&r.rows[0]?.texts===102;
+}
+async function applyT53Revision303(){
+ const d=t303Pack();const images=t303WriteImages();
+ const client=await db.connect();
+ try{
+   await client.query('BEGIN');
+   await client.query('SELECT pg_advisory_xact_lock(53,303)');
+   const t=(await client.query('SELECT * FROM topics WHERE id=55 FOR UPDATE')).rows[0];
+   if(!t||t.name!==d.title||t.block!=='especifico'||
+      Number(t.topic_order)!==53||Number(t.total_items)!==262||
+      t.source_file!==d.pdf_source_name)
+     throw Error('T303: tema 53 no coincide con el índice curricular');
+   const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,
+        encode(sha256(pdf_bytes),'hex') real,page_count,size_bytes
+        FROM topic_local_pdfs WHERE topic_id=55`)).rows[0];
+   if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+      Number(pdf.page_count)!==14||Number(pdf.size_bytes)!==d.pdf_size)
+     throw Error('T303: PDF original ausente o diferente');
+   const coverage=(await client.query(`SELECT COUNT(*)::int n,
+     COUNT(*) FILTER(WHERE exam_relevant)::int relevant FROM coverage_items WHERE topic_id=55`)).rows[0];
+   if(coverage.n!==262||coverage.relevant!==262)
+     throw Error('T303: cobertura modificada; actualización cancelada');
+   const ids=d.revisions.map(x=>x.id);
+   const rows=(await client.query(`SELECT q.*,c.exam_relevant AS coverage_relevant,
+       md5(q.options::text) previous_options_md5
+       FROM question_bank q JOIN coverage_items c ON q.coverage_item_id=c.id
+       WHERE c.topic_id=55 AND q.id=ANY($1::int[])
+       ORDER BY q.id FOR UPDATE OF q`,[ids])).rows;
+   if(rows.length!==104||rows.some(q=>!q.active||!q.coverage_relevant))
+     throw Error('T303: alguna pregunta original falta o está desactivada');
+   const all=(await client.query(`SELECT id,question_family,graphic,active
+       FROM question_bank WHERE coverage_item_id IN
+       (SELECT id FROM coverage_items WHERE topic_id=55) FOR UPDATE`)).rows;
+   if(all.length!==104||all.some(q=>!q.active))
+      throw Error('T303: número de preguntas inesperado; no sobrescribir datos nuevos');
+   const assets=(await client.query(`SELECT * FROM graphic_assets
+       WHERE topic_folder='ascensores' FOR UPDATE`)).rows;
+   if(assets.filter(x=>x.source_file.startsWith('T44_FIG_')).length!==26)
+      throw Error('T303: cambió el inventario de 26 figuras generadas');
+   const src=d.selected_images.map(x=>assets.find(a=>Number(a.id)===x.asset_id));
+   if(src.some((a,i)=>!a||a.source_id!==d.selected_images[i].original_source_id||
+       a.source_file!==d.selected_images[i].original_source_file||
+       a.topic_folder!=='ascensores'))
+     throw Error('T303: se modificó la identidad de las dos capturas originales');
+   const migrated=rows.every(q=>Number(q.validation_version)===303);
+   if(migrated){
+      for(const e of d.revisions){
+       const q=rows.find(x=>Number(x.id)===e.id);
+       if(!q||q.stem!==e.stem||q.correct_index!==e.correct_index||
+         createHash('md5').update(q.options[q.correct_index]).digest('hex')!==e.original_correct_md5||
+         (q.graphic!==null)!==(e.image_role>0)||q.question_family!==e.family)
+         throw Error('T303: migración previa parcial o alterada '+e.id);
+      }
+      // syncGraphicAssets can register the generated clean PNGs on subsequent boots.
+      // Reconcile ALL assets to ensure only the two ORIGINAL selected captures remain usable.
+      await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+        analysis_status='superseded',updated_at=NOW() WHERE topic_folder='ascensores'`);
+      for(const i of d.selected_images){
+        await client.query(`UPDATE graphic_assets SET is_usable=TRUE,analysis_status='analyzed',
+          public_url=$2,sanitization_version=3,updated_at=NOW() WHERE id=$1`,
+          [i.asset_id,i.public_url]);
+      }
+      await client.query('COMMIT');
+      return {skipped:true,reason:'T53_303_YA_VALIDADO',graphics:2,texts:102,coverage:262,images};
+   }
+   if(rows.some(q=>Number(q.validation_version)!==6||!Array.isArray(q.options)||q.options.length!==4))
+      throw Error('T303: revisiones externas detectadas, se suspende para no perderlas');
+   const fp=(await client.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) fingerprint
+      FROM question_bank q WHERE id=ANY($1::int[])`,[ids])).rows[0]?.fingerprint;
+   if(fp!==d.original_bank_fingerprint)
+      throw Error('T303: banco original cambió; huella='+fp);
+   for(const e of d.revisions){
+      const q=rows.find(x=>Number(x.id)===e.id);
+      if(!q||q.correct_index!==e.correct_index||String(q.manual_page)!==String(e.manual_page)||
+         (q.question_family==='GRAFICA')!==e.was_graphic||
+         (q.graphic!==null)!==e.was_graphic||
+         createHash('md5').update(q.options[q.correct_index]).digest('hex')!==e.original_correct_md5)
+         throw Error('T303: respuesta, página, familia o imagen anterior alteradas '+e.id);
+   }
+   await client.query(`INSERT INTO app_state(key,value)
+      VALUES('T53_303_BACKUP_104_PREGUNTAS_35_ASSETS',$1)
+      ON CONFLICT(key) DO NOTHING`,[JSON.stringify({revision:303,createdAt:new Date().toISOString(),
+        topic:t,pdf_sha256:pdf.sha,coverage,question_bank:rows,graphic_assets:assets})]);
+   // Historical images retained in DB for traceability, never deleted.
+   await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+      analysis_status='superseded',updated_at=NOW() WHERE topic_folder='ascensores'`);
+   for(const img of d.selected_images){
+      await client.query(`UPDATE graphic_assets SET is_usable=TRUE,
+         analysis_status='analyzed',sanitization_version=3,
+         public_url=$2,source_evidence=$3,
+         crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+         mask_regions='[]'::jsonb,updated_at=NOW() WHERE id=$1`,
+         [img.asset_id,img.public_url,`CEIS Guadalajara p.${img.printed_page}; captura original elegida por usuario ${img.original_source_file}; recorte limpio sin rótulos.`]);
+   }
+   const byId=new Map(rows.map(q=>[Number(q.id),q]));
+   for(const e of d.revisions){
+     const q=byId.get(e.id),opts=q.options.slice();let wrong=0;
+     for(let i=0;i<4;i++)if(i!==q.correct_index)opts[i]=e.wrong_options[wrong++];
+     if(wrong!==3||new Set(opts).size!==4||opts[q.correct_index]!==q.options[q.correct_index])
+         throw Error('T303: respuesta correcta o alternativas inconsistentes '+e.id);
+     const selected=e.image_role?d.selected_images[e.image_role-1]:null;
+     const graphic=selected?{
+       assetId:selected.asset_id,sourceId:selected.original_source_id,
+       publicUrl:selected.public_url,assetType:'individual',
+       externalKey:'T53-USER-SELECTED-0'+e.image_role,
+       originalSelected:true,
+       originalFile:selected.original_source_file,
+       crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+       source:'CEIS Guadalajara página impresa '+selected.printed_page
+     }:null;
+     await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+       question_family=$4,graphic=$5::jsonb,
+       difficulty='muy alta',validation_version=303,updated_at=NOW()
+       WHERE id=$1`,[e.id,e.stem,JSON.stringify(opts),e.family,
+        graphic?JSON.stringify(graphic):null]);
+   }
+   const final=(await client.query(`SELECT COUNT(*)::int total,
+     COUNT(*) FILTER(WHERE active AND question_family='GRAFICA' AND graphic IS NOT NULL)::int graphics,
+     COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts,
+     COUNT(*) FILTER(WHERE active AND validation_version=303)::int revised,
+     COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE graphic IS NOT NULL)::int distinct_images
+     FROM question_bank WHERE coverage_item_id IN
+       (SELECT id FROM coverage_items WHERE topic_id=55)`)).rows[0];
+   const a=(await client.query(`SELECT COUNT(*)::int usable FROM graphic_assets
+     WHERE topic_folder='ascensores' AND is_usable=TRUE`)).rows[0];
+   const ct=(await client.query(`SELECT COUNT(*)::int n,
+     COUNT(*) FILTER(WHERE exam_relevant)::int relevant FROM coverage_items WHERE topic_id=55`)).rows[0];
+   if(final.total!==104||final.graphics!==2||final.texts!==102||final.revised!==104||
+      final.distinct_images!==2||a.usable!==2||ct.n!==262||ct.relevant!==262)
+      throw Error('T303: comprobación de salida fallida: '+JSON.stringify({final,a,ct}));
+   await client.query('COMMIT');
+   return {ok:true,revision:303,graphics:2,texts:102,converted:71,
+     audited_previous_texts:31,questions:104,coverage:262,images};
+ }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{client.release();}
+}
+
+let T53_303_START_PROMISE=Promise.resolve();
+let T51_301_RETRY_PROMISE=Promise.resolve();
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -25613,6 +25857,13 @@ async function startServer(){
 
   app.listen(process.env.PORT || 3000, ()=>{
     console.log("Test Bombero V2 listo");
+    // Reintento independiente protegido de T51 (SERVER301), pendiente en PostgreSQL.
+    T51_301_RETRY_PROMISE=applyT51Revision301()
+      .then(r=>console.log('T51_301_REINTENTO_INDEPENDIENTE',JSON.stringify(r)))
+      .catch(e=>{console.error('T51_301_REINTENTO_PENDIENTE:',String(e?.message||e));return {error:String(e?.message||e)};});
+    T53_303_START_PROMISE=applyT53Revision303()
+      .then(r=>console.log('T53_303_2_GRAFICAS_102_TEXTOS_AUDITADOS',JSON.stringify(r)))
+      .catch(e=>{console.error('T53_303_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
     console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
     console.log(
       "EXAM STYLE STORE recuperado:",
@@ -25672,7 +25923,7 @@ async function startServer(){
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
       FROM topics WHERE block='especifico' AND
       id=55`)
-      .then(r=>Promise.all(r.rows.filter(t44Topic).map(t=>t44ImportOnce(t))))
+      .then(async r=>{await T53_303_START_PROMISE;return Promise.all(r.rows.filter(t44Topic).map(t=>t44ImportOnce(t)));})
       .then(r=>console.log('T44_ARRANQUE',JSON.stringify(r)))
       .catch(e=>console.error('T44_ARRANQUE_PENDIENTE:',String(e?.message||e)));
     db.query(`SELECT id,name,block,total_items,source_file,file_search_indexed
@@ -25696,6 +25947,7 @@ async function startServer(){
       id IN (57,58,59,60,61,62,63,64,65,66,67,68,69,70)`)
       .then(r=>Promise.all(r.rows.filter(healthTopicNumber192)
         .map(async t=>{
+          if(Number(t.id)===70)await T51_301_RETRY_PROMISE;
           if(healthTopicNumber192(t)===52)await t52CorrectDocument199(t);
           if(healthTopicNumber192(t)===56)await t56EnsureLocalPdf213(t);
           if(healthTopicNumber192(t)===58)await t58EnsureLocalPdf221(t);
