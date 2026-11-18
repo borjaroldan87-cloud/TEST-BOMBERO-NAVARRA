@@ -3791,6 +3791,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   if(n===59 && await t301MigrationAlready())return {skipped:true,reason:'T301_GRAFICAS_ORIGINALES_ACTIVAS'};
   // SERVER302: no reinsertar el banco gráfico viejo después de validar las veinte preguntas.
   if(n===51 && await t302MigrationAlready())return {skipped:true,reason:'T302_1_GRAFICA_19_TEXTOS_ACTIVOS'};
+  // SERVER304: nunca restaurar las 37 gráficas de origen después de la auditoría.
+  if(n===56 && await t304MigratedAlready())return {skipped:true,reason:'T304_10_GRAFICAS_ORIGINALES_CONSERVADAS'};
   const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
@@ -25770,6 +25772,258 @@ async function applyT53Revision303(){
  finally{client.release();}
 }
 
+/* SERVER304 — T54 APEO Y PODA (CEIS original T56).
+   Revisión individual 91 preguntas antiguas; 9 imágenes técnicas originales
+   y un esquema de examen oficial 2024 aportado por el usuario.
+   28 gráficas antiguas pasan a texto, con idénticas respuestas y cobertura.
+   El gráfico del examen se examina mediante una pregunta adicional (sin alterar las 91).
+   Migración transaccional, conservadora, reversible e idempotente.
+*/
+let T304_PACK_CACHE=null;
+function t304Pack(){
+ if(T304_PACK_CACHE)return T304_PACK_CACHE;
+ const d=t279ReadPack('t54_revision304_data.js',54);
+ if(!d||d.schema!==1||d.revision!==304||d.topic_number!==54||d.topic_id!==67||
+    d.legacy_number!==56||d.title!=='TEMA 54. APEO Y PODA'||
+    d.pdf_source_name!=='TEMA_56_APEO_Y_PODA.pdf'||
+    d.pdf_sha256!=='d3ae61452fd7c65819366567b9495bb74b305d55ef52f97703c9cf95bbb5fc81'||
+    d.pdf_pages!==29||d.pdf_size!==1400442||d.coverage_total_before!==259||
+    d.coverage_relevant_before!==259||d.original_count!==91||d.original_graphics!==37||
+    d.original_texts!==54||d.converted_graphics!==28||d.revised_old_texts!==54||
+    d.selected_graphic_questions!==10||d.new_graphic_questions!==1||
+    d.final_count!==92||d.final_graphics!==10||d.final_texts!==82||
+    d.original_bank_fingerprint!=='e08fd6aacd2a526bad28748b10fbc9c2'||
+    d.selected_images?.length!==10||d.revisions?.length!==91||
+    d.selected_screenshots_all?.length!==13||d.additional_question?.correct_index!==1)
+      throw Error('T304: PDF o inventario no coinciden con la auditoría');
+ const expected=[...Array.from({length:37},(_,i)=>2163+i),
+   ...Array.from({length:18},(_,i)=>2200+i),
+   ...Array.from({length:18},(_,i)=>2465+i),
+   ...Array.from({length:18},(_,i)=>2664+i)];
+ const ids=d.revisions.map(x=>x.id);
+ if(new Set(ids).size!==91||expected.some(id=>!ids.includes(id)))
+    throw Error('T304: se ha modificado la identidad de las preguntas antiguas');
+ const sourceFolders=new Set(),assetIDs=new Set(),roles=new Set();
+ let converted=0,oldGraphics=0,newText=0;
+ for(const e of d.revisions){
+   if(!Number.isInteger(e.id)||!Array.isArray(e.wrong_options)||e.wrong_options.length!==3||
+      e.wrong_options.some(x=>typeof x!=='string'||x.length<3)||
+      new Set(e.wrong_options).size!==3||
+      (e.stem!==null&&(typeof e.stem!=='string'||e.stem.length<45))||
+      !Number.isInteger(e.image_role)||e.image_role<0||e.image_role>9)
+       throw Error('T304: formato no válido en la pregunta '+e.id);
+   if(e.was_graphic){
+      oldGraphics++;
+      if(!/^[a-f0-9]{32}$/.test(e.original_correct_md5)||
+         createHash('md5').update(e.correct_text).digest('hex')!==e.original_correct_md5||
+         e.wrong_options.includes(e.correct_text))throw Error('T304: respuesta de origen incongruente '+e.id);
+      if(e.image_role===0){
+         converted++;
+         if(/\b(imagen|figura|esquema|representad[ao]|ilustraci[oó]n|dibujo)\b/i.test(e.stem))
+           throw Error('T304: texto convertido todavía depende de imagen '+e.id);
+      }
+   }else{
+      if(e.image_role!==0||!Number.isInteger(e.correct_index)||e.correct_index<0||e.correct_index>3)
+         throw Error('T304: pregunta textual modificada incorrectamente '+e.id);
+      newText++;
+   }
+ }
+ if(oldGraphics!==37||converted!==28||newText!==54)
+    throw Error('T304: las 91 preguntas no cuadran con el inventario');
+ const expectedAssets=[
+  [1,'Screenshot_20260924-131407-display-0.png~2.jpg',1,2168,363,13],
+  [2,'Screenshot_20260924-131439-display-0.png~2.jpg',27154,2169,364,14],
+  [3,'Screenshot_20260924-131501-display-0.png~2.jpg',3,2170,364,14],
+  [4,'Screenshot_20260924-131522-display-0.png~2.jpg',27157,2175,366,16],
+  [5,'Screenshot_20260924-131542-display-0.png~2.jpg',5,2177,367,17],
+  [6,'Screenshot_20260924-131601-display-0.png~2.jpg',6,2179,369,19],
+  [7,'Screenshot_20260924-131618-display-0.png~2.jpg',7,2181,372,22],
+  [8,'Screenshot_20260924-131629-display-0.png~2.jpg',27162,2182,373,23],
+  [9,'Screenshot_20260924-131638-display-0.png~2.jpg',9,2183,373,23],
+  [10,'Screenshot_20260924-173918-display-0.png.png',27167,null,364,14]
+ ];
+ for(const [i,x] of d.selected_images.entries()){
+   const [role,orig,assetId,qId,page,pdfPage]=expectedAssets[i];
+   if(x.role!==role||x.asset_id!==assetId||x.original_source_file!==orig||
+       x.original_source_id!=='apeo-poda/'+orig||x.question_id!==qId||
+       x.printed_page!==page||x.pdf_page!==pdfPage||
+       x.file!==`T54_SELECTED_${String(role).padStart(2,'0')}.png`||
+       x.source_id!==`apeo-poda/T54_SELECTED_${String(role).padStart(2,'0')}.png`||
+       x.public_url!==`/graphics/apeo-poda/T54_SELECTED_${String(role).padStart(2,'0')}.png`||
+       !/^[a-f0-9]{64}$/.test(x.sha256)||sourceFolders.has(x.original_source_id)||
+       assetIDs.has(assetId)||roles.has(role))
+       throw Error('T304: captura original no coincide '+orig);
+   roles.add(role);sourceFolders.add(x.original_source_id);assetIDs.add(assetId);
+ }
+ const imgRoles=d.revisions.filter(x=>x.image_role>0).map(x=>x.image_role);
+ if(imgRoles.length!==9||imgRoles.some(r=>r>9)||new Set(imgRoles).size!==9)
+    throw Error('T304: selección gráfica duplicada o incompleta');
+ T304_PACK_CACHE=d;return d;
+}
+function t304WriteImages(){
+ const d=t304Pack(),out=[],folder=path.join(process.cwd(),'public','graphics','apeo-poda');
+ fs.mkdirSync(folder,{recursive:true});
+ for(const img of d.selected_images){
+   const bytes=Buffer.from(img.base64,'base64');
+   if(bytes.length!==img.size_bytes||bytes.length<5000||
+      !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||
+      createHash('sha256').update(bytes).digest('hex')!==img.sha256)
+      throw Error('T304: imagen CEIS o del examen incorrecta '+img.file);
+   const dest=path.join(folder,img.file);
+   if(fs.existsSync(dest)){
+     if(createHash('sha256').update(fs.readFileSync(dest)).digest('hex')!==img.sha256)
+       throw Error('T304: imagen ajena detectada. No sobrescribir '+img.file);
+   }else fs.writeFileSync(dest,bytes);
+   out.push({role:img.role,source_file:img.original_source_file,sha256:img.sha256});
+ }
+ return out;
+}
+async function t304MigratedAlready(){
+ const r=await db.query(`SELECT COUNT(*)::int total,
+    COUNT(*) FILTER(WHERE active AND validation_version=304)::int revised,
+    COUNT(*) FILTER(WHERE active AND question_family='GRAFICA' AND graphic IS NOT NULL)::int graphics,
+    COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts
+    FROM question_bank WHERE coverage_item_id IN
+      (SELECT id FROM coverage_items WHERE topic_id=67)`);
+ return r.rows[0]?.total===92&&r.rows[0]?.revised===92&&
+        r.rows[0]?.graphics===10&&r.rows[0]?.texts===82;
+}
+async function applyT54Revision304(){
+ const d=t304Pack(),images=t304WriteImages(),client=await db.connect();
+ try{
+   await client.query('BEGIN');
+   await client.query('SELECT pg_advisory_xact_lock(54,304)');
+   const t=(await client.query('SELECT * FROM topics WHERE id=67 FOR UPDATE')).rows[0];
+   if(!t||t.name!==d.title||t.block!=='especifico'||Number(t.topic_order)!==54||
+      Number(t.total_items)!==259||t.source_file!==d.pdf_source_name)
+      throw Error('T304: índice del tema divergente');
+   const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,
+       encode(sha256(pdf_bytes),'hex') real,page_count,size_bytes
+       FROM topic_local_pdfs WHERE topic_id=67`)).rows[0];
+   if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+      Number(pdf.page_count)!==29||Number(pdf.size_bytes)!==d.pdf_size)
+      throw Error('T304: PDF original distinto o no verificado');
+   const covers=(await client.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant FROM coverage_items
+      WHERE topic_id=67`)).rows[0];
+   if(covers.n!==259||covers.relevant!==259)
+      throw Error('T304: alguna ficha examinable ha cambiado');
+   const originals=d.revisions.map(x=>x.id);
+   const all=(await client.query(`SELECT q.* FROM question_bank q
+      WHERE q.coverage_item_id IN(SELECT id FROM coverage_items WHERE topic_id=67)
+      ORDER BY q.id FOR UPDATE OF q`)).rows;
+   const assets=(await client.query(`SELECT * FROM graphic_assets
+      WHERE topic_folder IN('apeo-poda','apeo-poda-t56') FOR UPDATE`)).rows;
+   const selected=assets.filter(a=>d.selected_images.some(i=>i.asset_id===Number(a.id)));
+   if(selected.length!==10||selected.some(a=>!d.selected_images.some(i=>i.asset_id===Number(a.id)&&i.original_source_id===a.source_id)))
+      throw Error('T304: faltan o han cambiado las capturas seleccionadas');
+   if(assets.filter(x=>x.topic_folder==='apeo-poda-t56'&&/^T56_FIG_/.test(x.source_file)).length!==37)
+      throw Error('T304: inventario de 37 gráficas antiguas no coincide');
+   const migrated=all.length===92&&all.every(x=>Number(x.validation_version)===304);
+   if(migrated){
+      const correct=all.filter(q=>q.active&&q.graphic!==null&&q.question_family==='GRAFICA');
+      const texts=all.filter(q=>q.active&&q.graphic===null);
+      if(correct.length!==10||texts.length!==82)
+        throw Error('T304: actualización previa parcial; no modificar');
+      const imageIds=new Set(correct.map(q=>q.graphic?.sourceId));
+      if(imageIds.size!==10||d.selected_images.some(im=>!imageIds.has(im.original_source_id)))
+        throw Error('T304: selección gráfica previa divergente');
+      await client.query(`UPDATE graphic_assets SET is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+         WHERE topic_folder IN('apeo-poda','apeo-poda-t56')`);
+      for(const im of d.selected_images)await client.query(`UPDATE graphic_assets SET
+         is_usable=TRUE,analysis_status='analyzed',sanitization_version=3,
+         public_url=$2,updated_at=NOW() WHERE id=$1`,[im.asset_id,im.public_url]);
+      await client.query('COMMIT');return {skipped:true,reason:'T54_304_YA_APLICADO',graphics:10,texts:82,coverage:259};
+   }
+   if(all.length!==91||all.some(q=>!q.active||Number(q.validation_version)!==6))
+      throw Error('T304: banco actualizado por otra operación, se preserva sin cambios');
+   const origById=new Map(all.map(q=>[Number(q.id),q]));
+   if(d.revisions.some(x=>!origById.has(x.id)))
+      throw Error('T304: falta un identificador original');
+   const fingerprint=(await client.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||
+     md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) AS fp
+     FROM question_bank q WHERE q.id=ANY($1::int[])`,[originals])).rows[0]?.fp;
+   if(fingerprint!==d.original_bank_fingerprint)
+     throw Error('T304: huella del banco antiguo no coincide: '+fingerprint);
+   for(const e of d.revisions){
+     const q=origById.get(e.id);
+     if(!q||q.correct_index!==(e.was_graphic?e.correct_index:e.correct_index)||
+        (q.question_family==='GRAFICA')!==e.was_graphic||
+        (q.graphic!==null)!==e.was_graphic||
+        (e.was_graphic&&createHash('md5').update(q.options[q.correct_index]).digest('hex')!==e.original_correct_md5))
+        throw Error('T304: cambio de respuesta o procedencia en pregunta '+e.id);
+   }
+   const extraExisting=all.find(q=>q.graphic?.externalKey==='T54-USER-SELECTED-10');
+   if(extraExisting)throw Error('T304: la imagen del examen ya posee pregunta; evitar duplicado');
+   await client.query(`INSERT INTO app_state(key,value)
+      VALUES('T54_304_BACKUP_91_PREGUNTAS_13_CAPTURAS',$1)
+      ON CONFLICT(key) DO NOTHING`,[JSON.stringify({revision:304,createdAt:new Date().toISOString(),
+      topic:t,PDF:pdf.sha,coverage:covers,original_questions:all,original_assets:assets})]);
+   // Historic information is never deleted; only the usable-asset flag changes.
+   await client.query(`UPDATE graphic_assets SET is_usable=FALSE,
+      analysis_status='superseded',updated_at=NOW()
+      WHERE topic_folder IN('apeo-poda','apeo-poda-t56')`);
+   for(const im of d.selected_images){
+      await client.query(`UPDATE graphic_assets SET is_usable=TRUE,
+        analysis_status='analyzed',sanitization_version=3,public_url=$2,
+        source_evidence=$3,crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+        mask_regions='[]'::jsonb,updated_at=NOW() WHERE id=$1`,
+        [im.asset_id,im.public_url,`Imagen seleccionada por usuario. CEIS Guadalajara p.${im.printed_page}; recorte gráfico limpio.`]);
+   }
+   const graphicOf=im=>({assetId:im.asset_id,sourceId:im.original_source_id,
+     publicUrl:im.public_url,assetType:'individual',originalSelected:true,
+     originalFile:im.original_source_file,externalKey:`T54-USER-SELECTED-${String(im.role).padStart(2,'0')}`,
+     crop:{x:0,y:0,width:1,height:1},maskRegions:[],source:`CEIS Guadalajara p.${im.printed_page}`});
+   for(const e of d.revisions){
+     const q=origById.get(e.id),opts=q.options.slice();let j=0;
+     for(let i=0;i<4;i++)if(i!==q.correct_index)opts[i]=e.wrong_options[j++];
+     if(j!==3||new Set(opts).size!==4||opts[q.correct_index]!==q.options[q.correct_index])
+       throw Error('T304: alternativa ambigua o respuesta correcta modificada '+e.id);
+     const im=e.image_role?d.selected_images[e.image_role-1]:null;
+     await client.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+       question_family=$4,graphic=$5::jsonb,difficulty='muy alta',
+       validation_version=304,updated_at=NOW() WHERE id=$1`,[
+       e.id,e.stem||q.stem,JSON.stringify(opts),im?'GRAFICA':(e.family||q.question_family),
+       im?JSON.stringify(graphicOf(im)):null]);
+   }
+   // Only a genuinely NEW visual discrimination is added; all existing IDs retained.
+   const e=d.additional_question,im=d.selected_images[9];
+   if(e.coverage_item_id!==84222||e.manual_page!=='364'||e.image_role!==10||
+      e.correct_index!==1||e.options.length!==4||new Set(e.options).size!==4)
+      throw Error('T304: pregunta gráfica del modelo 2024 no válida');
+   const cov=(await client.query(`SELECT topic_id,exam_relevant,manual_page FROM coverage_items
+      WHERE id=$1`,[e.coverage_item_id])).rows[0];
+   if(!cov||cov.topic_id!==67||!cov.exam_relevant||String(cov.manual_page)!=='364')
+      throw Error('T304: falta el conocimiento que respalda la pregunta adicional');
+   await client.query(`INSERT INTO question_bank(coverage_item_id,stem,options,
+      correct_index,explanation,source_evidence,source_page,manual_page,
+      question_family,difficulty,graphic,active,validation_version)
+      VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,'GRAFICA','muy alta',$9::jsonb,TRUE,304)`,
+      [e.coverage_item_id,e.stem,JSON.stringify(e.options),e.correct_index,
+       e.explanation,e.source_evidence,e.source_page,e.manual_page,JSON.stringify(graphicOf(im))]);
+   const stats=(await client.query(`SELECT COUNT(*)::int total,
+     COUNT(*) FILTER (WHERE active AND question_family='GRAFICA' AND graphic IS NOT NULL)::int graphics,
+     COUNT(*) FILTER (WHERE active AND graphic IS NULL)::int texts,
+     COUNT(*) FILTER (WHERE active AND validation_version=304)::int revised,
+     COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE graphic IS NOT NULL)::int unique_images
+     FROM question_bank WHERE coverage_item_id IN
+       (SELECT id FROM coverage_items WHERE topic_id=67)`)).rows[0];
+   const usable=(await client.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder IN('apeo-poda','apeo-poda-t56') AND is_usable=TRUE`)).rows[0].n;
+   const covFinal=(await client.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int r FROM coverage_items WHERE topic_id=67`)).rows[0];
+   if(stats.total!==92||stats.graphics!==10||stats.texts!==82||stats.revised!==92||
+      stats.unique_images!==10||usable!==10||covFinal.n!==259||covFinal.r!==259)
+      throw Error('T304: control final fallido, revertir: '+JSON.stringify({stats,usable,covFinal}));
+   await client.query('COMMIT');
+   return {ok:true,revision:304,questions:92,graphic_original:10,
+       converted_graphics_to_text:28,old_text_questions_revised:54,
+       original_responses_retained:91,coverage:259,images};
+ }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{client.release();}
+}
+
+let T54_304_START_PROMISE=Promise.resolve();
 let T53_303_START_PROMISE=Promise.resolve();
 let T51_301_RETRY_PROMISE=Promise.resolve();
 async function startServer(){
@@ -25864,6 +26118,10 @@ async function startServer(){
     T53_303_START_PROMISE=applyT53Revision303()
       .then(r=>console.log('T53_303_2_GRAFICAS_102_TEXTOS_AUDITADOS',JSON.stringify(r)))
       .catch(e=>{console.error('T53_303_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
+    // Cadena independiente: un fallo previo no impide aplicar T54.
+    T54_304_START_PROMISE=T53_303_START_PROMISE.then(()=>applyT54Revision304())
+      .then(r=>console.log('T54_304_10_GRAFICAS_82_TEXTOS_AUDITADOS',JSON.stringify(r)))
+      .catch(e=>{console.error('T54_304_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
     console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
     console.log(
       "EXAM STYLE STORE recuperado:",
