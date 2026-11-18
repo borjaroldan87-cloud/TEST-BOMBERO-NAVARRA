@@ -3797,6 +3797,9 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   // Una vez migradas sus 2 figuras de PDF a texto no reconstruirlas.
   if(n===46 && await t307SoporteMigratedAlready())
     return {skipped:true,reason:'T307_SOPORTE_VITAL_21_TEXTOS_CERO_GRAFICAS'};
+  // SERVER308: T58 curricular, antes T47. No reinstalar su figura CEIS retirada.
+  if(n===47 && await t308UrgenciasMigratedAlready())
+    return {skipped:true,reason:'T308_URGENCIAS_TRAUMATICAS_10_TEXTOS_CERO_GRAFICAS'};
   // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
   if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
   if(n===62 && await t306MigratedAlready())return {skipped:true,reason:'T306_52_IMAGENES_USUARIO_AUDITADAS'};
@@ -26547,6 +26550,172 @@ async function applyT57SoporteRevision307(){
   finally{cl.release();}
 }
 
+
+/* SERVER308 — TEMA CURRICULAR 58 URGENCIAS TRAUMATICAS (historico 47).
+ * Solo una figura CEIS añadida automaticamente; ninguna captura Screenshot
+ * seleccionada por el usuario. Convertir 1902 en texto y auditar 9 textos.
+ * Única intervención en otro enunciado: 1960 contiene opción doblemente valida
+ * y referencia equivoca: corregirlo con respaldo literal en pág. 47.
+ * IDs, cobertura (519), SRS, sesiones y correct_index inalterados.
+ * Preflight, backup inmutable, transacción y ROLLBACK por discrepancia.
+ * ESM: no requiere require().
+ */
+const T308_URGENCIAS_FILE=path.join(process.cwd(),'t58_urgencias_revision308_data.js');
+const T308_URGENCIAS_MARKER='t58_urgencias_308_aplicada_v1';
+let T308_URGENCIAS_CACHE=null;
+function t308UrgenciasPack(){
+  if(T308_URGENCIAS_CACHE)return T308_URGENCIAS_CACHE;
+  const raw=fs.readFileSync(T308_URGENCIAS_FILE,'utf8').trim();
+  const prefix='module.exports = ';
+  if(!raw.startsWith(prefix)||!raw.endsWith(';'))
+    throw Error('T308: formato del paquete de datos desconocido');
+  const d=JSON.parse(raw.slice(prefix.length,-1));
+  if(d.schema!==1||d.revision!==308||d.topic_id!==58||
+     d.curricular_number!==58||d.legacy_number!==47||
+     d.pdf_sha256!=='0e6f0b1d41b60e46cc5a1723d2625ada92328e17e867d85108d530144ce0a188'||
+     d.pdf_pages!==24||d.pdf_size_bytes!==2596917||d.coverage_total!==519||
+     d.expected_active_questions!==10||d.previous_graphic_questions!==1||
+     d.selected_screenshots!==0||d.questions?.length!==10||
+     JSON.stringify(d.converted_to_text_ids)!=='[1902]'||
+     JSON.stringify(d.graphic_asset_ids_to_disable)!=='[109274]'||
+     JSON.stringify(d.graphic_asset_source_ids)!=='["salud-t47/T47_FIG_01_P051.png"]'||
+     JSON.stringify(d.calculation_question_ids)!=='[]'||
+     new Set(d.questions.map(q=>q.id)).size!==10||
+     d.questions.some(q=>q.correct_index<0||q.correct_index>3||
+       !Number.isInteger(q.correct_index)||q.distractors?.length!==3||
+       typeof q.expected_correct!=='string'||!q.expected_correct||
+       new Set([q.expected_correct,...q.distractors]).size!==4||
+       q.convert_graphic!==(q.id===1902)||
+       (!!q.new_stem)!==(q.id===1902||q.id===1960)))
+    throw Error('T308: inventario de 10 preguntas, 1 conversión o fuente no coincide');
+  T308_URGENCIAS_CACHE=d;return d;
+}
+async function t308UrgenciasMigratedAlready(){
+  const r=await db.query('SELECT 1 FROM app_state WHERE key=$1',[T308_URGENCIAS_MARKER]);
+  return r.rowCount>0;
+}
+async function applyT58UrgenciasRevision308(){
+  const d=t308UrgenciasPack();
+  const cl=await db.connect();
+  try{
+    await cl.query('BEGIN');
+    await cl.query('SELECT pg_advisory_xact_lock($1)',[308058]);
+    const t=(await cl.query(`SELECT id,name,topic_order,block,total_items FROM topics
+      WHERE id=58 FOR UPDATE`)).rows[0];
+    if(!t||t.block!=='especifico'||Number(t.topic_order)!==58||
+       !/^TEMA\s*58\.\s*URGENCIAS TRAUMÁTICAS Y GRANDES EMERGENCIAS$/i.test(t.name)||
+       Number(t.total_items)!==519)
+      throw Error('T308: ID, nombre, orden o total de cobertura no coinciden');
+    const source=(await cl.query(`SELECT TRIM(pdf_sha256) sha,page_count,size_bytes
+      FROM topic_local_pdfs WHERE topic_id=58`)).rows[0];
+    if(!source||source.sha!==d.pdf_sha256||Number(source.page_count)!==24||
+       Number(source.size_bytes)!==2596917)
+      throw Error('T308: el PDF almacenado no coincide con la fuente original');
+    const coverage=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER (WHERE exam_relevant)::int relevant
+      FROM coverage_items WHERE topic_id=58`)).rows[0];
+    if(coverage.n!==519||coverage.relevant!==519)
+      throw Error('T308: no se garantiza la preservación de los 519 conocimientos');
+    const rows=(await cl.query(`SELECT q.id,q.coverage_item_id,q.stem,q.options,
+      q.correct_index,q.explanation,q.source_evidence,q.source_page,q.manual_page,
+      q.question_family,q.difficulty,q.graphic,q.active,q.validation_version,
+      q.times_shown,q.times_correct,q.times_wrong,q.times_blank
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=58 ORDER BY q.id FOR UPDATE OF q`)).rows;
+    const assets=(await cl.query(`SELECT id,source_id,source_file,topic_folder,
+      is_usable,analysis_status FROM graphic_assets
+      WHERE topic_folder IN('salud-t47','salud-t58') ORDER BY id FOR UPDATE`)).rows;
+    const marked=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',
+      [T308_URGENCIAS_MARKER])).rowCount;
+    const byId=new Map(rows.map(q=>[Number(q.id),q]));
+    const graphic=rows.filter(q=>q.active&&q.graphic!==null);
+    const usable=assets.filter(a=>a.is_usable);
+    if(rows.length!==10||rows.some(q=>!q.active)||byId.size!==10||
+       d.questions.some(x=>!byId.has(x.id))||assets.length!==1||
+       assets.some(a=>a.source_file?.startsWith('Screenshot_')))
+      throw Error('T308: inventario de preguntas/recortes difiere; no modificar');
+    if(marked){
+      if(graphic.length!==0||usable.length!==0||
+         d.questions.some(x=>Number(byId.get(x.id)?.validation_version)!==308))
+        throw Error('T308: marcador presente pero migracion incompleta');
+      await cl.query('COMMIT');
+      return {ok:true,skipped:true,topic:58,questions:10,texts:10,graphics:0,coverage:519};
+    }
+    if(graphic.length!==1||Number(graphic[0].id)!==1902||
+       graphic[0].graphic?.sourceId!==d.graphic_asset_source_ids[0]||
+       Number(graphic[0].graphic?.assetId)!==109274||
+       usable.length!==1||Number(usable[0].id)!==109274)
+      throw Error('T308: la figura CEIS y su pregunta original no coinciden');
+    for(const v of d.questions){
+      const q=byId.get(v.id);
+      if(!q||q.validation_version!==6||!q.source_evidence||
+         q.difficulty!=='muy alta'||
+         !Array.isArray(q.options)||q.options.length!==4||
+         Number(q.correct_index)!==v.correct_index||
+         q.options[v.correct_index]!==v.expected_correct||
+         !!q.graphic!==v.convert_graphic||
+         (v.convert_graphic && q.question_family!=='GRAFICA')||
+         (v.id===1960 && !q.stem.includes('seguridad de la escena')))
+        throw Error('T308: versión, respuesta, evidencia o pregunta distinta ID '+v.id);
+    }
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,['t58_urgencias_308_respaldo_originales',
+      JSON.stringify({topicId:58,questions:rows,assets,source,coverage})]);
+    let edited=0;
+    for(const v of d.questions){
+      const q=byId.get(v.id);
+      let j=0;
+      const opts=q.options.map((old,i)=>i===v.correct_index?old:v.distractors[j++]);
+      if(j!==3||opts[v.correct_index]!==v.expected_correct||
+         new Set(opts).size!==4)
+        throw Error('T308: cuatro alternativas inválidas, ID '+v.id);
+      const stem=v.new_stem||q.stem;
+      const family=v.convert_graphic?'2026_RAZONAMIENTO':q.question_family;
+      const explanation=v.id===1902
+        ?'CEIS, pág. 50: equimosis retroauricular = signo de Battle; pág. 51: inmovilización cervical inmediata, ABC y oxígeno en cuanto sea posible.'
+        :v.id===1960
+          ?'CEIS, pág. 47: las incarceraciones prolongadas y los traumatismos con algún fallecido figuran en la lista de mecanismos potencialmente graves.'
+          :q.explanation;
+      const done=await cl.query(`UPDATE question_bank
+        SET stem=$2,options=$3::jsonb,question_family=$4,
+          explanation=$5,difficulty='muy alta',graphic=NULL,
+          validation_version=308,updated_at=NOW()
+        WHERE id=$1 AND active=TRUE`,
+        [v.id,stem,JSON.stringify(opts),family,explanation]);
+      if(done.rowCount!==1)throw Error('T308: no se ha modificado el registro '+v.id);
+      edited++;
+    }
+    const disabled=await cl.query(`UPDATE graphic_assets
+      SET is_usable=FALSE,analysis_status='superseded',updated_at=NOW()
+      WHERE id=109274 AND is_usable=TRUE`);
+    if(disabled.rowCount!==1)throw Error('T308: no se retiró el recurso CEIS');
+    const end=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE active)::int active,
+      COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER(WHERE active AND graphic IS NULL)::int texts,
+      COUNT(*) FILTER(WHERE validation_version=308 AND active)::int revised,
+      COUNT(*) FILTER(WHERE question_family='CALCULO_FORMULACION' AND active)::int calc
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=58`)).rows[0];
+    const endAssets=(await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder IN('salud-t47','salud-t58') AND is_usable`)).rows[0].n;
+    if(edited!==10||end.n!==10||end.active!==10||end.graphics!==0||
+       end.texts!==10||end.revised!==10||end.calc!==0||endAssets!==0)
+      throw Error('T308: auditoría SQL final no superada; deshacer transacción');
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+      T308_URGENCIAS_MARKER,
+      JSON.stringify({topicId:58,reviewed:10,graphicToText:1,
+        selectedScreenshots:0,coverage:519,originalIdsPreserved:10,
+        correctedAmbiguityId:1960,calculationsPreserved:0,
+        backup:'t58_urgencias_308_respaldo_originales'})]);
+    await cl.query('COMMIT');
+    return {ok:true,topic:58,reviewed:10,graphicConverted:1,
+      textualQuestions:10,coveragePreserved:519,originalIdsPreserved:10,
+      ambiguityCorrected:1,calculationsPreserved:0,deletedHistory:0};
+  }catch(e){await cl.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -26750,6 +26919,18 @@ async function startServer(){
                 JSON.stringify(reviewed));
             }catch(error){
               console.error('T57_307_NO_APLICADO_ROLLBACK:',String(error?.message||error));
+            }
+          }
+          // SERVER308: tema curricular 58 (historico 47). La figura CEIS de
+          // signo de Battle se convierte en texto sin perder identificador.
+          if(Number(t.id)===58){
+            try{
+              const reviewed=await applyT58UrgenciasRevision308();
+              console.log('T58_308_10_TEXTOS_1_GRAFICA_CONVERTIDA_SIN_CALCULOS',
+                JSON.stringify(reviewed));
+            }catch(error){
+              console.error('T58_308_PENDIENTE_TRANSACCION_REVERTIDA:',
+                String(error?.message||error));
             }
           }
           // Importar cobertura DESPUÉS de finalizar la importación existente.
