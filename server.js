@@ -27088,6 +27088,10 @@ async function applyT63VehiculosRevision310(){
  */
 const T311_FILE = path.join(process.cwd(),'t311_global_audit_repairs_data.js');
 const T311_MARKER='global_auditoria_311_aplicada_v1';
+// SERVER312: fase completa de Tráfico necesaria antes de auditar el contador.
+// La promesa se registra en el mismo ciclo de arranque, ANTES de ejecutar las
+// devoluciones asíncronas de otros temas (incluido T63/65).
+let T46_312_READY_PROMISE=Promise.resolve({ok:false,reason:'T46_NOT_STARTED'});
 let T311_CACHE=null;
 function t311Pack(){
  if(T311_CACHE)return T311_CACHE;
@@ -27573,6 +27577,14 @@ async function startServer(){
           if(Number(t.id)===65){
             try{
               await T56_306_START_PROMISE;
+              // SERVER312: esperar T46 FINALIZADO, no solo matriz sincronizada.
+              // El T282 de Tráfico y la verificación T296 deben terminar antes
+              // de contrastar el inventario 1432/1548; no relajar guardas T311.
+              const t46Ready=await T46_312_READY_PROMISE;
+              if(!t46Ready?.ok||t46Ready?.topicId!==72)
+                throw Error('T312: Tráfico no ha finalizado su recuperación verificada: '+
+                  String(t46Ready?.error||t46Ready?.reason||'desconocido'));
+              console.log('T312_T46_BARRERA_VERIFICADA',JSON.stringify(t46Ready));
               const review311=await applyGlobalAuditRepairs311();
               console.log('GLOBAL_311_AUDITORIA_CORRECCIONES',JSON.stringify(review311));
             }catch(e){
@@ -27687,13 +27699,13 @@ async function startServer(){
     // T46 visible = ID 72 / T61 histórico. Las 5 figuras y 26 textuales
     // se sincronizan sobre el PDF original YA guardado en PostgreSQL.
     // No re-extrae páginas con Gemini, ni espera antes de abrir el puerto HTTP.
-    db.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=72
+    T46_312_READY_PROMISE=db.query(`SELECT id,name,block,topic_order,total_items FROM topics WHERE id=72
       AND block='especifico'`)
       .then(async r=>{
         const t=r.rows[0];
         if(!t || healthTopicNumber192(t)!==61){
           console.warn('T46_SINCRONIZACION_NO_APLICADA: falta el tema histórico ID 72');
-          return;
+          return {ok:false,topicId:72,reason:'missing_legacy_topic'};
         }
         const updated=await healthImportOnce192(t);
         console.log('T46_MATRIZ_SINCRONIZADA',JSON.stringify(updated));
@@ -27702,8 +27714,26 @@ async function startServer(){
         await t282After(46,selected);
         const check296=await t296VerifyAfterImport();
         console.log('T46_296_VERIFICACION_POSTERIOR',JSON.stringify(check296));
+        // Guardas posrecuperación: contador declarado puede estar 1431/1432
+        // (T311 ajustará solo el metadato), pero 1432 fichas examinables y
+        // 1548 registros deben existir ANTES de ejecutar T311.
+        const inventory=(await db.query(`SELECT
+          COUNT(*)::int total,COUNT(*) FILTER(WHERE exam_relevant)::int relevant
+          FROM coverage_items WHERE topic_id=72`)).rows[0];
+        const catalog=(await db.query('SELECT total_items FROM topics WHERE id=72')).rows[0];
+        if(!inventory||inventory.total!==1548||inventory.relevant!==1432||
+          !catalog||![1431,1432].includes(Number(catalog.total_items)))
+          throw Error('T312: T46 posrecuperación distinto del inventario auditado');
+        return {ok:true,topicId:72,total:inventory.total,relevant:inventory.relevant,
+          catalog:Number(catalog.total_items),verification:'T46_296_POST_T282'};
       })
-      .catch(e=>console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',String(e?.message||e)));
+      .catch(e=>{
+        const message=String(e?.message||e);
+        console.error('T46_MATRIZ_PENDIENTE_SIN_BLOQUEAR:',message);
+        // La promesa nunca se rechaza sin control; T311 no puede empezar
+        // si se produjo un fallo real de recuperación.
+        return {ok:false,topicId:72,error:message};
+      });
     syncT43Selected5_276()
       .then(async r=>{
         console.log('T43_276_5_ORIGINALES_SINCRONIZADAS',JSON.stringify(r));
