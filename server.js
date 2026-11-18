@@ -3795,6 +3795,7 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   if(n===56 && await t304MigratedAlready())return {skipped:true,reason:'T304_10_GRAFICAS_ORIGINALES_CONSERVADAS'};
   // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
   if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
+  if(n===62 && await t306MigratedAlready())return {skipped:true,reason:'T306_52_IMAGENES_USUARIO_AUDITADAS'};
   const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
@@ -26035,9 +26036,161 @@ async function applyT54Revision304(){
    Los 74 cálculos y sus módulos t57_calculos*.js se excluyen de esta migración.
    Auditoría y respaldo antes de cambios. Control de concurrencia y rollback.
 */
+/* SERVER306 — TEMA 56 NRBQ (identidad fuente T62).
+ * Auditoría de las 52 imágenes seleccionadas, sin inventar imágenes nuevas.
+ * Conserva todas las fichas de cobertura, IDs, estadísticas y gráficas.
+ * Revisar SIN cambiar generadores de cálculo ni módulos históricos.
+ */
+let T56_306_START_PROMISE=Promise.resolve();
+function t306Pack(){
+ const f=path.join(process.cwd(),'t56_revision306_data.js');
+ const source=fs.readFileSync(f,'utf8');
+ const match=/module\.exports\s*=\s*(\{[\s\S]*\})\s*;\s*$/.exec(source);
+ if(!match)throw Error('T306: módulo no es JSON exportado en el formato verificado');
+ const d=JSON.parse(match[1]);
+ if(d.schema!==1||d.revision!==306||d.topic_number!==56||d.legacy_number!==62||
+    d.topic_id!==105||d.title!=='TEMA 56. NRBQ'||d.pdf_pages!==92||
+    d.pdf_sha256!=='f81dcff31190f37a7f820eb04a1ffe7a2660eee15dfc1e3cf79ddc62529a9bbf'||
+    d.pdf_size!==4823661||d.coverage_total!==1955||d.exam_relevant!==1180||
+    d.legacy_active_question_fingerprint!=='1f5c3f4e472fddade4919daac5cfd3ac'||
+    d.bank_count!==52||d.graphic_count!==52||d.selected_images_count!==52||
+    !Array.isArray(d.changes)||d.changes.length!==52)throw Error('T306: manifest incompatible');
+ const seenIds=new Set(),seenFiles=new Set(),seenAssets=new Set(),counts=[0,0,0,0];
+ for(let i=0;i<52;i++){
+   const e=d.changes[i],id=2765+i,src=e.manual_page-444;
+   if(e.id!==id||e.role!==i+1||e.asset_id!==152930+i||
+      e.source_file!==`T62_FIG_${String(i+1).padStart(2,'0')}_P${String(src).padStart(3,'0')}.png`||
+      seenIds.has(e.id)||seenFiles.has(e.source_file)||seenAssets.has(e.asset_id)||
+      !/^\d{3}$/.test(e.manual_page)||src<1||src>92||
+      typeof e.stem!=='string'||e.stem.length<80||
+      !Array.isArray(e.options)||e.options.length!==4||
+      e.options.some(x=>typeof x!=='string'||x.length<25)||new Set(e.options).size!==4||
+      !Number.isInteger(e.correct_index)||e.correct_index<0||e.correct_index>3||
+      typeof e.explanation!=='string'||e.explanation.length<60)
+       throw Error('T306: pregunta inválida '+id);
+   const lengths=e.options.map(x=>x.length);
+   if(Math.max(...lengths)/Math.min(...lengths)>2.25)
+     throw Error('T306: alternativa delatora por longitud '+id);
+   seenIds.add(e.id);seenFiles.add(e.source_file);seenAssets.add(e.asset_id);counts[e.correct_index]++;
+ }
+ if(counts.some(n=>n!==13))throw Error('T306: reparto de respuestas incorrecto');
+ // El módulo original contiene exactamente las 52 capturas escogidas por el
+ // usuario y su trazabilidad, pero NO debe ser modificado por esta auditoría.
+ const original=healthLoadData192(62);
+ if(!original||original.images.length!==52||original.questions.length!==52||
+    new Set(original.images.map(x=>x.selected_github)).size!==52)
+    throw Error('T306: falta inventario original de las 52 selecciones');
+ for(const [i,e] of d.changes.entries()){
+   const img=original.images[i],q=original.questions[i];
+   if(img.file!==e.source_file||q.graphic_file!==e.source_file||
+      !img.selected_github?.startsWith('Screenshot_')||
+      img.printed_page!==e.manual_page||img.sha256!==q.image_sha256||
+      createHash('sha256').update(Buffer.from(img.base64,'base64')).digest('hex')!==img.sha256)
+      throw Error('T306: la imagen elegida o su contenido difiere '+e.role);
+ }
+ return d;
+}
+async function t306MigratedAlready(){
+ const r=(await db.query(`SELECT COUNT(*)::int n,
+   COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL)::int g,
+   COUNT(*) FILTER(WHERE active AND validation_version=306)::int revised,
+   COUNT(DISTINCT graphic->>'sourceId') FILTER(WHERE active)::int distinct_images
+   FROM question_bank WHERE coverage_item_id IN
+     (SELECT id FROM coverage_items WHERE topic_id=105)`)).rows[0];
+ return r.n===52&&r.g===52&&r.revised===52&&r.distinct_images===52;
+}
+async function applyT56Revision306(){
+ const pack=t306Pack(),cl=await db.connect();
+ try{
+   await cl.query('BEGIN');
+   await cl.query('SELECT pg_advisory_xact_lock(56,306)');
+   const topic=(await cl.query('SELECT * FROM topics WHERE id=105 FOR UPDATE')).rows[0];
+   if(!topic||Number(topic.topic_order)!==56||topic.name!==pack.title||
+      Number(topic.total_items)!==1180||topic.source_file!=='TEMA_62_NRBQ.pdf')
+      throw Error('T306: identidad del tema 56 incorrecta');
+   const pdf=(await cl.query(`SELECT trim(pdf_sha256) sha,page_count,size_bytes,
+      encode(sha256(pdf_bytes),'hex') actual_sha FROM topic_local_pdfs
+      WHERE topic_id=105`)).rows[0];
+   if(!pdf||pdf.sha!==pack.pdf_sha256||pdf.actual_sha!==pack.pdf_sha256||
+      Number(pdf.page_count)!==92||Number(pdf.size_bytes)!==4823661)
+      throw Error('T306: el PDF indexado no coincide con la fuente del usuario');
+   const cov=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int relevant
+      FROM coverage_items WHERE topic_id=105`)).rows[0];
+   if(cov.n!==1955||cov.relevant!==1180)throw Error('T306: cobertura inesperada');
+   const bank=(await cl.query(`SELECT q.* FROM question_bank q WHERE q.coverage_item_id
+      IN (SELECT id FROM coverage_items WHERE topic_id=105)
+      ORDER BY q.id FOR UPDATE OF q`)).rows;
+   const activeAssets=(await cl.query(`SELECT * FROM graphic_assets
+      WHERE topic_folder='nrbq' AND is_usable=TRUE ORDER BY id FOR SHARE`)).rows;
+   if(bank.length!==52||activeAssets.length!==52||
+     activeAssets.some((a,i)=>Number(a.id)!==152930+i||a.source_id!==`nrbq/${pack.changes[i].source_file}`))
+     throw Error('T306: inventario de 52 imágenes originales divergente');
+   const already=bank.every((q,i)=>q.active===true&&q.validation_version===306&&
+      Number(q.id)===pack.changes[i].id&&q.stem===pack.changes[i].stem&&
+      JSON.stringify(q.options)===JSON.stringify(pack.changes[i].options)&&
+      Number(q.correct_index)===pack.changes[i].correct_index&&
+      q.graphic?.sourceId===`nrbq/${pack.changes[i].source_file}`);
+   if(already){await cl.query('COMMIT');return {skipped:true,reason:'T56_306_YA_APLICADO',questions:52,graphics:52};}
+   if(bank.some((q,i)=>!q.active||Number(q.id)!==pack.changes[i].id||
+       Number(q.validation_version)!==7||q.question_family!=='GRAFICA'||
+       Number(q.correct_index)!==pack.changes[i].correct_index||
+       q.graphic?.sourceId!==`nrbq/${pack.changes[i].source_file}`||
+       Number(q.graphic?.assetId)!==pack.changes[i].asset_id||
+       q.manual_page!==pack.changes[i].manual_page))
+      throw Error('T306: alguna pregunta original ha cambiado; nada se reescribe');
+   const fp=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||md5(q.stem)||'|'||
+      md5(q.options::text)||'|'||q.correct_index::text,';' ORDER BY q.id)) fp
+      FROM question_bank q JOIN coverage_items c ON q.coverage_item_id=c.id
+      WHERE c.topic_id=105`)).rows[0]?.fp;
+   if(fp!==pack.legacy_active_question_fingerprint)
+      throw Error('T306: huella inicial incompatible '+fp);
+   const graphFp=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||
+      md5(q.graphic::text),';' ORDER BY q.id)) fp FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id WHERE c.topic_id=105`)).rows[0]?.fp;
+   await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,['T56_306_RESPALDO_52_IMAGENES_Y_PREGUNTAS',
+       JSON.stringify({revision:306,createdAt:new Date().toISOString(),pdf_sha256:pdf.sha,
+        originalQuestions:bank,originalSelectedGraphicAssets:activeAssets,
+        originalBankFingerprint:fp,originalGraphicFingerprint:graphFp})]);
+   const revised=pack.changes.map(e=>({id:e.id,stem:e.stem,options:e.options,
+     explanation:e.explanation}));
+   const result=await cl.query(`UPDATE question_bank q SET stem=r.stem,
+      options=r.options,explanation=r.explanation || ' ' || q.explanation,
+      difficulty='muy alta',validation_version=306,updated_at=NOW()
+      FROM jsonb_to_recordset($1::jsonb) AS r(id bigint,stem text,options jsonb,
+        explanation text)
+      WHERE q.id=r.id AND q.question_family='GRAFICA' AND q.active=TRUE`,
+      [JSON.stringify(revised)]);
+   if(result.rowCount!==52)throw Error('T306: solo se han revisado '+result.rowCount+' preguntas');
+   const after=(await cl.query(`SELECT q.* FROM question_bank q
+      WHERE q.coverage_item_id IN(SELECT id FROM coverage_items WHERE topic_id=105)
+      ORDER BY id`)).rows;
+   if(after.length!==52||after.some((q,i)=>Number(q.id)!==pack.changes[i].id||
+      q.stem!==pack.changes[i].stem||
+      JSON.stringify(q.options)!==JSON.stringify(pack.changes[i].options)||
+      q.correct_index!==pack.changes[i].correct_index||
+      q.validation_version!==306||!q.active||
+      q.graphic?.sourceId!==`nrbq/${pack.changes[i].source_file}`||
+      q.graphic?.assetId!==pack.changes[i].asset_id))
+      throw Error('T306: auditoría post-actualización, respuestas o imagen divergentes');
+   const newGraphFp=(await cl.query(`SELECT md5(string_agg(q.id::text||'|'||
+      md5(q.graphic::text),';' ORDER BY q.id)) fp FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id WHERE c.topic_id=105`)).rows[0]?.fp;
+   if(newGraphFp!==graphFp)throw Error('T306: se modificó alguna referencia gráfica');
+   await cl.query('COMMIT');
+   return {ok:true,topic:56,selected_images_unchanged:52,graphical_questions_revised:52,
+     converted_to_text:0,coverage_total:1955,exam_relevant:1180,calculators_modified:0};
+ }catch(err){await cl.query('ROLLBACK').catch(()=>{});throw err;}
+ finally{cl.release();}
+}
+
 let T55_305_START_PROMISE=Promise.resolve();
 function t305Pack(){
- const d=require(path.join(process.cwd(),'t55_revision305_data.js'));
+ const source=fs.readFileSync(path.join(process.cwd(),'t55_revision305_data.js'),'utf8');
+ const match=/module\.exports\s*=\s*(\{[\s\S]*\})\s*;\s*$/.exec(source);
+ if(!match)throw Error('T305: formato de módulo incompatible');
+ const d=JSON.parse(match[1]);
  if(!d||d.revision!==305||d.schema!==1||d.topic_number!==55||d.legacy_number!==57||
     d.topic_id!==68||d.title!=='TEMA 55. RIESGO ELÉCTRICO'||
     d.pdf_sha256!=='ec4f2407fbf537e3a93d3df8a62ef2714fa7853e3f848f8477d2fe489270c77a'||
@@ -26322,6 +26475,11 @@ async function startServer(){
     T55_305_START_PROMISE=T54_304_START_PROMISE.then(()=>applyT55Revision305())
       .then(r=>console.log('T55_305_7_GRAFICAS_31_CONVERTIDAS_74_CALCULOS_INTACTOS',JSON.stringify(r)))
       .catch(e=>{console.error('T55_305_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
+    // SERVER306: arrancar al concluir el intento del T55, aunque el T55 falle.
+    // Nunca reimportar T62 después de una revisión 306 confirmada.
+    T56_306_START_PROMISE=T55_305_START_PROMISE.then(()=>applyT56Revision306())
+      .then(r=>console.log('T56_306_52_IMAGENES_52_PREGUNTAS_AUDITADAS',JSON.stringify(r)))
+      .catch(e=>{console.error('T56_306_NO_APLICADO_ROLLBACK:',String(e?.message||e));return {error:String(e?.message||e)};});
     console.log("TEMARIO STORE recuperado:", STORE || "ninguno");
     console.log(
       "EXAM STYLE STORE recuperado:",
