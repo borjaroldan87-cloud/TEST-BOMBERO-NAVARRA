@@ -27075,6 +27075,289 @@ async function applyT63VehiculosRevision310(){
   finally{cl.release();}
 }
 
+
+/* SERVER311 — Correcciones verificadas tras auditoría 26 temas.
+ * NO altera selección gráfica (casos de captura repetida/figura de examen pendientes
+ * de conciliación editorial, y no se inflan cifras hasta llegar a 210).
+ * Repara duplicados numéricos mediante nuevos valores probados independientes.
+ * Corrige 6 distractores hidráulicos; reemplaza 4 preguntas débiles conservando
+ * las preguntas antiguas INACTIVAS y todo su historial de sesiones y aciertos.
+ * Repara 2 metadatos de indicadores sin borrar conocimientos y registra auditoría.
+ * Cada cambio está cubierto por guardias de identidad, PDF, cardinalidad,
+ * pregunta original y salida. Una única transacción con reversión total.
+ */
+const T311_FILE = path.join(process.cwd(),'t311_global_audit_repairs_data.js');
+const T311_MARKER='global_auditoria_311_aplicada_v1';
+let T311_CACHE=null;
+function t311Pack(){
+ if(T311_CACHE)return T311_CACHE;
+ const raw=fs.readFileSync(T311_FILE,'utf8').trim(),prefix='module.exports = ';
+ if(!raw.startsWith(prefix)||!raw.endsWith(';'))throw Error('T311: paquete no JSON');
+ const d=JSON.parse(raw.slice(prefix.length,-1));
+ if(d.schema!==1||d.revision!==311||d.question_math_variants?.length!==30||
+    d.extra_math_variants?.length!==2||d.hydraulic_wrong_only?.length!==6||
+    d.hydraulic_replace_weak_true_false?.length!==4||
+    d.preserved_active_graphics!==207||
+    d.question_math_variants.some((x,i)=>x.id!==2307+i||x.options?.length!==4||
+      x.correct_index<0||x.correct_index>3||x.options[x.correct_index]!==x.answer)||
+    d.hydraulic_wrong_only.some(x=>x.wrong?.length!==3||x.correct_index<0||x.correct_index>3)||
+    JSON.stringify(d.hydraulic_replace_weak_true_false.map(x=>x.old_id))!=='[980,981,982,984]'||
+    new Set(d.question_math_variants.map(x=>x.stem)).size!==30)
+    throw Error('T311: paquete incoherente');
+ T311_CACHE=d;return d;
+}
+async function applyGlobalAuditRepairs311(){
+ const d=t311Pack(),cl=await db.connect();
+ let inTx=false;
+ try{
+  await cl.query('BEGIN');inTx=true;
+  await cl.query('SELECT pg_advisory_xact_lock($1)',[311311]);
+  await cl.query("SET LOCAL lock_timeout = '8s'");
+  await cl.query("SET LOCAL statement_timeout = '45s'");
+  const topics=(await cl.query(`SELECT id,name,topic_order,total_items,block FROM topics
+    WHERE id=ANY(ARRAY[49,50,68,72,65,69]) ORDER BY id FOR UPDATE`)).rows;
+  const byTopic=new Map(topics.map(x=>[Number(x.id),x]));
+  for(const [id,n] of [[49,39],[50,40],[68,55],[72,46],[65,63],[69,44]]){
+    if(!byTopic.has(id)||byTopic.get(id).topic_order!==n||byTopic.get(id).block!=='especifico')
+      throw Error('T311: numeración divergente, id='+id);
+  }
+  const marker=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[T311_MARKER])).rows;
+  if(marker.length){
+    const live46=(await cl.query(`SELECT total_items FROM topics WHERE id=72`)).rows[0];
+    const relevant46=(await cl.query(`SELECT COUNT(*) FILTER(WHERE exam_relevant)::int n
+      FROM coverage_items WHERE topic_id=72`)).rows[0];
+    if(!live46||relevant46.n!==1432||![1431,1432].includes(live46.total_items))
+      throw Error('T311: contador de Tráfico divergente');
+    if(live46.total_items===1431)await cl.query(`UPDATE topics SET total_items=1432 WHERE id=72`);
+    const q=(await cl.query(`SELECT COUNT(*)::int n FROM question_bank q
+      JOIN coverage_items c ON q.coverage_item_id=c.id WHERE c.topic_id=49 AND q.active AND q.difficulty='alta'`)).rows[0];
+    if(q.n!==0)throw Error('T311: marcador existente pero quedan preguntas T39 sin auditar');
+    const dup=(await cl.query(`SELECT COUNT(*)::int n FROM (SELECT stem FROM question_bank
+      WHERE active AND id BETWEEN 2297 AND 2336 GROUP BY stem HAVING COUNT(*)>1) y`)).rows[0];
+    if(dup.n!==0)throw Error('T311: marcador existente pero persisten clonaciones eléctricas');
+    await cl.query('COMMIT');inTx=false;
+    return {ok:true,skipped:true,reason:'T311_YA_VALIDADO'};
+  }
+  for(const [num,id] of [[39,49],[40,50],[55,68]]){
+    const r=(await cl.query(`SELECT TRIM(pdf_sha256) AS sha,
+       ENCODE(SHA256(pdf_bytes),'hex') AS real FROM topic_local_pdfs WHERE topic_id=$1`,[id])).rows[0];
+    if(!r||r.sha!==d.pdf_sha[String(num)]||r.real!==d.pdf_sha[String(num)])
+      throw Error('T311: PDF del temario '+num+' no coincide');
+  }
+  for(const [id,relevant,all,active,graphics] of [
+    [49,306,306,177,5],[50,589,591,196,32],[68,707,707,146,7]]){
+    const k=(await cl.query(`SELECT COUNT(*)::int n,
+        COUNT(*) FILTER(WHERE exam_relevant)::int relevant
+        FROM coverage_items WHERE topic_id=$1`,[id])).rows[0];
+    const q=(await cl.query(`SELECT COUNT(*) FILTER(WHERE active)::int active,
+        COUNT(*) FILTER(WHERE active AND graphic IS NOT NULL)::int graphics
+        FROM question_bank WHERE coverage_item_id IN
+        (SELECT id FROM coverage_items WHERE topic_id=$1)`,[id])).rows[0];
+    if(k.n!==all||k.relevant!==relevant||q.active!==active||q.graphics!==graphics)
+      throw Error('T311: inventario de tema '+id+' modificado');
+  }
+  const beforeLive=(await cl.query(`SELECT COUNT(*)::int graphic,
+    COUNT(DISTINCT q.graphic->>'sourceId')::int distinct_sources
+    FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+    JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico' AND
+      t.topic_order BETWEEN 38 AND 63 AND q.active AND q.graphic IS NOT NULL`)).rows[0];
+  if(beforeLive.graphic!==207||beforeLive.distinct_sources!==207)
+    throw Error('T311: inventario gráfico original inesperado, no tocar');
+  const targetIds=[...d.hydraulic_wrong_only.map(x=>x.id),
+    ...d.hydraulic_replace_weak_true_false.map(x=>x.old_id),
+    ...d.question_math_variants.map(x=>x.id),
+    ...d.extra_math_variants.map(x=>x.id),2060,2378,2426];
+  if(new Set(targetIds).size!==targetIds.length)throw Error('T311: ID duplicado');
+  const rows=(await cl.query(`SELECT q.*, c.topic_id FROM question_bank q
+    JOIN coverage_items c ON c.id=q.coverage_item_id
+    WHERE q.id=ANY($1::bigint[]) ORDER BY q.id FOR UPDATE OF q`,[targetIds])).rows;
+  if(rows.length!==targetIds.length)throw Error('T311: falta una pregunta original');
+  const old=new Map(rows.map(q=>[Number(q.id),q]));
+  const check=(id,topic,answer,ix)=>{
+    const q=old.get(id);
+    if(!q||!q.active||Number(q.topic_id)!==topic||q.graphic!==null||
+       Number(q.validation_version)!==6||!Array.isArray(q.options)||q.options.length!==4||
+       Number(q.correct_index)!==ix||q.options[ix]!==answer||
+       new Set(q.options).size!==4)return false;
+    return true;
+  };
+  const arr=[];
+  for(const x of d.hydraulic_wrong_only){
+    if(!check(x.id,49,x.expected_correct,x.correct_index)||old.get(x.id).difficulty!=='alta')
+      throw Error('T311: T39 pregunta validada distinta '+x.id);
+    arr.push(old.get(x.id));
+  }
+  for(const x of d.hydraulic_replace_weak_true_false){
+    const q=old.get(x.old_id);
+    if(!q||!check(x.old_id,49,x.expected_correct,q.correct_index)||q.difficulty!=='alta'||
+       (x.old_id===980&&q.correct_index!==0)||(x.old_id===981&&q.correct_index!==3)||
+       (x.old_id===982&&q.correct_index!==1)||(x.old_id===984&&q.correct_index!==2))
+      throw Error('T311: T39 pregunta verdadero/falso diferente '+x.old_id);
+    arr.push(q);
+  }
+  for(const x of d.question_math_variants){
+    const q=old.get(x.id),parent=old.get(x.old_id);
+    // Parent is intentionally not part of targets; guard its exact original stem
+    // using the common audited template and required cardinalities.
+    const oldAnswer=({0:'133,333 W',1:'3 A',2:'48 V',3:'1422,222 W',
+      4:'42,857 %',5:'68,549 kJ',6:'1350 C',7:'25 %',
+      8:'833,058 W',9:'27 Ω'})[(x.id-2297)%10];
+    if(!q||!check(x.id,68,oldAnswer,x.correct_index)||
+       q.stem!==x.expected_old_stem||q.question_family!=='T57_CALCULO')
+      throw Error('T311: cálculo original no coincide '+x.id);
+    arr.push(q);
+  }
+  for(const x of d.extra_math_variants){
+    const q=old.get(x.id);
+    if(!q||!check(x.id,x.id===1144?50:68,x.expected_old_correct,x.correct_index)||
+       q.stem!==x.old_stem)
+      throw Error('T311: cálculo adicional divergente '+x.id);
+    arr.push(q);
+  }
+  for(const id of [2378,2426]){
+    const q=old.get(id);
+    if(!q||q.topic_id!==69||!q.active||q.manual_page!=='57'||
+       q.source_page!==57||!q.source_evidence||!q.stem)
+       throw Error('T311: página 57 del manual no identificada correctamente '+id);
+  }
+  const pdf44=(await cl.query(`SELECT TRIM(pdf_sha256) AS sha,
+    ENCODE(SHA256(pdf_bytes),'hex') AS real,page_count FROM topic_local_pdfs
+    WHERE topic_id=69`)).rows[0];
+  if(!pdf44||pdf44.sha!=='a7cb16f0095240c807ecca7b741b0dae33b0bb6a0c5e1f16c6cee466ce5b8994'||
+    pdf44.real!==pdf44.sha||pdf44.page_count!==40)
+    throw Error('T311: PDF T44 diferente del estudiado');
+  const q2060=old.get(2060);
+  if(!q2060||!q2060.active||q2060.topic_id!==65||q2060.manual_page!==null||
+    q2060.source_page!==5||!q2060.source_evidence?.includes('1428/2003'))
+    throw Error('T311: metadato de vehículo no coincide');
+  const t46=byTopic.get(72);
+  const cov46=(await cl.query(`SELECT COUNT(*) FILTER (WHERE exam_relevant)::int relevant,
+      COUNT(*)::int total FROM coverage_items WHERE topic_id=72`)).rows[0];
+  if(![1431,1432].includes(Number(t46.total_items))||cov46.relevant!==1432||cov46.total!==1548)
+    throw Error('T311: contador de Tráfico ha cambiado; no inferir');
+  // Backup the *entire* affected original question objects and topic metadata.
+  await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+    'global_auditoria_311_respaldo_originales',
+    JSON.stringify({date:new Date().toISOString(),questions:rows,topic46:t46,
+      recordCount:rows.length,sourcePdfHashes:d.pdf_sha})]);
+  // Preserve historic sessions in place: all 10 prior Hydraulic questions
+  // have been answered in real tests. Never mutate their historical stem/options.
+  const inserted=[];
+  const archiveOriginal=async(id)=>{
+    const deactivated=await cl.query(`UPDATE question_bank SET active=FALSE,
+       updated_at=NOW() WHERE id=$1 AND active=TRUE`,[id]);
+    if(deactivated.rowCount!==1)throw Error('T311: no se archivó original '+id);
+  };
+  const insertReplacement=async(q,x,newOptions,newStem,newCorrect,newExplanation)=>{
+    if(new Set(newOptions).size!==4||newOptions.length!==4||
+       newOptions[newCorrect]?.length<2||!newStem)
+       throw Error('T311: pregunta de sustitución inválida '+q.id);
+    const ins=await cl.query(`INSERT INTO question_bank
+      (coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+       source_page,manual_page,question_family,difficulty,graphic,validation_version,active)
+       VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,'muy alta',NULL,311,TRUE)
+       RETURNING id`,[q.coverage_item_id,newStem,JSON.stringify(newOptions),
+       newCorrect,newExplanation,x.source_evidence||q.source_evidence,q.source_page,q.manual_page,
+       q.question_family]);
+    if(ins.rowCount!==1)throw Error('T311: sustitución no insertada '+q.id);
+    inserted.push({oldId:Number(q.id),newId:Number(ins.rows[0].id)});
+    await archiveOriginal(q.id);
+  };
+  for(const x of d.hydraulic_wrong_only){
+    const q=old.get(x.id),options=q.options.slice();let n=0;
+    for(let i=0;i<4;i++)if(i!==x.correct_index)options[i]=x.wrong[n++];
+    if(new Set(options).size!==4||options[x.correct_index]!==x.expected_correct)
+      throw Error('T311: error en distractores hidráulicos '+x.id);
+    await insertReplacement(q,x,options,q.stem,q.correct_index,q.explanation);
+  }
+  for(const x of d.hydraulic_replace_weak_true_false){
+    const q=old.get(x.old_id);
+    await insertReplacement(q,x,x.options,x.stem,x.correct_index,x.explanation);
+  }
+  for(const x of [...d.question_math_variants,...d.extra_math_variants.filter(e=>e.id!==1144)]){
+    if(new Set(x.options).size!==4||x.options.length!==4||
+       x.options[x.correct_index].length<2)
+      throw Error('T311: opciones matemáticas duplicadas '+x.id);
+    const res=await cl.query(`UPDATE question_bank
+      SET stem=$2,options=$3::jsonb,explanation=$4,source_evidence=COALESCE($5,source_evidence),
+          validation_version=311,updated_at=NOW()
+      WHERE id=$1 AND active=TRUE`,[x.id,x.stem,JSON.stringify(x.options),
+      x.explanation,x.source_evidence||null]);
+    if(res.rowCount!==1)throw Error('T311: cálculo no actualizado '+x.id);
+  }
+  // Distinct previously answered T40 heat question: preserve old question
+  // with its previous answer and recorded stats; insert new numerical version.
+  const heat=d.extra_math_variants.find(e=>e.id===1144),qheat=old.get(1144);
+  const insHeat=await cl.query(`INSERT INTO question_bank
+    (coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+     source_page,manual_page,question_family,difficulty,graphic,validation_version,active)
+    VALUES ($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,NULL,311,TRUE) RETURNING id`,
+    [qheat.coverage_item_id,heat.stem,JSON.stringify(heat.options),
+     heat.correct_index,heat.explanation,heat.source_evidence,
+     qheat.source_page,qheat.manual_page,qheat.question_family,'muy alta']);
+  if(insHeat.rowCount!==1)throw Error('T311: no se clonó el cálculo térmico');
+  inserted.push({oldId:1144,newId:Number(insHeat.rows[0].id)});
+  await archiveOriginal(1144);
+  await cl.query(`UPDATE topics SET total_items=1432 WHERE id=72 AND total_items=1431`);
+  await cl.query(`UPDATE question_bank SET manual_page='281',updated_at=NOW()
+      WHERE id=2060 AND manual_page IS NULL`);
+  // En el PDF original de 40 páginas, las dos citas de p.57 impresa
+  // están en la página física 35: se corrige solo la referencia digital.
+  await cl.query(`UPDATE question_bank SET source_page=35,updated_at=NOW()
+    WHERE id IN (2378,2426) AND source_page=57 AND manual_page='57'`);
+  const checks=(await cl.query(`SELECT t.topic_order,
+    COUNT(q.*) FILTER (WHERE q.active)::int active,
+    COUNT(q.*) FILTER (WHERE q.active AND q.graphic IS NOT NULL)::int graphic,
+    COUNT(q.*) FILTER (WHERE q.active AND q.difficulty='alta')::int high_not_veryhigh
+    FROM topics t JOIN coverage_items c ON c.topic_id=t.id
+    LEFT JOIN question_bank q ON q.coverage_item_id=c.id
+    WHERE t.id=ANY(ARRAY[49,50,68]) GROUP BY t.topic_order ORDER BY t.topic_order`)).rows;
+  const expected=[[39,177,5,0],[40,196,32,0],[55,146,7,0]];
+  if(checks.length!==3||checks.some((c,i)=>c.topic_order!==expected[i][0]||
+    c.active!==expected[i][1]||c.graphic!==expected[i][2]||c.high_not_veryhigh!==expected[i][3]))
+    throw Error('T311: cardinalidad final de preguntas incorrecta '+JSON.stringify(checks));
+  const math=(await cl.query(`SELECT COUNT(*)::int n,
+    COUNT(DISTINCT stem)::int unique_stems,
+    COUNT(*) FILTER(WHERE validation_version=311)::int revised
+    FROM question_bank WHERE id BETWEEN 2297 AND 2336 AND active`)).rows[0];
+  if(math.n!==40||math.unique_stems!==40||math.revised!==30)
+    throw Error('T311: los cálculos siguen repetidos '+JSON.stringify(math));
+  const graphic=(await cl.query(`SELECT COUNT(*)::int n,
+     COUNT(DISTINCT q.graphic->>'sourceId')::int sources FROM question_bank q
+     JOIN coverage_items c ON c.id=q.coverage_item_id JOIN topics t ON t.id=c.topic_id
+     WHERE t.block='especifico' AND t.topic_order BETWEEN 38 AND 63
+       AND q.active AND q.graphic IS NOT NULL`)).rows[0];
+  if(graphic.n!==207||graphic.sources!==207)
+    throw Error('T311: se ha alterado el banco gráfico');
+  const bankTotal=(await cl.query(`SELECT COUNT(*)::int n FROM question_bank q
+    JOIN coverage_items c ON c.id=q.coverage_item_id JOIN topics t ON t.id=c.topic_id
+    WHERE t.block='especifico' AND t.topic_order BETWEEN 38 AND 63 AND q.active`)).rows[0].n;
+  if(bankTotal!==1658||inserted.length!==11)
+    throw Error('T311: pérdida o duplicación de preguntas');
+  const final46=(await cl.query(`SELECT total_items FROM topics WHERE id=72`)).rows[0];
+  const final63=(await cl.query(`SELECT manual_page FROM question_bank WHERE id=2060`)).rows[0];
+  const page44=(await cl.query(`SELECT id,source_page,manual_page FROM question_bank
+     WHERE id IN (2378,2426) ORDER BY id`)).rows;
+  if(final46.total_items!==1432||final63.manual_page!=='281'||
+    page44.length!==2||page44.some(r=>r.source_page!==35||r.manual_page!=='57'))
+    throw Error('T311: metadatos no reparados');
+  await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+     T311_MARKER,JSON.stringify({topicsAudited:26,activeQuestions:1658,
+       graphicsPreserved:207,mathVariantsDifferentiated:32,
+       mathQuestionsStillActive:74,hydraulicsSixDistractorsImproved:6,
+       hydraulicsTenHistoricsArchived:10,heatHistoricArchived:1,hydraulicsReplacementIds:inserted,
+       questionHistoryDeleted:0,coverageRecordsDeleted:0,correctedCounter:46,
+       correctedManualPage:2060,correctedSourcePages:[2378,2426],imagesAdded:0,imagesRemoved:0,
+       imageComparison:'210 screenshot files: images not equivalent to unique diagrams; awaiting original selection semantic reconciliation'})]);
+  await cl.query('COMMIT');inTx=false;
+  return {ok:true,revision:311,activeQuestions:1658,graphics:207,
+    electricalVariants:31,heatCapacityVariant:1,hydraulicQuestionsReplaced:10,
+    heatQuestionReplaced:1,hydraulicDistractorsRevised:6,knowledgeDeleted:0,historyDeleted:0,
+    protectedOriginals:inserted,mathUnique:40};
+ }catch(e){if(inTx)await cl.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -27283,6 +27566,17 @@ async function startServer(){
               console.log('T63_310_3_ORIGINALES_13_DISTRACTORES_3_CALCULOS_INTACTOS',JSON.stringify(audit));
             }catch(e){
               console.error('T63_310_NO_APLICADO_ROLLBACK:',String(e?.message||e));
+            }
+          }
+          // SERVER311: verificar T310 y T55/T56 ya aplicados antes de reparar
+          // solo los hallazgos demostrados de la auditoría global.
+          if(Number(t.id)===65){
+            try{
+              await T56_306_START_PROMISE;
+              const review311=await applyGlobalAuditRepairs311();
+              console.log('GLOBAL_311_AUDITORIA_CORRECCIONES',JSON.stringify(review311));
+            }catch(e){
+              console.error('GLOBAL_311_NO_APLICADO_ROLLBACK:',String(e?.message||e));
             }
           }
           // SERVER307: T57 curricular/soporte vital, ID 57; antiguo T46.
