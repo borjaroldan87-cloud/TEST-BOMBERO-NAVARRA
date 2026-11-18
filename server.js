@@ -3788,6 +3788,8 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   if(!n)return {skipped:true};
   // SERVER301: tras migrar T51, no reactivar su banco histórico (36 gráficas).
   if(n===59 && await t301MigrationAlready())return {skipped:true,reason:'T301_GRAFICAS_ORIGINALES_ACTIVAS'};
+  // SERVER302: no reinsertar el banco gráfico viejo después de validar las veinte preguntas.
+  if(n===51 && await t302MigrationAlready())return {skipped:true,reason:'T302_1_GRAFICA_19_TEXTOS_ACTIVOS'};
   const data=n===61?t296OverlayHealthData(healthLoadData192(n)):healthLoadData192(n);
   if(!data)return {skipped:true,missing:true};
   healthWriteImages192(n);
@@ -25088,6 +25090,196 @@ async function applyT50Revision300(){
    Solo fuente documental del usuario y exámenes oficiales facilitados por él.
    No borrar conocimientos, sesiones, respuestas correctas, estadísticas ni SRS.
 */
+/*
+ SERVER302 / T52 APERTURAS FORZADAS (ID 62; fuente histórica T51).
+ FUENTE ÚNICA: TEMA_51_APERTURAS_FORZADAS.pdf, SHA256 comprobado.
+ 20 preguntas históricas, 1 gráfica seleccionada por el usuario y 19 textuales.
+ No se modifican claves correctas, estadísticas, sesiones ni SRS.
+ La migración es transaccional e idempotente; respaldo íntegro en app_state.
+*/
+let T302_PACK_CACHE=null;
+function t302Pack(){
+  if(T302_PACK_CACHE)return T302_PACK_CACHE;
+  const d=t279ReadPack('t52_revision302_data.js',52);
+  if(d.revision!==302||d.topic_id!==62||d.legacy_number!==51||
+    d.title!=='TEMA 52. APERTURAS FORZADAS'||
+    d.pdf_source_name!=='TEMA_51_APERTURAS_FORZADAS.pdf'||
+    d.pdf_sha256!=='569b85c06e97e58c0115293b3900213601d9b76652f4d8ce37db29cff05b39b1'||
+    d.pdf_pages!==11||d.coverage_total_before!==238||
+    d.coverage_relevant_before!==238||d.question_count_before!==20||
+    d.original_bank_fingerprint!=='a0eabe2fdab277e945e324462734d1f2'||
+    d.revisions?.length!==20||d.graphic?.question_id!==1903||
+    d.graphic?.coverage_id!==38465||d.graphic?.asset_id!==109275||
+    d.graphic?.source_id!=='salud-t51/T51_FIG_01_P304.png'||
+    d.graphic?.pdf_page!==10||d.graphic?.pdf_printed_page!==304||
+    d.graphic?.file!=='T51_FIG_01_P304.png')
+    throw Error('T302: paquete/fuente/identidad fuera de los límites acordados');
+  const wanted=new Set([1903,...Array.from({length:19},(_,j)=>1963+j)]);
+  const ids=new Set();
+  for(const q of d.revisions){
+    if(!wanted.has(q.id)||ids.has(q.id)||!Number.isInteger(q.correct_index)||
+      q.correct_index<0||q.correct_index>3||
+      !/^[0-9a-f]{32}$/.test(q.original_correct_md5)||
+      typeof q.stem!=='string'||q.stem.length<70||
+      !Array.isArray(q.wrong_options)||q.wrong_options.length!==3||
+      q.wrong_options.some(s=>typeof s!=='string'||s.length<35)||
+      new Set(q.wrong_options).size!==3||q.difficulty!=='muy alta'||
+      q.image!==(q.id===1903)||!Number.isInteger(q.manual_page))
+      throw Error('T302: pregunta editorial inválida '+q?.id);
+    ids.add(q.id);
+  }
+  if(ids.size!==20)throw Error('T302: inventario incompleto');
+  T302_PACK_CACHE=d;return d;
+}
+function t302WriteImage(){
+  const d=t302Pack(),i=d.graphic;
+  const bytes=Buffer.from(i.base64,'base64');
+  const actual=createHash('sha256').update(bytes).digest('hex');
+  if(bytes.length<5000||actual!==i.sha256||
+    !bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))
+    throw Error('T302: recorte original del PDF no supera el control de integridad');
+  const dir=path.join(process.cwd(),'public','graphics','salud-t51');
+  fs.mkdirSync(dir,{recursive:true});
+  const target=path.join(dir,i.file);
+  if(fs.existsSync(target)){
+    const previous=fs.readFileSync(target);
+    if(createHash('sha256').update(previous).digest('hex')!==actual){
+      const backup=path.join(dir,'T51_FIG_01_P304_ANTES_SERVER302.png');
+      if(!fs.existsSync(backup))fs.writeFileSync(backup,previous);
+      fs.writeFileSync(target,bytes);
+      return {changed:true,backup:true,bytes:bytes.length};
+    }
+    return {changed:false,bytes:bytes.length};
+  }
+  fs.writeFileSync(target,bytes);
+  return {changed:true,bytes:bytes.length};
+}
+async function t302MigrationAlready(){
+  const r=await db.query(`SELECT COUNT(*)::int n FROM question_bank q
+    JOIN coverage_items c ON c.id=q.coverage_item_id
+    WHERE c.topic_id=62 AND q.id=ANY($1::integer[])
+      AND q.active=TRUE AND q.validation_version=302`,
+    [[1903,...Array.from({length:19},(_,j)=>1963+j)]]);
+  return r.rows[0]?.n===20;
+}
+async function applyT52Revision302(){
+  const d=t302Pack();const image=t302WriteImage();
+  const client=await db.connect();
+  try{
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(52,302)');
+    const t=(await client.query(`SELECT * FROM topics WHERE id=62 FOR UPDATE`)).rows[0];
+    if(!t||t.name!==d.title||t.block!=='especifico'||
+      Number(t.topic_order)!==52||t.source_file!==d.pdf_source_name||
+      Number(t.total_items)!==238)
+      throw Error('T302: T52 no coincide con el catálogo curricular');
+    const pdf=(await client.query(`SELECT TRIM(pdf_sha256) sha,
+      encode(sha256(pdf_bytes),'hex') real,page_count,size_bytes
+      FROM topic_local_pdfs WHERE topic_id=62`)).rows[0];
+    if(!pdf||pdf.sha!==d.pdf_sha256||pdf.real!==d.pdf_sha256||
+      Number(pdf.page_count)!==11||Number(pdf.size_bytes)!==1233452)
+      throw Error('T302: el PDF no es el original de 11 páginas cotejado');
+    const cv=(await client.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER(WHERE exam_relevant)::int eligible
+      FROM coverage_items WHERE topic_id=62`)).rows[0];
+    if(cv.n!==238||cv.eligible!==238)
+      throw Error('T302: se ha alterado la cobertura, no modificar T52');
+    const knownIds=d.revisions.map(q=>q.id);
+    const known=(await client.query(`SELECT q.*,
+      md5(q.stem) old_stem_md5,md5(q.options::text) old_options_md5,
+      c.item_type AS coverage_type,c.exam_relevant AS coverage_relevant
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=62 AND q.id=ANY($1::integer[])
+      ORDER BY q.id FOR UPDATE OF q`,[knownIds])).rows;
+    if(known.length!==20)throw Error('T302: falta una de las 20 preguntas originales');
+    const all=(await client.query(`SELECT id,question_family,graphic,active
+      FROM question_bank WHERE coverage_item_id IN
+       (SELECT id FROM coverage_items WHERE topic_id=62) FOR UPDATE`)).rows;
+    if(all.some(q=>q.active&&q.question_family==='GRAFICA'&&Number(q.id)!==1903))
+      throw Error('T302: aparecieron gráficas nuevas no seleccionadas; revisión detenida');
+    const migrated=known.every(q=>q.active===true&&Number(q.validation_version)===302);
+    if(migrated){
+      for(const q of known){
+        const e=d.revisions.find(x=>x.id===Number(q.id));
+        if(!e||!Array.isArray(q.options)||q.options.length!==4||
+          Number(q.correct_index)!==e.correct_index||
+          createHash('md5').update(q.options[q.correct_index]).digest('hex')!==e.original_correct_md5||
+          q.stem!==e.stem||((q.graphic!==null)!==e.image))
+          throw Error('T302: versión anterior parcial o respuesta cambiada '+q.id);
+      }
+      await client.query('COMMIT');
+      return {skipped:true,reason:'T52_302_YA_VALIDADO',image,...{
+        original_questions:20,graphic_questions:1,text_questions:19,coverage:238}};
+    }
+    if(known.some(q=>q.active!==true||Number(q.validation_version)!==6||
+       !Array.isArray(q.options)||q.options.length!==4))
+      throw Error('T302: hay preguntas con cambios ajenos; no sobrescribir');
+    const digest=(await client.query(`SELECT md5(string_agg(
+       q.id::text||'|'||md5(q.stem)||'|'||md5(q.options::text)||'|'||q.correct_index::text,
+       ';' ORDER BY q.id)) fingerprint FROM question_bank q WHERE q.id=ANY($1::integer[])`,
+       [knownIds])).rows[0]?.fingerprint;
+    if(digest!==d.original_bank_fingerprint)
+      throw Error('T302: huella del banco anterior divergente '+String(digest));
+    const asset=(await client.query(`SELECT * FROM graphic_assets WHERE id=$1 FOR UPDATE`,
+      [d.graphic.asset_id])).rows[0];
+    if(!asset||asset.source_id!==d.graphic.source_id||
+      asset.topic_folder!=='salud-t51'||!asset.is_usable)
+      throw Error('T302: imagen seleccionada no coincide con el registro original');
+    const before={revision:302,createdAt:new Date().toISOString(),topic:t,
+      pdf:{sha:pdf.sha,pages:pdf.page_count},coverage:cv,
+      questionBank:known,assetOriginal:asset};
+    await client.query(`INSERT INTO app_state(key,value)
+      VALUES('T52_302_BACKUP_20_PREGUNTAS_1_IMAGEN',$1)
+      ON CONFLICT(key) DO NOTHING`,[JSON.stringify(before)]);
+    await client.query(`UPDATE graphic_assets SET is_usable=TRUE,
+      analysis_status='analyzed',sanitization_version=2,
+      public_url=$2,source_evidence=$3,
+      crop_x=0,crop_y=0,crop_width=1,crop_height=1,
+      mask_regions='[]'::jsonb,updated_at=NOW() WHERE id=$1`,
+      [asset.id,'/graphics/'+d.graphic.source_id,
+        'CEIS Guadalajara, página impresa 304, imagen 35. Recorte desde PDF original sin título.']);
+    const byId=new Map(known.map(q=>[Number(q.id),q]));
+    for(const e of d.revisions){
+      const q=byId.get(e.id);
+      if(!q||!q.coverage_relevant||q.correct_index!==e.correct_index||
+         String(q.manual_page)!==String(e.manual_page)||
+         (q.question_family==='GRAFICA')!==e.image||
+         (q.graphic!==null)!==e.image||
+         createHash('md5').update(q.options[q.correct_index]).digest('hex')!==e.original_correct_md5)
+        throw Error('T302: coincidencia de página, clave o familia fallida '+e.id);
+      const options=q.options.slice();let index=0;
+      for(let j=0;j<4;j++)if(j!==q.correct_index)options[j]=e.wrong_options[index++];
+      if(new Set(options).size!==4||options[q.correct_index]!==q.options[q.correct_index]||
+         options.some(v=>typeof v!=='string'||v.length<35))
+        throw Error('T302: distractores o respuesta invalidan la pregunta '+e.id);
+      const graphic=e.image?{
+        assetId:asset.id,sourceId:d.graphic.source_id,
+        publicUrl:'/graphics/'+d.graphic.source_id,assetType:'individual',
+        externalKey:'T52-ORIG-0001',originalSelected:true,
+        crop:{x:0,y:0,width:1,height:1},maskRegions:[],
+        source:'Recorte limpio del PDF CEIS entregado por el usuario'
+      }:null;
+      await client.query(`UPDATE question_bank SET stem=$2,
+          options=$3::jsonb,graphic=$4::jsonb,
+          difficulty='muy alta',validation_version=302,updated_at=NOW()
+          WHERE id=$1`,[e.id,e.stem,JSON.stringify(options),
+          graphic?JSON.stringify(graphic):null]);
+    }
+    const done=(await client.query(`SELECT COUNT(*)::int n,
+       COUNT(*) FILTER(WHERE q.active AND q.question_family='GRAFICA'
+                         AND q.graphic IS NOT NULL)::int graphic,
+       COUNT(*) FILTER(WHERE q.active AND q.graphic IS NULL)::int texts,
+       COUNT(*) FILTER(WHERE q.validation_version=302)::int revised
+       FROM question_bank q WHERE q.id=ANY($1::integer[])`,[knownIds])).rows[0];
+    if(done.n!==20||done.graphic!==1||done.texts!==19||done.revised!==20)
+      throw Error('T302: auditoría posmigración fallida '+JSON.stringify(done));
+    await client.query('COMMIT');
+    return {updated:20,distractors:57,graphic:1,texts:19,coverage:238,
+      pdf:d.pdf_sha256,image};
+  }catch(e){await client.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{client.release();}
+}
+
 let T301_PACK_CACHE=null;
 function t301Pack(){
  if(T301_PACK_CACHE)return T301_PACK_CACHE;
@@ -25510,6 +25702,15 @@ async function startServer(){
           const base=await healthImportOnce192(t);
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
+          // T52 actual / histórico T51: revisión cerrada tras su importador.
+          if(Number(t.id)===62){
+            try{
+              const revised=await applyT52Revision302();
+              console.log('T52_302_1_GRAFICA_19_TEXTOS_AUDITADOS',JSON.stringify(revised));
+            }catch(e){
+              console.error('T52_302_NO_APLICADO_ROLLBACK:',String(e?.message||e));
+            }
+          }
           if(Number(t.id)===70){
             try{const audited=await applyT51Revision301();
               console.log('T51_301_21_GRAFICAS_60_TEXTOS_AUDITADOS',JSON.stringify(audited));
