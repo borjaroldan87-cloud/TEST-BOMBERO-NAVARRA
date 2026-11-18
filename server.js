@@ -3793,6 +3793,10 @@ async function healthImportOnce192(topic,uploadedPdfPath=null){
   if(n===51 && await t302MigrationAlready())return {skipped:true,reason:'T302_1_GRAFICA_19_TEXTOS_ACTIVOS'};
   // SERVER304: nunca restaurar las 37 gráficas de origen después de la auditoría.
   if(n===56 && await t304MigratedAlready())return {skipped:true,reason:'T304_10_GRAFICAS_ORIGINALES_CONSERVADAS'};
+  // SERVER307: el soporte vital historico T46 es el tema curricular 57.
+  // Una vez migradas sus 2 figuras de PDF a texto no reconstruirlas.
+  if(n===46 && await t307SoporteMigratedAlready())
+    return {skipped:true,reason:'T307_SOPORTE_VITAL_21_TEXTOS_CERO_GRAFICAS'};
   // SERVER305: no reinstalar figuras automáticas después de convertirlas a texto.
   if(n===57 && await t305MigratedAlready())return {skipped:true,reason:'T305_7_IMAGENES_USUARIO_31_CONVERTIDAS'};
   if(n===62 && await t306MigratedAlready())return {skipped:true,reason:'T306_52_IMAGENES_USUARIO_AUDITADAS'};
@@ -26375,6 +26379,174 @@ async function applyT55Revision305(){
 let T54_304_START_PROMISE=Promise.resolve();
 let T53_303_START_PROMISE=Promise.resolve();
 let T51_301_RETRY_PROMISE=Promise.resolve();
+
+/* SERVER307 — TEMA CURRICULAR 57 SOPORTE VITAL (historico T46).
+ * Dos recortes ilustrativos CEIS SIN captura Screenshot seleccionada por el usuario.
+ * Conserva las 21 preguntas originales y sus IDs, SRS, sesiones y estadisticas.
+ * Convierte EN SITIO las dos graficas en texto; audita otros 17 textos;
+ * preserva integramente las 2 preguntas CALCULO_FORMULACION.
+ * PDF y registros de cobertura inmutables. Transaccion y preflight estricto.
+ * No usa require() (servidor ES Modules) y nunca escribe en GitHub.
+ */
+const T307_SOPORTE_FILE=path.join(process.cwd(),'t57_soporte_revision307_data.js');
+const T307_SOPORTE_MARKER='t57_soporte_307_aplicada_v1';
+let T307_SOPORTE_CACHE=null;
+function t307SoportePack(){
+  if(T307_SOPORTE_CACHE)return T307_SOPORTE_CACHE;
+  const raw=fs.readFileSync(T307_SOPORTE_FILE,'utf8').trim();
+  const pre='module.exports = ';
+  if(!raw.startsWith(pre)||!raw.endsWith(';'))
+    throw Error('T307: paquete de datos con formato desconocido');
+  const d=JSON.parse(raw.slice(pre.length,-1));
+  const ids=(d.questions||[]).map(q=>q.id);
+  if(d.schema!==1||d.revision!==307||d.topic_id!==57||d.curricular_number!==57||
+     d.legacy_number!==46||d.pdf_sha256!==
+       'a72f123bbeb75a04445157be0342f135a1dbdf5657068d561db763f693590dc1'||
+     d.pdf_pages!==28||d.coverage_total!==390||d.expected_active_questions!==21||
+     d.previous_graphic_questions!==2||d.selected_screenshots!==0||
+     d.questions?.length!==19||new Set(ids).size!==19||
+     JSON.stringify(d.calculations_preserved_ids)!=='[1913,1952]'||
+     JSON.stringify(d.converted_to_text_ids)!=='[1900,1901]'||
+     JSON.stringify(d.graphic_asset_ids_to_disable)!=='[109272,109273]'||
+     d.questions.some(q=>q.distractors?.length!==3||
+       new Set([q.expected_correct,...q.distractors]).size!==4||
+       !Number.isInteger(q.correct_index)||q.correct_index<0||q.correct_index>3||
+       q.convert_graphic!==(q.id===1900||q.id===1901)||
+       (q.convert_graphic && !q.new_stem)))
+    throw Error('T307: inventario de 19 revisiones, 2 conversiones, 2 calculos o fuente no coincide');
+  T307_SOPORTE_CACHE=d;return d;
+}
+async function t307SoporteMigratedAlready(){
+  const r=await db.query('SELECT 1 FROM app_state WHERE key=$1',[T307_SOPORTE_MARKER]);
+  return r.rowCount>0;
+}
+async function applyT57SoporteRevision307(){
+  const d=t307SoportePack();
+  const cl=await db.connect();
+  try{
+    await cl.query('BEGIN');
+    await cl.query('SELECT pg_advisory_xact_lock($1)',[307057]);
+    const already=await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',
+      [T307_SOPORTE_MARKER]);
+    const t=(await cl.query(`SELECT id,name,topic_order,block,total_items FROM topics
+      WHERE id=57 FOR UPDATE`)).rows[0];
+    if(!t||Number(t.topic_order)!==57||t.block!=='especifico'||
+       !/^TEMA\s*57\.\s*SOPORTE VITAL$/i.test(t.name)||
+       Number(t.total_items)!==390)
+      throw Error('T307: identidad, orden o cobertura del tema cambiados');
+    const source=(await cl.query(`SELECT TRIM(pdf_sha256) sha,page_count,size_bytes
+      FROM topic_local_pdfs WHERE topic_id=57`)).rows[0];
+    if(!source||source.sha!==d.pdf_sha256||Number(source.page_count)!==28||
+       Number(source.size_bytes)!==3752076)
+      throw Error('T307: el PDF local de soporte vital no coincide con el original');
+    const rows=(await cl.query(`SELECT q.id,q.coverage_item_id,q.stem,q.options,
+      q.correct_index,q.explanation,q.source_evidence,q.source_page,q.manual_page,
+      q.question_family,q.difficulty,q.graphic,q.active,q.validation_version,
+      q.times_shown,q.times_correct,q.times_wrong,q.times_blank
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=57 ORDER BY q.id FOR UPDATE OF q`)).rows;
+    const assets=(await cl.query(`SELECT id,source_id,source_file,topic_folder,is_usable,
+      analysis_status FROM graphic_assets
+      WHERE topic_folder IN('salud-t46','salud-t57') ORDER BY id FOR UPDATE`)).rows;
+    const coverage=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER (WHERE exam_relevant)::int relevant
+      FROM coverage_items WHERE topic_id=57`)).rows[0];
+    if(coverage.n!==390||coverage.relevant!==390||rows.length!==21||
+       rows.some(q=>q.active!==true)||assets.length!==33||
+       assets.some(a=>a.source_file?.startsWith('Screenshot_')))
+      throw Error('T307: inventario de cobertura, banco o capturas originales distinto');
+    const byId=new Map(rows.map(q=>[Number(q.id),q]));
+    const dataIds=new Set(d.questions.map(q=>q.id));
+    const calcIds=new Set(d.calculations_preserved_ids);
+    if(rows.some(q=>!dataIds.has(Number(q.id))&&!calcIds.has(Number(q.id))))
+      throw Error('T307: preguntas activas desconocidas; no sobrescribir');
+    const calcs=d.calculations_preserved_ids.map(id=>byId.get(id));
+    if(calcs.some(q=>!q||q.question_family!=='CALCULO_FORMULACION'||q.graphic!==null))
+      throw Error('T307: calculos preexistentes distintos; cancelar sin cambios');
+    const graphics=rows.filter(q=>q.graphic!==null);
+    const usable=assets.filter(a=>a.is_usable);
+    if(already.rowCount){
+      if(graphics.length!==0||usable.length!==0||
+         d.questions.some(x=>byId.get(x.id)?.validation_version!==307))
+        throw Error('T307: marcador presente pero migracion incompleta');
+      await cl.query('COMMIT');
+      return {ok:true,skipped:true,topic:57,questions:21,graphics:0,texts:21,calculationsPreserved:2};
+    }
+    if(graphics.length!==2||graphics.some(q=>!d.converted_to_text_ids.includes(Number(q.id)))||
+       usable.length!==2||usable.some(a=>!d.graphic_asset_ids_to_disable.includes(Number(a.id)))||
+       assets.filter(a=>a.topic_folder==='salud-t57').length!==31||
+       assets.some(a=>a.topic_folder==='salud-t57'&&a.is_usable))
+      throw Error('T307: la seleccion de graficas no coincide con las 2 figuras CEIS');
+    for(let i=0;i<2;i++){
+      const q=byId.get(d.converted_to_text_ids[i]);
+      if(q.graphic?.sourceId!==d.graphic_asset_source_ids[i]||
+         Number(q.graphic.assetId)!==d.graphic_asset_ids_to_disable[i]||
+         q.question_family!=='GRAFICA')
+        throw Error('T307: pregunta grafica historica no coincide con su recurso');
+    }
+    for(const v of d.questions){
+      const q=byId.get(v.id);
+      if(!q||q.active!==true||Number(q.correct_index)!==v.correct_index||
+         !Array.isArray(q.options)||q.options.length!==4||
+         q.options[q.correct_index]!==v.expected_correct||
+         q.validation_version!==6||!q.source_evidence||
+         (v.convert_graphic && q.graphic===null)||
+         (!v.convert_graphic && q.graphic!==null))
+        throw Error('T307: respuesta original, fuente o version distinta en ID '+v.id);
+    }
+    // Respaldo de registros ANTES de alterarlos; ni la cobertura ni el historico
+    // de respuestas, sesiones y SRS se borran o se modifican.
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,['t57_soporte_307_respaldo_originales',
+        JSON.stringify({topicId:57,questions:rows,assets,source})]);
+    let changed=0;
+    for(const v of d.questions){
+      const q=byId.get(v.id);
+      let j=0;
+      const options=q.options.map((x,i)=>i===q.correct_index?x:v.distractors[j++]);
+      if(j!==3||options[q.correct_index]!==v.expected_correct||
+         new Set(options).size!==4||options.some(x=>!x||typeof x!=='string'))
+        throw Error('T307: clave o alternativas incorrectas ID '+v.id);
+      const stem=v.convert_graphic?v.new_stem:q.stem;
+      if(v.convert_graphic && !/^(En el paciente representado|En el adulto consciente)/.test(q.stem))
+        throw Error('T307: enunciado grafico historico inesperado '+v.id);
+      const family=v.convert_graphic?'2026_RAZONAMIENTO':q.question_family;
+      const done=await cl.query(`UPDATE question_bank SET stem=$2,options=$3::jsonb,
+        question_family=$4,difficulty='muy alta',graphic=NULL,
+        validation_version=307,updated_at=NOW() WHERE id=$1 AND active=TRUE`,
+        [v.id,stem,JSON.stringify(options),family]);
+      if(done.rowCount!==1)throw Error('T307: no se pudo actualizar pregunta '+v.id);
+      changed++;
+    }
+    const disabled=await cl.query(`UPDATE graphic_assets SET is_usable=FALSE,
+      analysis_status='superseded',updated_at=NOW()
+      WHERE id=ANY($1::int[]) AND is_usable=TRUE`,[d.graphic_asset_ids_to_disable]);
+    if(disabled.rowCount!==2)throw Error('T307: cantidad de recursos automaticos retirada distinta');
+    const final=(await cl.query(`SELECT COUNT(*)::int n,
+      COUNT(*) FILTER (WHERE active)::int active,
+      COUNT(*) FILTER (WHERE active AND graphic IS NOT NULL)::int graphics,
+      COUNT(*) FILTER (WHERE active AND graphic IS NULL)::int texts,
+      COUNT(*) FILTER (WHERE active AND validation_version=307)::int revised,
+      COUNT(*) FILTER (WHERE active AND question_family='CALCULO_FORMULACION')::int calculations
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE c.topic_id=57`)).rows[0];
+    const activeAssets=(await cl.query(`SELECT COUNT(*)::int n FROM graphic_assets
+      WHERE topic_folder IN('salud-t46','salud-t57') AND is_usable=TRUE`)).rows[0].n;
+    if(changed!==19||final.n!==21||final.active!==21||final.graphics!==0||
+       final.texts!==21||final.revised!==19||final.calculations!==2||activeAssets!==0)
+      throw Error('T307: comprobacion final fallida; transaccion revertida');
+    await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+      T307_SOPORTE_MARKER,
+      JSON.stringify({topicId:57,reviewed:19,graphicsToText:2,retainedCalculations:2,
+        coverage:390,originalIdPreserved:21,backup:'t57_soporte_307_respaldo_originales'})]);
+    await cl.query('COMMIT');
+    return {ok:true,topic:57,reviewed:19,graphicsConvertedToText:2,
+      totalTextQuestions:21,calculationsPreserved:2,originalIdsPreserved:21,
+      coveragePreserved:390,assetsRetired:2,deletedHistory:0};
+  }catch(e){await cl.query('ROLLBACK').catch(()=>{});throw e;}
+  finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -26568,6 +26740,18 @@ async function startServer(){
           if(healthTopicNumber192(t)===56)await t56EnsureLocalPdf213(t);
           if(healthTopicNumber192(t)===58)await t58EnsureLocalPdf221(t);
           const base=await healthImportOnce192(t);
+          // SERVER307: T57 curricular/soporte vital, ID 57; antiguo T46.
+          // Ejecutar despues del importador historico y ANTES de tareas
+          // suplementarias independientes para no reactivar graficas de PDF.
+          if(Number(t.id)===57){
+            try{
+              const reviewed=await applyT57SoporteRevision307();
+              console.log('T57_307_SOPORTE_VITAL_19_TEXTOS_AUDITADOS_2_CALCULOS_INTACTOS',
+                JSON.stringify(reviewed));
+            }catch(error){
+              console.error('T57_307_NO_APLICADO_ROLLBACK:',String(error?.message||error));
+            }
+          }
           // Importar cobertura DESPUÉS de finalizar la importación existente.
           const supplement=await t4650CoverageImport197(t);
           // T52 actual / histórico T51: revisión cerrada tras su importador.
