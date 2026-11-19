@@ -27397,16 +27397,23 @@ async function applyT40Distractors313(){
        JOIN topics t ON t.id=c.topic_id WHERE q.id=ANY($1::bigint[])
        ORDER BY q.id FOR UPDATE OF q`,[ids])).rows;
     if(originals.length!==3)throw Error('T313: faltan preguntas antiguas');
-    const activeStats=(await cl.query(`SELECT COUNT(*) FILTER(WHERE q.active)::int AS questions,
-      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic
+    // SERVER315: el banco textual crece legítimamente al realizar tests.
+    // SERVER311 certificó 1658 preguntas y 207 gráficas; 1658 es el MÍNIMO
+    // histórico protegido, no un límite máximo para nuevas preguntas.
+    // Las 32 gráficas de T40 permanecen fijas, según selección original.
+    const activeStats=(await cl.query(`SELECT
+      COUNT(*) FILTER(WHERE q.active)::int AS questions,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic,
+      COUNT(*) FILTER(WHERE q.active AND t.id=50)::int AS t40_questions,
+      COUNT(*) FILTER(WHERE q.active AND t.id=50 AND q.graphic IS NOT NULL)::int AS t40_graphic
       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
       JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
       AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
-    if(activeStats.questions!==1658||activeStats.graphic!==207){
-      const err=Error('T313: recuentos previos distintos del auditado ('+
-        'activas='+String(activeStats.questions)+', graficas='+String(activeStats.graphic)+')');
-      // SERVER314: este estado puede ser transitorio mientras terminan
-      // sincronizaciones históricas concurrentes durante el arranque.
+    if(activeStats.questions<1658||activeStats.graphic!==207||
+       activeStats.t40_questions<196||activeStats.t40_graphic!==32){
+      const err=Error('T313: inventario inferior al validado o gráficas divergentes ('+
+        'activas='+String(activeStats.questions)+', graficas='+String(activeStats.graphic)+
+        ', t40='+String(activeStats.t40_questions)+'/'+String(activeStats.t40_graphic)+')');
       err.code='T313_STARTUP_COUNTS_PENDING';
       throw err;
     }
@@ -27434,19 +27441,29 @@ async function applyT40Distractors313(){
       if(newer.rowCount!==1)throw Error('T313: no se pudo crear la pregunta sustituta '+spec.id);
       newIds.push(Number(newer.rows[0].id));
     }
-    const finalStats=(await cl.query(`SELECT COUNT(*) FILTER(WHERE q.active)::int AS questions,
-      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic
+    const finalStats=(await cl.query(`SELECT
+      COUNT(*) FILTER(WHERE q.active)::int AS questions,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic,
+      COUNT(*) FILTER(WHERE q.active AND t.id=50)::int AS t40_questions,
+      COUNT(*) FILTER(WHERE q.active AND t.id=50 AND q.graphic IS NOT NULL)::int AS t40_graphic
       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
       JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
       AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
-    if(finalStats.questions!==1658||finalStats.graphic!==207){
-      const err=Error('T313: cambió número de preguntas o imágenes ('+
-        'activas='+String(finalStats.questions)+', graficas='+String(finalStats.graphic)+')');
+    // No permitir que nuestra migración cambie ni el total ni las gráficas,
+    // incluso si el banco ahora contiene preguntas nuevas de tests.
+    if(finalStats.questions!==activeStats.questions||
+       finalStats.graphic!==activeStats.graphic||
+       finalStats.t40_questions!==activeStats.t40_questions||
+       finalStats.t40_graphic!==activeStats.t40_graphic){
+      const err=Error('T313: cambio inesperado de preguntas o imágenes ('+
+        'antes='+JSON.stringify(activeStats)+', despues='+JSON.stringify(finalStats)+')');
       err.code='T313_STARTUP_COUNTS_PENDING';
       throw err;
     }
     const payload={ok:true,revision:313,oldIds:ids,newIds,
-      active:1658,graphics:207,historyDeleted:0,answersChanged:0,knowledgeDeleted:0};
+      active:activeStats.questions,graphics:activeStats.graphic,
+      t40Questions:activeStats.t40_questions,t40Graphics:activeStats.t40_graphic,
+      historyDeleted:0,answersChanged:0,knowledgeDeleted:0};
     await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[T313_KEY,JSON.stringify(payload)]);
     await cl.query('COMMIT');inTx=false;
     return payload;
@@ -27455,10 +27472,10 @@ async function applyT40Distractors313(){
 }
 
 
-// SERVER314: reutiliza SIN RELAJAR la auditoría transaccional T313.
-// Otros importadores del arranque escriben concurrentemente y pueden dejar
-// un recuento transitorio distinto de 1658/207. Reintentar solo ese caso;
-// divergencias de contenido, imagen o respuesta se siguen rechazando.
+// SERVER315: migración idempotente con recuento dinámico de preguntas
+// textuales y 207 fuentes gráficas auditadas; acepta nuevos tests, pero no
+// pérdida de preguntas, figuras ni variaciones en las tres respuestas.
+// SERVER314 mantiene reintentos únicamente ante concurrencia transitoria.
 async function applyT40Distractors313AfterStartup314(){
   const maxAttempts=25;
   for(let attempt=1;attempt<=maxAttempts;attempt++){
