@@ -17691,6 +17691,106 @@ function t39Hydraulica(item){
     coverageTopicNumber(item?.topic_name)===39 &&
     /hidr[aá]ulica/i.test(String(item?.topic_name||''));
 }
+
+// SERVER318: los datos de TABLAS del T39 son conocimientos examinables.
+// Una fila de tabla es lectura de una asociación documentada, NO un cálculo
+// deducible de una ley con basisQuotes. No borrar, degradar ni excluir fichas.
+function t39LiteralTable318(t){
+  return t39Hydraulica(t) &&
+    ['tabla','dato_numerico'].includes(String(t?.item_type||'').toLowerCase()) &&
+    ['identificacion','literal'].includes(String(t?.evaluation_type||'').toLowerCase()) &&
+    /^Tabla\s+\d+\b/i.test(String(t?.section||'')) &&
+    /^Tabla\s+\d+\b/i.test(String(t?.source_evidence||''));
+}
+function t39TableRow318(t){
+  if(!t39LiteralTable318(t))return null;
+  const section=String(t.section||'');
+  const src=String(t.source_evidence||'').trim();
+  const tab=Number(section.match(/^Tabla\s+(\d+)/i)?.[1]);
+  let m=null,kind='',label='',value='',unit='';
+  if(tab===1){
+    m=src.match(/:\s*([^:=]+?)\s*=\s*(\d+(?:[.,]\d+)?)\s+densidad\s+relativa$/i);
+    if(m){kind='densidad_relativa';label=m[1].trim();value=m[2];unit='densidad relativa';}
+  }else if(tab===2){
+    m=src.match(/\bT\s*=\s*(\d+)\s*°\s*C\s*=\s*(\d+(?:[.,]\d+)?)\s*(kg\s*\/\s*cm[²2])/i);
+    if(m){kind='presion_vapor';label=`T=${m[1]} °C`;value=m[2];unit=m[3].replace(/\s+/g,'').replace(/2$/,'²');}
+  }else if(tab===3){
+    m=src.match(/Tabla\s*3\s*:\s*1\s*(ATM|bar)\s*=\s*(\d+(?:[.,]\d+)?)\s*(Kg\/cm[²2]|m\.c\.a\.|Pa)\s*$/i);
+    if(m){kind='equivalencia_presion';label=`1 ${m[1].toUpperCase()}`;
+      value=m[2];unit=m[3].replace(/2$/,'²');}
+  }else if(tab===4){
+    m=src.match(/\bLanza\s+(25|45|70)\s+(boquilla|caudal)\s+(min|max)\s*=\s*(\d+(?:[.,]\d+)?)\s*(mm|l\/min)/i);
+    if(m){kind=`${m[2].toLowerCase()}_${m[3].toLowerCase()}`;label=`Lanza ${m[1]}`;value=m[4];unit=m[5];}
+  }else if(tab===5){
+    m=src.match(/\bAltitud\s+(\d+)\s*m\s*=\s*(\d+(?:[.,]\d+)?)\s*m\.c\.a\./i);
+    if(m){kind='atmosferica_altitud';label=`Altitud ${m[1]} m`;value=m[2];unit='m.c.a.';}
+  }else if(tab===6){
+    m=src.match(/\bT\s*=\s*(\d+)\s*°\s*C\s*=\s*(\d+(?:[.,]\d+)?)\s*m\.c\.a\./i);
+    if(m){kind='perdida_aspiracion';label=`T=${m[1]} °C`;value=m[2];unit='m.c.a.';}
+  }else if(tab===7){
+    m=src.match(/\bCaudal\s+(\d+)\s*l\/min\s*;\s*di[aá]metro\s+(25|45|70)\s*=\s*(\d+(?:[.,]\d+)?)\s*bar/i);
+    if(m){kind='perdida_carga';label=`${m[1]} l/min, diámetro ${m[2]}`;value=m[3];unit='bar';}
+  }else if(tab===9){
+    m=src.match(/\bLanza\s+(25|45|70)\s*;\s*presi[oó]n\s+(\d+)\s*kg\/cm[²2]\s*=\s*(\d+(?:[.,]\d+)?)\s*m\b/i);
+    if(m){kind='alcance_lanzas';label=`Lanza ${m[1]} a ${m[2]} kg/cm²`;value=m[3];unit='m';}
+  }
+  if(!m||!value||!unit)return null;
+  return {id:Number(t.id),topic_id:Number(t.topic_id),tab,kind,label,value,unit,
+    section,src,manual_page:String(t.manual_page||''),source_page:t.source_page};
+}
+function t39CompositeTable318(target,sourceRows,seed=0,difficulty='muy alta'){
+  const f=t39TableRow318(target);
+  if(!f || target.t39StrictCalculation133)return null;
+  const same=(sourceRows||[]).map(t39TableRow318).filter(x=>x&&
+    x.tab===f.tab&&x.kind===f.kind&&
+    (f.tab===3||x.unit===f.unit)&&x.manual_page===f.manual_page);
+  const dedup=[...new Map(same.map(x=>[x.label+'|'+x.unit,x])).values()];
+  const registered=dedup.find(x=>x.id===f.id);
+  // La base no puede autorizar una fila diferente bajo el mismo ID.
+  if(!registered||registered.src!==f.src||registered.label!==f.label||
+    registered.value!==f.value||dedup.length<3)return null;
+  // Escoger 2 filas diferentes, pero el conocimiento objetivo siempre aparece.
+  const others=dedup.filter(x=>x.id!==f.id && (f.tab===3||x.value!==f.value));
+  if(others.length<2)return null;
+  const offset=Math.abs(Number(seed)||0)%others.length;
+  const second=others[offset];
+  const third=others.slice(offset+1).concat(others.slice(0,offset))
+    .find(x=>x.id!==second.id && (f.tab===3||x.value!==second.value));
+  if(!third)return null;
+  const chosen=[f,second,third];
+  if(f.tab!==3&&new Set(chosen.map(x=>x.value)).size!==3)return null;
+  let options;
+  if(f.tab===3){
+    // En esta tabla las unidades de salida son DIFERENTES: alterar sólo
+    // la UNIDAD/PRESIÓN DE ORIGEN, no cruzar kg/cm² con Pa ni inventar leyes.
+    const fmt=changed=>chosen.map((x,i)=>{
+      const label=i===changed?(x.label.endsWith('ATM')?'1 BAR':'1 ATM'):x.label;
+      return `${label} = ${x.value} ${x.unit}`;
+    }).join('; ')+'.';
+    options=[fmt(-1),fmt(0),fmt(1),fmt(2)];
+  }else{
+    const [a,b,c]=chosen;const triples=[[a.value,b.value,c.value],
+      [b.value,a.value,c.value],[c.value,b.value,a.value],[a.value,c.value,b.value]];
+    const opt=values=>chosen.map((x,i)=>`${x.label}: ${values[i]} ${f.unit}`).join('; ')+'.';
+    options=triples.map(opt);
+  }
+  if(new Set(options).size!==4)return null;
+  const text={1:'densidad relativa de los materiales',2:'presión de vapor del agua',
+    3:'equivalencias de presión',5:'presión atmosférica por altitud',
+    6:'pérdidas de aspiración',7:'pérdidas de carga según caudal y diámetro',
+    9:'alcance según presión y lanza'}[f.tab]||
+    (f.kind.startsWith('boquilla')?'diámetro de boquilla':'caudal de lanza');
+  const conditionList=chosen.map(x=>f.tab===3?`${x.label} expresada en ${x.unit}`:x.label);
+  const stem=`De acuerdo con la tabla ${f.tab} del manual, ¿qué asociación corresponde simultáneamente a ${conditionList.join(', ')}, respecto a ${text} y con las condiciones originales de la tabla?`;
+  const evidence=chosen.map(x=>x.src).join(' | ');
+  const q={stem,options,correctIndex:0,
+    explanation:`Correspondencias literales de la tabla ${f.tab}, p. ${f.manual_page}: ${options[0]}`,
+    sourceEvidence:evidence,sourcePage:f.source_page,manualPage:f.manual_page,
+    questionFamily:'2026_RAZONAMIENTO',difficulty,graphic:null,
+    resetLocal136:true,t39Tabla318:true,t39TablaRows318:chosen.map(x=>x.id)};
+  return resetShape136(q)?null:q;
+}
+
 // Mantener la transcripción del PDF palabra por palabra. Las correcciones
 // del usuario se facilitan por separado en T39_REGLAS_HIDRAULICA, con igual
 // autoridad; no sustituir silenciosamente el texto de coverage_items.
@@ -18131,6 +18231,9 @@ function t39CaudalOptions145(q){
 }
 function t39PreflightIssue143(q,t,difficulty,mode){
   if(!t39Hydraulica(t)||!q||!Array.isArray(q.options))return null;
+  // SERVER318: la tabla aporta el dato; no es un ejercicio con unidad SI
+  // obligatoria ni requiere fórmula para consultar una asociación literal.
+  if(t39LiteralTable318(t))return null;
   const stem=String(q.stem||'');
   const numeric=t39StrictNumeric133(q);
   if(!numeric){
@@ -18232,6 +18335,7 @@ function t39BasisProof144(a,target,question){
 function t39GenerationPrompt141(targets,difficulty,mode){
   const objectives=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,
     epigrafe:t.section,concepto:t.concept,
+    tipoFuente:t39LiteralTable318(t)?'FILA_LITERAL_TABLA':'FORMULA_O_TEORIA',
     fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO',
     paginaImpresa:String(t.manual_page??''),
@@ -18265,6 +18369,13 @@ D) Antes de redactar un ejercicio identifica la cita LITERAL de cada
 E) La teoría sigue siendo evaluable sin convertirla artificialmente en
    cálculo. Los ejercicios difíciles requieren razonamiento pero NUNCA una
    fórmula externa para fabricar dificultad.
+F) LAS FILAS DE TABLAS que tienen tipoFuente=FILA_LITERAL_TABLA son DATOS
+   EXAMINABLES: comprueba la asociación literal de fila, columna, cifra,
+   unidad y condiciones. NO las trates como una fórmula ni exijas
+   derivación o basisQuotes. Conserva unidades del propio PDF, incluso
+   cuando NO sean SI: NO conviertas un dato literal en un cálculo ficticio.
+   Dificultad alta por asociaciones contrastables y distractores del
+   MISMO tipo de dato, nunca inventando una ley o interpolando tablas.
 T39 CÁLCULOS CON MODELO COMPLETO: para un objetivo con modeloCompleto,
 USA COMO PATRÓN el enunciado, las cuatro opciones, la respuesta y la resolución
 COMPLETOS de ese único modelo. Conserva el fenómeno, la incógnita, los pasos
@@ -18858,6 +18969,7 @@ exactamente el número de preguntas solicitado.
        /seg[uú]n la tabla|qu[eé] combinaci[oó]n.*figura/i.test(q.stem))return [];
     return [{index:i,tema:group[i].topic_name,
       epigrafe:group[i].section,concepto:group[i].concept,
+      tipoFuente:t39LiteralTable318(group[i])?'FILA_LITERAL_TABLA':'FORMULA_O_TEORIA',
       fragmento:String(group[i].source_evidence||'').slice(0,t39Hydraulica(group[i])?3000:3500),
       stem:q.stem,options:q.options,
       ...(iiff91Topic(group[i])?{explanation:q.explanation}:{})}];
@@ -19056,6 +19168,20 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    La cita puede proceder del fragmento o de las aclaraciones expresas.
 6. No rechaces por no encontrar en el PDF cifras inventadas para el problema.
 7. Bernoulli: teoría y fórmula permitidas, cálculos numéricos prohibidos.
+8. SERVER318, TABLAS: cuando la ficha fuente esté identificada como dato
+   literal de TABLA (item_type=tabla/dato_numerico, evaluación literal o
+   identificación), una pregunta que pida la cifra, asociación, columna o
+   condición exacta NO es ejercicio aritmético. Valida la respuesta usando
+   el dato LITERAL de la tabla con su UNIDAD ORIGINAL. No exijas fórmulas,
+   basisQuotes cuantitativas, derivation, conversiones SI ni reasoningOk de
+   cálculo en ese caso. Sí exige respuesta única, cita literal de la fila,
+   cuatro opciones del mismo ámbito y distractores plausibles; no interpolar,
+   extrapolar, redondear arbitrariamente ni inventar entradas. Si la pregunta
+   añade una operación numérica real, conserva TODAS las exigencias de cálculo.
+   Para una tabla literal, relationOk=true si la asociación exacta fila-valor-
+   unidad consta en la cita; unitsOk=true si respeta la unidad ORIGINAL,
+   y basisQuotes=[]/derivation='' porque no se está deduciendo una ley.
+   Si la clave es incoherente con la tabla, answer=-1 y relationOk=false.
 No añadas explicaciones fuera del JSON exigido.
 ACLARACIONES AUTORIZADAS: ${T39_REGLAS_HIDRAULICA}
 FILAS: ${JSON.stringify(blind)}` : null;
@@ -19098,7 +19224,8 @@ FILAS: ${JSON.stringify(blind)}` : null;
     fichasOriginales:group.length,candidatas:questions.length}));
   const validated=questions.map((q,i)=>{
     const a=auditByIndex142.get(i);
-    const strictT39=t39Hydraulica(group[i])&&t39StrictNumeric133(q);
+    const strictT39=t39Hydraulica(group[i])&&!t39LiteralTable318(group[i])&&
+      t39StrictNumeric133(q);
     const math154=strictT39?t39Math154(q):null;
     // Si la operación puede reconstruirse del enunciado, la verdad numérica
     // prevalece sobre el índice erróneo del modelo. Los criterios documentales
@@ -19115,7 +19242,8 @@ FILAS: ${JSON.stringify(blind)}` : null;
     if(strictT39&&!math154&&!t39Arithmetic154(a?.solution))return null;
     // SERVER148: la validación dimensional es obligatoria para cálculos;
     // en teoría importa la correspondencia factual, no una unidad inexistente.
-    const t39AuditFailure143=onlyT39&&(a?.relationOk!==true||
+    const t39AuditFailure143=onlyT39&&(
+      (!t39LiteralTable318(group[i])&&a?.relationOk!==true)||
       (strictT39&&a?.unitsOk!==true)||
       (strictT39&&['alta','muy alta'].includes(difficulty)&&a?.reasoningOk!==true)||
       (strictT39&&(!String(a?.solution||'').trim()||
@@ -20838,9 +20966,28 @@ app.post('/api/generate',async(req,res)=>{
       const riverLocalSlots=new Set(riverCandidates.filter((_,j)=>j%5===0).map(x=>x.index));
       const riverProofs=riverLocalSlots.size?await geo114RiverComparators(targets):[];
       const usedLocalStems=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
+      // SERVER318: una sola consulta de datos ya indexados para tablas T39.
+      // No se reindexa el PDF ni se añaden rondas Gemini para esas fichas.
+      let t39TableRows318=[];
+      const t39TableTopics318=[...new Set(todo.filter(x=>t39LiteralTable318(x.t))
+        .map(x=>Number(x.t.topic_id)).filter(Number.isInteger))];
+      if(t39TableTopics318.length){
+        try{
+          const facts=await db.query(`SELECT c.id,c.topic_id,t.name AS topic_name,
+            t.block AS topic_block,c.section,c.concept,c.item_type,
+            c.evaluation_type,c.source_evidence,c.source_page,c.manual_page
+            FROM coverage_items c JOIN topics t ON t.id=c.topic_id
+            WHERE c.topic_id=ANY($1::int[]) AND c.exam_relevant=TRUE
+              AND c.section ILIKE 'Tabla %'
+              AND c.item_type IN ('tabla','dato_numerico')
+            ORDER BY c.id LIMIT 300`,[t39TableTopics318]);
+          t39TableRows318=facts.rows;
+        }catch(e){console.warn('T39_318_TABLAS_CONSULTA:',String(e?.message||e));}
+      }
       for(const {t,index} of todo){
         for(const shift of [0,1]){
-          const local=t40TablaPregunta175(t,index+shift,difficulty) ||
+          const local=t39CompositeTable318(t,t39TableRows318,index+shift,difficulty)||
+            t40TablaPregunta175(t,index+shift,difficulty) ||
           t40FormulaQr175(t,difficulty) ||
           t40AguaLiquida176(t,difficulty) ||
           (shift===0 && riverLocalSlots.has(index)
@@ -20935,6 +21082,20 @@ app.post('/api/generate',async(req,res)=>{
             Math.max(1000,count*50),topicIds,examMode,freshOnly111);
           const occupied=new Set(targets.filter((_,idx)=>Boolean(questions[idx])).map(t=>Number(t.id)));
           for(const slot of holes){
+            // SERVER318: recuperar tablas T39 por su dato literal; una sola
+            // fuente, sin inventar fórmulas ni aceptar preguntas no auditadas.
+            if(t39LiteralTable318(slot.t)){
+              const local=t39CompositeTable318(slot.t,t39TableRows318,
+                slot.index+round119+1,difficulty);
+              if(local&&!acceptedStems.has(R136_NORM(local.stem))){
+                questions[slot.index]=local;
+                acceptedStems.add(R136_NORM(local.stem));
+                console.log('T39_318_TABLA_LOCAL:',JSON.stringify({
+                  slot:slot.index,coverageId:Number(slot.t.id),
+                  rows:local.t39TablaRows318}));
+                continue;
+              }
+            }
             // SERVER177: antes de volver a pagar un lote, completar T22 con
             // un ejercicio factual de rutas si los tres distractores son
             // diferentes, elegibles y provienen del MISMO PDF/TEMA.
