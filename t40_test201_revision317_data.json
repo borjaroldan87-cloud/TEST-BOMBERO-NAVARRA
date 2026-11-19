@@ -1,0 +1,198 @@
+{
+  "schema": 1,
+  "revision": 317,
+  "topic_id": 50,
+  "source_session": 201,
+  "revisions": [
+    {
+      "id": 2983,
+      "stemMd5": "6521326d86d81933d83e2d4b844e2afa",
+      "optionsMd5": "019ce142c1dd263d172f19bc0e8a2728",
+      "correctIndex": 0,
+      "correct": "Desplazar el flujo a través del recinto incendiado, coordinando esa circulación con el ataque al fuego y la salida prevista.",
+      "options": [
+        "Desplazar el flujo a través del recinto incendiado, coordinando esa circulación con el ataque al fuego y la salida prevista.",
+        "Mantener el recorrido del aire fuera del foco, trasladando únicamente la salida de gases a otra estancia no incendiada.",
+        "Abrir el acceso al foco, pero mantener la circulación principal de aire fuera del recinto incendiado.",
+        "Aumentar el caudal del impulsor de entrada, conservando el mismo recorrido exterior al foco que muestra el esquema."
+      ],
+      "stem": "Observe el trazado de la corriente y la situación del foco en la planta. ¿Qué modificación del recorrido representado transformaría la ventilación defensiva en ofensiva manteniendo el impulsor de entrada?",
+      "explanation": "CEIS, p. 132, imagen 119: en la ventilación defensiva el flujo rodea el foco sin atravesarlo. La modalidad ofensiva lo atraviesa y exige coordinar la ventilación con la extinción.",
+      "graphicClean": true
+    },
+    {
+      "id": 2984,
+      "stemMd5": "0c7e91dd7f9fbf6992ff3b90aaa16663",
+      "optionsMd5": "b8fa90e55fbc8a1d0fe0d3930ef24a7f",
+      "correctIndex": 1,
+      "correct": "Presurizar la zona común, confinar el foco y evacuar los gases de los espacios no incendiados sin atravesarlo.",
+      "options": [
+        "Presurizar la zona común, abrir el recinto incendiado y dirigir hacia él el flujo de gases antes de su evacuación.",
+        "Presurizar la zona común, confinar el foco y evacuar los gases de los espacios no incendiados sin atravesarlo.",
+        "Presurizar la zona común, mantener el foco sectorizado y establecer la salida principal de gases a través de ese mismo foco.",
+        "Presurizar la zona del incendio, mantener las zonas comunes en depresión y evacuar el humo desde la ruta de acceso."
+      ],
+      "stem": "Examine el recorrido azul del aire, la posición de los equipos y la zona del fuego en el corte. ¿Qué combinación de presión, confinamiento y ruta de evacuación se corresponde con la disposición dibujada?",
+      "explanation": "CEIS, p. 132, imagen 120: la VPP defensiva evacua los gases del resto de la estructura sin atravesar el foco, que permanece confinado para no aportar oxígeno adicional.",
+      "graphicClean": true
+    },
+    {
+      "id": 3401,
+      "stemMd5": "8d26ab39e832b7a68ca1ba642f074b99",
+      "optionsMd5": "b522db3ea2bedb70da35192d276239df",
+      "correctIndex": 3,
+      "correct": "609 ºC",
+      "options": [
+        "560 ºC",
+        "590 ºC",
+        "640 ºC",
+        "609 ºC"
+      ]
+    },
+    {
+      "id": 3403,
+      "stemMd5": "d7edec31be869183f2866ae04f213996",
+      "optionsMd5": "4a87d701e8b97520a5b90d58ca04a1c0",
+      "correctIndex": 2,
+      "correct": "Lo común será encontrar incendios confinados que evolucionan en la mayoría de los casos en incendios infraventilados donde el valor de la presión varía a lo largo del tiempo en base al desarrollo del mismo.",
+      "options": [
+        "Lo común será encontrar incendios confinados que evolucionan hacia situaciones infraventiladas, aunque su presión interior se mantiene estable durante las distintas fases de desarrollo.",
+        "Lo común será encontrar incendios confinados que evolucionan hacia situaciones infraventiladas en las que la presión depende únicamente del tamaño inicial de las aberturas.",
+        "Lo común será encontrar incendios confinados que evolucionan en la mayoría de los casos en incendios infraventilados donde el valor de la presión varía a lo largo del tiempo en base al desarrollo del mismo.",
+        "Lo común será encontrar incendios confinados que evolucionan hacia situaciones infraventiladas en las que la presión decrece de manera uniforme con independencia de su evolución temporal."
+      ]
+    },
+    {
+      "id": 3405,
+      "stemMd5": "3a52408dba6ec49b3185433775135fe1",
+      "optionsMd5": "1580b21c008569c08a330d6ab2e36c09",
+      "correctIndex": 0,
+      "correct": "Las concentraciones de CO en incendios difícilmente sobrepasan el 5%, mientras que su límite inferior de inflamabilidad se sitúa en el 12%.",
+      "options": [
+        "Las concentraciones de CO en incendios difícilmente sobrepasan el 5%, mientras que su límite inferior de inflamabilidad se sitúa en el 12%.",
+        "Las concentraciones de CO en incendios difícilmente sobrepasan el 5%, mientras que su límite inferior de inflamabilidad se sitúa en el 10%.",
+        "Las concentraciones de CO en incendios difícilmente sobrepasan el 12%, mientras que su límite inferior de inflamabilidad se sitúa en el 5%.",
+        "Las concentraciones de CO en incendios difícilmente sobrepasan el 10%, mientras que su límite inferior de inflamabilidad se sitúa en el 12%."
+      ]
+    },
+    {
+      "id": 3407,
+      "stemMd5": "4bff3aa3412e2bb493ee224035812cc7",
+      "optionsMd5": "dfc35ddae8b81dcca97fff4d87326f21",
+      "correctIndex": 3,
+      "correct": "Técnica que emplea ventiladores de VPP para crear diferenciales de presión en zonas anexas a recintos de incendio con el objeto de protegerlos de la propagación del incendio y la dispersión de gases.",
+      "options": [
+        "Técnica que emplea ventiladores de VPP para crear diferenciales de presión en el propio recinto de incendio y favorecer la evacuación de gases a través del foco.",
+        "Técnica que emplea ventiladores de VPP para crear diferenciales de presión en zonas anexas a recintos de incendio con el objeto de canalizar hacia ellas la evacuación de gases.",
+        "Técnica que emplea ventiladores de VPP para crear diferenciales de presión en zonas anexas a recintos de incendio y conducir a través de ellas el flujo caliente procedente del foco.",
+        "Técnica que emplea ventiladores de VPP para crear diferenciales de presión en zonas anexas a recintos de incendio con el objeto de protegerlos de la propagación del incendio y la dispersión de gases."
+      ]
+    },
+    {
+      "id": 3408,
+      "stemMd5": "a4e9a3d5830e7387cb275bc0c9acbb98",
+      "optionsMd5": "46b883a6676716c1ed01942748c57683",
+      "correctIndex": 1,
+      "correct": "La cantidad de masa de entrada y salida es casi idéntica, pero los gases a altas temperaturas disminuyen su densidad generando un volumen mayor que los de entrada.",
+      "options": [
+        "La cantidad de masa de entrada y salida es casi idéntica, pero los gases calientes aumentan su densidad y salen ocupando un volumen inferior.",
+        "La cantidad de masa de entrada y salida es casi idéntica, pero los gases a altas temperaturas disminuyen su densidad generando un volumen mayor que los de entrada.",
+        "La cantidad de masa de entrada y salida varía en la misma proporción que el volumen, de modo que la densidad del gas permanece prácticamente igual.",
+        "La cantidad de masa de entrada y salida es casi idéntica, pero la menor densidad de los gases calientes hace que su volumen sea inferior al de entrada."
+      ]
+    },
+    {
+      "id": 3409,
+      "stemMd5": "b42877025893232a68280d9088870873",
+      "optionsMd5": "58a658d48471b292fd85dfb168c42716",
+      "correctIndex": 0,
+      "correct": "14,375 kg",
+      "options": [
+        "14,375 kg",
+        "28,750 kg",
+        "11,500 kg",
+        "23,000 kg"
+      ],
+      "stem": "En un recinto de 5 m × 5 m y 2,5 m de altura, el límite inferior del colchón de gases se sitúa a 1,25 m del suelo. Si la densidad de los gases a 500 ºC es de 0,46 kg/m³, ¿qué masa ocupa la capa superior?",
+      "explanation": "CEIS, p. 120: la altura superior es 2,5 − 1,25 = 1,25 m; el volumen es 5 × 5 × 1,25 = 31,25 m³ y su masa es 31,25 × 0,46 = 14,375 kg."
+    },
+    {
+      "id": 3410,
+      "stemMd5": "855b3d6edd7c0462cc1422c5078ee44c",
+      "optionsMd5": "af5a139c16c17ce1e6bbdcbd48f884d1",
+      "correctIndex": 0,
+      "correct": "Aumentar la visibilidad, reducir la temperatura en determinadas zonas, controlar la potencia del incendio y conducir el flujo de gases según la opción táctica.",
+      "options": [
+        "Aumentar la visibilidad, reducir la temperatura en determinadas zonas, controlar la potencia del incendio y conducir el flujo de gases según la opción táctica.",
+        "Aumentar la visibilidad, reducir la temperatura en determinadas zonas y la potencia del incendio, evitando que la dirección del flujo dependa de la opción táctica.",
+        "Aumentar la visibilidad, reducir la temperatura en determinadas zonas, controlar la potencia del incendio y mantener invariable el flujo de gases durante la intervención.",
+        "Aumentar la visibilidad, reducir la temperatura en determinadas zonas, controlar la potencia del incendio y canalizar el flujo de gases a través del foco en todas las modalidades."
+      ]
+    },
+    {
+      "id": 3411,
+      "stemMd5": "f4920b33dcd2ce5435adac7f8e7deb16",
+      "optionsMd5": "161f06cf14ecb6302c7342994cab8676",
+      "correctIndex": 2,
+      "correct": "Minimizar la escorrentía buscando que las gotas que impacten en los combustibles se evaporen y formen una fina película de agua.",
+      "options": [
+        "Minimizar la escorrentía buscando que las gotas se evaporen antes de alcanzar el combustible y que la aplicación forme una película sobre él.",
+        "Minimizar la escorrentía buscando que las gotas que impacten en el combustible permanezcan líquidas sin evaporarse y formen una capa continua de agua.",
+        "Minimizar la escorrentía buscando que las gotas que impacten en los combustibles se evaporen y formen una fina película de agua.",
+        "Minimizar la escorrentía buscando que las gotas impacten y escurran antes de evaporarse, formando una película de agua sobre el suelo."
+      ]
+    },
+    {
+      "id": 3415,
+      "stemMd5": "56177882c3f2dea2efbd1614744d4cfa",
+      "optionsMd5": "dc61fee02deb70b0520c6cde26ad2ce5",
+      "correctIndex": 3,
+      "correct": "Se coloca en la entrada del recinto y posee la mayor capacidad.",
+      "options": [
+        "Se coloca en la entrada del recinto y posee la menor capacidad.",
+        "Se coloca en un punto intermedio del recorrido y posee la mayor capacidad.",
+        "Se coloca en la salida del recinto y posee la mayor capacidad.",
+        "Se coloca en la entrada del recinto y posee la mayor capacidad."
+      ]
+    },
+    {
+      "id": 3416,
+      "stemMd5": "9dd1cc4fc06f92eb3c6d219a379eb812",
+      "optionsMd5": "2e56813cf69c863bc929ffd12e32c37a",
+      "correctIndex": 2,
+      "correct": "El consumo de oxígeno supera el aporte exterior.",
+      "options": [
+        "El consumo de oxígeno es inferior al aporte exterior.",
+        "El consumo de oxígeno se mantiene igual al aporte exterior.",
+        "El consumo de oxígeno supera el aporte exterior.",
+        "El aporte exterior de oxígeno crece y supera al consumo del incendio."
+      ]
+    },
+    {
+      "id": 3417,
+      "stemMd5": "cf09c03171d7633d1fd67e6ef7f0fc98",
+      "optionsMd5": "c763b1ade3def47b7ffdae84daf0576b",
+      "correctIndex": 2,
+      "correct": "El incendio alcanza a los contenidos y a la propia estructura, siendo el continente parte del combustible.",
+      "options": [
+        "El incendio alcanza a los contenidos y a la propia estructura, pero el continente no participa como combustible.",
+        "El incendio alcanza a los contenidos y a los revestimientos del recinto, sin afectar a elementos de la propia estructura.",
+        "El incendio alcanza a los contenidos y a la propia estructura, siendo el continente parte del combustible.",
+        "El incendio alcanza a la propia estructura y consume exclusivamente su continente, sin participación del contenido."
+      ]
+    },
+    {
+      "id": 3418,
+      "stemMd5": "02ec8559f5b777e78b5fa20cf551e495",
+      "optionsMd5": "2282a227519082c5cf5bef870f7a7a09",
+      "correctIndex": 1,
+      "correct": "2.600 kJ",
+      "options": [
+        "2.443 kJ",
+        "2.600 kJ",
+        "2.943 kJ",
+        "2.343 kJ"
+      ]
+    }
+  ]
+}

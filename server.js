@@ -25,6 +25,28 @@ db.on('connect', client => {
 const app = express();
 const upload = multer({ dest: "uploads/" });
 app.use(express.json({limit:"2mb"}));
+// SERVER317: the user's two original selected screenshots remain on disk,
+// unchanged and hash-compatible with the historical T40 importer. These two
+// exact original URLs are served as CLEAN CROPS taken from the same PDF,
+// without the editorial caption (visible in the session 201 screenshots).
+// Never redirect any other graphic asset or create new selected source IDs.
+const T317_GRAPHIC_CAPTION_FREE = Object.freeze({
+  '/graphics/incendios-interior/Screenshot_20260924-115222-display-0.png.png':
+    'T40_317_FIG119_SIN_PIE.png',
+  '/graphics/incendios-interior/Screenshot_20260924-115232-display-0.png.png':
+    'T40_317_FIG120_SIN_PIE.png'
+});
+for (const [originalUrl,cleanFile] of Object.entries(T317_GRAPHIC_CAPTION_FREE)) {
+  app.get(originalUrl,(req,res)=>{
+    const local=path.join(process.cwd(),'public','graphics','incendios-interior',cleanFile);
+    if(!fs.existsSync(local)){
+      console.error('T317_CROP_MISSING:',cleanFile);
+      return res.status(503).send('Recorte documental no instalado; imagen bloqueada para evitar pistas.');
+    }
+    res.set('Cache-Control','no-store');
+    return res.sendFile(local);
+  });
+}
 app.use(express.static("public"));
 
 function aiClient(){
@@ -1531,7 +1553,18 @@ CEIS p.115: si se trata el ejercicio 5×5×2,5 m a 200 °C, preguntar y responde
 
 Para cualquier pregunta del apartado 2.3.8/2.3.9, NOMBRAR VPP o ventilación natural según la ficha. Si se pregunta por Qr, aclarar que es caudal efectivo generado por ventilador VPP, y definir r=Ae/Ai, Ae y Ai. No preguntar una ecuación descontextualizada. Para cualquier pregunta que pida identificar una fórmula, las CUATRO alternativas deberán emplear la sintaxis KaTeX ya habilitada en public/app.js, con delimitadores \( ... \), \frac{numerador}{denominador}, \sqrt{...} y subíndices. Las cuatro opciones deben tener apariencia comparable; no escribir una en fracción y tres en texto lineal. Si no puedes formular las cuatro con sintaxis homogénea, pregunta un concepto o valor documentado de las tablas.
 Distingue rigurosamente las tablas: 18 = rendimiento de ventilación natural vertical a 500 °C; 20 = rendimiento del caudal efectivo VPP; 21 = r recomendable y mínima por modalidad; 22 = diferencial de presión en VPP. No trasladar valores de otra tabla a la ficha, ni incorporar datos que no figuran en su evidencia.
-Respuestas de dificultad muy alta: cuatro distractores del MISMO ámbito técnico y grado de precisión; ninguna respuesta correcta debe resaltar por longitud o plausibilidad. Audita mentalmente la plausibilidad de CADA distractor antes de emitir JSON: si una opción puede eliminarse por absurdo, lenguaje extremo o materia ajena sin leer el documento, reescríbela en la misma generación. No alteres ni inventes datos del PDF. Esta regla se aplica a TODO el temario, incluidas preguntas gráficas prefabricadas. Evita preguntas de definición universal con tres disparates. Escoge la condición exacta, una comparación próxima y real o una inferencia limitada respaldada por el fragmento. No usar el título de un índice como objetivo.
+Respuestas de dificultad muy alta: cuatro distractores del MISMO ámbito técnico y grado de precisión; ninguna respuesta correcta debe resaltar por longitud o plausibilidad. Audita mentalmente la plausibilidad de CADA distractor antes de emitir JSON: si una opción puede eliminarse por absurdo, lenguaje extremo o materia ajena sin leer el documento, reescríbela en la misma generación. No alteres ni inventes datos del PDF.
+SERVER317: antipatrones REALES observados en el T40: NUNCA transformes
+la temperatura de 609 °C en un porcentaje «609 %»; NO inventes palabras
+como «holpachas», marcas ni procesos ausentes de la evidencia. Si el
+fragmento solo documenta una proporción o una cifra, no la conviertas
+artificialmente en dificultad muy alta con términos absurdos. En preguntas
+sobre tablas 20/22, combina los datos reales sin repetir el mismo par
+r=2 en dos plazas del mismo test. En cálculos de Muy alta, si el PDF
+permite construir el volumen antes de hallar la masa, pide ambos pasos;
+no regales un volumen ya calculado cuando el objetivo es evaluar dos
+operaciones. Conserva respuesta única y cita únicamente CEIS.
+Esta regla se aplica a TODO el temario, incluidas preguntas gráficas prefabricadas. Evita preguntas de definición universal con tres disparates. Escoge la condición exacta, una comparación próxima y real o una inferencia limitada respaldada por el fragmento. No usar el título de un índice como objetivo.
 Tabla 2: unidades y valores impresos literales (Hc kJ/kg); no corregirlos.
 Tabla 4: dato impreso 224 kW/m² frente a 244 kW/m² calculados;
 no ofrecer ambos como correctos para una misma pregunta.
@@ -14349,6 +14382,31 @@ if(selectedAdaptive.length < count){
 // SERVER175: dar cabida a tablas 18/20/21/22 en preguntas nuevas T40,
 // sin desplazar vencimientos SRS ni introducir una ruta nueva de generación.
 t40PriorizarTablas175(selectedAdaptive,adaptiveCandidates,count,allowedTopicIds,selectionStrategy);
+// SERVER317: avoid two near-identical VPP table-20/22 comparisons
+// in one T40 test (as observed at positions 2 and 4 of session 201).
+// Only swap for an eligible item of the SAME topic and adaptive priority;
+// do not touch formulas, images, another topic or the SRS state in PG.
+function t317DiversificarVPP(selected,candidates,topics){
+ if(!Array.isArray(topics)||topics.length!==1||Number(topics[0])!==50)return 0;
+ const slots=selected.flatMap((t,i)=>['20','22'].includes(t40TablaFact175(t)?.table)?[i]:[]);
+ if(slots.length<=1)return 0;
+ const used=new Set(selected.map(x=>Number(x.id)));let changed=0;
+ for(const slot of slots.slice(1)){
+   const old=selected[slot];
+   const next=candidates.find(x=>Number(x.topic_id)===50&&
+     !used.has(Number(x.id))&&!['20','22'].includes(t40TablaFact175(x)?.table)&&
+     Number(x.adaptive_priority||4)===Number(old.adaptive_priority||4)&&
+     x.exam_relevant!==false&&x.evaluation_type!=='interpretacion_visual'&&
+     !x.graphicAsset&&
+     !selected.some(t=>String(t.concept||'').trim().toLowerCase()===
+        String(x.concept||'').trim().toLowerCase()));
+   if(!next){console.warn('T317_VPP_DIVERSIDAD_SIN_REEMPLAZO',String(old.id));continue;}
+   used.delete(Number(old.id));used.add(Number(next.id));selected[slot]=next;changed++;
+ }
+ if(changed)console.log('T317_VPP_DIVERSIFICADO',JSON.stringify({replaced:changed}));
+ return changed;
+}
+t317DiversificarVPP(selectedAdaptive,adaptiveCandidates,allowedTopicIds);
 // Aplicar una sola vez antes de asignar familias. No fuerza matemáticas
 // inexistentes ni desplaza preguntas de distinta prioridad SRS.
 specificAlignFormula128(selectedAdaptive,adaptiveCandidates);
@@ -18556,6 +18614,32 @@ function t316EvidenceQualityGuard(q,t,difficulty){
  return null;
 }
 
+// SERVER317: cheap deterministic rejection of PROVEN bogus distractors.
+// The independent PDF auditor (SERVER316) still decides factual validity.
+// This does not invent a dictionary of technical terms or block legitimate
+// percentage increases >100 in other contexts.
+function t317SpecificObviousOptionIssue(q,t,difficulty){
+ if(difficulty!=='muy alta'||String(t?.topic_block||'').toLowerCase()!=='especifico')return null;
+ if(!q||!Array.isArray(q.options)||q.options.length!==4)return null;
+ const opts=q.options.map(x=>String(x||''));const stem=String(q.stem||'');
+ if(opts.some(x=>/\bholpachas\b/iu.test(x)))return 'T317: término inventado sin fuente CEIS';
+ // A bounded percentage (concentration, flammability threshold, output
+ // efficiency) cannot be 609 %; do not confuse a temperature in ºC with %.
+ const bounded=/(?:concentraci[oó]n|inflamabilidad|l[ií]mite\s+inferior|rendimiento\s+(?:de\s+)?(?:caudal|ventilaci[oó]n)|porcentaje\s+del\s+caudal)/iu.test(stem);
+ if(bounded){
+   for(const option of opts){
+     for(const m of option.matchAll(/(?:^|[^\d])([0-9]+(?:[.,][0-9]+)?)\s*%/gu)){
+       const v=Number(m[1].replace(',','.'));
+       if(v>100.000001||v<0)return 'T317: porcentaje imposible para magnitud acotada';
+     }
+   }
+ }
+ // Concrete verified T40 errors in the session 201: nonsense or mismatched
+ // units must never be accepted even if the language auditor scores 2/2.
+ if(Number(t.topic_id)===50&&/mon[oó]xido\s+de\s+carbono|\bCO\b/iu.test(stem)&&
+    opts.some(x=>/609\s*%/u.test(x)))return 'T317: 609 grados no son 609 por ciento';
+ return null;
+}
 // SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
 const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
@@ -18746,7 +18830,7 @@ exactamente el número de preguntas solicitado.
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
-    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty);
+    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
     const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
@@ -18878,6 +18962,15 @@ NO intercambies caudal de tabla 20 con presión de tabla 22.
 Si el fragmento no documenta suficientes datos para la pregunta o para tres
 alternativas verdaderas de una INCORRECTA, answer=-1 y calidad=0.
 No uses datos de internet, otra norma ni de fragmentos de otro tema.
+SERVER317, ANTIFALLOS: una opción con 609 % de monóxido de carbono para
+un dato de 609 °C es imposible y exige calidad=0, answer=-1; lo mismo
+para vocablos inventados como «holpachas». En cantidades acotadas
+(0-100 %), rechaza cifras físicamente imposibles. Una simple pregunta
+de definición con tres alternativas ajenas al mismo procedimiento NO
+alcanza calidad=2. En preguntas sobre imágenes seleccionadas, la clave
+ha de requerir observar la configuración y NO quedar explícita en
+el enunciado ni en el pie de figura. No admitas dos ejercicios de la
+misma tabla y variable con solo cambios superficiales en un test.
 ` : '';
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
@@ -19036,7 +19129,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       !Array.isArray(verdicts316)||verdicts316.length!==4||
       verdicts316.some((v,j)=>typeof v!=='boolean'||
         v!==(negative316?j!==q.correctIndex:j===q.correctIndex)));
-    if(strictFail316||t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
+    if(strictFail316||t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -27689,6 +27782,139 @@ async function applyT40Test200Corrections316(){
  finally{cl.release();}
 }
 
+// SERVER317 — 14 corrections from the user's completed session 201.
+// All previous questions and test-session answers remain immutable in the
+// historic bank. Each replaced record gets a new ID (never update old text).
+const T317_KEY='t40_test201_317_aplicada_v1';
+function t317LoadData(){
+ const f=path.join(process.cwd(),'t40_test201_revision317_data.json');
+ const d=JSON.parse(fs.readFileSync(f,'utf8'));
+ if(d.schema!==1||d.revision!==317||d.topic_id!==50||d.source_session!==201||
+    !Array.isArray(d.revisions)||d.revisions.length!==14||
+    new Set(d.revisions.map(x=>x.id)).size!==14||
+    d.revisions.filter(x=>x.graphicClean).length!==2||
+    d.revisions.some(x=>x.options?.length!==4||
+       new Set(x.options).size!==4||x.options[x.correctIndex]!==x.correct||
+       !/^[0-9a-f]{32}$/.test(x.stemMd5)||
+       !/^[0-9a-f]{32}$/.test(x.optionsMd5)))
+   throw Error('T317: datos de auditoría incompletos o manipulados');
+ return d;
+}
+async function applyT40Test201Revision317(){
+ const d=t317LoadData();
+ const cleanFolder=path.join(process.cwd(),'public','graphics','incendios-interior');
+ for(const name of Object.values(T317_GRAPHIC_CAPTION_FREE)){
+   const filename=path.join(cleanFolder,name);
+   if(!fs.existsSync(filename))throw Error('T317: falta recorte CEIS '+name);
+   const b=fs.readFileSync(filename);
+   if(b.length<4000||!b.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||
+      b.readUInt32BE(16)<400||b.readUInt32BE(20)<180)
+     throw Error('T317: figura no validada '+name);
+ }
+ const cl=await db.connect();let tx=false;
+ try{
+   await cl.query('BEGIN');tx=true;
+   const already=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[T317_KEY])).rows[0];
+   if(already){
+     const v=JSON.parse(already.value);
+     if(v.ok!==true||v.newIds?.length!==14)
+       throw Error('T317: marcador previo incoherente');
+     const chk=(await cl.query(`SELECT id,active,validation_version,graphic,correct_index,options
+        FROM question_bank WHERE id=ANY($1::bigint[])`,[v.newIds])).rows
+        .sort((a,b)=>v.newIds.indexOf(Number(a.id))-v.newIds.indexOf(Number(b.id)));
+     const archived=(await cl.query('SELECT id,active FROM question_bank WHERE id=ANY($1::bigint[])',
+       [d.revisions.map(x=>x.id)])).rows;
+     if(chk.length!==14||archived.length!==14||archived.some(x=>x.active)||
+        chk.some((x,i)=>!x.active||Number(x.validation_version)!==317||
+          x.options?.length!==4||Number(x.correct_index)!==d.revisions[i].correctIndex||
+          x.options[x.correct_index]!==d.revisions[i].correct)||
+        chk.filter(x=>x.graphic!==null).length!==2)
+       throw Error('T317: registros aplicados no conservados');
+     await cl.query('COMMIT');tx=false;
+     return {...v,skipped:true};
+   }
+   const b316=(await cl.query('SELECT value FROM app_state WHERE key=$1',
+     ['t40_test200_316_aplicada_v1'])).rows[0];
+   if(!b316||JSON.parse(b316.value)?.ok!==true)
+     throw Error('T317: SERVER316 no confirmado; no realizar cambios');
+   const pdf=(await cl.query(`SELECT page_count,pdf_sha256,encode(sha256(pdf_bytes),'hex') AS actual
+       FROM topic_local_pdfs WHERE topic_id=50 FOR UPDATE`)).rows[0];
+   if(!pdf||Number(pdf.page_count)!==66||pdf.pdf_sha256!==pdf.actual)
+     throw Error('T317: PDF del tema 40 distinto de la fuente auditada');
+   const ids=d.revisions.map(x=>x.id);
+   const originals=(await cl.query(`SELECT q.*, c.topic_id,c.exam_relevant,
+       md5(q.stem) AS stem_md5, md5(q.options::text) AS options_md5
+       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+       WHERE q.id=ANY($1::bigint[]) FOR UPDATE OF q`,[ids])).rows;
+   if(originals.length!==14)throw Error('T317: originales no localizados');
+   const byId=new Map(originals.map(x=>[Number(x.id),x]));
+   for(const sp of d.revisions){
+     const q=byId.get(sp.id);
+     if(!q||!q.active||q.topic_id!==50||q.exam_relevant!==true||
+       Number(q.validation_version)!==(sp.graphicClean?8:6)||
+       q.stem_md5!==sp.stemMd5||q.options_md5!==sp.optionsMd5||
+       Number(q.correct_index)!==sp.correctIndex||
+       q.options?.[sp.correctIndex]!==sp.correct||
+       (sp.graphicClean && (q.question_family!=='GRAFICA'||
+         q.graphic?.originalSelected!==true||
+         !Object.prototype.hasOwnProperty.call(T317_GRAPHIC_CAPTION_FREE,q.graphic?.publicUrl))))
+        throw Error('T317: pregunta histórica alterada o imagen no seleccionada: '+sp.id);
+   }
+   const pre=(await cl.query(`SELECT
+      COUNT(*) FILTER(WHERE q.active)::int AS active,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphics
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      JOIN topics t ON t.id=c.topic_id
+      WHERE t.block='especifico' AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
+   const sessionBefore=(await cl.query(`SELECT COUNT(*)::int AS n
+      FROM test_session_questions WHERE session_id=201`)).rows[0].n;
+   if(sessionBefore!==20||Number(pre.graphics)<207)
+      throw Error('T317: sesión 201 o banco gráfico alterados');
+   await cl.query(`INSERT INTO app_state(key,value) VALUES($1,$2)`,[
+     't40_test201_317_respaldo_originales',
+     JSON.stringify({date:new Date().toISOString(),session201Count:sessionBefore,questions:originals})]);
+   const newIds=[];
+   for(const sp of d.revisions){
+     const q=byId.get(sp.id);
+     const u=await cl.query('UPDATE question_bank SET active=FALSE,updated_at=NOW() WHERE id=$1 AND active=TRUE RETURNING id',[sp.id]);
+     if(u.rowCount!==1)throw Error('T317: archivo fallido '+sp.id);
+     const g=sp.graphicClean?{...q.graphic,crop:{x:0,y:0,width:1,height:1},maskRegions:[]}:q.graphic;
+     const ins=await cl.query(`INSERT INTO question_bank(
+       coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+       source_page,manual_page,question_family,difficulty,graphic,active,validation_version)
+       VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,317)
+       RETURNING id`,[
+       q.coverage_item_id,sp.stem||q.stem,JSON.stringify(sp.options),sp.correctIndex,
+       sp.explanation||q.explanation,q.source_evidence,q.source_page,q.manual_page,
+       q.question_family,q.difficulty,g?JSON.stringify(g):null]);
+     newIds.push(Number(ins.rows[0].id));
+   }
+   const post=(await cl.query(`SELECT
+      COUNT(*) FILTER(WHERE q.active)::int AS active,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphics
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      JOIN topics t ON t.id=c.topic_id
+      WHERE t.block='especifico' AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
+   if(Number(post.active)<Number(pre.active)||Number(post.graphics)<Number(pre.graphics))
+      throw Error('T317: modificación de los recuentos existentes');
+   const sessionAfter=(await cl.query(`SELECT COUNT(*)::int AS n
+      FROM test_session_questions WHERE session_id=201`)).rows[0].n;
+   if(sessionAfter!==sessionBefore)throw Error('T317: se alteró sesión histórica');
+   const checks=(await cl.query(`SELECT id,active,options,correct_index,graphic,validation_version
+      FROM question_bank WHERE id=ANY($1::bigint[])`,[newIds])).rows;
+   if(checks.length!==14||checks.some(x=>!x.active||Number(x.validation_version)!==317||
+      x.options?.length!==4)||checks.filter(x=>x.graphic!==null).length!==2)
+      throw Error('T317: auditoría posterior fallida');
+   const result={ok:true,revision:317,sourceSession:201,originalIds:ids,newIds,
+      corrected:14,cleanedGraphics:2,coverageDeleted:0,historyDeleted:0,
+      activeBefore:pre.active,activeAfter:post.active,
+      graphicalBefore:pre.graphics,graphicalAfter:post.graphics};
+   await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[T317_KEY,JSON.stringify(result)]);
+   await cl.query('COMMIT');tx=false;return result;
+ }catch(e){if(tx)await cl.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{cl.release();}
+}
+
 // SERVER315: migración idempotente con recuento dinámico de preguntas
 // textuales y 207 fuentes gráficas auditadas; acepta nuevos tests, pero no
 // pérdida de preguntas, figuras ni variaciones en las tres respuestas.
@@ -27948,6 +28174,11 @@ async function startServer(){
                 }catch(e){
                   console.error('T316_NO_APLICADO_ROLLBACK:',String(e?.message||e));
                 }
+                // SERVER317: after 316; idempotent and preserves session 201.
+                try{
+                  const revised317=await applyT40Test201Revision317();
+                  console.log('T317_T40_TEST201_AUDITADO',JSON.stringify(revised317));
+                }catch(e){console.error('T317_NO_APLICADO_ROLLBACK:',String(e?.message||e));}
               }catch(e){
                 console.error('T313_NO_APLICADO_ROLLBACK:',String(e?.message||e));
               }
