@@ -3286,9 +3286,14 @@ function specificOneFactNegative205(t){
   if(String(t?.topic_block||'').toLowerCase()!=='especifico'||iiff91Topic(t)||
      t?.questionFamily!=='2026_INCORRECTA')return false;
   const ev=String(t?.source_evidence||'').trim();
-  // Límite intencionadamente prudente: NO interpretar párrafos largos.
-  if(!ev||ev.length>=135)return false;
-  const clauses=ev.split(/[;\n•]/).filter(x=>x.trim().length>=15);
+  // SERVER319: en sanitarios y Mecánica, una frase larga sigue siendo UN
+  // único hecho. No fabricar tres verdades para una INCORRECTA sin soporte.
+  // No afecta a T39, IIFF ni a los demás temas específicos auditados.
+  const topic=Number(t.topic_id);
+  const scoped319=(topic>=57&&topic<=61)||topic===65;
+  if(!ev||(!scoped319&&ev.length>=135))return false;
+  const clauses=ev.split(/[;\n•]|(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÜÑ])/u)
+    .filter(x=>x.trim().length>=15);
   return clauses.length<3;
 }
 // SERVER205 — control mínimo transversal de alternativas (4 opciones).
@@ -14407,6 +14412,53 @@ function t317DiversificarVPP(selected,candidates,topics){
  return changed;
 }
 t317DiversificarVPP(selectedAdaptive,adaptiveCandidates,allowedTopicIds);
+// SERVER319: solo mezcla explícita de los cinco temas sanitarios.
+// La consulta de candidatos YA está hecha; no se toca Postgres, Gemini,
+// el SRS, otros bloques ni se añaden bucles de rescate a la generación.
+function health319Balance(selected,candidates,topicIds){
+  const five=[57,58,59,60,61];
+  if(!Array.isArray(topicIds)||topicIds.length!==5||
+      five.some(id=>!topicIds.some(x=>Number(x)===id))||
+      selected.length<5||selected.length%5!==0)return null;
+  const per=selected.length/5,counts=new Map(five.map(id=>[id,0]));
+  for(const t of selected){
+    const id=Number(t.topic_id);
+    if(!counts.has(id))return null;
+    counts.set(id,counts.get(id)+1);
+  }
+  const occupied=new Set(selected.map(t=>Number(t.id)));
+  let changes=0;
+  // Máximo selected.length sustituciones; nunca falla el test por no equilibrar.
+  for(const needed of five){
+    while(counts.get(needed)<per){
+      let swap=null,from=-1;
+      for(let i=selected.length-1;i>=0;i--){
+        const old=selected[i],oldTopic=Number(old.topic_id);
+        if(counts.get(oldTopic)<=per)continue;
+        const alternative=candidates.find(c=>
+          Number(c.topic_id)===needed&&!occupied.has(Number(c.id))&&
+          Number(c.adaptive_priority||4)===Number(old.adaptive_priority||4)&&
+          c.exam_relevant!==false&&specificEvidenceReady128(c)&&
+          !selected.some(x=>Number(x.topic_id)===needed&&
+            String(x.section||'')===String(c.section||'')&&
+            String(x.concept||'')===String(c.concept||'')));
+        if(alternative){from=i;swap=alternative;break;}
+      }
+      if(!swap)break; // Se conserva la selección elegible original.
+      const prev=selected[from],oldTopic=Number(prev.topic_id);
+      selected[from]=swap;
+      occupied.delete(Number(prev.id));occupied.add(Number(swap.id));
+      counts.set(oldTopic,counts.get(oldTopic)-1);
+      counts.set(needed,counts.get(needed)+1);
+      changes++;
+    }
+  }
+  console.log('T319_SANITARIOS_BALANCE',JSON.stringify({
+    selected:selected.length,perTopic:Object.fromEntries(counts),changes,
+    balanced:five.every(id=>counts.get(id)===per),extraSql:0,extraGemini:0}));
+  return {changes,counts:Object.fromEntries(counts)};
+}
+health319Balance(selectedAdaptive,adaptiveCandidates,allowedTopicIds);
 // Aplicar una sola vez antes de asignar familias. No fuerza matemáticas
 // inexistentes ni desplaza preguntas de distinta prioridad SRS.
 specificAlignFormula128(selectedAdaptive,adaptiveCandidates);
@@ -18881,23 +18933,31 @@ Para nivel Muy alta, evita cálculos triviales de una sola multiplicación
 cuando la fuente autorice un problema con dos decisiones razonables.
 Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
 ` : '';
+  // SERVER319: se endurece LA MISMA llamada generadora, sin nuevos
+  // validadores/rechazos que puedan ocasionar 19/20, ni rondas o SQL.
   const qualityGuide217=difficulty==='muy alta' && group.some(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
-CALIDAD MUY ALTA — BLOQUE ESPECÍFICO (MISMA LLAMADA, SIN FILTROS NUEVOS):
-Antes de emitir cada pregunta, determina qué error concreto cometería un opositor
-preparado: confundir dos condiciones del mismo concepto, intercambiar fases,
-atribuir una función a un componente próximo, aplicar una excepción al supuesto
-general, cambiar el orden de dos pasos, o equivocar magnitud/unidad de un dato.
-Construye los tres distractores a partir de tres confusiones técnicas DISTINTAS
-que sean plausibles y compatibles con el contexto del enunciado. Evita tres
-números elegidos al azar alrededor de la clave y alternativas que puedan
-eliminarse sin estudiar. En un cálculo, si los datos permiten dos operaciones,
-prioriza la composición autorizada de ambas, sin revelar el despeje.
-La dificultad debe proceder del contenido comprobable, NO de añadir palabras,
-hipótesis no documentadas ni relaciones externas al PDF. Si la evidencia
-sostiene solo una pregunta directa, consérvala fiel y sin falsas complicaciones.
-No hagas comprobaciones externas, no generes preguntas adicionales y mantén
-exactamente el número de preguntas solicitado.
+CALIDAD MUY ALTA — REVISIÓN INTERNA EN LA MISMA GENERACIÓN:
+1. Las CUATRO alternativas han de responder a LA MISMA cuestión técnica y
+   compartir la misma magnitud, fase, material, componente o procedimiento.
+   Cada distractor cambiará un dato/condición técnicamente cercano que el
+   fragmento CEIS permita refutar, sin recurrir a hechos de fuera del PDF.
+2. PROHIBIDO fabricar opciones imposibles por su redacción: presión infinita,
+   congelación por aumento de temperatura, densidades vectoriales, órganos
+   inexistentes, funcionamientos mágicos, «elimina completamente» o
+   «siempre/nunca» cuando solo sirven como pista obvia. No utilizar partes
+   de otro sistema que el aspirante puede descartar por sentido común.
+3. INCORRECTA: deben existir TRES afirmaciones verdaderas INDEPENDIENTES
+   verificables en el fragmento. Si solo aparece una o dos, formula CORRECTA
+   con tres errores pequeños en ESE mismo dato, no tres verdades inventadas.
+4. Comparaciones, secuencias o tablas: permutar condiciones de LA MISMA
+   fuente, no términos externos. Longitudes y precisión de opciones parecidas.
+   Evita opciones cuya clave destaque por ser la única razonable o detallada.
+5. CÁLCULO: sin regalar fórmula; solo operaciones justificadas por el PDF.
+   No introducir una segunda ley si falta respaldo. Si solo admite una cuenta
+   simple, mantenla fiel y NO finjas que es un problema complejo.
+Haz esta autocorrección antes de cerrar el JSON, SIN preguntas ni llamadas
+adicionales, SIN reintentos ni postprocesados que puedan bloquear plazas.
 ` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
