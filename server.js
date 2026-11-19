@@ -27362,6 +27362,88 @@ async function applyGlobalAuditRepairs311(){
  finally{cl.release();}
 }
 
+
+// SERVER313: cierre editorial T40. Solo distractores de tres figuras seleccionadas.
+// No se altera enunciado, respuesta correcta, PDF, conocimiento ni historial.
+const T313_KEY='t40_graficas_3_distractores_313_aplicada_v1';
+const T313_DATA=[{"id":2995,"f":"ddec95efbc1e4c154320f3c62c1c7c65","image":"c25999ff8fc1fbba9e6f7274a8d03fb9","idx":3,"correct":"Abrir la primera; cuando su zona esté limpia abrir la segunda y cerrar inmediatamente la primera; repetir hacia la tercera manteniendo salida durante cada transición.","options":["Abrir la primera salida y, una vez limpia su zona, abrir las dos siguientes sin cerrar ninguna de las anteriores para mantener la circulación de gases.","Comenzar por la salida más alejada de la entrada y avanzar hacia la más próxima, cerrando cada abertura únicamente cuando hayan quedado limpias todas las zonas.","Abrir la primera y, cuando quede limpia su zona, cerrarla antes de abrir la segunda; repetir hacia la tercera, sin mantener dos salidas abiertas durante el cambio.","Abrir la primera; cuando su zona esté limpia abrir la segunda y cerrar inmediatamente la primera; repetir hacia la tercera manteniendo salida durante cada transición."]},{"id":2997,"f":"4cc3ee5a70e6fa1d883e6143d2e067a4","image":"d29e0ee44cf42d298660ebdd306ba02a","idx":2,"correct":"El montaje con equipo auxiliar aguas abajo y ganancia de hasta +100 %, que podría alcanzar 3.600 m³/h.","options":["El montaje con +35 %, suponiendo que esa ganancia se aplica a cada uno de los dos ventiladores sobre el caudal inicial.","El montaje del +6 %, interpretando el porcentaje como una mejora acumulable en cada tramo de ventilación del edificio.","El montaje con equipo auxiliar aguas abajo y ganancia de hasta +100 %, que podría alcanzar 3.600 m³/h.","Los montajes de +35 % y hasta +100 %, porque ambos superan el incremento mínimo de 1.400 m³/h sobre la base."]},{"id":3001,"f":"f6d09b41bae1e1e68f56e600e937b2e4","image":"75c3d683e30056c04673c5f546271461","idx":1,"correct":"Conservar una referencia física y completar barridos del espacio interior hacia el acceso, sin confundirlo con la inmovilización del punta propia del método francés.","options":["Finalizar el recorrido del perímetro, abandonar temporalmente el tendido y atravesar el interior en diagonal hasta recuperar la pared opuesta.","Conservar una referencia física y completar barridos del espacio interior hacia el acceso, sin confundirlo con la inmovilización del punta propia del método francés.","Considerar revisado el recinto cuando se ha seguido todo el perímetro, manteniendo la pared como referencia sin efectuar otra progresión hacia el centro.","Dejar inmóvil al punta junto a la puerta siguiente para que el apoyo inspeccione por separado ambos laterales, conforme a la técnica francesa."]}];
+async function applyT40Distractors313(){
+  const cl=await db.connect(); let inTx=false;
+  try{
+    await cl.query('BEGIN');inTx=true;
+    await cl.query('SELECT pg_advisory_xact_lock($1)',[313313]);
+    await cl.query("SET LOCAL lock_timeout='8s'");
+    await cl.query("SET LOCAL statement_timeout='40s'");
+    const existing=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[T313_KEY])).rows[0];
+    if(existing){
+      const info=JSON.parse(existing.value);
+      if(info.oldIds?.join(',')!=='2995,2997,3001'||info.newIds?.length!==3)
+        throw Error('T313: marcador anterior incoherente');
+      const ver=(await cl.query(`SELECT id,active,question_family,difficulty,
+        graphic->>'originalSelected' AS selected FROM question_bank
+        WHERE id=ANY($1::bigint[])`,[info.newIds])).rows;
+      if(ver.length!==3||ver.some(q=>!q.active||q.question_family!=='GRAFICA'||q.difficulty!=='muy alta'||q.selected!=='true'))
+        throw Error('T313: marcador previo sin preguntas activas verificadas');
+      await cl.query('COMMIT');inTx=false;
+      return {ok:true,skipped:true,reason:'T313_YA_VALIDADO',originals:3,newIds:info.newIds};
+    }
+    const prev311=(await cl.query('SELECT 1 FROM app_state WHERE key=$1', ['global_auditoria_311_aplicada_v1'])).rowCount;
+    if(prev311!==1)throw Error('T313: falta certificación de SERVER311');
+    const ids=T313_DATA.map(r=>r.id);
+    const originals=(await cl.query(`SELECT q.*,
+       md5(q.stem||q.options::text) AS fingerprint,
+       md5(q.graphic::text) AS image_fingerprint,c.topic_id,t.topic_order
+       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+       JOIN topics t ON t.id=c.topic_id WHERE q.id=ANY($1::bigint[])
+       ORDER BY q.id FOR UPDATE OF q`,[ids])).rows;
+    if(originals.length!==3)throw Error('T313: faltan preguntas antiguas');
+    const activeStats=(await cl.query(`SELECT COUNT(*) FILTER(WHERE q.active)::int AS questions,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
+      AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
+    if(activeStats.questions!==1658||activeStats.graphic!==207)
+      throw Error('T313: recuentos previos distintos del auditado');
+    for(const row of originals){
+      const spec=T313_DATA.find(x=>x.id===Number(row.id));
+      if(!spec||!row.active||row.topic_id!==50||row.topic_order!==40||
+        row.validation_version!==8||row.question_family!=='GRAFICA'||
+        row.difficulty!=='muy alta'||row.graphic?.originalSelected!==true||
+        row.fingerprint!==spec.f||row.image_fingerprint!==spec.image||
+        row.correct_index!==spec.idx||row.options[spec.idx]!==spec.correct)
+          throw Error('T313: precondición divergente en pregunta '+String(row.id));
+    }
+    await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[
+      't40_graficas_313_respaldo_originales',JSON.stringify({date:new Date().toISOString(),questions:originals})]);
+    const newIds=[];
+    for(const spec of T313_DATA){
+      const changed=await cl.query('UPDATE question_bank SET active=FALSE,updated_at=NOW() WHERE id=$1 AND active=TRUE',[spec.id]);
+      if(changed.rowCount!==1)throw Error('T313: no se pudo archivar '+spec.id);
+      const newer=await cl.query(`INSERT INTO question_bank
+        (coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+         source_page,manual_page,question_family,difficulty,graphic,active,validation_version)
+       SELECT coverage_item_id,stem,$2::jsonb,correct_index,explanation,source_evidence,
+              source_page,manual_page,question_family,difficulty,graphic,TRUE,313
+       FROM question_bank WHERE id=$1 RETURNING id`,[spec.id,JSON.stringify(spec.options)]);
+      if(newer.rowCount!==1)throw Error('T313: no se pudo crear la pregunta sustituta '+spec.id);
+      newIds.push(Number(newer.rows[0].id));
+    }
+    const finalStats=(await cl.query(`SELECT COUNT(*) FILTER(WHERE q.active)::int AS questions,
+      COUNT(*) FILTER(WHERE q.active AND q.graphic IS NOT NULL)::int AS graphic
+      FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
+      JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
+      AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
+    if(finalStats.questions!==1658||finalStats.graphic!==207)
+      throw Error('T313: cambió número de preguntas o imágenes');
+    const payload={ok:true,revision:313,oldIds:ids,newIds,
+      active:1658,graphics:207,historyDeleted:0,answersChanged:0,knowledgeDeleted:0};
+    await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[T313_KEY,JSON.stringify(payload)]);
+    await cl.query('COMMIT');inTx=false;
+    return payload;
+  }catch(e){if(inTx)await cl.query('ROLLBACK');throw e;}
+  finally{cl.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -27587,6 +27669,14 @@ async function startServer(){
               console.log('T312_T46_BARRERA_VERIFICADA',JSON.stringify(t46Ready));
               const review311=await applyGlobalAuditRepairs311();
               console.log('GLOBAL_311_AUDITORIA_CORRECCIONES',JSON.stringify(review311));
+              // SERVER313: cierre de las tres preguntas gráficas T40 seleccionadas.
+              // Puede omitirse con rollback seguro sin impedir el resto de la plataforma.
+              try{
+                const fixed313=await applyT40Distractors313();
+                console.log('T313_T40_3_GRAFICAS_DISTRACTORES_CORREGIDOS',JSON.stringify(fixed313));
+              }catch(e){
+                console.error('T313_NO_APLICADO_ROLLBACK:',String(e?.message||e));
+              }
             }catch(e){
               console.error('GLOBAL_311_NO_APLICADO_ROLLBACK:',String(e?.message||e));
             }
