@@ -27402,8 +27402,14 @@ async function applyT40Distractors313(){
       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
       JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
       AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
-    if(activeStats.questions!==1658||activeStats.graphic!==207)
-      throw Error('T313: recuentos previos distintos del auditado');
+    if(activeStats.questions!==1658||activeStats.graphic!==207){
+      const err=Error('T313: recuentos previos distintos del auditado ('+
+        'activas='+String(activeStats.questions)+', graficas='+String(activeStats.graphic)+')');
+      // SERVER314: este estado puede ser transitorio mientras terminan
+      // sincronizaciones históricas concurrentes durante el arranque.
+      err.code='T313_STARTUP_COUNTS_PENDING';
+      throw err;
+    }
     for(const row of originals){
       const spec=T313_DATA.find(x=>x.id===Number(row.id));
       if(!spec||!row.active||row.topic_id!==50||row.topic_order!==40||
@@ -27433,8 +27439,12 @@ async function applyT40Distractors313(){
       FROM question_bank q JOIN coverage_items c ON c.id=q.coverage_item_id
       JOIN topics t ON t.id=c.topic_id WHERE t.block='especifico'
       AND t.topic_order BETWEEN 38 AND 63`)).rows[0];
-    if(finalStats.questions!==1658||finalStats.graphic!==207)
-      throw Error('T313: cambió número de preguntas o imágenes');
+    if(finalStats.questions!==1658||finalStats.graphic!==207){
+      const err=Error('T313: cambió número de preguntas o imágenes ('+
+        'activas='+String(finalStats.questions)+', graficas='+String(finalStats.graphic)+')');
+      err.code='T313_STARTUP_COUNTS_PENDING';
+      throw err;
+    }
     const payload={ok:true,revision:313,oldIds:ids,newIds,
       active:1658,graphics:207,historyDeleted:0,answersChanged:0,knowledgeDeleted:0};
     await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[T313_KEY,JSON.stringify(payload)]);
@@ -27442,6 +27452,29 @@ async function applyT40Distractors313(){
     return payload;
   }catch(e){if(inTx)await cl.query('ROLLBACK');throw e;}
   finally{cl.release();}
+}
+
+
+// SERVER314: reutiliza SIN RELAJAR la auditoría transaccional T313.
+// Otros importadores del arranque escriben concurrentemente y pueden dejar
+// un recuento transitorio distinto de 1658/207. Reintentar solo ese caso;
+// divergencias de contenido, imagen o respuesta se siguen rechazando.
+async function applyT40Distractors313AfterStartup314(){
+  const maxAttempts=25;
+  for(let attempt=1;attempt<=maxAttempts;attempt++){
+    try{
+      const result=await applyT40Distractors313();
+      return {...result,startupAttempts:attempt};
+    }catch(err){
+      if(err?.code!=='T313_STARTUP_COUNTS_PENDING'||attempt===maxAttempts)throw err;
+      if(attempt===1||attempt%5===0){
+        console.warn('T314_ESPERANDO_ESTABILIZACION_ARRANQUE',JSON.stringify({
+          attempt,maxAttempts,reason:String(err?.message||err)}));
+      }
+      await new Promise(resolve=>setTimeout(resolve,2500));
+    }
+  }
+  throw Error('T314: no se pudo estabilizar el arranque');
 }
 
 async function startServer(){
@@ -27672,7 +27705,7 @@ async function startServer(){
               // SERVER313: cierre de las tres preguntas gráficas T40 seleccionadas.
               // Puede omitirse con rollback seguro sin impedir el resto de la plataforma.
               try{
-                const fixed313=await applyT40Distractors313();
+                const fixed313=await applyT40Distractors313AfterStartup314();
                 console.log('T313_T40_3_GRAFICAS_DISTRACTORES_CORREGIDOS',JSON.stringify(fixed313));
               }catch(e){
                 console.error('T313_NO_APLICADO_ROLLBACK:',String(e?.message||e));
