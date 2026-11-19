@@ -1596,9 +1596,42 @@ function t40TablaFact175(t){
   if(table==='22'&&!/presión diferencial/i.test(evidence))return null;
   return {table,idx,r,value};
 }
+// SERVER316: tablas VPP 20 y 22, nivel Muy alta. Sustituye la
+// identificación de UN porcentaje por una comparación simultánea de dos
+// variables en dos relaciones, sin usar valores fuera de pp. 141 y 142.
+// Las plantillas CALCULOS (T40_162/167) no se modifican.
+function t40CompararTablas316(t,fact){
+  const ratios=T40_VENTILACION_175['20'].ratios;
+  const caudales=T40_VENTILACION_175['20'].values;
+  const presiones=T40_VENTILACION_175['22'].values;
+  const i=fact.idx;
+  const j=fact.table==='20'?(i<ratios.length-1?i+1:i-1):
+    ((i+2)%ratios.length);
+  if(i<0||j<0||i>=ratios.length||j>=ratios.length||i===j)return null;
+  // Aumentos y descensos se interpretan exclusivamente en la escala de
+  // rendimiento de caudal o presión DIFERENCIAL teóricos de la tabla CEIS.
+  const pair=(a,b,c,d)=>`Caudal ${a} % → ${b} %; diferencial de presión ${c} % → ${d} %.`;
+  const correct=pair(caudales[i],caudales[j],presiones[i],presiones[j]);
+  const opts=[correct,
+    pair(caudales[i],caudales[j],presiones[j],presiones[i]),
+    pair(caudales[j],caudales[i],presiones[i],presiones[j]),
+    pair(caudales[i],caudales[j],presiones[i],presiones[(j+1)%ratios.length])];
+  if(new Set(opts).size!==4)return null;
+  const q={stem:`En ventilación por presión positiva, cuando la relación entre salida y entrada de gases cambia de r = ${ratios[i]} a r = ${ratios[j]}, ¿qué opción reproduce simultáneamente el rendimiento de caudal y el diferencial de presión relativos a sus máximos teóricos?`,
+    options:opts,correctIndex:0,
+    explanation:`CEIS, tablas 20 y 22 (pp. 141-142). En r=${ratios[i]}: caudal ${caudales[i]} % y presión ${presiones[i]} %. En r=${ratios[j]}: caudal ${caudales[j]} % y presión ${presiones[j]} %.`,
+    sourceEvidence:String(t.source_evidence||'')+` | CEIS tabla 20, p.141: r=${ratios[i]}, ${caudales[i]} %; r=${ratios[j]}, ${caudales[j]} %. Tabla 22, p.142: r=${ratios[i]}, ${presiones[i]} %; r=${ratios[j]}, ${presiones[j]} %.`,
+    sourcePage:t.source_page,manualPage:String(t.manual_page),
+    questionFamily:'2026_RAZONAMIENTO',difficulty:'muy alta',
+    graphic:null,resetLocal136:true,t40Tabla175:fact.table,t40Comparada316:true};
+  return resetShape136(q)?null:q;
+}
+
 function t40TablaPregunta175(t,seed=0,difficulty='alta'){
   const fact=t40TablaFact175(t);
   if(!fact)return null;
+  if(difficulty==='muy alta'&&(fact.table==='20'||fact.table==='22'))
+    return t40CompararTablas316(t,fact);
   const sourceEvidence=String(t.source_evidence);
   const page=String(t.manual_page);
   let stem,opts,correct;
@@ -18500,6 +18533,29 @@ const RESET_GENERATE_SCHEMA_137={type:'object',properties:{questions:{type:'arra
 const RESET_AUDIT_SCHEMA_136={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},quote:{type:'string'}},
   required:['index','answer','quote']}}},required:['results']};
+
+// SERVER316: auditoría de distractores y unicidad para el resto de temas específicos.
+// Una única auditoría independiente (sin llamadas adicionales). No afecta a
+// fórmulas deterministas ni a los controles particulares de hidráulica/IIFF.
+const RESET_SPECIFIC_AUDIT_SCHEMA_316={type:'object',properties:{results:{type:'array',items:{type:'object',
+ properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
+  quote:{type:'string'},calidad:{type:'integer',minimum:0,maximum:2},
+  optionVerdicts:{type:'array',items:{type:'boolean'},minItems:4,maxItems:4}},
+ required:['index','answer','quote','calidad','optionVerdicts']}}},required:['results']};
+function t316EvidenceQualityGuard(q,t,difficulty){
+ if(difficulty!=='muy alta'||String(t?.topic_block||'').toLowerCase()!=='especifico')return null;
+ const stem=String(q?.stem||'');const ans=String(q?.options?.[q.correctIndex]||'');
+ const topic=Number(t?.topic_id);
+ // El PDF CEIS p. 129 y sus tablas 20/22 emplean SIEMPRE r=Ae/Ai.
+ if(topic===50&&/\br\s*=\s*(?:[aá]rea\s+de\s+)?entrada\s*\/\s*(?:[aá]rea\s+de\s+)?salida/iu.test(stem))
+   return 'T40: r invertida; definición válida Ae/Ai';
+ // Fuente CEIS p.128: el mecanismo expresamente definido es la diferencia de PRESIÓN.
+ if(topic===50&&/prop[oó]sito\s+de\s+la\s+ventilaci[oó]n\s+natural/iu.test(stem)&&
+    /diferencias?\s+de\s+densidad/iu.test(ans))
+   return 'T40: ventilación natural confunde densidad con presión';
+ return null;
+}
+
 // SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
 const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
@@ -18614,6 +18670,22 @@ asignes un parque: ese objetivo no permite preguntar por el parque físico.
 `:'';
   // SERVER217: exigencia cognitiva en la misma generación, sin nuevas llamadas.
   // No se inventa una segunda condición si el extracto no la documenta.
+  const t316GenerationGuide=difficulty==='muy alta'&&group.some(t=>
+    String(t?.topic_block||'').toLowerCase()==='especifico'&&!t39Hydraulica(t)&&!iiff91Topic(t))?`
+SERVER316: Cada pregunta de alternativa INCORRECTA exige tres afirmaciones
+VERDADERAS independientes y una falsa; si la ficha no documenta tres,
+selecciona CORRECTA o una relación más apropiada, sin inventar datos.
+Las cuatro opciones han de pertenecer al MISMO ámbito técnico y ocupar
+longitudes comparables. No uses tres distractores absurdos o ajenos al tema.
+Si una pregunta se basa en una tabla, respeta magnitud, condición y sentido
+exacto del cociente de la tabla; no intercambies valores entre tablas.
+En el T40: ventilación natural CEIS p.128 se define mediante diferencias de
+PRESIÓN (no densidad). La relación r se define como SALIDA Ae / ENTRADA Ai,
+no su inversa. Distingue caudal VPP (tabla 20) y presión VPP (tabla 22).
+Para nivel Muy alta, evita cálculos triviales de una sola multiplicación
+cuando la fuente autorice un problema con dos decisiones razonables.
+Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
+` : '';
   const qualityGuide217=difficulty==='muy alta' && group.some(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
 CALIDAD MUY ALTA — BLOQUE ESPECÍFICO (MISMA LLAMADA, SIN FILTROS NUEVOS):
@@ -18639,7 +18711,7 @@ exactamente el número de preguntas solicitado.
       : resetPrompt136(group,difficulty,mode,comparisons)+
         (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA+t39Prompt131(group,difficulty):'')+
         iiffGenerationRules+(repair118&&iiffScope?'IIFF RESCATE: prioriza procedimientos, condiciones y magnitudes relacionadas. Imita los patrones técnicos del tribunal 2024/2026, no copies títulos de fichas; elige distractores cercanos, con rasgo material inequívoco. No inventes ni repitas.':'')+
-        geoPhysical112+t40Guide157+t41Guide+qualityGuide217,config:{
+        geoPhysical112+t40Guide157+t41Guide+qualityGuide217+t316GenerationGuide,config:{
       // PDF acotado y ya recuperado: ningún File Search redundante.
       httpOptions:{timeout:R136_TIMEOUT_MS},
       ...(R136_MODEL.startsWith('gemini-3.')?{thinkingConfig:{thinkingLevel:(geoHighChallenge||(iiffScope&&difficulty==='muy alta'))?'medium':'low'}}:{}),
@@ -18674,7 +18746,7 @@ exactamente el número de preguntas solicitado.
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
-    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty);
+    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
     const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
@@ -18781,11 +18853,35 @@ Para preguntas NO numéricas, conserva sin cambios la auditoría literal general
   ).replace(' FILAS: ',` COMPARADORES POR SLOT: ${JSON.stringify(comparisons)}. FILAS: `)
     :auditBaseT39;
   const onlyT39=group.length>0 && group.every(t39Hydraulica);
+  const auditStrict316=difficulty==='muy alta'&&group.length>0&&
+    group.every(t=>String(t?.topic_block||'').toLowerCase()==='especifico'&&
+      !iiff91Topic(t)&&!t39Hydraulica(t));
   const auditSchema=onlyT39?T39_AUDIT_SCHEMA_143:
-    (iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) : RESET_AUDIT_SCHEMA_136);
+    (iiffScope ? iiff92AuditSchema(RESET_AUDIT_SCHEMA_136) :
+     auditStrict316?RESET_SPECIFIC_AUDIT_SCHEMA_316:RESET_AUDIT_SCHEMA_136);
+  const t316AuditGuide=auditStrict316?`
+SERVER316 — AUDITORÍA EXIGENTE DE TODOS LOS DEMÁS TEMAS ESPECÍFICOS:
+Para cada pregunta entrega calidad=0,1,2 y optionVerdicts (4 booleanos).
+Analiza por separado las CUATRO opciones conforme SOLO al fragmento PDF.
+En CORRECTA, optionVerdicts será [true,false,false,false] con true en el índice
+correcto (según distribución A-D); en INCORRECTA será exactamente la inversa:
+TRES afirmaciones VERDADERAS, una FALSA en el índice de la respuesta.
+Una opción sin fundamento o que pudiera ser verdadera debe llevar a answer=-1.
+La cita quote debe ser una copia contigua literal y justificar la clave.
+calidad=2 EXIGE tres distractores del mismo dominio, precisión y extensión
+razonablemente comparable; una alternativa obviamente disparatada, de otro
+procedimiento o que regale la respuesta por longitud obliga a calidad<=1.
+Revisa el sentido del cociente, la magnitud y la unidad, no solo sus números.
+Especialmente T40: ventilación natural CEIS p.128 emplea DIFERENCIAS DE PRESIÓN;
+relación r=superficie de SALIDA Ae / ENTRADA Ai en pp.129 y 141-142.
+NO intercambies caudal de tabla 20 con presión de tabla 22.
+Si el fragmento no documenta suficientes datos para la pregunta o para tres
+alternativas verdaderas de una INCORRECTA, answer=-1 y calidad=0.
+No uses datos de internet, otra norma ni de fragmentos de otro tema.
+` : '';
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
-  const auditModel120=iiffScope&&difficulty==='muy alta'
+  const auditModel120=(iiffScope||auditStrict316)&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
   // SERVER138: una única política de auditoría para lotes exclusivamente T39.
   // Sustituye, no acumula, las instrucciones generales de citas incompatibles
@@ -18875,9 +18971,9 @@ FILAS: ${JSON.stringify(blind)}` : null;
       (difficulty==='muy alta'?'\nALTERNATIVAS: no aceptes opciones que sean paráfrasis del mismo hecho; en INCORRECTA las tres verdaderas deben ser HECHOS DISTINTOS, no frases sinónimas, y la falsa ha de ser técnicamente plausible. Si una respuesta se distingue sin conocer el documento por absurda o por tres opciones idénticas, marca answer=-1. No penalices en cambio tres opciones cercanas que cambian un número, unidad, condición, secuencia o dirección concreta, porque son distractores válidos. Sin llamadas adicionales.':'')+
       (group.every(t=>String(t.topic_block||'').toLowerCase()==='especifico')?
         '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual. En ejercicio de cálculo Alta/Muy alta, el ENUNCIADO no debe dar la fórmula de resolución ni especificar la unidad de respuesta: si lo hace, answer=-1; la fórmula y SI deben figurar solo en explicación/opciones. Los datos sí conservan sus unidades. Evitar dos opciones físicamente equivalentes.':'')+
-      (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112),
+      (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112+t316AuditGuide),
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
-      ...(auditModel120.startsWith('gemini-3.')&&iiffScope&&difficulty==='muy alta'?
+      ...(auditModel120.startsWith('gemini-3.')&&(iiffScope||auditStrict316)&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
@@ -18932,7 +19028,15 @@ FILAS: ${JSON.stringify(blind)}` : null;
       (strictT39&&(!String(a?.solution||'').trim()||
         !t39BasisProof144(a,group[i],q)||
         t39PreflightIssue143(q,group[i],difficulty,mode))));
-    if(t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
+    // SERVER316: evitar aprobar un test 'muy alta' con distractores obvios
+    // o dos respuestas válidas, aunque el índice elegido coincida.
+    const negative316=/\b(?:INCORRECTA|FALSA|NO\s+ES\s+CORRECTA)\b/iu.test(String(q?.stem||''));
+    const verdicts316=a?.optionVerdicts;
+    const strictFail316=auditStrict316&&(!Number.isInteger(a?.calidad)||a.calidad!==2||
+      !Array.isArray(verdicts316)||verdicts316.length!==4||
+      verdicts316.some((v,j)=>typeof v!=='boolean'||
+        v!==(negative316?j!==q.correctIndex:j===q.correctIndex)));
+    if(strictFail316||t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -27472,6 +27576,119 @@ async function applyT40Distractors313(){
 }
 
 
+
+// SERVER316: auditoría de las 20 preguntas reales de la sesión 200.
+// Reemplaza únicamente las 16 preguntas con fallos o distractores débiles.
+// Las otras 6 permanecen y todas las 20 respuestas históricas se conservan.
+const T316_TEST200_KEY='t40_test200_316_aplicada_v1';
+const T316_TEST200_DATA=[{"id":2981,"correct_index":3,"old_correct":"La presión diferencial pasa de producirse por impulsión en entrada a producirse por depresión en salida.","stem":"Observe en la figura la ubicación del equipo, el sentido del movimiento del aire y la salida del humo. ¿Qué relación entre posición del equipo y diferencial de presión interior corresponde al montaje representado?","options":["Extractor colocado en la salida, depresión interior y reposición de aire por la abertura contraria.","Impulsor colocado en la salida, sobrepresión interior y desplazamiento del humo hacia la abertura de entrada.","Impulsor colocado en la entrada, depresión interior y evacuación de gases por la abertura opuesta.","Impulsor colocado en la entrada, sobrepresión interior y evacuación de gases por la abertura opuesta."],"graphic_crop":{"x":0.02,"y":0.13,"width":0.95,"height":0.58},"evidence":"CEIS p. 131, imagen 112: «Ventilación por Presión Positiva: el diferencial de presión interior se crea con la ayuda de un ventilador VPP». El ventilador situado en la entrada genera sobrepresión interior.","coverage_evidence":"CEIS p. 131, imagen 112: Ventilación por Presión Positiva; el diferencial de presión interior se crea con un ventilador VPP. La impulsión en entrada crea sobrepresión interior y los gases salen por la abertura opuesta.","explanation":"La figura 112 muestra el impulsor en la abertura de entrada, el flujo de aire hacia el interior y el desplazamiento de gases hacia la salida. El ventilador genera sobrepresión interior."},{"id":2982,"correct_index":2,"old_correct":"La presión interior se eleva sistemáticamente sobre la exterior debido exclusivamente a la aspiración en salida.","stem":"Observe la ubicación del ventilador y las flechas de circulación del esquema. ¿Qué combinación identifica el montaje representado y el signo del diferencial de presión interior respecto al exterior?","options":["Extractor en salida, sobrepresión interior y evacuación de gases por empuje desde la entrada.","Impulsor en entrada, sobrepresión interior y avance del humo hacia la abertura opuesta.","Extractor en salida, depresión interior y entrada del aire de reposición por la abertura contraria.","Extractor en salida, igualdad de presiones y expulsión de gases exclusivamente por flotabilidad."],"graphic_crop":{"x":0.02,"y":0.19,"width":0.95,"height":0.54},"evidence":"CEIS p. 131: la VPN emplea extractores en las salidas para generar diferenciales de presión negativos en el interior respecto al exterior. El flujo se genera en la salida.","coverage_evidence":"CEIS p. 131, imagen 113: Ventilación por Presión Negativa (extracción). Los extractores se colocan en la salida y generan diferenciales de presión interior negativos respecto al exterior, de manera que entra aire de reposición.","explanation":"El esquema de la figura 113 sitúa al extractor en la salida; la aspiración crea depresión interior y el aire exterior reemplaza los gases evacuados."},{"id":3368,"correct_index":0,"old_correct":"83 %","stem":"En una VPP, el cociente entre superficie de salida y superficie de entrada pasa de r = 1 a r = 1,5. Conforme a las tablas 20 y 22 del manual, ¿cómo cambian simultáneamente el rendimiento del caudal respecto a su máximo teórico y el diferencial de presión relativo?","options":["El caudal pasa del 71 % al 83 % y el diferencial de presión del 50 % al 30 %.","El caudal pasa del 71 % al 89 % y el diferencial de presión del 50 % al 20 %.","El caudal pasa del 50 % al 83 % y el diferencial de presión del 80 % al 30 %.","El caudal pasa del 71 % al 83 % y el diferencial de presión del 50 % al 80 %."],"evidence":"CEIS pp. 141–142: Tabla 20, caudal VPP: r=1, 71 %; r=1,5, 83 %. Tabla 22, diferencial de presión: r=1, 50 %; r=1,5, 30 %. La relación es r=Ae/Ai.","explanation":"Según las tablas 20 y 22, al aumentar r de 1 a 1,5 el caudal relativo aumenta del 71 % al 83 %, mientras el diferencial relativo disminuye del 50 % al 30 %.","coverage_evidence":"T40-T20-K003 | r=1,5 | Rendimiento 83 % | CEIS p. 141, tabla 20: r=1 → 71 % y r=1,5 → 83 % de caudal efectivo máximo teórico; CEIS p. 142, tabla 22: r=1 → 50 % y r=1,5 → 30 % de diferencial de presión máximo. Relación r=Ae/Ai."},{"id":3370,"correct_index":0,"old_correct":"30 %","stem":"En una ventilación por presión positiva, la relación salida/entrada aumenta desde r = 1,5 hasta r = 2. ¿Qué combinación recoge los cambios del caudal efectivo y del diferencial de presión, ambos respecto a sus respectivos máximos teóricos?","options":["El caudal pasa del 83 % al 89 % y el diferencial de presión del 30 % al 20 %.","El caudal pasa del 83 % al 95 % y el diferencial de presión del 30 % al 10 %.","El caudal pasa del 83 % al 89 % y el diferencial de presión del 30 % al 50 %.","El caudal pasa del 71 % al 89 % y el diferencial de presión del 50 % al 20 %."],"evidence":"CEIS pp. 141–142: Tabla 20, caudal VPP: r=1,5, 83 %; r=2, 89 %. Tabla 22, diferencial de presión: r=1,5, 30 %; r=2, 20 %. La relación es r=Ae/Ai.","explanation":"En la tabla 20, r=1,5 produce 83 % y r=2 produce 89 %; en la tabla 22 los valores respectivos son 30 % y 20 %.","coverage_evidence":"T40-T22-K003 | r=1,5 | Presión diferencial relativa 30 % | CEIS p. 141, tabla 20: r=1,5 → 83 % y r=2 → 89 % del caudal máximo VPP; CEIS p. 142, tabla 22: r=1,5 → 30 % y r=2 → 20 % del diferencial máximo. Relación r=Ae/Ai."},{"id":3371,"correct_index":3,"old_correct":"Una fracción de combustible realmente alta, por encima del 15% según algunos autores.","stem":"En relación con la atmósfera que puede desencadenar un backdraft, ¿qué combinación de concentración y origen del combustible se ajusta a la descripción del manual?","options":["Una fracción inferior al 5 % y la presencia exclusiva de monóxido de carbono, sin productos de pirólisis ni de combustión incompleta.","Una fracción situada entre el 5 % y el 10 %, debida a productos de pirólisis junto con productos incompletos de combustión.","Una fracción superior al 15 % atribuida únicamente al monóxido de carbono, sin participación de productos de pirólisis.","Una fracción superior al 15 % según algunos autores, con productos de pirólisis y productos incompletos de combustión."],"evidence":"CEIS p. 95: para un backdraft es necesaria una fracción de combustible muy elevada (>15 % según autores). El combustible procede de productos de pirólisis y productos incompletos de combustión.","explanation":"La concentración de combustible es superior al 15 % según algunos autores y no se identifica únicamente con CO: el manual cita productos de pirólisis y productos incompletos de combustión.","coverage_evidence":"CEIS p. 95: para que se produzca un backdraft es necesaria una fracción de combustible realmente alta dentro del recinto (>15% según autores). Un abundante volumen de productos de pirólisis junto con productos incompletos de combustión constituye el combustible del backdraft. El manual advierte del error de asociarlo únicamente al monóxido de carbono."},{"id":3372,"correct_index":3,"old_correct":"Evacuar los gases de incendio de un recinto empleando las diferencias de densidad generadas por el propio incendio, buscando ademas recobrar visibilidad, expulsar atmósfera combustible y reducir la temperatura.","options":["Aprovechar las diferencias de presión creadas por un extractor situado en la salida para evacuar gases y recobrar la visibilidad.","Aprovechar las diferencias de presión creadas por un ventilador en la entrada para evacuar gases y mejorar la atmósfera interior.","Aprovechar el gradiente de presión del incendio para retener los gases en el recinto mientras se estabiliza la temperatura.","Aprovechar las diferencias de presión generadas por el propio incendio para evacuar gases, recobrar visibilidad y reducir la temperatura."],"evidence":"CEIS p. 128: «El propósito de la ventilación natural es evacuar los gases de incendio de un recinto empleando las diferencias de presión generadas por el propio incendio». También persigue recuperar visibilidad, expulsar atmósfera combustible y reducir la temperatura.","explanation":"La ventilación natural aprovecha las diferencias de presión generadas por el incendio, no diferencias de densidad como mecanismo expresado en la definición del manual.","coverage_evidence":"El propósito de la ventilación natural es evacuar los gases de incendio de un recinto empleando las diferencias de presión generadas por el propio incendio. Persigue, además, recobrar la visibilidad, expulsar la atmósfera combustible al exterior (hasta en un 50% de la cantidad expulsada) y reducir la temperatura para facilitar las operaciones de progresión interior y la supervivencia de víctimas."},{"id":3373,"correct_index":3,"old_correct":"No situar al personal a lo largo de la ruta caliente de gases y abrir la salida de gases en primer lugar.","options":["Situar al personal fuera de la ruta caliente y mantener cerrada la salida de gases hasta alcanzar la presión de impulsión prevista.","Abrir primero la salida de gases y disponer al personal a lo largo de la ruta caliente para supervisar la progresión del flujo.","Mantener al personal fuera de la ruta caliente, abriendo primero la entrada de gases para establecer la sobrepresión interior.","No situar al personal a lo largo de la ruta caliente de gases y abrir la salida de gases en primer lugar."]},{"id":3374,"correct_index":1,"old_correct":"Un pico puntual en la potencia del incendio, una ligera sobrepresión y un elevado nivel de radiación térmica.","options":["Un aumento gradual de la potencia del incendio, una ligera sobrepresión y un elevado nivel de radiación térmica.","Un pico puntual en la potencia del incendio, una ligera sobrepresión y un elevado nivel de radiación térmica.","Un pico puntual en la potencia del incendio, una ligera depresión y un elevado nivel de radiación térmica.","Un pico puntual en la potencia del incendio, una ligera sobrepresión y una disminución de la radiación térmica."]},{"id":3375,"correct_index":2,"old_correct":"31,25 m³","stem":"En un recinto de 5 m de largo y 5 m de ancho, con una altura interior de 3,00 m, el límite inferior del colchón de gases se encuentra a 1,75 m del suelo. ¿Qué volumen ocupa la capa superior de gases antes de enfriarse?","options":["43,75 m³","75,00 m³","31,25 m³","25,00 m³"],"explanation":"La altura ocupada por los gases es 3,00 − 1,75 = 1,25 m; el volumen superior es 5 × 5 × 1,25 = 31,25 m³, conforme al cálculo de la página 120."},{"id":3376,"correct_index":3,"old_correct":"El tamaño excesivamente pequeño produce la evaporación en las inmediaciones del bombero exponiéndolo al vapor, mientras que el chorro sólido penetra evaporándose mínimamente hasta impactar.","options":["Las gotas extremadamente pequeñas penetran hasta el combustible antes de vaporizarse y el chorro sólido se evapora principalmente junto al bombero.","La reducción extrema del tamaño de gota disminuye la vaporización durante la trayectoria y el chorro sólido pierde agua principalmente antes del impacto.","Las gotas extremadamente pequeñas se evaporan solo tras impactar con el combustible, mientras el chorro sólido evapora su agua en el aire del recinto.","El tamaño excesivamente pequeño produce la evaporación en las inmediaciones del bombero exponiéndolo al vapor, mientras que el chorro sólido penetra evaporándose mínimamente hasta impactar."]},{"id":3377,"correct_index":2,"old_correct":"Realizar una aplicación de agua continua, sin dejar de mover el chorro de posición para cubrir con una fina película de agua todas las superficies del combustible.","options":["Aplicar agua de forma continua, manteniendo el chorro fijo sobre la primera superficie incendiada hasta completar su enfriamiento.","Recorrer las superficies incendiadas con el chorro de forma intermitente, intercalando pausas entre cada desplazamiento de la lanza.","Realizar una aplicación de agua continua, sin dejar de mover el chorro de posición para cubrir con una fina película de agua todas las superficies del combustible.","Mantener el agua aplicada de forma continua sobre la capa de gases sin dirigir el chorro a las superficies combustibles incendiadas."]},{"id":3378,"correct_index":0,"old_correct":"Aumenta la sobrepresión interna del recinto favoreciendo la propagación vertical.","options":["Reduce la temperatura en el recinto del incendio, pero prolonga el tiempo necesario para el control y la extinción.","Reduce la temperatura en el recinto del incendio.","Reduce el tiempo necesario para el control y extinción del incendio.","Reduce la temperatura en los recintos adyacentes."],"coverage_evidence":"T40-T14-K001 | CEIS p. 123, ventajas del ataque exterior ofensivo o ablandado: reduce la temperatura en el recinto del incendio y en los adyacentes, aumenta la supervivencia de las víctimas y reduce el tiempo necesario para el control y la extinción del incendio.","evidence":"CEIS p. 123: el ablandado reduce la temperatura del recinto y los adyacentes y reduce el tiempo necesario para el control y extinción del incendio.","explanation":"La afirmación incorrecta invierte la consecuencia temporal: el manual indica que el ablandado REDUCE el tiempo necesario para controlar y extinguir el incendio."},{"id":3379,"correct_index":1,"old_correct":"Para acomodar la relación recomendada r = 0,5, se debe reducir el tamaño de la salida de gases si la entrada es limitada.","stem":"En ventilación natural vertical, la relación r se define como área de salida de gases (Ae) dividida entre área de entrada (Ai). Según las recomendaciones y los límites de la página 129 del manual, señale la afirmación INCORRECTA:","evidence":"CEIS p. 129: la relación r es el cociente entre salida de gases (Ae) y entrada (Ai). Recomienda entrada al menos igual a salida (r=1), preferiblemente doble (r=0,5); nunca reducir la salida para acomodar r=0,5.","coverage_evidence":"CEIS p. 129: relación r= Ae/Ai, área de salida/área de entrada. A efectos prácticos se debe proporcionar una entrada al menos tan grande como la salida (r=1); resulta muy recomendable una entrada al menos dos veces el tamaño de la salida (r=0,5). En ningún caso se debe reducir la salida para acomodar r=0,5."},{"id":3382,"correct_index":1,"old_correct":"No excede del 10%.","stem":"Al aplicar conservación de la masa a las fases de un incendio se aproxima la masa de gases que sale a la que entra. ¿Qué contribución se desprecia y qué límite expresa el manual para justificar esa simplificación?","options":["La masa de combustible gasificado, considerada inferior o igual al 5 % del flujo gaseoso en las distintas fases del incendio.","La masa de combustible que se gasifica, cuyo valor no excede del 10 % durante las distintas fases del incendio.","La masa de combustible que se gasifica, cuyo valor no excede del 20 % durante las distintas fases del incendio.","La masa de combustible gasificado, considerada inferior o igual al 15 % del flujo gaseoso en las distintas fases del incendio."],"explanation":"El manual señala que la masa de combustible gasificado no excede del 10 %; por ello aproxima la masa de gases que sale a la que entra (p. 106)."},{"id":3383,"correct_index":0,"old_correct":"El incendio se limita estrictamente a los combustibles del interior, sin que el continente aporte combustible, siendo característico de obras de fábrica y forjados de hormigón.","options":["El incendio se limita estrictamente a los combustibles del interior, sin que el continente aporte combustible, siendo característico de obras de fábrica y forjados de hormigón.","El incendio se limita a los combustibles interiores, pero el continente de obra de fábrica aporta además parte del combustible al fuego.","El incendio afecta al contenido y a los forjados de hormigón, que contribuyen como combustible principal en la evolución del foco.","El incendio se limita al contenido de las construcciones ligeras de madera porque sus elementos estructurales no participan en la combustión."]},{"id":3384,"correct_index":2,"old_correct":"\\( P = k \\cdot T_a^4 \\)","options":["\\( P = k \\cdot T_a^3 \\)","\\( P = k \\cdot T_a^2 \\)","\\( P = k \\cdot T_a^4 \\)","\\( P = k \\cdot T_a^5 \\)"]}];
+async function applyT40Test200Corrections316(){
+ const cl=await db.connect();let tx=false;
+ try{
+  await cl.query('BEGIN');tx=true;
+  await cl.query('SELECT pg_advisory_xact_lock($1)',[316316]);
+  await cl.query("SET LOCAL lock_timeout='8s'");
+  await cl.query("SET LOCAL statement_timeout='70s'");
+  const previous=(await cl.query('SELECT value FROM app_state WHERE key=$1 FOR UPDATE',[T316_TEST200_KEY])).rows[0];
+  if(previous){
+    const info=JSON.parse(previous.value);
+    if(!Array.isArray(info.newIds)||info.newIds.length!==T316_TEST200_DATA.length)
+      throw Error('T316: marcador existente no corresponde al inventario');
+    const current=(await cl.query('SELECT id,active,validation_version FROM question_bank WHERE id=ANY($1::bigint[])',[info.newIds])).rows;
+    if(current.length!==info.newIds.length||current.some(r=>!r.active||Number(r.validation_version)!==316))
+      throw Error('T316: marcador antiguo divergente');
+    await cl.query('COMMIT');tx=false;
+    return {ok:true,skipped:true,reason:'T316_YA_VALIDADO',newIds:info.newIds};
+  }
+  if((await cl.query('SELECT 1 FROM app_state WHERE key=$1',['t40_graficas_3_distractores_313_aplicada_v1'])).rowCount!==1)
+     throw Error('T316: T313 no está aplicada; primero verificar SERVER315');
+  const ids=T316_TEST200_DATA.map(r=>r.id);
+  const originals=(await cl.query(`SELECT q.*,c.topic_id FROM question_bank q
+      JOIN coverage_items c ON c.id=q.coverage_item_id
+      WHERE q.id=ANY($1::bigint[]) ORDER BY q.id FOR UPDATE OF q`,[ids])).rows;
+  if(originals.length!==T316_TEST200_DATA.length)
+      throw Error('T316: falta una de las 16 preguntas originales');
+  for(const q of originals){
+    const spec=T316_TEST200_DATA.find(r=>r.id===Number(q.id));
+    if(!spec||!q.active||Number(q.topic_id)!==50||
+       Number(q.correct_index)!==spec.correct_index||
+       !Array.isArray(q.options)||q.options.length!==4||
+       q.options[q.correct_index]!==spec.old_correct||
+       (spec.graphic_crop&&(!q.graphic||q.graphic.originalSelected!==true)))
+      throw Error('T316: pregunta de origen modificada: '+q.id);
+  }
+  const coverageIds=originals.filter(q=>T316_TEST200_DATA.find(x=>x.id===Number(q.id)).coverage_evidence)
+    .map(q=>Number(q.coverage_item_id));
+  const coverageOriginal=coverageIds.length?(await cl.query('SELECT * FROM coverage_items WHERE id=ANY($1::int[]) FOR UPDATE',[coverageIds])).rows:[];
+  if(coverageOriginal.length!==coverageIds.length)throw Error('T316: faltan fichas documentales');
+  // El texto fuente corregido está cotejado con el PDF original, no con internet.
+  const priorById=new Map(coverageOriginal.map(x=>[Number(x.id),x]));
+  const expectedSources={
+   24046:'T40-T20-K003',24055:'T40-T22-K003',
+   23958:'diferencias de generación generadas',23716:'fracción de combustible realmente alta',
+   23930:'T40-T14-K001',23961:'A efectos prácticos',
+   24144:'Imagen 112',24145:'Imagen 113'};
+  for(const q of originals){
+    const sp=T316_TEST200_DATA.find(x=>x.id===Number(q.id));
+    if(!sp.coverage_evidence)continue;
+    const original=priorById.get(Number(q.coverage_item_id));
+    if(!original||!String(original.source_evidence).includes(expectedSources[Number(q.coverage_item_id)]||'__NOT_EXPECTED__'))
+      throw Error('T316: contenido de ficha PDF distinto, id='+q.coverage_item_id);
+    const changed=await cl.query(`UPDATE coverage_items SET source_evidence=$2
+        WHERE id=$1 AND source_evidence=$3`,[Number(q.coverage_item_id),sp.coverage_evidence,original.source_evidence]);
+    if(changed.rowCount!==1)throw Error('T316: ficha actualizada concurrentemente '+q.coverage_item_id);
+  }
+  await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[
+    't40_test200_316_respaldo_originales',JSON.stringify({date:new Date().toISOString(),questions:originals,coverage:coverageOriginal})]);
+  const newIds=[];
+  for(const q of originals){
+    const spec=T316_TEST200_DATA.find(x=>x.id===Number(q.id));
+    const nextGraphic=spec.graphic_crop?{...q.graphic,crop:spec.graphic_crop}:q.graphic;
+    if(spec.graphic_crop){
+      const c=spec.graphic_crop;
+      if(!nextGraphic||!Number.isInteger(Number(nextGraphic.assetId))||
+         c.x<0||c.y<0||c.width<=0||c.height<=0||c.x+c.width>1.001||c.y+c.height>1.001)
+        throw Error('T316: recorte inválido de '+q.id);
+    }
+    const nextOptions=spec.options||q.options;
+    if(nextOptions.length!==4||new Set(nextOptions.map(String)).size!==4||
+       !nextOptions[spec.correct_index]||
+       (spec.options&&nextOptions.every((v,i)=>v===q.options[i])))
+      throw Error('T316: opciones no modificadas o ambiguas '+q.id);
+    if((await cl.query('UPDATE question_bank SET active=FALSE,updated_at=NOW() WHERE id=$1 AND active=TRUE',[q.id])).rowCount!==1)
+      throw Error('T316: archivo histórico no aplicado '+q.id);
+    const newer=await cl.query(`INSERT INTO question_bank
+     (coverage_item_id,stem,options,correct_index,explanation,source_evidence,
+      source_page,manual_page,question_family,difficulty,graphic,active,validation_version)
+     VALUES($1,$2,$3::jsonb,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,TRUE,316)
+     RETURNING id`,[q.coverage_item_id,spec.stem||q.stem,JSON.stringify(nextOptions),
+      q.correct_index,spec.explanation||q.explanation,spec.evidence||q.source_evidence,
+      q.source_page,q.manual_page,q.question_family,q.difficulty,
+      nextGraphic?JSON.stringify(nextGraphic):null]);
+    if(newer.rowCount!==1)throw Error('T316: sustituta no creada '+q.id);
+    newIds.push(Number(newer.rows[0].id));
+  }
+  const verified=(await cl.query(`SELECT q.id,q.active,q.options,q.correct_index,q.question_family,q.graphic,
+     q.validation_version,c.topic_id FROM question_bank q JOIN coverage_items c
+     ON c.id=q.coverage_item_id WHERE q.id=ANY($1::bigint[])`,[newIds])).rows;
+  if(verified.length!==newIds.length||verified.some(x=>!x.active||Number(x.topic_id)!==50||
+    Number(x.validation_version)!==316||x.options.length!==4||
+    x.correct_index<0||x.correct_index>3))throw Error('T316: comprobación posterior incorrecta');
+  const oldRows=(await cl.query('SELECT id,active FROM question_bank WHERE id=ANY($1::bigint[])',[ids])).rows;
+  if(oldRows.length!==ids.length||oldRows.some(r=>r.active))throw Error('T316: no se archivaron los originales');
+  const graphics=verified.filter(q=>q.graphic!==null);
+  if(graphics.length!==2||graphics.some(q=>q.question_family!=='GRAFICA'||q.graphic?.originalSelected!==true))
+     throw Error('T316: pérdida de figuras seleccionadas');
+  const details={ok:true,revision:316,sourceSession:200,originalsArchived:ids,
+     newIds,correctedQuestions:16,graphicsCorrected:2,historyDeleted:0,
+     examKnowledgeDeleted:0,preExistingSessionModified:0};
+  await cl.query('INSERT INTO app_state(key,value) VALUES($1,$2)',[T316_TEST200_KEY,JSON.stringify(details)]);
+  await cl.query('COMMIT');tx=false;
+  return details;
+ }catch(e){if(tx)await cl.query('ROLLBACK').catch(()=>{});throw e;}
+ finally{cl.release();}
+}
+
 // SERVER315: migración idempotente con recuento dinámico de preguntas
 // textuales y 207 fuentes gráficas auditadas; acepta nuevos tests, pero no
 // pérdida de preguntas, figuras ni variaciones en las tres respuestas.
@@ -27724,6 +27941,13 @@ async function startServer(){
               try{
                 const fixed313=await applyT40Distractors313AfterStartup314();
                 console.log('T313_T40_3_GRAFICAS_DISTRACTORES_CORREGIDOS',JSON.stringify(fixed313));
+                // SERVER316 requiere T313 aplicada antes de archivar las 16 originales.
+                try{
+                  const result316=await applyT40Test200Corrections316();
+                  console.log('T316_T40_TEST200_CORREGIDO',JSON.stringify(result316));
+                }catch(e){
+                  console.error('T316_NO_APLICADO_ROLLBACK:',String(e?.message||e));
+                }
               }catch(e){
                 console.error('T313_NO_APLICADO_ROLLBACK:',String(e?.message||e));
               }
