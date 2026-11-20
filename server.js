@@ -18662,8 +18662,6 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
   const items=targets.map((t,i)=>({slot:i+1,tema:t.topic_name,epigrafe:t.section,
     concepto:t.concept,fragmento:String(t.source_evidence||'').slice(0,3000),
     familia:t.questionFamily||'2024_TEXTO',
-    ...(t323Scope(t)&&difficulty==='muy alta'?{
-      alcanceProbatorio:t323EvidenceProfile(t).sections<2?'UNICO_HECHO_O_FRASE':'VARIOS_HECHOS_EXPLICITOS'}:{}),
     ...(String(t.topic_block||'').toLowerCase()==='especifico'&&!iiff91Topic(t)&&
        ['2024_TEXTO','2024_NUMERICA'].includes(t.questionFamily)?
       {paginaImpresa:String(t.manual_page??'')}:{ }),
@@ -18863,56 +18861,6 @@ function t322SourceWantsRicherAlternative(t,difficulty){
      t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192||t.t38PreparedGraphicSlot270)return false;
   return !t322SourceCognitiveFit(t);
 }
-// SERVER323 - Clasificar la exigencia COGNITIVA con la fuente real,
-// sin confundir longitud del PDF con razonamiento. Protege imagenes,
-// formulas, temas IIFF y T39 y cualquier bloque no especifico.
-function t323Scope(t){
- return !!t && String(t.topic_block||'').toLowerCase()==='especifico' &&
-   !iiff91Topic(t) && !t39Hydraulica(t) && !t.graphicAsset &&
-   !t.t39StrictCalculation133 && !t.t38PreparedGraphicSlot270 &&
-   !t.t40PreparedGraphicSlot157 && !t.t41PreparedGraphicSlot &&
-   !t.t42PreparedGraphicSlot && !t.t43PreparedGraphicSlot &&
-   !t.t44PreparedGraphicSlot && !t.t45PreparedGraphicSlot &&
-   !t.healthPreparedGraphicSlot192;
-}
-function t323EvidenceProfile(t){
- const ev=String(t?.source_evidence||'').trim();
- const sections=ev.split(/(?:\.{2,}|[;\n•]|\.\s+(?=[A-ZÁÉÍÓÚÑ]))/u)
-   .map(x=>x.trim()).filter(x=>x.length>=18);
- // Estructuras causales/condicionales explicitas; no contar la longitud
- // ni etiquetas editoriales como una relacion tecnica.
- const cues=(ev.match(/\b(?:cuando|mientras|si\s+(?:la|el|se)|debido\s+a|a\s+medida\s+que|permite|produce|provoca|a\s+traves\s+de|para\s+(?:evitar|lograr|reducir|mantener|aumentar|conseguir)|en\s+(?:baja|alta)\s+presion|su\s+funcion|sus\s+funciones|al\s+(?:aumentar|disminuir|pasar|girar|abrir|cerrar|actuar|entrar|salir|activarse|elevarse)|causa|consecuencia)\b/giu)||[]).length;
- const bulletEntries=(ev.match(/(?:^|\s)•\s+\S/gu)||[]).length;
- const multiValues=(ev.match(/\d+(?:[.,]\d+)?\s*(?:l\/?min|bar|km\/?h|rpm|kg|%|w(?:att)?|mm|cm|m\b)/giu)||[]).length;
- const listedProperties=(ev.match(/\b(?:no necesita|es insensible|no se ve perjudicado|presenta|dispone de|se compone de|se caracteriza por|su funcion|sus funciones)\b/giu)||[]).length;
- const causalProcess=/\b(?:para\s+(?:lograr|evitar|reducir|conseguir|permitir)|de\s+forma\s+que|lo\s+que\s+(?:permite|provoca|produce)|al\s+(?:pasar|abrir|cerrar))\b/iu.test(ev);
- return {len:ev.length,sections:sections.length,cues,bulletEntries,multiValues,listedProperties,causalProcess};
-}
-function t323SourceCognitiveFit(t,family=t?.questionFamily){
- if(!t323Scope(t)||!['2026_CORRECTA','2026_RAZONAMIENTO','2026_INCORRECTA'].includes(String(family)))return true;
- const x=t323EvidenceProfile(t);
- if(family==='2026_INCORRECTA')return x.sections>=3 ||
-   (x.bulletEntries>=3 && x.len>=165) ||
-   (x.sections>=2 && x.cues>=3 && x.len>=220);
- if(family==='2026_RAZONAMIENTO')return x.len>=120 &&
-   ((x.sections>=2 && x.cues>=1) || x.cues>=2 ||
-    (x.bulletEntries>=3 && x.len>=190) ||
-    (x.sections>=3 && x.len>=170) ||
-    (x.causalProcess && x.len>=175));
- return (x.sections>=2 && x.len>=120) ||
-   (x.len>=175 && x.cues>=2) ||
-   (x.len>=155 && x.listedProperties>=2) ||
-   (x.bulletEntries>=2 && x.len>=150);
-}
-function t323SafeFamily(t,wanted){
- if(!t323Scope(t))return wanted;
- // Un objetivo sustituto sin magnitud NO puede heredar 2024_NUMERICA.
- if(wanted==='2024_NUMERICA'&&!specificNumericReady128(t))return '2024_TEXTO';
- if(t323SourceCognitiveFit(t,wanted))return wanted;
- if(['2026_RAZONAMIENTO','2026_INCORRECTA'].includes(wanted) &&
-    t323SourceCognitiveFit(t,'2026_CORRECTA'))return '2026_CORRECTA';
- return specificNumericReady128(t)?'2024_NUMERICA':'2024_TEXTO';
-}
 // SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
 const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
@@ -19048,18 +18996,6 @@ Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
 SERVER322 — CALIBRACION OPERATIVA EN UNA SOLA GENERACION (BLOQUE ESPECIFICO):
 Conserva exclusivamente los HECHOS y las relaciones del fragmento CEIS de
 cada slot. Los examenes 2023/2024/2026 son PATRONES DE REDACCION, no fuente.
-PRIORIDAD ABSOLUTA: antes de escribir la CLAVE, separa sus afirmaciones
-tecnicas y verifica que CADA UNA aparece en el FRAGMENTO DEL MISMO SLOT.
-Si una frase combina un dato correcto con una propiedad no documentada,
-ELIMINA esa propiedad; no la deduzcas de conocimiento general. Un solo
-fragmento no autoriza añadir leyes fisicas, excepciones, mecanismos o normas.
-Para distractores usa alteraciones creibles en la MISMA categoria de datos
-(fase, umbral, sentido, componente, condicion, secuencia). Evita imposibles
-patentes, funciones ajenas, negaciones grotescas y valores desmesurados.
-ALCANCE PROBATORIO=UNICO_HECHO_O_FRASE exige una pregunta literal
-precisa con alternativas cercanas: NO fabricar un caso causal ni encadenar
-propiedades inexistentes para aparentar nivel 2026. Si la fuente recoge
-VARIOS_HECHOS_EXPLICITOS, plantea comparaciones SOLO entre esos hechos.
 2026 CORRECTA: enunciado y cuatro respuestas desarrolladas cuando el PDF
 lo permita. Las cuatro deben responder a la misma pregunta tecnica;
 en cada alternativa falsa modifica solo una condicion, fase, valor,
@@ -19273,12 +19209,7 @@ SERVER321: Si el enunciado pide el nombre/titulo de una tabla, epigrafe,
 encabezado, numero de figura o pagina, answer=-1 y calidad=0: eso NO evalua
 conocimiento tecnico, aunque la frase coincida literalmente con el PDF.
 Si una respuesta une dos afirmaciones, verifica AMBAS en el fragmento total,
-no apruebes por una cita que solo respalde una parte. La cita quote es UNA
-muestra del mismo fragmento (no contiene necesariamente todas las pruebas):
-comprueba TODO el fragmento antes de decidir, sin exigir una sola cita que
-repita literalmente la respuesta entera. Si la respuesta agrega una propiedad,
-valor, mecanismo o condicion NO presentes en la fuente, answer=-1. No aceptar
-esos añadidos por conocimientos generales del auditor.
+no apruebes por una cita que solo respalde una parte.
 - En familias 2026_* verifica ENUNCIADO y CUATRO OPCIONES por separado.
   Valora si presentan contexto técnico y relaciones examinables; en Muy alta,
   si el fragmento acredita dos relaciones, la solución debe requerirlas.
@@ -19871,9 +19802,46 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false,
   if(pairs.length<count)throw Error(`Banco insuficiente para ${count} preguntas ${difficulty}; hay ${pairs.length} aptas en esta selección. No se rellena con preguntas deficientes.`);
   return bank285PickBalanced(pairs,count,allowedTopicIds,mode);
 }
+// SERVER324: reparacion exclusivamente de PRESENTACION de dos imagenes
+// seleccionadas T40 (figuras 121 y 122/123), sin reescribir archivos,
+// ni cambiar el banco, las respuestas, el SRS o la generacion Gemini.
+// Coordenadas sobre los originales exactos de GitHub, verificadas visualmente.
+const T324_MEDIA_T40=Object.freeze({
+  'incendios-interior/Screenshot_20260924-115249-display-0.png.png':{
+    crop:{x:0,y:0,width:1,height:0.807},
+    maskRegions:[
+      {x:0.062,y:0.026,width:0.263,height:0.05},
+      {x:0.080,y:0.313,width:0.246,height:0.17}
+    ]
+  },
+  'incendios-interior/Screenshot_20260924-115306-display-0.png.png':{
+    crop:{x:0,y:0,width:1,height:0.912},
+    maskRegions:[{x:0,y:0.491,width:1,height:0.152}]
+  }
+});
+function t324FormatOnlyFormula(text){
+  if(typeof text!=='string')return text;
+  const s=text.trim();
+  // Solo casos de fuente real: paréntesis que contienen una expresión TeX
+  // con barras invertidas pero sin los delimitadores \\( ... \\) de KaTeX.
+  // No inventar ni transformar expresiones físicas ni respuestas.
+  if(/^\([^()]{1,160}\)$/.test(s)&&
+     /\\(?:rho|frac|Delta|sigma|theta|sqrt|mu|pi|cdot)(?![a-z])/i.test(s)&&
+     !/\\\(|\\\[/.test(s)){
+    return '\\('+s.slice(1,-1)+'\\)';
+  }
+  return text;
+}
 function publicManualPageQuestions(questions){
-  return (questions||[]).map(q=>({...q,sourcePage:null,
-    manualPage:q.manualPage??null}));
+  return (questions||[]).map(q=>{
+    const src=String(q?.graphic?.sourceId||'');
+    const media=T324_MEDIA_T40[src];
+    const graphic=media?{...q.graphic,crop:{...media.crop},
+      maskRegions:media.maskRegions.map(r=>({...r}))}:q.graphic;
+    return {...q,sourcePage:null,manualPage:q.manualPage??null,
+      graphic,
+      options:Array.isArray(q.options)?q.options.map(t324FormatOnlyFormula):q.options};
+  });
 }
 // SERVER 91: previsualización READ-ONLY del reparto IIFF, cero llamadas Gemini.
 app.get('/api/iiff-selection-preview',async(req,res)=>{
@@ -21086,31 +21054,34 @@ app.post('/api/generate',async(req,res)=>{
         }
       }
     }
-    // SERVER323: una sola asignacion de familia, SIN Gemini ni SQL extra.
-    // Primero permite intercambiar con un literal MAS RICO del mismo tema;
-    // si no existe, conserva el conocimiento como familia realmente evaluable.
-    // No toca preguntas directas, graficas, calculos T39 ni otros bloques.
+    // SERVER322 — CALIBRACION SIN SQL NI GEMINI ADICIONAL:
+    // Una ficha breve de siglas sigue siendo preguntable, pero no puede
+    // disfrazarse de RAZONAMIENTO. Intercambia SOLO la familia con un objetivo
+    // del mismo test y mismo tema que sí aporte hechos/relaciones suficientes.
+    // Ni la cobertura, ni el orden de slots, ni la base de datos se alteran.
     if(!resume136&&difficulty==='muy alta'&&testType==='normal'){
+      const toProtect=t=>Boolean(t?.graphicAsset||t?.t39StrictCalculation133||
+        t?.t38PreparedGraphicSlot270||t?.t40PreparedGraphicSlot157||
+        t?.t41PreparedGraphicSlot||t?.t42PreparedGraphicSlot||
+        t?.t43PreparedGraphicSlot||t?.t44PreparedGraphicSlot||
+        t?.t45PreparedGraphicSlot||t?.healthPreparedGraphicSlot192);
       for(let i=0;i<targets.length;i++){
-        const t=targets[i],wanted=String(t?.questionFamily||'');
-        if(direct.has(i)||!t323Scope(t)||t323SourceCognitiveFit(t,wanted))continue;
+        const t=targets[i];
+        if(direct.has(i)||toProtect(t)||!t322SourceWantsRicherAlternative(t,difficulty))continue;
         const swapIndex=targets.findIndex((other,j)=>j!==i&&!direct.has(j)&&
-          Number(other?.topic_id)===Number(t.topic_id)&&t323Scope(other)&&
-          ['2024_TEXTO','2024_NUMERICA'].includes(other.questionFamily)&&
-          (other.questionFamily!=='2024_NUMERICA'||specificNumericReady128(t))&&
-          t323SourceCognitiveFit(other,wanted));
+          Number(other?.topic_id)===Number(t.topic_id)&&!toProtect(other)&&
+          other.questionFamily==='2024_TEXTO'&&
+          t322SourceCognitiveFit(other,t.questionFamily));
         if(swapIndex!==-1){
           const oldFamily=targets[swapIndex].questionFamily;
-          targets[swapIndex]={...targets[swapIndex],questionFamily:wanted};
+          targets[swapIndex]={...targets[swapIndex],questionFamily:t.questionFamily};
           targets[i]={...t,questionFamily:oldFamily};
-          console.log('T323_INTERCAMBIO_FAMILIAS:',JSON.stringify({topicId:t.topic_id,a:i,b:swapIndex}));
-        }else{
-          const family=t323SafeFamily(t,wanted);
-          if(family!==wanted){
-            targets[i]={...t,questionFamily:family};
-            console.log('T323_FAMILIA_CON_EVIDENCIA:',JSON.stringify({topicId:t.topic_id,slot:i,from:wanted,to:family}));
-          }
+          console.log('T322_INTERCAMBIO_FAMILIAS:',JSON.stringify({topicId:t.topic_id,a:i,b:swapIndex}));
+        }else if(t.questionFamily==='2026_RAZONAMIENTO'){
+          targets[i]={...t,questionFamily:'2024_TEXTO'};
+          console.log('T322_LITERAL_HONESTO:',JSON.stringify({topicId:t.topic_id,slot:i}));
         }
+        // Para INCORRECTA insuficiente se conserva el fallback SERVER205.
       }
     }
     // Ajuste local gratuito para evitar la triple paráfrasis verdadera en
@@ -21400,11 +21371,7 @@ app.post('/api/generate',async(req,res)=>{
                desiredFamily==='GRAFICA'
                 ?specificFallbackFamily129(targets,slot.index)
                 :(desiredFamily||'2026_CORRECTA')):desiredFamily;
-            // SERVER323: la fuente SUSTITUTA debe poder sustentar la familia;
-            // no heredar RAZONAMIENTO/INCORRECTA de una fuente descartada.
-            const t323Recovered=(!slot.t.t39StrictCalculation133&&specific&&difficulty==='muy alta')
-              ?t323SafeFamily(other,recoveredFamily):recoveredFamily;
-            targets[slot.index]=specific?{...other,questionFamily:slot.t.t39StrictCalculation133?'CALCULO_FORMULACION':t323Recovered,...(slot.t.t39StrictCalculation133?{t39StrictCalculation133:true}:{})}:other;
+            targets[slot.index]=specific?{...other,questionFamily:slot.t.t39StrictCalculation133?'CALCULO_FORMULACION':recoveredFamily,...(slot.t.t39StrictCalculation133?{t39StrictCalculation133:true}:{})}:other;
             occupied.add(Number(other.id));tried119.add(Number(other.id));
             slot.t=targets[slot.index];
             // Los formatos geográficos deterministas mantienen su ruta normal.
