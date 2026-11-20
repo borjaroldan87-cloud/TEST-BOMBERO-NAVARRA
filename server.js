@@ -18832,6 +18832,35 @@ function t321SpecificTitleOnlyCoverage(t){
  if(!/^tabla\s+\d+\s*[.:-]\s*\S/iu.test(section))return false;
  return norm(section)===norm(t?.source_evidence);
 }
+// SERVER322: adecuacion cognitiva ANTES de llamar a Gemini.
+// El material literal breve sigue siendo examinable; no se presenta como
+// razonamiento 2026 si la unica evidencia es una sigla/lista/denominacion.
+// No se agregan rechazos al auditor, llamadas al modelo ni rondas de rescate.
+function t322SourceCognitiveFit(t,family=t?.questionFamily){
+  if(String(t?.topic_block||'').toLowerCase()!=='especifico'||
+     iiff91Topic(t)||t39Hydraulica(t)||
+     !['2026_RAZONAMIENTO','2026_INCORRECTA'].includes(String(family)))return true;
+  const ev=String(t?.source_evidence||'').trim();
+  const editorialList=/^(?:tabla\s*\d+[.:-]\s*)?(?:nomenclatura|clasificaci[oó]n\s+de\s+(?:veh[ií]culos|equipos))\b/iu.test(ev);
+  if(family==='2026_RAZONAMIENTO'){
+    // Un inventario de siglas sin mecanismo causal es un literal, no
+    // un supuesto de razonamiento, por muchos caracteres que contenga.
+    if(editorialList&&!/(?:cuando|debido|mediante|produce|permite|causa|condici[oó]n|si\s+la\s+presi[oó]n)\b/iu.test(ev))return false;
+    return ev.length>=180;
+  }
+  // INCORRECTA: tres verdades independientes, no una frase repetida.
+  const pieces=ev.split(/[;\n•]|\.\s+(?=[A-ZÁÉÍÓÚÑ])/u)
+    .map(x=>x.trim()).filter(x=>x.length>=20);
+  return pieces.length>=3 || (ev.length>=260 && /(?:primero|segundo|tercero|cuando|mientras|adem[aá]s|por otra parte|por un lado|por otro lado)/iu.test(ev));
+}
+function t322SourceWantsRicherAlternative(t,difficulty){
+  if(difficulty!=='muy alta'||!t||!['2026_RAZONAMIENTO','2026_INCORRECTA'].includes(t.questionFamily)||
+     String(t.topic_block||'').toLowerCase()!=='especifico'||
+     t.graphicAsset||t.t39StrictCalculation133||t.t40PreparedGraphicSlot157||t.t41PreparedGraphicSlot||
+     t.t42PreparedGraphicSlot||t.t43PreparedGraphicSlot||t.t44PreparedGraphicSlot||
+     t.t45PreparedGraphicSlot||t.healthPreparedGraphicSlot192||t.t38PreparedGraphicSlot270)return false;
+  return !t322SourceCognitiveFit(t);
+}
 // SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
 const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
   properties:{index:{type:'integer'},answer:{type:'integer',minimum:-1,maximum:3},
@@ -18962,38 +18991,34 @@ Para nivel Muy alta, evita cálculos triviales de una sola multiplicación
 cuando la fuente autorice un problema con dos decisiones razonables.
 Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
 ` : '';
-  const qualityGuide217=difficulty==='muy alta' && group.some(t=>
-    String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
-SERVER320 — CALIDAD MUY ALTA DEL BLOQUE ESPECIFICO, EN ESTA MISMA GENERACION:
-SERVER321: Titulo, numero de tabla/figura y epigrafe NO son contenido examinable.
-Si la fuente solo contiene el encabezado, no conviertas ese encabezado en
-pregunta. De una tabla se examinan FILAS, criterios, relaciones y valores,
-no como se titula. No alterar los recortes graficos seleccionados.
-Basarse en la FORMA de los modelos oficiales 2023/2024/2026, especialmente
-el desarrollo del enunciado y de las alternativas de las familias 2026_*.
-NO transferir ningún dato factual de esos exámenes al tema: SOLO evidencia CEIS.
-- Construye primero la respuesta sustentada, después tres alternativas
-  DENTRO DEL MISMO MECANISMO, VARIABLE O CONDICIÓN, de extensión y detalle
-  comparables. Un opositor preparado debe tener que comprobarlas todas;
-  no debe descartar tres por sentido común, exageración, terminología ficticia
-  o porque traten de otras máquinas, otros riesgos o funciones irrelevantes.
-- Para 2026_CORRECTA y 2026_RAZONAMIENTO, cuando el texto dé dos relaciones,
-  conserva el mismo contexto técnico en las cuatro opciones y altera una sola
-  relación en cada falsa: fase, orden, causa/efecto, límite o componente con
-  función cercana. No basta añadir «nunca», «siempre» o «automáticamente».
-- Para 2026_INCORRECTA, redacta CUATRO afirmaciones con densidad semejante,
-  tres verdaderas DISTINTAS cuya evidencia pueda señalarse por separado y una
-  falsa cuya única divergencia sea un detalle contrastable del PDF. Una sola
-  frase factual NO acredita tres verdaderas; no inventes contenido para
-  mantener la polaridad, ni cambies silenciosamente la familia indicada.
-- Para 2024_TEXTO / 2024_NUMERICA conserva preguntas directas con opciones
-  homogéneas en categoría y unidad; para CALCULO_FORMULACION, resultados
-  incorrectos originados por errores concretos de una relación autorizada.
-- Prueba de calidad: ¿una persona que NO recuerde el dato CEIS puede suprimir
-  tres alternativas por descarte semántico? Si sí, redáctalas de nuevo ANTES
-  de emitir el mismo JSON. Con evidencia insuficiente, no simules Muy alta.
-- Mantener las excepciones existentes de IIFF, T39/tablas y todas las
-  preguntas gráficas seleccionadas; NO crear llamadas ni filtros nuevos.
+  const qualityGuide217=difficulty==='muy alta'&&group.some(t=>
+    String(t.topic_block||'').toLowerCase()==='especifico'&&!iiff91Topic(t))?`
+SERVER322 — CALIBRACION OPERATIVA EN UNA SOLA GENERACION (BLOQUE ESPECIFICO):
+Conserva exclusivamente los HECHOS y las relaciones del fragmento CEIS de
+cada slot. Los examenes 2023/2024/2026 son PATRONES DE REDACCION, no fuente.
+2026 CORRECTA: enunciado y cuatro respuestas desarrolladas cuando el PDF
+lo permita. Las cuatro deben responder a la misma pregunta tecnica;
+en cada alternativa falsa modifica solo una condicion, fase, valor,
+componente u orden REALMENTE DISCRIMINANTE dentro del mismo mecanismo.
+2026 INCORRECTA: construye primero tres VERDADES DISTINTAS comprobables
+en el fragmento y luego una falsedad tecnicamente proxima; NO escribas
+una falsedad de sentido comun opuesta a tres funciones basicas evidentes.
+2026 RAZONAMIENTO: exige relacionar causa y efecto, secuencia o
+condicion y respuesta; una pregunta de reconocer siglas o una etiqueta
+NO es razonamiento aunque antepongas «Analizando» o alargues el texto.
+2024 TEXTO/NUMERICA: conservar preguntas directas de memoria precisa,
+datos y unidades. No simular complejidad por redaccion ni contaminar la
+clave con afirmaciones no acreditadas. CALCULO: reglas propias del PDF.
+PRUEBA ADVERSARIAL ANTES DEL MISMO JSON: oculta la clave y examina cada
+falsa. ¿Un opositor preparado podria creerla si recuerda mal UN detalle
+tecnico? Si puede descartarla por terminologia ajena, mecanismo sin
+relacion, imposibilidad elemental, extremo gratuito, o si dos falsas
+dicen practicamente lo mismo, reescribela dentro de ESTA MISMA GENERACION.
+El objetivo es DISCRIMINAR con conocimientos CEIS, no confundir con
+imposibles. Si el extracto es corto, NO inventes tres condiciones extra.
+No preguntes titulos/epigrafes/numeros editoriales (SERVER321). No cambies
+imágenes seleccionadas, IIFF, T39 ni requisitos particulares de cada tema.
+NO añadas llamadas, filtros automaticos, rondas ni aumento de concurrencia.
 ` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
@@ -19190,10 +19215,21 @@ no apruebes por una cita que solo respalde una parte.
   si el fragmento acredita dos relaciones, la solución debe requerirlas.
   No exijas más palabras cuando el hecho sea literal breve, ni crees vetos
   automáticos por ratios de longitud: la longitud es solo un posible indicio.
-- La clave NO puede quedar distinguible por ser la única plausible o por
-  contener la única explicación técnica; «las otras tres son absurdas»
-  obliga a calidad<=1 aunque sean todas falsas frente al PDF. Compara cada
-  distractor con el mismo dato discriminante y exige un error técnico creíble.
+- CALIBRACION SERVER322: audita la DIFICULTAD sin mirar la clave. Antes
+  de adjudicar calidad=2, contrasta cada distractor con su rival mas cercano:
+  (a) ¿pertenece a la misma magnitud, mecanismo, condicion o fase?,
+  (b) ¿su fallo podria deberse a recordar mal UN detalle real del texto?,
+  (c) ¿otra falsa repite el mismo error cambiando solo palabras?
+  Si una falsa se descarta por absurdo, funcion sin relacion, extremo
+  injustificado o contradiccion de sentido comun, calidad<=1. Si dos
+  alternativas solo expresan la misma afirmacion, calidad<=1.
+  NO confundas mayor longitud con mayor complejidad. En 2026_RAZONAMIENTO
+  pedir solo siglas, nombres o listas NO es razonamiento: calidad<=1.
+  En INCORRECTA una falsa obvia (simple negacion del principio basico)
+  tampoco merece calidad=2 aunque las otras tres sean verdaderas.
+  Si la materia es un literal 2024, no penalices una cifra breve ni
+  valores vecinos suficientemente discriminantes. NO rebajes exigencias
+  de fidelidad al PDF y NO inventes relaciones de dificultad artificial.
 - INCORRECTA: cada una de las tres verdaderas debe tener respaldo propio
   en el fragmento entregado; confirma por separado su condición y relación.
   Si la cita y el fragmento solo avalan la falsa y no las tres verdaderas,
@@ -20979,6 +21015,36 @@ app.post('/api/generate',async(req,res)=>{
             occupied.add(Number(substitute.id));
           }
         }
+      }
+    }
+    // SERVER322 — CALIBRACION SIN SQL NI GEMINI ADICIONAL:
+    // Una ficha breve de siglas sigue siendo preguntable, pero no puede
+    // disfrazarse de RAZONAMIENTO. Intercambia SOLO la familia con un objetivo
+    // del mismo test y mismo tema que sí aporte hechos/relaciones suficientes.
+    // Ni la cobertura, ni el orden de slots, ni la base de datos se alteran.
+    if(!resume136&&difficulty==='muy alta'&&testType==='normal'){
+      const toProtect=t=>Boolean(t?.graphicAsset||t?.t39StrictCalculation133||
+        t?.t38PreparedGraphicSlot270||t?.t40PreparedGraphicSlot157||
+        t?.t41PreparedGraphicSlot||t?.t42PreparedGraphicSlot||
+        t?.t43PreparedGraphicSlot||t?.t44PreparedGraphicSlot||
+        t?.t45PreparedGraphicSlot||t?.healthPreparedGraphicSlot192);
+      for(let i=0;i<targets.length;i++){
+        const t=targets[i];
+        if(direct.has(i)||toProtect(t)||!t322SourceWantsRicherAlternative(t,difficulty))continue;
+        const swapIndex=targets.findIndex((other,j)=>j!==i&&!direct.has(j)&&
+          Number(other?.topic_id)===Number(t.topic_id)&&!toProtect(other)&&
+          other.questionFamily==='2024_TEXTO'&&
+          t322SourceCognitiveFit(other,t.questionFamily));
+        if(swapIndex!==-1){
+          const oldFamily=targets[swapIndex].questionFamily;
+          targets[swapIndex]={...targets[swapIndex],questionFamily:t.questionFamily};
+          targets[i]={...t,questionFamily:oldFamily};
+          console.log('T322_INTERCAMBIO_FAMILIAS:',JSON.stringify({topicId:t.topic_id,a:i,b:swapIndex}));
+        }else if(t.questionFamily==='2026_RAZONAMIENTO'){
+          targets[i]={...t,questionFamily:'2024_TEXTO'};
+          console.log('T322_LITERAL_HONESTO:',JSON.stringify({topicId:t.topic_id,slot:i}));
+        }
+        // Para INCORRECTA insuficiente se conserva el fallback SERVER205.
       }
     }
     // Ajuste local gratuito para evitar la triple paráfrasis verdadera en
