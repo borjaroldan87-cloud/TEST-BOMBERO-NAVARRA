@@ -3286,9 +3286,12 @@ function specificOneFactNegative205(t){
   if(String(t?.topic_block||'').toLowerCase()!=='especifico'||iiff91Topic(t)||
      t?.questionFamily!=='2026_INCORRECTA')return false;
   const ev=String(t?.source_evidence||'').trim();
-  // Límite intencionadamente prudente: NO interpretar párrafos largos.
-  if(!ev||ev.length>=135)return false;
-  const clauses=ev.split(/[;\n•]/).filter(x=>x.trim().length>=15);
+  // T319: una evidencia sanitaria/mecánica puede ser una frase larga
+  // sin contener tres hechos verificables para la modalidad INCORRECTA.
+  const scoped=[57,58,59,60,61,65].includes(Number(t.topic_id));
+  if(!ev||(!scoped&&ev.length>=135))return false;
+  const clauses=(scoped?ev.split(/[;\n•]|\.\s+(?=[A-ZÁÉÍÓÚÑ])/u)
+                       :ev.split(/[;\n•]/)).filter(x=>x.trim().length>=15);
   return clauses.length<3;
 }
 // SERVER205 — control mínimo transversal de alternativas (4 opciones).
@@ -14407,6 +14410,52 @@ function t317DiversificarVPP(selected,candidates,topics){
  return changed;
 }
 t317DiversificarVPP(selectedAdaptive,adaptiveCandidates,allowedTopicIds);
+// T319: equilibrado SOLO para los 5 temas sanitarios juntos. Utiliza el
+// pool SRS elegible ya cargado; sin consultas, Gemini, reintentos o bloqueos.
+function balanceHealth319(selected, pool, requested){
+  const ids=[57,58,59,60,61];
+  if(!Array.isArray(requested)||requested.length!==5||
+      !ids.every(id=>requested.some(x=>Number(x)===id))||
+      selected.length<5||selected.length%5)return null;
+  const quota=selected.length/5, counts=new Map(ids.map(id=>[id,0]));
+  for(const item of selected){
+    const id=Number(item.topic_id);
+    if(!counts.has(id))return null;
+    counts.set(id,counts.get(id)+1);
+  }
+  const used=new Set(selected.map(x=>Number(x.id)));
+  const byTopic=new Map(ids.map(id=>[id,[]]));
+  for(const item of pool){
+    const id=Number(item.topic_id);
+    if(byTopic.has(id)&&item.exam_relevant!==false&&
+        specificEvidenceReady128(item))byTopic.get(id).push(item);
+  }
+  let swaps=0;
+  for(const needed of ids){
+    for(const item of byTopic.get(needed)){
+      if(counts.get(needed)>=quota)break;
+      if(used.has(Number(item.id)))continue;
+      const dest=selected.findIndex(old=>
+        counts.get(Number(old.topic_id))>quota&&
+        Number(old.adaptive_priority||4)===Number(item.adaptive_priority||4));
+      if(dest<0)continue;
+      if(selected.some(old=>Number(old.topic_id)===needed&&
+          String(old.section||'')===String(item.section||'')&&
+          String(old.concept||'')===String(item.concept||'')))continue;
+      const previous=selected[dest], priorId=Number(previous.topic_id);
+      selected[dest]=item;
+      used.delete(Number(previous.id));used.add(Number(item.id));
+      counts.set(priorId,counts.get(priorId)-1);
+      counts.set(needed,counts.get(needed)+1);
+      swaps++;
+    }
+  }
+  console.log('T319_SANITARIOS_BALANCE',JSON.stringify({
+    questions:selected.length,perTopic:Object.fromEntries(counts),swaps,
+    balanced:ids.every(id=>counts.get(id)===quota),extraSql:0,extraGemini:0}));
+  return {swaps,counts:Object.fromEntries(counts)};
+}
+balanceHealth319(selectedAdaptive,adaptiveCandidates,allowedTopicIds);
 // Aplicar una sola vez antes de asignar familias. No fuerza matemáticas
 // inexistentes ni desplaza preguntas de distinta prioridad SRS.
 specificAlignFormula128(selectedAdaptive,adaptiveCandidates);
@@ -18883,21 +18932,17 @@ Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
 ` : '';
   const qualityGuide217=difficulty==='muy alta' && group.some(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
-CALIDAD MUY ALTA — BLOQUE ESPECÍFICO (MISMA LLAMADA, SIN FILTROS NUEVOS):
-Antes de emitir cada pregunta, determina qué error concreto cometería un opositor
-preparado: confundir dos condiciones del mismo concepto, intercambiar fases,
-atribuir una función a un componente próximo, aplicar una excepción al supuesto
-general, cambiar el orden de dos pasos, o equivocar magnitud/unidad de un dato.
-Construye los tres distractores a partir de tres confusiones técnicas DISTINTAS
-que sean plausibles y compatibles con el contexto del enunciado. Evita tres
-números elegidos al azar alrededor de la clave y alternativas que puedan
-eliminarse sin estudiar. En un cálculo, si los datos permiten dos operaciones,
-prioriza la composición autorizada de ambas, sin revelar el despeje.
-La dificultad debe proceder del contenido comprobable, NO de añadir palabras,
-hipótesis no documentadas ni relaciones externas al PDF. Si la evidencia
-sostiene solo una pregunta directa, consérvala fiel y sin falsas complicaciones.
-No hagas comprobaciones externas, no generes preguntas adicionales y mantén
-exactamente el número de preguntas solicitado.
+CALIDAD MUY ALTA, SIN LLAMADAS NI PREGUNTAS ADICIONALES:
+Las cuatro opciones han de ser técnicas, plausibles, similares en longitud y
+comparables en magnitud o procedimiento. Crea distractores con diferencias
+pequeñas entre hechos documentados en ESTA evidencia CEIS: orden, condición,
+cifra, fase, componente o excepción. Prohibidos errores disparatados, absolutos
+que delaten la respuesta, órganos inventados o mecanismos ajenos al PDF.
+Para INCORRECTA, tres alternativas deben ser verdaderas por afirmaciones
+INDEPENDIENTES del fragmento; con menos de tres hechos usa CORRECTA.
+Sin datos externos, sin inventar, sin añadir operaciones no justificadas y
+sin regalar la fórmula. Si solo admite una pregunta simple, no falsees dificultad.
+Revisa las opciones ANTES de emitir el JSON en esta misma llamada.
 ` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
