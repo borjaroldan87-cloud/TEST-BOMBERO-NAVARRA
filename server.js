@@ -18682,6 +18682,7 @@ No copies estos ejercicios, cifras ni respuestas: sirven SOLO para calibrar clar
   return `Eres examinador de Bombero de Navarra, oposición nivel C. Redacta ${targets.length} preguntas NUEVAS, nivel ${difficulty}, modalidad ${mode}.
 NUNCA utilices conocimientos externos ni hechos de ejemplos de exámenes. La ÚNICA fuente factual son los fragmentos del PDF proporcionados en OBJETIVOS; si falta el dato, recupera exclusivamente del PDF del temario mediante File Search cuando se te habilite.
 Un objetivo por pregunta, EN ORDEN. Cuatro opciones homogéneas; exactamente una correcta. Distractores plausibles pero falsos a la luz del texto. No inventes normas, cifras o excepciones.
+${spec?`SERVER321 — PROHIBICION EDITORIAL PARA TODO EL BLOQUE ESPECIFICO: JAMAS preguntes por el titulo exacto de una tabla, figura, epigrafe, encabezado, enunciado de apartado, numero de tabla/figura, pagina o ubicacion del dato en el manual. El titulo solo orienta al examinador. Pregunta por propiedades, comparaciones, valores, relaciones, consecuencias o procedimientos REALES DEL CONTENIDO de esa tabla o seccion. Si el OBJETIVO aporta solo un titulo sin filas ni texto factual, NO construyas una pregunta sobre ese titulo: faltan hechos para evaluar. Las tablas completas y sus datos SI son examinables, respetando fila, unidad y condicion; las imagenes seleccionadas se mantienen intactas. Nunca copies en las opciones etiquetas «Tabla N. ...» como si el encabezado fuera la respuesta.`:""}
 ${geo && (soloSolares||soloEolicos) ? 'MUY ALTA significa discriminación territorial precisa y distractores próximos, no preguntas triviales de una columna. En ALTA mantén precisión, cuatro alternativas homogéneas y enunciados naturales. Evita introducciones del tipo «Según la tabla del temario». La sección PARQUE del objetivo es un dato factual explícito.': 'No endurezcas artificialmente el nivel: Alta / Muy alta son niveles del examen de funcionario C, no de posgrado.'} ${geo||targets.every(iiff91Topic)?'':'En modalidad INCORRECTA hay tres afirmaciones verdaderas y una falsa.'}
 La auditoría independiente aportará la cita textual del PDF. Devuelve únicamente enunciado, cuatro alternativas, índice y explicación breve.
 ${t55Calibration}
@@ -18802,6 +18803,34 @@ function t317SpecificObviousOptionIssue(q,t,difficulty){
  if(Number(t.topic_id)===50&&/mon[oó]xido\s+de\s+carbono|\bCO\b/iu.test(stem)&&
     opts.some(x=>/609\s*%/u.test(x)))return 'T317: 609 grados no son 609 por ciento';
  return null;
+}
+// SERVER321 — Validez editorial global para TODO el Bloque Específico.
+// Los títulos, numeraciones y encabezados son referencias bibliográficas,
+// NO hechos evaluables. Preservar los DATOS/valores de tablas y las imágenes
+// seleccionadas. No toca cobertura, PostgreSQL, SRS ni la selección gráfica.
+function t321SpecificEditorialQuestionIssue(q,t){
+ if(String(t?.topic_block||'').toLowerCase()!=='especifico')return null;
+ const stem=String(q?.stem||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+   .toLowerCase().replace(/\s+/g,' ').trim();
+ const names='(?:titulo|epigrafe|encabezado|cabecera|rotulo|pie de (?:figura|tabla|imagen))';
+ // Preguntas que interrogan por ORGANIZACIÓN del documento, no por el temario.
+ const aboutHeading=new RegExp('(?:\\b(?:que|cual|como|bajo que)\\b[^?]{0,85}\\b'+names+'\\b|\\b'+names+'\\b[^?]{0,60}\\b(?:exacto|literal|se (?:recoge|denomina|titula|encuentra)))','u');
+ const aboutLocation=/(?:\b(?:en|bajo)\s+que\s+(?:apartado|capitulo|seccion|pagina)\b|\b(?:numero|identificador)\s+de\s+(?:la|el)\s+(?:tabla|figura|imagen|esquema)\b|\b(?:tabla|figura|imagen|esquema)\s+numero\s+\d+\s*\?)/u;
+ if(aboutHeading.test(stem)||aboutLocation.test(stem))
+   return 'T321: pregunta sobre titulo, epigrafe, numero o ubicacion editorial, sin conocimiento examinable';
+ const options=Array.isArray(q?.options)?q.options:[];
+ if(options.length===4&&options.every(x=>/^\s*(?:tabla|figura|imagen|esquema)\s+\d+[\s.:)\-]/iu.test(String(x))))
+   return 'T321: alternativas limitadas a titulos o numeros editoriales';
+ return null;
+}
+function t321SpecificTitleOnlyCoverage(t){
+ if(String(t?.topic_block||'').toLowerCase()!=='especifico')return false;
+ // Caso de la sesion 209: la fuente NO contiene ni una fila de la tabla.
+ // Comparación exacta deliberada para no eliminar una tabla real o un gráfico.
+ const norm=x=>String(x||'').normalize('NFKC').replace(/\s+/g,' ').trim().replace(/[.\s]+$/,'').toLowerCase();
+ const section=String(t?.section||'').trim();
+ if(!/^tabla\s+\d+\s*[.:-]\s*\S/iu.test(section))return false;
+ return norm(section)===norm(t?.source_evidence);
 }
 // SERVER143: ampliar el MISMO auditor T39, no añadir auditor ni llamadas.
 const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',items:{type:'object',
@@ -18936,6 +18965,10 @@ Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
   const qualityGuide217=difficulty==='muy alta' && group.some(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
 SERVER320 — CALIDAD MUY ALTA DEL BLOQUE ESPECIFICO, EN ESTA MISMA GENERACION:
+SERVER321: Titulo, numero de tabla/figura y epigrafe NO son contenido examinable.
+Si la fuente solo contiene el encabezado, no conviertas ese encabezado en
+pregunta. De una tabla se examinan FILAS, criterios, relaciones y valores,
+no como se titula. No alterar los recortes graficos seleccionados.
 Basarse en la FORMA de los modelos oficiales 2023/2024/2026, especialmente
 el desarrollo del enunciado y de las alternativas de las familias 2026_*.
 NO transferir ningún dato factual de esos exámenes al tema: SOLO evidencia CEIS.
@@ -19004,7 +19037,7 @@ NO transferir ningún dato factual de esos exámenes al tema: SOLO evidencia CEI
   // además de una única respuesta factual verificable.
   const blind=questions.flatMap((q,i)=>{
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
-    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty);
+    const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty)||t321SpecificEditorialQuestionIssue(q,group[i]);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
     const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
@@ -19147,6 +19180,11 @@ ha de requerir observar la configuración y NO quedar explícita en
 el enunciado ni en el pie de figura. No admitas dos ejercicios de la
 misma tabla y variable con solo cambios superficiales en un test.
 SERVER320 — EVALUACION REAL DE DIFICULTAD (MODELO 2026, SOLO ESPECIFICO):
+SERVER321: Si el enunciado pide el nombre/titulo de una tabla, epigrafe,
+encabezado, numero de figura o pagina, answer=-1 y calidad=0: eso NO evalua
+conocimiento tecnico, aunque la frase coincida literalmente con el PDF.
+Si una respuesta une dos afirmaciones, verifica AMBAS en el fragmento total,
+no apruebes por una cita que solo respalde una parte.
 - En familias 2026_* verifica ENUNCIADO y CUATRO OPCIONES por separado.
   Valora si presentan contexto técnico y relaciones examinables; en Muy alta,
   si el fragmento acredita dos relaciones, la solución debe requerirlas.
@@ -19339,7 +19377,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       !Array.isArray(verdicts316)||verdicts316.length!==4||
       verdicts316.some((v,j)=>typeof v!=='boolean'||
         v!==(negative316?j!==q.correctIndex:j===q.correctIndex)));
-    if(strictFail316||t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty)||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
+    if(strictFail316||t39AuditFailure143||resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty)||t321SpecificEditorialQuestionIssue(q,group[i])||geo114QuestionIssue({...q,topic_block:group[i].topic_block,topic_name:group[i].topic_name,concept:group[i].concept})||!a||a.answer!==q.correctIndex ||
       (iiff91Topic(group[i])&&iiff107UnsupportedStrictLimit(q,group[i].source_evidence))||
       (iiff91Topic(group[i])&&iiff91UnsafeQuestion(q,{allowProvenNegative:
         iiff92EvidenceCanSupportNegative(group[i].source_evidence)}))||
@@ -19701,6 +19739,7 @@ async function resetBank136(allowedTopicIds,count,difficulty,onlyFresh111=false,
       r.anki_validation_status==='validated' && r.anki_direct_eligible===true);
     if(geo114QuestionIssue(r)||t52MattsonExample204(r))continue;
     if(bank278WeakText(r,difficulty))continue;
+    if(t321SpecificTitleOnlyCoverage(r)||t321SpecificEditorialQuestionIssue(r,r))continue;
     if(specificQualityIssue204({options:r.options,stem:r.stem},r,difficulty))continue;
     if(usedQuestions.has(stem)||usedCoverage.has(id)||
       (iiff91Topic(r)&&(iiff91Editorial({...r,source_page:r.ci_source_page,source_evidence:r.ci_evidence})||iiff91UnsafeQuestion(r,{allowProvenNegative:
@@ -20075,6 +20114,8 @@ function selectBankReview111(rows,count,testType){
     const q={stem:r.stem,options:r.options,correctIndex:Number(r.correct_index),ankiOriginalBank};
     if(resetShape136(q))continue;
     if(geo114QuestionIssue(r))continue;
+    // SERVER321: excluir tambien del SRS y repasos libres referencias editoriales.
+    if(t321SpecificEditorialQuestionIssue(r,r)||t321SpecificTitleOnlyCoverage({...r,source_evidence:r.ci_source_evidence}))continue;
     if(iiff91Topic(r)&&iiff91UnsafeQuestion(r,{allowProvenNegative:[114,119].includes(Number(r.validation_version))}))continue;
     const key=Number(r.topic_id);
     if(!grouped.has(key))grouped.set(key,[]);
@@ -20915,7 +20956,7 @@ app.post('/api/generate',async(req,res)=>{
     // ni el historial; evita pagar lotes destinados a rechazo automático.
     if(!resume136&&testType==='normal'&&count<=40){
       const missing=targets.map((t,i)=>({t,i})).filter(({t,i})=>
-        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!t.t45PreparedGraphicSlot&&!t.healthPreparedGraphicSlot192&&!specificEvidenceReady128(t)&&
+        !direct.has(i)&&!t.t40PreparedGraphicSlot157&&!t.t41PreparedGraphicSlot&&!t.t42PreparedGraphicSlot&&!t.t43PreparedGraphicSlot&&!t.t44PreparedGraphicSlot&&!t.t45PreparedGraphicSlot&&!t.healthPreparedGraphicSlot192&&(!specificEvidenceReady128(t)||t321SpecificTitleOnlyCoverage(t))&&
         !geographyTableRecord135(t));
       if(missing.length){
         const alternates=await getAdaptiveCoverageCandidates(
@@ -20925,6 +20966,7 @@ app.post('/api/generate',async(req,res)=>{
           const substitute=alternates.find(a=>Number(a.topic_id)===Number(t.topic_id)&&
             !occupied.has(Number(a.id))&&
             (!iiff91Topic(a)||!iiff91Editorial(a))&&
+            !t321SpecificTitleOnlyCoverage(a)&&
             iiff106ReplacementAllowed(a,targets,i,examMode==='simulation')&&
             (specificEvidenceReady128(a)||geographyTableRecord135(a)));
           if(substitute){
