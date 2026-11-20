@@ -18649,8 +18649,10 @@ function resetPrompt136(targets,difficulty,mode,comparisons=[]){
     geo ? pickGeografiaExamples73(targets,3) :
     targets.every(iiff91Topic) ? [] :
     targets.every(t=>String(t.topic_block||'').toLowerCase()==='especifico') ? [
-    'ESTILO 2026: «En relación con [mecanismo, condición o actuación documentada], señale la afirmación INCORRECTA». Tres verdaderas y una contradicha por el fragmento; opciones homogéneas, sin escenario ficticio.',
-    'ESTILO CEIS/2024 LITERAL: «¿Cuál es la característica de [concepto documentado]?» o «¿Qué valor/procedimiento se recoge para [caso]?»; pregunta directa de precisión, sin escribir CORRECTA/INCORRECTA y sin inventar cifras.'
+    '2026 INCORRECTA — comprensión técnica: «En relación con [procedimiento/fenómeno acreditado] y las condiciones en las que se desarrolla, señale la afirmación INCORRECTA». Cuatro afirmaciones DESARROLLADAS y de densidad comparable: tres relaciones verdaderas DIFERENTES demostradas por el mismo fragmento, y una casi correcta con una sola condición, fase, sentido físico o consecuencia falsada. No fabricar tres verdades si la ficha contiene solo un hecho.',
+    '2026 CORRECTA — interpretación de dos relaciones: «Respecto al funcionamiento de [sistema documentado] cuando se da [condición acreditada], señale la afirmación CORRECTA». Cuatro opciones técnicas comparables, cada una relaciona componente/condición y función/consecuencia; las falsas modifican un detalle técnico pertinente, NO un fenómeno ajeno o una exageración.',
+    '2026 RAZONAMIENTO — situación operativa acreditada: «Durante [maniobra o circunstancia que conste en el fragmento], ¿qué secuencia, efecto o actuación corresponde al mecanismo descrito?». Tanto enunciado como opciones desarrollan los DATOS REALES necesarios; no imaginar incidentes ni reglas. Distractores próximos que confunden fase, condición de activación o resultado documentado.',
+    '2023/2024 precisión literal y numérica: «¿Qué magnitud/valor/denominación corresponde a [condición exacta del manual]?». Pregunta directa; cuatro opciones de misma categoría, magnitud y unidad, con cifras próximas si son discriminables. CALCULO_FORMULACION solo con las relaciones documentadas, distractores derivados de errores de operación identificables, no números arbitrarios.'
   ] : [
     'T21: concejo a municipio y parque; no confundir municipio con concejo.',
     'T22-25: instalación a municipio y asignación de parque, según tabla literal.',
@@ -18686,7 +18688,8 @@ ${t55Calibration}
 Pregunta sólo lo respaldado, evita pistas y duplicados. Mantén exactamente la familia de cada objetivo. Formato JSON según el esquema solicitado.
 REGLA EDITORIAL SERVER208 (sin comprobaciones adicionales):
 Antes de cerrar cada pregunta evita alternativas que compartan literalmente una descripción larga y únicamente intercambien etiquetas o dos palabras, salvo que el objetivo exija comparar valores o secuencias literales tan próximos. Si el objetivo es un régimen, técnica, vehículo o concepto clasificado, utiliza otros elementos de la MISMA categoría documentados en los extractos disponibles y establece diferencias sustantivas (causa, fase, función, condición o consecuencia), sin sumar hechos ajenos al PDF. No redactes distracciones grotescas (imposibilidades evidentes, negaciones absurdas ni relleno ajeno al tema). Detecta errores de lengua como «desorientación desorientada». Si el fragmento solo sustenta un dato sencillo, respétalo en vez de fabricar una dificultad ficticia. Todo esto se resuelve dentro de esta MISMA respuesta JSON, sin pedir nuevas llamadas ni añadir validaciones de bloqueo.
-${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`Para conceptos técnicos, razonamientos y procedimientos prioriza enunciados y opciones desarrollados siguiendo el examen de 2026; para cifras, definiciones literales y relaciones exactas usa redacción breve precisa. No equipares longitud con dificultad ni extiendas datos simples artificialmente.
+${reglasCalidadTransversal81(difficulty,leg,geo)}\n${spec?`CALIBRACION 2023/2024/2026 DEL BLOQUE ESPECIFICO (SOLO ESTILO, NUNCA FUENTE FACTUAL):
+En las familias 2026_* redacta tanto el ENUNCIADO como las CUATRO ALTERNATIVAS con el mayor desarrollo técnico que permita la evidencia: contexto, condición y relación que hay que comprender, como en el examen oficial de Navarra de 2026. En Muy alta la diferencia entre alternativas debe exigir discriminar DOS relaciones del PDF cuando existan; en Alta basta una relación precisa con distractores próximos. No escribir enunciados largos vacíos ni una respuesta completa acompañada de tres frases cortas. La INCORRECTA solo es posible con tres afirmaciones verdaderas DISTINTAS verificables en el fragmento. No hay una cuota artificial de palabras: 2024_TEXTO / 2024_NUMERICA siguen siendo breves y literales cuando así lo requiera el objetivo. Los enunciados, distractores y explicaciones NO pueden añadir contenido del examen modelo al PDF aportado.
 ESTILO COMÚN DEL BLOQUE ESPECÍFICO — aplicar la familia indicada en cada OBJETIVO:
 2026_CORRECTA pide la opción CORRECTA; 2026_INCORRECTA pide la INCORRECTA. No invertir la polaridad. 2026_RAZONAMIENTO examina relaciones, secuencias o decisiones sustentadas. 2024_TEXTO y 2024_NUMERICA son preguntas LITERALES de precisión, no enunciados genéricos de señale CORRECTA/INCORRECTA; con cifras solo si aportan datos del manual; identificadores de normas NO son magnitudes. CALCULO_FORMULACION en modo cálculos T39 exige cálculo numérico REAL; en otros modos permite calcular, identificar una fórmula exacta, elegir qué fórmula corresponde a una magnitud o comparar sus variables; no se exige siempre operación aritmética. GRAFICA solo si hay una figura original adjunta y necesaria para resolver. En las tres familias LITERALES (2024_TEXTO / 2024_NUMERICA) del CEIS Guadalajara, redacta la pregunta directa: el servidor antepone de forma determinista «Según el manual del CEIS Guadalajara, página [página impresa], ...». No escribas esa cabecera en stem ni inventes páginas. Las otras familias NO llevan esa cabecera. Al nombrar normas, utiliza preferentemente su código literal sin añadirles clasificaciones ajenas al objetivo.
 EVALUABILIDAD EN TODO EL BLOQUE ESPECÍFICO: preguntar únicamente hechos,
@@ -18932,17 +18935,32 @@ Nunca cambies la afirmación literal del PDF ni añadas conocimientos externos.
 ` : '';
   const qualityGuide217=difficulty==='muy alta' && group.some(t=>
     String(t.topic_block||'').toLowerCase()==='especifico' && !iiff91Topic(t)) ? `
-CALIDAD MUY ALTA, SIN LLAMADAS NI PREGUNTAS ADICIONALES:
-Las cuatro opciones han de ser técnicas, plausibles, similares en longitud y
-comparables en magnitud o procedimiento. Crea distractores con diferencias
-pequeñas entre hechos documentados en ESTA evidencia CEIS: orden, condición,
-cifra, fase, componente o excepción. Prohibidos errores disparatados, absolutos
-que delaten la respuesta, órganos inventados o mecanismos ajenos al PDF.
-Para INCORRECTA, tres alternativas deben ser verdaderas por afirmaciones
-INDEPENDIENTES del fragmento; con menos de tres hechos usa CORRECTA.
-Sin datos externos, sin inventar, sin añadir operaciones no justificadas y
-sin regalar la fórmula. Si solo admite una pregunta simple, no falsees dificultad.
-Revisa las opciones ANTES de emitir el JSON en esta misma llamada.
+SERVER320 — CALIDAD MUY ALTA DEL BLOQUE ESPECIFICO, EN ESTA MISMA GENERACION:
+Basarse en la FORMA de los modelos oficiales 2023/2024/2026, especialmente
+el desarrollo del enunciado y de las alternativas de las familias 2026_*.
+NO transferir ningún dato factual de esos exámenes al tema: SOLO evidencia CEIS.
+- Construye primero la respuesta sustentada, después tres alternativas
+  DENTRO DEL MISMO MECANISMO, VARIABLE O CONDICIÓN, de extensión y detalle
+  comparables. Un opositor preparado debe tener que comprobarlas todas;
+  no debe descartar tres por sentido común, exageración, terminología ficticia
+  o porque traten de otras máquinas, otros riesgos o funciones irrelevantes.
+- Para 2026_CORRECTA y 2026_RAZONAMIENTO, cuando el texto dé dos relaciones,
+  conserva el mismo contexto técnico en las cuatro opciones y altera una sola
+  relación en cada falsa: fase, orden, causa/efecto, límite o componente con
+  función cercana. No basta añadir «nunca», «siempre» o «automáticamente».
+- Para 2026_INCORRECTA, redacta CUATRO afirmaciones con densidad semejante,
+  tres verdaderas DISTINTAS cuya evidencia pueda señalarse por separado y una
+  falsa cuya única divergencia sea un detalle contrastable del PDF. Una sola
+  frase factual NO acredita tres verdaderas; no inventes contenido para
+  mantener la polaridad, ni cambies silenciosamente la familia indicada.
+- Para 2024_TEXTO / 2024_NUMERICA conserva preguntas directas con opciones
+  homogéneas en categoría y unidad; para CALCULO_FORMULACION, resultados
+  incorrectos originados por errores concretos de una relación autorizada.
+- Prueba de calidad: ¿una persona que NO recuerde el dato CEIS puede suprimir
+  tres alternativas por descarte semántico? Si sí, redáctalas de nuevo ANTES
+  de emitir el mismo JSON. Con evidencia insuficiente, no simules Muy alta.
+- Mantener las excepciones existentes de IIFF, T39/tablas y todas las
+  preguntas gráficas seleccionadas; NO crear llamadas ni filtros nuevos.
 ` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
@@ -19128,6 +19146,25 @@ alcanza calidad=2. En preguntas sobre imágenes seleccionadas, la clave
 ha de requerir observar la configuración y NO quedar explícita en
 el enunciado ni en el pie de figura. No admitas dos ejercicios de la
 misma tabla y variable con solo cambios superficiales en un test.
+SERVER320 — EVALUACION REAL DE DIFICULTAD (MODELO 2026, SOLO ESPECIFICO):
+- En familias 2026_* verifica ENUNCIADO y CUATRO OPCIONES por separado.
+  Valora si presentan contexto técnico y relaciones examinables; en Muy alta,
+  si el fragmento acredita dos relaciones, la solución debe requerirlas.
+  No exijas más palabras cuando el hecho sea literal breve, ni crees vetos
+  automáticos por ratios de longitud: la longitud es solo un posible indicio.
+- La clave NO puede quedar distinguible por ser la única plausible o por
+  contener la única explicación técnica; «las otras tres son absurdas»
+  obliga a calidad<=1 aunque sean todas falsas frente al PDF. Compara cada
+  distractor con el mismo dato discriminante y exige un error técnico creíble.
+- INCORRECTA: cada una de las tres verdaderas debe tener respaldo propio
+  en el fragmento entregado; confirma por separado su condición y relación.
+  Si la cita y el fragmento solo avalan la falsa y no las tres verdaderas,
+  answer=-1, calidad=0. No completes datos ausentes con memoria externa.
+- No confundas distractor plausible con afirmación también verdadera:
+  si más de una opción responde al enunciado, answer=-1 y calidad=0.
+- Para 2024_TEXTO/NUMERICA, acepta precisión concisa y unidades homogéneas.
+  Para cálculo verifica el método autorizado y resultados de errores reales.
+  No rechaces literales válidos por ser cortos, ni fuerces desarrollo falso.
 ` : '';
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
