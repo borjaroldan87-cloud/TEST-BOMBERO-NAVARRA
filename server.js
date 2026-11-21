@@ -12112,9 +12112,24 @@ async function getNewCoverageCandidate(
 function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAnkiIds,freshAnkiIds,count,strategy,sectionKey,tokensFor,overlap,seed}){
   const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
-  const subkey=item=>`${Number(item.topic_id)}:${norm(item.section||'sin epigrafe')}`;
-  const conceptKey=item=>`${Number(item.topic_id)}:${norm(item.concept)}`;
-  const nucleus=item=>sectionKey(item)||subkey(item);
+  // SERVER330: calcular las claves semánticas UNA vez por ficha. Estas claves
+  // no cambian durante la selección; memorizar no altera SRS ni prioridades.
+  const subkeyMemo=new WeakMap(), conceptMemo=new WeakMap(), nucleusMemo=new WeakMap();
+  const subkey=item=>{
+    if(subkeyMemo.has(item))return subkeyMemo.get(item);
+    const key=`${Number(item.topic_id)}:${norm(item.section||'sin epigrafe')}`;
+    subkeyMemo.set(item,key);return key;
+  };
+  const conceptKey=item=>{
+    if(conceptMemo.has(item))return conceptMemo.get(item);
+    const key=`${Number(item.topic_id)}:${norm(item.concept)}`;
+    conceptMemo.set(item,key);return key;
+  };
+  const nucleus=item=>{
+    if(nucleusMemo.has(item))return nucleusMemo.get(item);
+    const key=sectionKey(item)||subkey(item);
+    nucleusMemo.set(item,key);return key;
+  };
   const stats=new Map((statsRows||[]).map(row=>[subkey(row),{
     total:Number(row.total)||1, asked:Number(row.asked_count)||0
   }]));
@@ -12127,7 +12142,9 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     tokenCache.set(item,set);return set;
   };
   const recentIds=new Set(), recentConcepts=new Set(), recentByNucleus=new Map();
-  const recentBySub=new Map(), pastConcepts=[];
+  // SERVER330: indexar historial por núcleo. Evita la multiplicación
+  // 2400 candidatos × centenas de historiales × recalculo de sectionKey.
+  const recentBySub=new Map(),pastConceptsByNucleus=new Map();
   const recentSessionIds=[...new Set((recentRows||[]).map(row=>Number(row.session_id)))].sort((a,b)=>b-a);
   const sessionRanks=new Map(recentSessionIds.map((id,index)=>[id,index]));
   for(const row of recentRows||[]){
@@ -12138,7 +12155,8 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     hit.hits++;hit.latest=Math.min(hit.latest,rank);recentByNucleus.set(nk,hit);
     const sub=recentBySub.get(sk)||{hits:0,latest:99};
     sub.hits++;sub.latest=Math.min(sub.latest,rank);recentBySub.set(sk,sub);
-    pastConcepts.push({nucleus:nk,tokens:contentTokens(row),item:row});
+    if(!pastConceptsByNucleus.has(nk))pastConceptsByNucleus.set(nk,[]);
+    pastConceptsByNucleus.get(nk).push({tokens:contentTokens(row),item:row});
   }
   const historicByNucleus=new Map();
   const seenSub=new Set();
@@ -12161,7 +12179,7 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     if(recentCache.has(item))return recentCache.get(item);
     const tokens=contentTokens(item);
     const value=recentIds.has(Number(item.id))||recentConcepts.has(conceptKey(item))||
-      (tokens.size>=4 && pastConcepts.some(prev=>prev.nucleus===nucleus(item) &&
+      (tokens.size>=4 && (pastConceptsByNucleus.get(nucleus(item))||[]).some(prev=>
         prev.tokens.size>=4 && overlap(tokens,prev.tokens)>=0.90));
     recentCache.set(item,value);return value;
   };
@@ -12197,8 +12215,11 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
       (permitSameNucleus||!seenNuclei.has(nucleus(item))) &&
       (permitRecent||!recent(item)));
     if(!pool.length)return false;
-    pool.sort((a,b)=>score(b)-score(a)||idOrder(a)-idOrder(b)||Number(a.id)-Number(b.id));
-    const picked=pool[0];
+    // SERVER330: durante este paso el conjunto seleccionado es inmutable;
+    // evaluar la puntuación una vez por ficha (no en cada comparación sort).
+    const ranked=pool.map(item=>({item,score:score(item),order:idOrder(item)}));
+    ranked.sort((a,b)=>b.score-a.score||a.order-b.order||Number(a.item.id)-Number(b.item.id));
+    const picked=ranked[0].item;
     selected.push(picked);seenIds.add(Number(picked.id));seenConcepts.add(conceptKey(picked));
     const nk=nucleus(picked);seenNuclei.set(nk,(seenNuclei.get(nk)||0)+1);
     if(hasAnki(picked))selectedAnki++;
