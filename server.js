@@ -17791,57 +17791,113 @@ function t39TableRow318(t){
   return {id:Number(t.id),topic_id:Number(t.topic_id),tab,kind,label,value,unit,
     section,src,manual_page:String(t.manual_page||''),source_page:t.source_page};
 }
+// SERVER327: construir intervalos completos y distractores próximos para UNA lanza.
+// Ambas cifras deben proceder de la tabla 4 YA indexada, misma lanza,
+// unidad y página. No interpolar, añadir entradas ni modificar cobertura.
+function t327LanzaRange(target,sourceRows,difficulty='muy alta'){
+  const f=t39TableRow318(target);
+  if(!f||f.tab!==4||!/^((boquilla|caudal)_(min|max))$/.test(f.kind))return null;
+  const family=f.kind.split('_')[0];
+  const candidates=(sourceRows||[]).map(t39TableRow318).filter(x=>
+    x&&x.tab===4&&x.label===f.label&&x.unit===f.unit&&
+    x.manual_page===f.manual_page&&x.kind.startsWith(family+'_'));
+  const lo=candidates.find(x=>x.kind===family+'_min');
+  const hi=candidates.find(x=>x.kind===family+'_max');
+  if(!lo||!hi||!candidates.some(x=>x.id===f.id&&x.src===f.src))return null;
+  const left=Number(lo.value.replace(',','.'));
+  const right=Number(hi.value.replace(',','.'));
+  if(!Number.isFinite(left)||!Number.isFinite(right)||left<=0||left>=right)return null;
+  const a=family==='boquilla'?0.5:10;
+  const b=family==='boquilla'?2:20;
+  const pairs=[[left,right],[left-a,right-b],[left,right+a],[left+a,right+a]];
+  if(pairs.some(([x,y])=>x<=0||x>=y))return null;
+  const format=n=>String(Number(n.toFixed(3))).replace('.',',');
+  const options=pairs.map(([x,y])=>`Entre ${format(x)} y ${format(y)} ${f.unit}.`);
+  if(new Set(options).size!==4)return null;
+  const feature=family==='boquilla'?'diámetro de boquilla':'caudal';
+  const q={stem:`Según la tabla 4 del manual, ¿qué intervalo de ${feature} corresponde a una ${f.label.toLowerCase()}?`,
+    options,correctIndex:0,
+    explanation:`${f.label}: ${format(left)}–${format(right)} ${f.unit} (tabla 4, p. ${f.manual_page}).`,
+    sourceEvidence:`${lo.src} | ${hi.src}`,
+    sourcePage:f.source_page,manualPage:f.manual_page,
+    questionFamily:'2024_NUMERICA',difficulty,graphic:null,
+    resetLocal136:true,t39Tabla318:true,t39TablaRows318:[lo.id,hi.id]};
+  return resetShape136(q)?null:q;
+}
+// SERVER327: tablas no intervalares: DOS filas del mismo cuadro,
+// cifras cercanas y unidades homogéneas; la respuesta requiere recordar
+// ambas correspondencias, sin fabricar una relación física nueva.
+function t327NearbyTable(target,sourceRows,seed=0,difficulty='muy alta'){
+  const f=t39TableRow318(target);
+  if(!f||f.tab===4)return null;
+  const rows=[...new Map((sourceRows||[]).map(t39TableRow318).filter(x=>x&&
+    x.tab===f.tab&&x.kind===f.kind&&x.unit===f.unit&&
+    x.manual_page===f.manual_page).map(x=>[x.label+'|'+x.unit,x])).values()];
+  if(!rows.some(x=>x.id===f.id&&x.src===f.src))return null;
+  const others=rows.filter(x=>x.id!==f.id&&x.label!==f.label);
+  // Una conversión de tabla 3 no se debe repetir en el mismo examen;
+  // entremezclar unidades de otras filas facilita el descarte.
+  const second=f.tab===3?null:(others.length?others[Math.abs(seed)%others.length]:null);
+  if(f.tab!==3&&!second)return null;
+  const pair=second?[f,second]:[f];
+  const original=pair.map(x=>Number(x.value.replace(',','.')));
+  if(original.some(v=>!Number.isFinite(v)||v<0))return null;
+  const decimals=x=>String(x.value).includes(',')?String(x.value).split(',')[1].length:
+    String(x.value).includes('.')?String(x.value).split('.')[1].length:0;
+  const pert=(x,v,direction)=>{
+    const precision=Math.max(decimals(x),Math.abs(v)<1?3:2);
+    const step=Math.max(10**(-precision),Math.abs(v)*0.02);
+    return Number((v+direction*step).toFixed(precision));
+  };
+  const v0=original[0], v1=original[1];
+  const alternatives=second?[
+    [v0,v1],[pert(f,v0,-1),v1],
+    [v0,pert(second,v1,1)],[pert(f,v0,1),pert(second,v1,-1)]
+  ]:[[v0],[pert(f,v0,-1)],[pert(f,v0,1)],[pert(f,v0,2)]];
+  const fmt=n=>String(n).replace('.',',');
+  const options=alternatives.map(values=>pair.map((x,i)=>
+    `${x.label}: ${fmt(values[i])} ${x.unit}`).join('; ')+'.');
+  if(new Set(options).size!==4)return null;
+  const field={1:'densidad relativa',2:'presión de vapor',3:'equivalencia de presión',
+    5:'presión atmosférica por altitud',6:'pérdida de aspiración',
+    7:'pérdida de carga',9:'alcance de la lanza'}[f.tab]||'valor tabulado';
+  const labels=pair.map(x=>x.label).join(' y ');
+  const q={stem:`Según la tabla ${f.tab}, ¿qué ${second?'correspondencias son correctas para':'valor corresponde a'} ${labels}, en relación con ${field}?`,
+    options,correctIndex:0,
+    explanation:`Tabla ${f.tab}, p. ${f.manual_page}: ${options[0]}`,
+    sourceEvidence:pair.map(x=>x.src).join(' | '),
+    sourcePage:f.source_page,manualPage:f.manual_page,
+    questionFamily:second?'2026_RAZONAMIENTO':'2024_NUMERICA',difficulty,graphic:null,
+    resetLocal136:true,t39Tabla318:true,t39TablaRows318:pair.map(x=>x.id)};
+  return resetShape136(q)?null:q;
+}
+// Identificador de concepto, NO de enunciado, para prevenir dos preguntas
+// de equivalencias de presión en el mismo examen aunque cambien las cifras.
+function t327TableFourGenerationIssue(q,t,difficulty){
+  if(difficulty!=='muy alta')return null;
+  const row=t39TableRow318(t);
+  if(row?.tab!==4)return null;
+  // En un objetivo que contiene UN extremo no puede demostrarse un
+  // intervalo inventando el segundo. Se utiliza la vía local a partir
+  // de las dos fichas de origen o se rescata otro objetivo del mismo tema.
+  return 'T39: intervalo tabla 4 requiere extremos min/max documentados';
+}
+function t327T39KnowledgeKey(t){
+  const row=t39TableRow318(t);
+  if(!row)return null;
+  if(row.tab===3)return `${Number(t.topic_id)}:equivalencias-presion-tabla-3`;
+  if(row.tab===4)return `${Number(t.topic_id)}:tabla-4:${row.kind.split('_')[0]}`;
+  // Una sola variante de la MISMA tabla numérica en el examen; las demás
+  // fichas no se eliminan, quedan disponibles para próximos tests.
+  return `${Number(t.topic_id)}:tabla-${row.tab}:${row.kind}`;
+}
 function t39CompositeTable318(target,sourceRows,seed=0,difficulty='muy alta'){
   const f=t39TableRow318(target);
-  if(!f || target.t39StrictCalculation133)return null;
-  const same=(sourceRows||[]).map(t39TableRow318).filter(x=>x&&
-    x.tab===f.tab&&x.kind===f.kind&&
-    (f.tab===3||x.unit===f.unit)&&x.manual_page===f.manual_page);
-  const dedup=[...new Map(same.map(x=>[x.label+'|'+x.unit,x])).values()];
-  const registered=dedup.find(x=>x.id===f.id);
-  // La base no puede autorizar una fila diferente bajo el mismo ID.
-  if(!registered||registered.src!==f.src||registered.label!==f.label||
-    registered.value!==f.value||dedup.length<3)return null;
-  // Escoger 2 filas diferentes, pero el conocimiento objetivo siempre aparece.
-  const others=dedup.filter(x=>x.id!==f.id && (f.tab===3||x.value!==f.value));
-  if(others.length<2)return null;
-  const offset=Math.abs(Number(seed)||0)%others.length;
-  const second=others[offset];
-  const third=others.slice(offset+1).concat(others.slice(0,offset))
-    .find(x=>x.id!==second.id && (f.tab===3||x.value!==second.value));
-  if(!third)return null;
-  const chosen=[f,second,third];
-  if(f.tab!==3&&new Set(chosen.map(x=>x.value)).size!==3)return null;
-  let options;
-  if(f.tab===3){
-    // En esta tabla las unidades de salida son DIFERENTES: alterar sólo
-    // la UNIDAD/PRESIÓN DE ORIGEN, no cruzar kg/cm² con Pa ni inventar leyes.
-    const fmt=changed=>chosen.map((x,i)=>{
-      const label=i===changed?(x.label.endsWith('ATM')?'1 BAR':'1 ATM'):x.label;
-      return `${label} = ${x.value} ${x.unit}`;
-    }).join('; ')+'.';
-    options=[fmt(-1),fmt(0),fmt(1),fmt(2)];
-  }else{
-    const [a,b,c]=chosen;const triples=[[a.value,b.value,c.value],
-      [b.value,a.value,c.value],[c.value,b.value,a.value],[a.value,c.value,b.value]];
-    const opt=values=>chosen.map((x,i)=>`${x.label}: ${values[i]} ${f.unit}`).join('; ')+'.';
-    options=triples.map(opt);
-  }
-  if(new Set(options).size!==4)return null;
-  const text={1:'densidad relativa de los materiales',2:'presión de vapor del agua',
-    3:'equivalencias de presión',5:'presión atmosférica por altitud',
-    6:'pérdidas de aspiración',7:'pérdidas de carga según caudal y diámetro',
-    9:'alcance según presión y lanza'}[f.tab]||
-    (f.kind.startsWith('boquilla')?'diámetro de boquilla':'caudal de lanza');
-  const conditionList=chosen.map(x=>f.tab===3?`${x.label} expresada en ${x.unit}`:x.label);
-  const stem=`De acuerdo con la tabla ${f.tab} del manual, ¿qué asociación corresponde simultáneamente a ${conditionList.join(', ')}, respecto a ${text} y con las condiciones originales de la tabla?`;
-  const evidence=chosen.map(x=>x.src).join(' | ');
-  const q={stem,options,correctIndex:0,
-    explanation:`Correspondencias literales de la tabla ${f.tab}, p. ${f.manual_page}: ${options[0]}`,
-    sourceEvidence:evidence,sourcePage:f.source_page,manualPage:f.manual_page,
-    questionFamily:'2026_RAZONAMIENTO',difficulty,graphic:null,
-    resetLocal136:true,t39Tabla318:true,t39TablaRows318:chosen.map(x=>x.id)};
-  return resetShape136(q)?null:q;
+  if(!f||target.t39StrictCalculation133)return null;
+  // Filas reales, dos correspondencias de una tabla o un intervalo completo
+  // de una sola lanza. No preguntas por tres lanzas fáciles de descartar.
+  return f.tab===4?t327LanzaRange(target,sourceRows,difficulty)
+    :t327NearbyTable(target,sourceRows,seed,difficulty);
 }
 
 // Mantener la transcripción del PDF palabra por palabra. Las correcciones
@@ -18429,6 +18485,13 @@ F) LAS FILAS DE TABLAS que tienen tipoFuente=FILA_LITERAL_TABLA son DATOS
    cuando NO sean SI: NO conviertas un dato literal en un cálculo ficticio.
    Dificultad alta por asociaciones contrastables y distractores del
    MISMO tipo de dato, nunca inventando una ley o interpolando tablas.
+   SERVER327: si el dato es un INTERVALO de boquilla/caudal de tabla 4,
+   pregunta por UNA sola lanza y AMBOS extremos, con cuatro INTERVALOS
+   próximos de la misma magnitud; PROHIBIDO cruzar tres lanzas y sus
+   límites aislados. Cada distractor debe ser numéricamente plausible.
+   Evita repetir otra equivalencia de presión en un mismo examen.
+   Una tabla literal precisa puede ser examinable, pero «muy alta» NO
+   autoriza distractores obvios ni tres magnitudes desparejadas.
 T39 CÁLCULOS CON MODELO COMPLETO: para un objetivo con modeloCompleto,
 USA COMO PATRÓN el enunciado, las cuatro opciones, la respuesta y la resolución
 COMPLETOS de ese único modelo. Conserva el fenómeno, la incógnita, los pasos
@@ -18923,8 +18986,9 @@ const T39_AUDIT_SCHEMA_143={type:'object',properties:{results:{type:'array',item
     quote:{type:'string'},unitsOk:{type:'boolean'},reasoningOk:{type:'boolean'},
     relationOk:{type:'boolean'},solution:{type:'string'},
     basisQuotes:{type:'array',items:{type:'string'},minItems:0,maxItems:3},
-    derivation:{type:'string'}},
-  required:['index','answer','quote','unitsOk','reasoningOk','relationOk','solution','basisQuotes','derivation']}}},
+    derivation:{type:'string'},calidad:{type:'integer',minimum:0,maximum:2},
+    optionVerdicts:{type:'array',items:{type:'boolean'},minItems:4,maxItems:4}},
+  required:['index','answer','quote','unitsOk','reasoningOk','relationOk','solution','basisQuotes','derivation','calidad','optionVerdicts']}}},
   required:['results']};
 // Métricas reales observables sin registrar el texto curricular en los logs.
 // Una llamada de generación + una auditoría INDEPENDIENTE por lote.
@@ -19086,7 +19150,14 @@ El objetivo es DISCRIMINAR con conocimientos CEIS, no confundir con
 imposibles. Si el extracto es corto, NO inventes tres condiciones extra.
 No preguntes titulos/epigrafes/numeros editoriales (SERVER321). No cambies
 imágenes seleccionadas, IIFF, T39 ni requisitos particulares de cada tema.
-NO añadas llamadas, filtros automaticos, rondas ni aumento de concurrencia.
+  SERVER327: en nivel Muy alta es preferible una pregunta técnicamente
+  precisa con cuatro opciones próximas y comprobables a una cadena ficticia
+  de relaciones. Enunciado y opciones deben evaluar una condición que
+  distinga al opositor preparado, no una definición que se adivine por
+  la única respuesta verosímil. Para datos en tablas mantén SAME
+  magnitud/unidad, condiciones y rangos completos, nunca datos aislados
+  de varios equipos si generan una asociación trivial.
+  NO añadas llamadas, filtros automaticos, rondas ni aumento de concurrencia.
 ` : '';
   const response=await resetGeminiCall139(ai,'generar',{model:R136_MODEL,
     contents:group.every(t39Hydraulica)
@@ -19132,7 +19203,8 @@ NO añadas llamadas, filtros automaticos, rondas ni aumento de concurrencia.
     const numericRejected=group[i].t39StrictCalculation133&&!t39StrictNumeric133(q);
     const shapeIssue=resetShape136(q)||specificQualityIssue204(q,group[i],difficulty)||t316EvidenceQualityGuard(q,group[i],difficulty)||t317SpecificObviousOptionIssue(q,group[i],difficulty)||t321SpecificEditorialQuestionIssue(q,group[i]);
     const bernoulliRejected=t39BernoulliNumeric131(q,group[i]);
-    const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode);
+    const t39Issue143=t39PreflightIssue143(q,group[i],difficulty,mode)||
+      t327TableFourGenerationIssue(q,group[i],difficulty);
     const geoIssue=geo114QuestionIssue({...q,topic_block:group[i].topic_block,
       topic_name:group[i].topic_name,concept:group[i].concept});
     if(numericRejected||shapeIssue||bernoulliRejected||geoIssue||t39Issue143){
@@ -19315,7 +19387,7 @@ esos añadidos por conocimientos generales del auditor.
 ` : '';
   // SERVER120: el modelo Lite no discrimino repetidamente calidad 1/2.
   // Auditor reforzado SOLO en el Manual IIFF Muy alta: misma llamada independiente.
-  const auditModel120=(iiffScope||auditStrict316)&&difficulty==='muy alta'
+  const auditModel120=(iiffScope||auditStrict316||onlyT39)&&difficulty==='muy alta'
     ?String(process.env.RESET_IIFF_HIGH_AUDITOR_MODEL||R136_MODEL):R136_AUDITOR;
   // SERVER138: una única política de auditoría para lotes exclusivamente T39.
   // Sustituye, no acumula, las instrucciones generales de citas incompatibles
@@ -19397,7 +19469,21 @@ No incorpores hechos externos ni utilices ejemplos de examen como fuente.
    La cita puede proceder del fragmento o de las aclaraciones expresas.
 6. No rechaces por no encontrar en el PDF cifras inventadas para el problema.
 7. Bernoulli: teoría y fórmula permitidas, cálculos numéricos prohibidos.
-8. SERVER318, TABLAS: cuando la ficha fuente esté identificada como dato
+8. SERVER327, EVALUACIÓN EXIGENTE DE DIFICULTAD:
+   Devuelve obligatoriamente calidad=0,1,2 y optionVerdicts=[4 booleanos].
+   Para preguntas CORRECTA, solo la clave es verdadera; para INCORRECTA,
+   las otras tres son verdaderas y la clave es falsa, siempre en el
+   contexto exacto del ENUNCIADO. Si no puedes demostrarlo, answer=-1.
+   calidad=2 solamente si las CUATRO opciones son creíbles en el MISMO
+   ámbito técnico, sin pistas de longitud, unidad o sentido común.
+   Un distractor absurdo, una respuesta única muy diferente o una definición
+   simple con tres opciones ajenas exige calidad<=1, incluso con clave válida.
+   Para un cálculo exige decisiones respaldadas y distractores que representen
+   errores reales de operación/unidad. Para tabla literal, exige valores
+   cercanos del mismo tipo: una cifra sin los DOS extremos de un rango de
+   tabla 4 es inválida, y cruzar tres lanzas en el mismo enunciado no es
+   nivel muy alto. No inventes datos verdaderos ausentes del PDF.
+9. SERVER318, TABLAS: cuando la ficha fuente esté identificada como dato
    literal de TABLA (item_type=tabla/dato_numerico, evaluación literal o
    identificación), una pregunta que pida la cifra, asociación, columna o
    condición exacta NO es ejercicio aritmético. Valida la respuesta usando
@@ -19421,7 +19507,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
         '\nEVALUABILIDAD ESPECÍFICA: en una pregunta de cálculo, cada relación física aplicada debe constar literalmente en el fragmento PDF. Solo se permiten despejes, conversiones y combinaciones de relaciones documentadas; una descripción cualitativa no autoriza inventar una fórmula. Rechaza answer=-1 si una solución requiere una relación física externa, aunque la opción numérica sea plausible. No inventar datos o constantes del manual. En ejercicio de cálculo Alta/Muy alta, el ENUNCIADO no debe dar la fórmula de resolución ni especificar la unidad de respuesta: si lo hace, answer=-1; la fórmula y SI deben figurar solo en explicación/opciones. Los datos sí conservan sus unidades. Evitar dos opciones físicamente equivalentes.':'')+
       (group.some(t39Hydraulica)?T39_REGLAS_HIDRAULICA:"")+t39AuditNumerical132+iiffAuditRules+geoPhysical112+t316AuditGuide),
     config:{httpOptions:{timeout:R136_TIMEOUT_MS},
-      ...(auditModel120.startsWith('gemini-3.')&&(iiffScope||auditStrict316)&&difficulty==='muy alta'?
+      ...(auditModel120.startsWith('gemini-3.')&&(iiffScope||auditStrict316||onlyT39)&&difficulty==='muy alta'?
         {thinkingConfig:{thinkingLevel:'medium'}}:{}),
       responseMimeType:'application/json',
       responseJsonSchema:fixedCountSchema(auditSchema,'results',blind.length)}});
@@ -19471,7 +19557,15 @@ FILAS: ${JSON.stringify(blind)}` : null;
     if(strictT39&&!math154&&!t39Arithmetic154(a?.solution))return null;
     // SERVER148: la validación dimensional es obligatoria para cálculos;
     // en teoría importa la correspondencia factual, no una unidad inexistente.
+    const t327Negative=/\b(?:INCORRECTA|FALSA|NO\s+ES\s+CORRECTA)\b/iu.test(String(q?.stem||''));
+    const t327Verdicts=a?.optionVerdicts;
+    const t327AuditQuality=onlyT39&&difficulty==='muy alta'&&(
+      a?.calidad!==2||!Array.isArray(t327Verdicts)||t327Verdicts.length!==4||
+      t327Verdicts.some((v,j)=>typeof v!=='boolean'||
+        v!==(t327Negative?j!==q.correctIndex:j===q.correctIndex)));
     const t39AuditFailure143=onlyT39&&(
+      t327TableFourGenerationIssue(q,group[i],difficulty)||
+      t327AuditQuality||
       (!t39LiteralTable318(group[i])&&a?.relationOk!==true)||
       (strictT39&&a?.unitsOk!==true)||
       (strictT39&&['alta','muy alta'].includes(difficulty)&&a?.reasoningOk!==true)||
@@ -19556,6 +19650,7 @@ FILAS: ${JSON.stringify(blind)}` : null;
       reasoningOk:auditByIndex142.get(i)?.reasoningOk??null,
       relationOk:auditByIndex142.get(i)?.relationOk??null,
       basisProofOk:t39BasisProof144(auditByIndex142.get(i),t,questions[i]),
+      calidad:auditByIndex142.get(i)?.calidad??null,
       preflightIssue:t39PreflightIssue143(questions[i],t,difficulty,mode),
       shape:resetShape136(questions[i]),
       auditorAnswer:auditByIndex142.get(i)?.answer??null,
@@ -21261,6 +21356,7 @@ app.post('/api/generate',async(req,res)=>{
       const riverLocalSlots=new Set(riverCandidates.filter((_,j)=>j%5===0).map(x=>x.index));
       const riverProofs=riverLocalSlots.size?await geo114RiverComparators(targets):[];
       const usedLocalStems=new Set(questions.filter(Boolean).map(q=>R136_NORM(q.stem)));
+      const usedKnowledge327=new Set(targets.flatMap((t,i)=>questions[i]&&t327T39KnowledgeKey(t)?[t327T39KnowledgeKey(t)]:[]));
       // SERVER318: una sola consulta de datos ya indexados para tablas T39.
       // No se reindexa el PDF ni se añaden rondas Gemini para esas fichas.
       let t39TableRows318=[];
@@ -21280,6 +21376,10 @@ app.post('/api/generate',async(req,res)=>{
         }catch(e){console.warn('T39_318_TABLAS_CONSULTA:',String(e?.message||e));}
       }
       for(const {t,index} of todo){
+        // Mismo concepto tabular ya preguntado en otra plaza: no usar
+        // una pregunta local repetida; la plaza irá al rescate del tema.
+        const tabKey327=t327T39KnowledgeKey(t);
+        if(tabKey327&&usedKnowledge327.has(tabKey327))continue;
         for(const shift of [0,1]){
           const local=t39CompositeTable318(t,t39TableRows318,index+shift,difficulty)||
             t40TablaPregunta175(t,index+shift,difficulty) ||
@@ -21289,7 +21389,9 @@ app.post('/api/generate',async(req,res)=>{
             ?geo114RiverComposite(t,riverProofs,difficulty):null) ||
             resetGeoTableQuestion136(t,index+shift,difficulty,targets);
           if(local&&!usedLocalStems.has(R136_NORM(local.stem))){
-            questions[index]=local;usedLocalStems.add(R136_NORM(local.stem));break;
+            questions[index]=local;usedLocalStems.add(R136_NORM(local.stem));
+            if(tabKey327)usedKnowledge327.add(tabKey327);
+            break;
           }
         }
       }
@@ -21315,11 +21417,24 @@ app.post('/api/generate',async(req,res)=>{
       // del mismo manual, sin rebajar validadores ni agregar rondas.
       const resumeSpecificRescue325=Boolean(resume136&&remaining.length&&
         testType==='normal'&&difficulty==='muy alta'&&
-        (remaining.every(x=>t323Scope(x.t))||
-         remaining.every(x=>iiff91Topic(x.t))));
+        remaining.every(x=>t323Scope(x.t)||iiff91Topic(x.t)||
+          t39Hydraulica(x.t)));
       const skipDuplicateResume325=resumeT39Rescue147||resumeSpecificRescue325;
-      const groups=skipDuplicateResume325?[]:resetGroups139(remaining,difficulty);
-      const ai=(groups.length||skipDuplicateResume325)?aiClient():null;
+      // SERVER327: en el primer intento tampoco pagar dos veces por
+      // extremos min/max o equivalencias de la MISMA tabla T39.
+      // La plaza libre pasa al rescate de otro conocimiento documentado.
+      const firstAttempt327=remaining.filter(x=>{
+        const row=t39TableRow318(x.t);
+        // Sin los dos extremos documentados, Gemini NO puede inventar
+        // el otro extremo: rescatar otro objetivo directamente.
+        if(row?.tab===4)return false;
+        const key=t327T39KnowledgeKey(x.t);
+        return !key||!targets.some((t,j)=>j<x.index&&
+          t327T39KnowledgeKey(t)===key);
+      });
+      const groups=skipDuplicateResume325?[]:resetGroups139(firstAttempt327,difficulty);
+      const ai=(groups.length||skipDuplicateResume325||
+        remaining.length>firstAttempt327.length)?aiClient():null;
       const run=await resetPool136(groups,async group=>{
         const items=group.map(x=>x.t);
         // Reanudar un T39 fallido es también RESCATE: aplicar desde la
@@ -21339,13 +21454,19 @@ app.post('/api/generate',async(req,res)=>{
       // idéntico a otra no puede destruir un examen completo al persistir.
       // Conservamos la primera pregunta verificada, sin inventar alternativas.
       const acceptedStems=new Set();
+      const acceptedKnowledge327=new Set();
       for(let i=0;i<questions.length;i++){
         if(!questions[i])continue;
         const key=R136_NORM(questions[i].stem);
-        if(acceptedStems.has(key)){
+        const knowledge=t327T39KnowledgeKey(targets[i]);
+        if(acceptedStems.has(key)||(knowledge&&acceptedKnowledge327.has(knowledge))){
           questions[i]=null;
-          failures.push({slot:i,reason:'enunciado duplicado entre lotes'});
-        }else acceptedStems.add(key);
+          failures.push({slot:i,reason:knowledge&&acceptedKnowledge327.has(knowledge)
+            ?'mismo conocimiento T39 ya evaluado':'enunciado duplicado entre lotes'});
+        }else{
+          acceptedStems.add(key);
+          if(knowledge)acceptedKnowledge327.add(knowledge);
+        }
       }
       draft136={targets,questions};
       // SERVER119: rescates acotados por calidad, sin rebajar calidad=2 ni
@@ -21363,7 +21484,8 @@ app.post('/api/generate',async(req,res)=>{
       // No relaja ningún validador ni genera preguntas sin evidencia.
       const maxRounds119=3;
       const tried119=new Set(targets.map(t=>Number(t.id)));
-      const blocked119=high119?
+      // SERVER327: también evitar conocimientos IIFF repetidos en tests mixtos.
+      const blocked119=difficulty==='muy alta'&&targets.some(iiff91Topic)?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
       const blockedFacts119=blocked119.flat();
       let recoveryCandidates119=null;
@@ -21392,7 +21514,10 @@ app.post('/api/generate',async(req,res)=>{
           for(const slot of holes){
             // SERVER318: recuperar tablas T39 por su dato literal; una sola
             // fuente, sin inventar fórmulas ni aceptar preguntas no auditadas.
-            if(t39LiteralTable318(slot.t)){
+            if(t39LiteralTable318(slot.t)&&
+               !targets.some((other,j)=>j!==slot.index&&questions[j]&&
+                 t327T39KnowledgeKey(other)&&
+                 t327T39KnowledgeKey(other)===t327T39KnowledgeKey(slot.t))){
               const local=t39CompositeTable318(slot.t,t39TableRows318,
                 slot.index+round119+1,difficulty);
               if(local&&!acceptedStems.has(R136_NORM(local.stem))){
@@ -21426,11 +21551,14 @@ app.post('/api/generate',async(req,res)=>{
               specificRecoveryOrder129(recoveryCandidates119,slot.t,targets,slot.index);
             const other=pool119.find(candidate=>
               Number(candidate.topic_id)===Number(slot.t.topic_id)&&
-              !occupied.has(Number(candidate.id))&&
-              !tried119.has(Number(candidate.id))&&
+               !occupied.has(Number(candidate.id))&&
+               !tried119.has(Number(candidate.id))&&
+               (!t327T39KnowledgeKey(candidate)||
+                 !targets.some((other,j)=>j!==slot.index&&questions[j]&&
+                   t327T39KnowledgeKey(other)===t327T39KnowledgeKey(candidate)))&&
               (!slot.t.t39StrictCalculation133||t39CalculationCandidate133(candidate))&&
               (!iiff91Topic(candidate)||(!iiff91Editorial(candidate)&&
-                (!high119||iiff105TechnicalMerit(candidate)>=6)&&
+                (difficulty!=='muy alta'||iiff105TechnicalMerit(candidate)>=6)&&
                 !iiff102CandidateRepetition(candidate,blockedFacts119)))&&
               iiff106ReplacementAllowed(candidate,targets,slot.index,examMode==='simulation')&&
               (specificEvidenceReady128(candidate)||geographyTableRecord135(candidate)));
@@ -21515,7 +21643,7 @@ app.post('/api/generate',async(req,res)=>{
         const valid=questions.filter(Boolean).length;
         console.warn('RESET_136_INCOMPLETO:',JSON.stringify({count,valid,
           failed:count-valid,failures:failures.slice(0,8),ms:Date.now()-started}));
-        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':targets.some(t39Hydraulica)?'los controles de evidencia, unidades o calidad':'verificación PDF'}. No se guardó un examen incompleto.`);
+        throw Error(`Generadas y verificadas ${valid} de ${count} preguntas; ${count-valid} no superaron ${targets.some(iiff91Topic)?'los controles de evidencia, formato o calidad':targets.some(t39Hydraulica)?'los controles de evidencia, unidades o calidad':'verificación PDF'}. Se conservan las preguntas válidas para continuar con el mismo runId; no se guardó un examen incompleto.`);
       }
     }
     // SERVER207: si falla una validación final, registrar SOLO plaza y motivo.
@@ -21529,8 +21657,11 @@ app.post('/api/generate',async(req,res)=>{
     }
     const invalidGeo=questions.findIndex((q,i)=>geo114QuestionIssue({...q,topic_block:targets[i]?.topic_block,topic_name:targets[i]?.topic_name,concept:targets[i]?.concept}));
     if(invalidGeo>=0)throw Error('GEO114: pregunta geográfica no apta antes de guardar.');
-    const unique=new Set(questions.map(q=>R136_NORM(q.stem)));
-    if(unique.size!==questions.length)throw Error('Preguntas duplicadas; no se guardó test.');
+     const unique=new Set(questions.map(q=>R136_NORM(q.stem)));
+     if(unique.size!==questions.length)throw Error('Preguntas duplicadas; no se guardó test.');
+     const k327=targets.map(t327T39KnowledgeKey).filter(Boolean);
+     if(new Set(k327).size!==k327.length)
+       throw Error('SERVER327: conocimientos repetidos de tablas T39. Borrador conservado.');
     // SERVER 83: equilibrado mecánico de letras. NUNCA confiar la posición
     // correcta a Gemini. Solo se modifican preguntas NUEVAS de Gemini;
     // tarjetas Anki ORIGINALES y preguntas reutilizadas conservan su orden.
