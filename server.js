@@ -17794,7 +17794,7 @@ function t39TableRow318(t){
 // SERVER327: construir intervalos completos y distractores próximos para UNA lanza.
 // Ambas cifras deben proceder de la tabla 4 YA indexada, misma lanza,
 // unidad y página. No interpolar, añadir entradas ni modificar cobertura.
-function t327LanzaRange(target,sourceRows,difficulty='muy alta'){
+function t327LanzaRange(target,sourceRows,difficulty='muy alta',usedRows=new Set()){
   const f=t39TableRow318(target);
   if(!f||f.tab!==4||!/^((boquilla|caudal)_(min|max))$/.test(f.kind))return null;
   const family=f.kind.split('_')[0];
@@ -17803,7 +17803,8 @@ function t327LanzaRange(target,sourceRows,difficulty='muy alta'){
     x.manual_page===f.manual_page&&x.kind.startsWith(family+'_'));
   const lo=candidates.find(x=>x.kind===family+'_min');
   const hi=candidates.find(x=>x.kind===family+'_max');
-  if(!lo||!hi||!candidates.some(x=>x.id===f.id&&x.src===f.src))return null;
+  if(!lo||!hi||!candidates.some(x=>x.id===f.id&&x.src===f.src)||
+     usedRows.has(lo.id)||usedRows.has(hi.id))return null;
   const left=Number(lo.value.replace(',','.'));
   const right=Number(hi.value.replace(',','.'));
   if(!Number.isFinite(left)||!Number.isFinite(right)||left<=0||left>=right)return null;
@@ -17827,14 +17828,14 @@ function t327LanzaRange(target,sourceRows,difficulty='muy alta'){
 // SERVER327: tablas no intervalares: DOS filas del mismo cuadro,
 // cifras cercanas y unidades homogéneas; la respuesta requiere recordar
 // ambas correspondencias, sin fabricar una relación física nueva.
-function t327NearbyTable(target,sourceRows,seed=0,difficulty='muy alta'){
+function t327NearbyTable(target,sourceRows,seed=0,difficulty='muy alta',usedRows=new Set()){
   const f=t39TableRow318(target);
   if(!f||f.tab===4)return null;
   const rows=[...new Map((sourceRows||[]).map(t39TableRow318).filter(x=>x&&
     x.tab===f.tab&&x.kind===f.kind&&x.unit===f.unit&&
     x.manual_page===f.manual_page).map(x=>[x.label+'|'+x.unit,x])).values()];
-  if(!rows.some(x=>x.id===f.id&&x.src===f.src))return null;
-  const others=rows.filter(x=>x.id!==f.id&&x.label!==f.label);
+  if(!rows.some(x=>x.id===f.id&&x.src===f.src)||usedRows.has(f.id))return null;
+  const others=rows.filter(x=>x.id!==f.id&&x.label!==f.label&&!usedRows.has(x.id));
   // Una conversión de tabla 3 no se debe repetir en el mismo examen;
   // entremezclar unidades de otras filas facilita el descarte.
   const second=f.tab===3?null:(others.length?others[Math.abs(seed)%others.length]:null);
@@ -17882,22 +17883,57 @@ function t327TableFourGenerationIssue(q,t,difficulty){
   // de las dos fichas de origen o se rescata otro objetivo del mismo tema.
   return 'T39: intervalo tabla 4 requiere extremos min/max documentados';
 }
+// SERVER328: una tabla contiene varias correspondencias DIFERENTES.
+// SERVER327 agrupaba toda la tabla 6 en una única clave y bloqueaba
+// sustitutos válidos. Ahora identifica el hecho, limita el número por
+// tabla y prohíbe reutilizar filas reales en preguntas compuestas.
 function t327T39KnowledgeKey(t){
   const row=t39TableRow318(t);
   if(!row)return null;
-  if(row.tab===3)return `${Number(t.topic_id)}:equivalencias-presion-tabla-3`;
-  if(row.tab===4)return `${Number(t.topic_id)}:tabla-4:${row.kind.split('_')[0]}`;
-  // Una sola variante de la MISMA tabla numérica en el examen; las demás
-  // fichas no se eliminan, quedan disponibles para próximos tests.
-  return `${Number(t.topic_id)}:tabla-${row.tab}:${row.kind}`;
+  if(row.tab===3)return `${row.topic_id}:equivalencias-presion-tabla-3`;
+  if(row.tab===4)return `${row.topic_id}:tabla4:${row.label}:${row.kind.split('_')[0]}`;
+  return `${row.topic_id}:tabla${row.tab}:hecho${row.id}`;
 }
-function t39CompositeTable318(target,sourceRows,seed=0,difficulty='muy alta'){
+function t328TableMax(tab){
+  return ({1:2,2:3,3:1,4:3,5:3,6:2,7:4,9:3})[tab]||2;
+}
+function t328TableUsedRows(questions,except=-1){
+  const ids=new Set();
+  for(let i=0;i<questions.length;i++){
+    if(i===except||!questions[i])continue;
+    const rows=questions[i].t39TablaRows318;
+    if(Array.isArray(rows))for(const id of rows)ids.add(Number(id));
+  }
+  return ids;
+}
+function t328RecoveryRank(candidate,targets,questions){
+  const row=t39TableRow318(candidate);
+  if(!row)return 20; // Gemini solo si faltan soluciones documentales directas.
+  const n=targets.reduce((sum,t,i)=>
+    sum+Number(Boolean(questions[i])&&t39TableRow318(t)?.tab===row.tab),0);
+  return n*5; // Entre tablas, preferir la menos repetida del examen.
+}
+function t328T39TableAllowed(candidate,targets,questions,except,sourceRows,difficulty){
+  const row=t39TableRow318(candidate);
+  if(!row)return !t39LiteralTable318(candidate);
+  let count=0;
+  for(let i=0;i<targets.length;i++){
+    if(i===except||!questions[i])continue;
+    const other=t39TableRow318(targets[i]);
+    if(other&&other.tab===row.tab&&other.topic_id===row.topic_id)count++;
+    if(t327T39KnowledgeKey(targets[i])===t327T39KnowledgeKey(candidate))return false;
+  }
+  if(count>=t328TableMax(row.tab))return false;
+  const used=t328TableUsedRows(questions,except);
+  // Tabla 4 solo es válida con los dos extremos acreditados;
+  // las restantes solo si ofrecen asociación comprobada sin reutilizar filas.
+  return Boolean(t39CompositeTable318(candidate,sourceRows,except+1,difficulty,used));
+}
+function t39CompositeTable318(target,sourceRows,seed=0,difficulty='muy alta',usedRows=new Set()){
   const f=t39TableRow318(target);
   if(!f||target.t39StrictCalculation133)return null;
-  // Filas reales, dos correspondencias de una tabla o un intervalo completo
-  // de una sola lanza. No preguntas por tres lanzas fáciles de descartar.
-  return f.tab===4?t327LanzaRange(target,sourceRows,difficulty)
-    :t327NearbyTable(target,sourceRows,seed,difficulty);
+  return f.tab===4?t327LanzaRange(target,sourceRows,difficulty,usedRows)
+    :t327NearbyTable(target,sourceRows,seed,difficulty,usedRows);
 }
 
 // Mantener la transcripción del PDF palabra por palabra. Las correcciones
@@ -21360,7 +21396,7 @@ app.post('/api/generate',async(req,res)=>{
       // SERVER318: una sola consulta de datos ya indexados para tablas T39.
       // No se reindexa el PDF ni se añaden rondas Gemini para esas fichas.
       let t39TableRows318=[];
-      const t39TableTopics318=[...new Set(todo.filter(x=>t39LiteralTable318(x.t))
+      const t39TableTopics318=[...new Set(todo.filter(x=>t39Hydraulica(x.t))
         .map(x=>Number(x.t.topic_id)).filter(Number.isInteger))];
       if(t39TableTopics318.length){
         try{
@@ -21380,8 +21416,11 @@ app.post('/api/generate',async(req,res)=>{
         // una pregunta local repetida; la plaza irá al rescate del tema.
         const tabKey327=t327T39KnowledgeKey(t);
         if(tabKey327&&usedKnowledge327.has(tabKey327))continue;
+        if(t39LiteralTable318(t)&&!t328T39TableAllowed(
+          t,targets,questions,index,t39TableRows318,difficulty))continue;
         for(const shift of [0,1]){
-          const local=t39CompositeTable318(t,t39TableRows318,index+shift,difficulty)||
+          const local=t39CompositeTable318(t,t39TableRows318,index+shift,difficulty,
+              t328TableUsedRows(questions,index))||
             t40TablaPregunta175(t,index+shift,difficulty) ||
           t40FormulaQr175(t,difficulty) ||
           t40AguaLiquida176(t,difficulty) ||
@@ -21427,7 +21466,10 @@ app.post('/api/generate',async(req,res)=>{
         const row=t39TableRow318(x.t);
         // Sin los dos extremos documentados, Gemini NO puede inventar
         // el otro extremo: rescatar otro objetivo directamente.
-        if(row?.tab===4)return false;
+        // Las tablas se construyen SOLO con fichas PDF pareadas ya verificadas.
+        // Si el conocimiento no cabe por diversidad, pasa a sustitución; no
+        // enviarlo a Gemini sin los extremos / las dos filas.
+        if(t39LiteralTable318(x.t))return false;
         const key=t327T39KnowledgeKey(x.t);
         return !key||!targets.some((t,j)=>j<x.index&&
           t327T39KnowledgeKey(t)===key);
@@ -21515,11 +21557,11 @@ app.post('/api/generate',async(req,res)=>{
             // SERVER318: recuperar tablas T39 por su dato literal; una sola
             // fuente, sin inventar fórmulas ni aceptar preguntas no auditadas.
             if(t39LiteralTable318(slot.t)&&
-               !targets.some((other,j)=>j!==slot.index&&questions[j]&&
-                 t327T39KnowledgeKey(other)&&
-                 t327T39KnowledgeKey(other)===t327T39KnowledgeKey(slot.t))){
+               t328T39TableAllowed(slot.t,targets,questions,slot.index,
+                 t39TableRows318,difficulty)){
               const local=t39CompositeTable318(slot.t,t39TableRows318,
-                slot.index+round119+1,difficulty);
+                slot.index+round119+1,difficulty,
+                t328TableUsedRows(questions,slot.index));
               if(local&&!acceptedStems.has(R136_NORM(local.stem))){
                 questions[slot.index]=local;
                 acceptedStems.add(R136_NORM(local.stem));
@@ -21549,13 +21591,17 @@ app.post('/api/generate',async(req,res)=>{
                 (Number(iiff91Band(b)===iiff91Band(slot.t))-
                  Number(iiff91Band(a)===iiff91Band(slot.t)))*10):
               specificRecoveryOrder129(recoveryCandidates119,slot.t,targets,slot.index);
-            const other=pool119.find(candidate=>
+            const ordered119=t39Hydraulica(slot.t)?[...pool119].sort((a,b)=>
+              Number(a.adaptive_priority||4)-Number(b.adaptive_priority||4)||
+              t328RecoveryRank(a,targets,questions)-t328RecoveryRank(b,targets,questions)||
+              Number(a.id)-Number(b.id)):pool119;
+            const other=ordered119.find(candidate=>
               Number(candidate.topic_id)===Number(slot.t.topic_id)&&
                !occupied.has(Number(candidate.id))&&
                !tried119.has(Number(candidate.id))&&
                (!t327T39KnowledgeKey(candidate)||
-                 !targets.some((other,j)=>j!==slot.index&&questions[j]&&
-                   t327T39KnowledgeKey(other)===t327T39KnowledgeKey(candidate)))&&
+                 t328T39TableAllowed(candidate,targets,questions,slot.index,
+                   t39TableRows318,difficulty))&&
               (!slot.t.t39StrictCalculation133||t39CalculationCandidate133(candidate))&&
               (!iiff91Topic(candidate)||(!iiff91Editorial(candidate)&&
                 (difficulty!=='muy alta'||iiff105TechnicalMerit(candidate)>=6)&&
@@ -21590,7 +21636,10 @@ app.post('/api/generate',async(req,res)=>{
             // Los formatos geográficos deterministas mantienen su ruta normal.
             // Reutilizar la construcción local IIFF previamente acordada SOLO
             // sobre el candidato ya seleccionado por SRS: cero búsquedas SQL extra.
-            const local=t40TablaPregunta175(other,slot.index,difficulty)||
+            const local=t39CompositeTable318(other,t39TableRows318,
+              slot.index+round119+1,difficulty,
+              t328TableUsedRows(questions,slot.index))||
+              t40TablaPregunta175(other,slot.index,difficulty)||
               t40FormulaQr175(other,difficulty)||
               t40AguaLiquida176(other,difficulty)||
               (high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
@@ -21612,6 +21661,9 @@ app.post('/api/generate',async(req,res)=>{
             round:round119+1,slots:unsupported224.map(x=>x.index+1)}));
         }
         holes=holes.filter(x=>!unsupported224.some(u=>u.index===x.index));
+        // Una pregunta de tabla literal T39 requiere verificación determinista,
+        // nunca generar min/max aislados a ciegas mediante Gemini.
+        holes=holes.filter(x=>!t39LiteralTable318(targets[x.index]));
         if(!holes.length)break;
         const repairGroups=resetGroups139(holes,difficulty);
         if(!repairGroups.length)break;
