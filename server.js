@@ -21309,9 +21309,14 @@ app.post('/api/generate',async(req,res)=>{
       // ya dejó plazas sin validar, no volver a pagar la MISMA ficha fallida.
       // Usa el rescate 224 ya existente con otra ficha del mismo tema;
       // nunca rebaja el auditor, no modifica SRS y no añade rondas.
+      // SERVER326: IIFF tambien reanuda directamente en el rescate ya existente.
+      // Las fichas fallidas del intento anterior NO vuelven al lote inicial:
+      // se conserva cada pregunta previamente validada y se busca sustituta
+      // del mismo manual, sin rebajar validadores ni agregar rondas.
       const resumeSpecificRescue325=Boolean(resume136&&remaining.length&&
         testType==='normal'&&difficulty==='muy alta'&&
-        remaining.every(x=>t323Scope(x.t)));
+        (remaining.every(x=>t323Scope(x.t))||
+         remaining.every(x=>iiff91Topic(x.t))));
       const skipDuplicateResume325=resumeT39Rescue147||resumeSpecificRescue325;
       const groups=skipDuplicateResume325?[]:resetGroups139(remaining,difficulty);
       const ai=(groups.length||skipDuplicateResume325)?aiClient():null;
