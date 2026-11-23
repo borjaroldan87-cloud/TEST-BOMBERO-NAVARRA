@@ -12170,6 +12170,9 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     historicByNucleus.set(nk,old);
   }
   const seenIds=new Set();const seenConcepts=new Set();const seenNuclei=new Map();
+  // SERVER332: indices del conjunto ya elegido, sin cambiar filtros ni prioridades.
+  // Evita recorrer todas las preguntas seleccionadas al puntuar cada candidato.
+  const selectedByNucleus332=new Map(), selectedByTopic332=new Map();
   const selected=[];let selectedAnki=0,selectedNew=0;
   const isNew=item=>Number(item.times_asked||0)===0;
   const hasAnki=item=>verifiedAnkiIds.has(Number(item.id));
@@ -12183,9 +12186,10 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
         prev.tokens.size>=4 && overlap(tokens,prev.tokens)>=0.90));
     recentCache.set(item,value);return value;
   };
-  const distinctWithinTest=item=>!seenConcepts.has(conceptKey(item)) && !selected.some(other=>
-    nucleus(other)===nucleus(item) && contentTokens(item).size>=4 &&
-    contentTokens(other).size>=4 && overlap(contentTokens(item),contentTokens(other))>=0.85);
+  const distinctWithinTest=item=>!seenConcepts.has(conceptKey(item)) &&
+    !(selectedByNucleus332.get(nucleus(item))||[]).some(other=>
+      contentTokens(item).size>=4 && contentTokens(other).size>=4 &&
+      overlap(contentTokens(item),contentTokens(other))>=0.85);
   // Se ordenan las secciones y núcleos por su exposición histórica, no por ID.
   function score(item){
     const nk=nucleus(item),sk=subkey(item);
@@ -12197,7 +12201,7 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     const seen=seenNuclei.get(nk)||0;
     const recentNucPenalty=nh.latest===0?105:nh.latest===1?50:nh.latest===2?23:0;
     const recentSubPenalty=sh.latest===0?60:sh.latest===1?25:0;
-    const topicSame=selected.filter(s=>Number(s.topic_id)===Number(item.topic_id)).length;
+    const topicSame=selectedByTopic332.get(Number(item.topic_id))||0;
     return -seen*220-recentNucPenalty-recentSubPenalty
       -nh.hits*2.5-sh.hits*2.8
       -36*nt.asked/Math.max(1,nt.total)
@@ -12222,6 +12226,10 @@ function chooseLegislationCoverage83({candidates,statsRows,recentRows,verifiedAn
     const picked=ranked[0].item;
     selected.push(picked);seenIds.add(Number(picked.id));seenConcepts.add(conceptKey(picked));
     const nk=nucleus(picked);seenNuclei.set(nk,(seenNuclei.get(nk)||0)+1);
+    const sameNucleus=selectedByNucleus332.get(nk)||[];
+    sameNucleus.push(picked);selectedByNucleus332.set(nk,sameNucleus);
+    const tid=Number(picked.topic_id);
+    selectedByTopic332.set(tid,(selectedByTopic332.get(tid)||0)+1);
     if(hasAnki(picked))selectedAnki++;
     if(isNew(picked))selectedNew++;
     return true;
@@ -17455,30 +17463,52 @@ function resetGeoTableQuestion136(t,seed=0,difficulty='alta',pool=[]){
     sourceEvidence:source,sourcePage:t.source_page??null,manualPage:t.manual_page??null,
     questionFamily:'2024_TEXTO',difficulty};
 }
-// Une objetivos contiguos del mismo bloque SIN perder su posición global.
-// Un lote se limita por número de preguntas Y tamaño de evidencia, para evitar
-// que una petición enorme convierta menos llamadas en más latencia y 504.
+// SERVER331 — Agrupar por tema, no por adyacencia en el examen.
+// Los slots alternos de los tests mixtos se vuelven a reunir sin cambiar su
+// posicion final, sus extractos PDF, su familia ni el auditor por pregunta.
+// Para 20-30 temas muy dispersos, se empaquetan los grupos compatibles del
+// MISMO bloque, tal como permitía SERVER330, sin mezclar IIFF/T39/T22 con
+// otros manuales. Conserva cupo, presupuesto documental y paralelismo.
 function resetGroups139(rows,difficulty=null){
   const groups=[];
+  const normalizedKey=t=>{
+    const id=Number(t.topic_id);
+    return Number.isInteger(id)&&id>0?'id:'+id:
+      'name:'+String(t.topic_block||'').trim().toLowerCase()+'/'+
+      String(t.topic_name||'').trim().toLowerCase();
+  };
+  const special=t=> iiff91Topic(t)?'iiff':t39Hydraulica(t)?'t39':
+    coverageTopicNumber(t.topic_name)===22?'t22':'general';
+  const size=t=>Math.min(3000,String(t.source_evidence||'').length);
+  const cap=t=>difficulty==='muy alta'&&iiff91Topic(t)?5:R136_BATCH;
+  const budget=t=>difficulty==='muy alta'&&iiff91Topic(t)
+    ?Math.floor(R136_CONTEXT_BUDGET/2):R136_CONTEXT_BUDGET;
+  const canFit=(g,r)=>g.length<cap(r.t)&&
+    g.reduce((n,x)=>n+size(x.t),0)+size(r.t)<=budget(r.t);
+  const sameKind=(a,b)=>String(a.topic_block||'').toLowerCase()===
+    String(b.topic_block||'').toLowerCase() && special(a)===special(b);
+  // Primera pasada: reagrupar todos los objetivos del mismo manual, incluso
+  // si se intercalaron con otros bloques y temas en el orden del examen.
   for(const row of rows){
-    const last=groups.at(-1);
-    const block=String(row.t.topic_block||'').toLowerCase();
-    const bytes=Math.min(3000,String(row.t.source_evidence||'').length);
-    const current=last ? last.reduce((n,r)=>n+Math.min(3000,String(r.t.source_evidence||'').length),0):0;
-    if(last&&last.length<(difficulty==='muy alta'&&iiff91Topic(row.t)?5:R136_BATCH) &&
-       String(last[0].t.topic_block||'').toLowerCase()===block &&
-       // SERVER 92: no mezclar el Manual IIFF con otros temas del mismo bloque.
-       // Impide que las reglas exclusivas se filtren a preguntas de otros manuales.
-       iiff91Topic(last[0].t)===iiff91Topic(row.t) &&
-       t39Hydraulica(last[0].t)===t39Hydraulica(row.t) &&
-       (coverageTopicNumber(last[0].t.topic_name)===22)===
-         (coverageTopicNumber(row.t.topic_name)===22) &&
-       current+bytes<=(difficulty==='muy alta'&&iiff91Topic(row.t)
-         ?Math.floor(R136_CONTEXT_BUDGET/2):R136_CONTEXT_BUDGET)){
-      last.push(row);
-    }else groups.push([row]);
+    const g=groups.find(g=>normalizedKey(g[0].t)===normalizedKey(row.t)&&
+      sameKind(g[0].t,row.t)&&canFit(g,row));
+    if(g)g.push(row);else groups.push([row]);
   }
-  return groups;
+  // Segunda pasada: si hay muchísimos temas con pocas plazas, no multiplicar
+  // lotes de un solo objetivo. Sólo se mezclan materias GENERALES del mismo
+  // bloque: el generador/auditor usan la evidencia de CADA slot, no la ajena.
+  const packed=[];
+  for(const g of groups){
+    const head=g[0].t;
+    const compatible= special(head)==='general'
+      ?packed.find(p=>special(p[0].t)==='general'&&
+          sameKind(p[0].t,head)&&p.length+g.length<=cap(head)&&
+          p.reduce((n,r)=>n+size(r.t),0)+
+          g.reduce((n,r)=>n+size(r.t),0)<=budget(head))
+      :null;
+    if(compatible)compatible.push(...g);else packed.push(g);
+  }
+  return packed;
 }
 async function resetPool136(tasks,worker,limit=R136_CONCURRENCY){
   const out=new Array(tasks.length);let cursor=0;
@@ -21552,6 +21582,10 @@ app.post('/api/generate',async(req,res)=>{
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
       const blockedFacts119=blocked119.flat();
       let recoveryCandidates119=null;
+      // SERVER331: el reloj de 45 s se aplica al RESCATE, no se consume
+      // íntegramente durante las llamadas iniciales a Gemini. Mismas 3 rondas
+      // máximas y misma auditoría; evita obligar a repetir el POST sin rescatar.
+      const rescueStarted119=Date.now();
       for(let round119=0;round119<maxRounds119;round119++){
         let holes=targets.map((t,index)=>({t,index})).filter(x=>!questions[x.index]);
         if(!holes.length)break;
@@ -21563,7 +21597,7 @@ app.post('/api/generate',async(req,res)=>{
         }
         // No seguir sumando llamadas si el tiempo de esta petición se agota;
         // el borrador guardado se reanudará con el MISMO runId.
-        if(Date.now()-started>45000){
+        if(round119>0 && Date.now()-rescueStarted119>45000){
           console.warn('IIFF119_LIMITE_TIEMPO_REANUDABLE:',JSON.stringify({faltan:holes.length,round119}));
           break;
         }
