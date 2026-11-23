@@ -13721,12 +13721,147 @@ function specificAlignFormula128(selected,candidates){
   }
 }
 
+// SERVER334: una cuota de objetivos por cada tema solicitado es un requisito
+// estructural de los tests MIXTOS. El pool SRS puede estar ordenado por ID y
+// no incluir los últimos temas antes del LIMIT global. No crear preguntas,
+// no aprobar respuestas: solamente escoger hechos ya elegibles por la SQL SRS.
+function topicQuotas334(ids,count,rotation=0){
+  const unique=[...new Set((ids||[]).map(Number).filter(id=>Number.isInteger(id)&&id>0))];
+  if(!unique.length)return new Map();
+  // Si hay más temas que preguntas, repartir el subconjunto por TODO el
+  // ámbito (también entre bloques), en lugar de escoger temas contiguos
+  // que podrían agotar primero legislación y excluir el específico.
+  const stride=unique.length/count;
+  const phase=((Math.abs(Number(rotation)||0)%1000)/1000)*stride;
+  const use=unique.length>count?
+    Array.from({length:count},(_,i)=>unique[Math.floor(i*stride+phase)]):unique;
+  const quotas=new Map(use.map(id=>[id,0]));
+  for(let i=0;i<count;i++){
+    const id=use[i%use.length];quotas.set(id,quotas.get(id)+1);
+  }
+  return quotas;
+}
+function mixedTopicCandidates334(candidate,topicId){
+  if(Number(candidate?.topic_id)!==Number(topicId))return false;
+  if(candidate.exam_relevant===false||t52MattsonExample204(candidate))return false;
+  if(iiff91Topic(candidate)&&iiff91Editorial(candidate))return false;
+  if(t321SpecificTitleOnlyCoverage(candidate))return false;
+  return specificEvidenceReady128(candidate)||geographyTableRecord135(candidate);
+}
+async function mixedTopicPools334(quotas,existing,selectionStrategy,freshOnly111){
+  const byTopic=new Map([...quotas.keys()].map(id=>[id,[]]));
+  const present=new Set();
+  const add=item=>{
+    const id=Number(item?.id),topic=Number(item?.topic_id);
+    if(!byTopic.has(topic)||present.has(id)||!mixedTopicCandidates334(item,topic))return;
+    present.add(id);byTopic.get(topic).push(item);
+  };
+  for(const candidate of existing||[])add(candidate);
+  const needs=[...quotas].filter(([id,n])=>{
+    const options=byTopic.get(id);
+    // Entre veinte fichas forestales pueden no existir cuatro preguntas
+    // tecnicamente exigentes: ampliar SOLO este pool SRS cuando escasea
+    // evidencia operativa, sin generar ni auditar más preguntas.
+    const forestal=options.some(iiff91Topic);
+    const rich=forestal?options.filter(c=>
+      iiff105TechnicalMerit(c)>=8 &&
+      String(c.source_evidence||'').length>=160).length:0;
+    return options.length<Math.max(20,n*5)||
+      (forestal&&rich<Math.max(10,n*3));
+  });
+  // Reutilizar el selector SQL YA auditado, con su SRS, filtro de examen nuevo,
+  // bloqueo de repeticiones forestales y prioridades. Máximo tres consultas
+  // por lotes de trabajo a la vez. No se consulta el contenido del PDF afuera.
+  const queried=await resetPool136(needs,async ([id,n])=>
+    getAdaptiveCoverageCandidates(Math.min(500,Math.max(120,n*30)),
+      [id],selectionStrategy,freshOnly111),3);
+  for(let i=0;i<queried.length;i++){
+    if(!queried[i].ok)throw Error('SERVER334: fallo consultando el tema '+needs[i][0]+': '+queried[i].error);
+    for(const candidate of queried[i].value)add(candidate);
+  }
+  return byTopic;
+}
+async function rebalanceMixedTopics334(selected,candidates,topicIds,count,strategy,freshOnly111,difficulty){
+  if(!Array.isArray(topicIds)||topicIds.length<=1||count<1)return null;
+  const quotas=topicQuotas334(topicIds,count,Date.now()%topicIds.length);
+  const pools=await mixedTopicPools334(quotas,[...selected,...candidates],strategy,freshOnly111);
+  const queues=new Map(),used=new Set();
+  for(const [topic,n] of quotas){
+    let pool=pools.get(topic)||[];
+    const first=selected.filter(c=>Number(c.topic_id)===topic&&
+      mixedTopicCandidates334(c,topic));
+    let chosen=[];
+    if(pool.some(iiff91Topic)){
+      // Selección forestal ya auditada: diversidad de páginas, contenido
+      // técnico y SRS, también cuando el manual forma parte de un mixto.
+      try{
+        chosen=chooseIiffCoverage91(pool,n,{simulation:strategy==='simulation',
+          difficulty});
+      }catch(e){
+        console.warn('SERVER334_IIFF_POCAS_APTAS',String(e?.message||e));
+      }
+    }
+    if(chosen.length<n){
+      const selectedIds=new Set(chosen.map(c=>Number(c.id)));
+      const options=[...first,...pool].filter(c=>!selectedIds.has(Number(c.id)));
+      const factKeys=new Set(chosen.map(c=>`${String(c.section||'').toLowerCase()}|${String(c.concept||'').toLowerCase()}`));
+      for(let pass=0;pass<2 && chosen.length<n;pass++)for(const c of options){
+        const key=`${String(c.section||'').toLowerCase()}|${String(c.concept||'').toLowerCase()}`;
+        if(selectedIds.has(Number(c.id)) || (pass===0&&factKeys.has(key)))continue;
+        chosen.push(c);selectedIds.add(Number(c.id));factKeys.add(key);
+        if(chosen.length>=n)break;
+      }
+    }
+    queues.set(topic,chosen.slice(0,n));
+  }
+  const total=[...queues.values()].reduce((sum,list)=>sum+list.length,0);
+  if(total<count){
+    // No se crea una pregunta imposible por tema. Las plazas de temas sin
+    // suficientes fichas SRS se reasignan a otros temas solicitados.
+    const pool=[...pools.values()].flat();
+    const already=new Set([...queues.values()].flat().map(c=>Number(c.id)));
+    const fill=pool.filter(c=>!already.has(Number(c.id)));
+    for(const c of fill){
+      if(already.size>=count)break;
+      queues.get(Number(c.topic_id)).push(c);already.add(Number(c.id));
+    }
+    if(already.size<count)throw Error(`SERVER334: solo ${already.size} conocimientos SRS válidos para ${count} preguntas entre ${topicIds.length} temas.`);
+  }
+  const final=[],max=Math.max(...[...queues.values()].map(q=>q.length));
+  for(let i=0;i<max;i++)for(const list of queues.values())if(list[i])final.push(list[i]);
+  if(final.length!==count||new Set(final.map(c=>Number(c.id))).size!==count)
+    throw Error('SERVER334: error de cuotas o conocimiento duplicado antes de Gemini.');
+  selected.splice(0,selected.length,...final);
+  // Las siguientes funciones (Anki, fórmulas, gráficos) pueden necesitar el
+  // pool de las fichas nuevas obtenidas desde el mismo selector SRS.
+  const known=new Set(candidates.map(c=>Number(c.id)));
+  for(const list of pools.values())for(const c of list)if(!known.has(Number(c.id))){
+    known.add(Number(c.id));candidates.push(c);
+  }
+  const distribution=[...quotas].map(([id,wanted])=>({topicId:id,wanted,
+    selected:final.filter(c=>Number(c.topic_id)===id).length}));
+  console.log('SERVER334_CUOTAS_MIXTAS:',JSON.stringify({requested:topicIds.length,
+    total:count,distribution}));
+  return distribution;
+}
+// SERVER334: rescatar por EL TEMA QUE TIENE EL HUECO, no mediante LIMIT
+// compartido entre miles de fichas de legislación y territorio.
+async function mixedRecoveryCandidates334(holes,selectionStrategy,freshOnly111){
+  const quotas=new Map();
+  for(const {t} of holes){const id=Number(t.topic_id);
+    quotas.set(id,(quotas.get(id)||0)+1);
+  }
+  const byTopic=await mixedTopicPools334(quotas,[],selectionStrategy,freshOnly111);
+  return [...byTopic.values()].flat();
+}
+
 async function getCoverageTargetsForGeneration(
   count,
   ai,
   allowedTopicIds = null,
   selectionStrategy = "adaptive",
-  freshOnly111 = false
+  freshOnly111 = false,
+  difficulty = "alta"
 ){
   /*
     SELECCIÓN DE OBJETIVOS
@@ -13970,13 +14105,15 @@ si todavía faltan preguntas, actúan las pasadas normales de respaldo.
 La clave de núcleo incluye topic_id, por lo que también funciona al seleccionar
 varios temas de Legislación sin mezclar sus núcleos entre sí.
 */
-const legislationOnlySelection =
-  adaptiveCandidates.length > 0 &&
-  adaptiveCandidates.every(candidate =>
-    String(candidate?.topic_block || "")
-      .trim()
-      .toLowerCase() === "legislacion"
-  );
+// SERVER334: NO inferir el ámbito de bloques de un pool LIMITADO. En
+// tests mixtos dicho pool puede contener solo legislación aunque se hayan
+// solicitado 9 temas de tres bloques. Así se evitaba el balance y se lanzaba
+// innecesariamente el costoso selector de núcleos/Anki solo-legislación.
+const requestedBlockRows=Array.isArray(allowedTopicIds)&&allowedTopicIds.length?
+  (await db.query('SELECT DISTINCT block FROM topics WHERE id=ANY($1::int[])',
+    [allowedTopicIds])).rows:[];
+const legislationOnlySelection=requestedBlockRows.length===1&&
+  String(requestedBlockRows[0].block||'').toLowerCase()==='legislacion';
 
 /*
 SERVER_74 — diversificación y prioridad Anki SIN cambiar la prioridad SRS.
@@ -14395,6 +14532,12 @@ if(selectedAdaptive.length < count){
   throw new Error(
     `Solo se han podido seleccionar ${selectedAdaptive.length} objetivos distintos para un test de ${count} preguntas.`
   );
+}
+// SERVER334: antes de familias y gráficos, corregir la distribución GLOBAL
+// entre temas elegidos sin cambiar el selector exclusivo de un solo tema.
+if(Array.isArray(allowedTopicIds)&&allowedTopicIds.length>1){
+  await rebalanceMixedTopics334(selectedAdaptive,adaptiveCandidates,
+    allowedTopicIds,count,selectionStrategy,freshOnly111,difficulty);
 }
 // SERVER204: no repetir en el MISMO test dos conversiones idénticas
 // de escala 1:25.000 solo por variar los centímetros de partida.
@@ -21188,7 +21331,7 @@ app.post('/api/generate',async(req,res)=>{
             return getIiffTargets91(count,topicIds,examMode==='simulation',difficulty,freshOnly111);
         }
         return getCoverageTargetsForGeneration(count,{models:{generateContent:(...args)=>
-          aiClient().models.generateContent(...args)}},topicIds,examMode,freshOnly111);
+          aiClient().models.generateContent(...args)}},topicIds,examMode,freshOnly111,difficulty);
       })())));
     // SERVER142: en reanudaciones de T39, sustituir ANTES de Gemini los
     // objetivos vacíos que no contienen una relación calculable en el PDF
@@ -21509,7 +21652,10 @@ app.post('/api/generate',async(req,res)=>{
         testType==='normal'&&difficulty==='muy alta'&&
         remaining.every(x=>t323Scope(x.t)||iiff91Topic(x.t)||
           t39Hydraulica(x.t)));
-      const skipDuplicateResume325=resumeT39Rescue147||resumeSpecificRescue325;
+      // SERVER334: un run reanudado NO vuelve a generar el mismo conocimiento
+      // ya rechazado, sea legislación, territorio, IIFF o específico.
+      const skipDuplicateResume325=Boolean(resume136&&remaining.length&&testType==='normal') ||
+        resumeT39Rescue147||resumeSpecificRescue325;
       // SERVER327: en el primer intento tampoco pagar dos veces por
       // extremos min/max o equivalencias de la MISMA tabla T39.
       // La plaza libre pasa al rescate de otro conocimiento documentado.
@@ -21576,7 +21722,8 @@ app.post('/api/generate',async(req,res)=>{
       // Preserva los 2/3 intentos previos de T39/T57 y amplía el resto a 3.
       // No relaja ningún validador ni genera preguntas sin evidencia.
       const maxRounds119=3;
-      const tried119=new Set(targets.map(t=>Number(t.id)));
+      const tried119=new Set([...targets.map(t=>Number(t.id)),
+        ...(Array.isArray(resume136?.triedCoverageIds)?resume136.triedCoverageIds.map(Number):[])]);
       // SERVER327: también evitar conocimientos IIFF repetidos en tests mixtos.
       const blocked119=difficulty==='muy alta'&&targets.some(iiff91Topic)?
         await Promise.all([...new Set(targets.filter(iiff91Topic).map(t=>Number(t.topic_id)))].map(id=>iiff96BlockedHistory(id))):[];
@@ -21605,8 +21752,13 @@ app.post('/api/generate',async(req,res)=>{
         // sustituto elegible. Las preguntas aprobadas permanecen intactas.
         const noReplacementT39=new Set();
         if(testType==='normal'){
-          if(!recoveryCandidates119)recoveryCandidates119=await getAdaptiveCoverageCandidates(
-            Math.max(1000,count*50),topicIds,examMode,freshOnly111);
+          if(!recoveryCandidates119){
+            recoveryCandidates119=await mixedRecoveryCandidates334(holes,examMode,freshOnly111);
+            console.log('SERVER334_RESCATE_POR_TEMAS:',JSON.stringify({
+              pendientes:holes.length,
+              temas:[...new Set(holes.map(x=>Number(x.t.topic_id)))],
+              disponibles:recoveryCandidates119.length}));
+          }
           const occupied=new Set(targets.filter((_,idx)=>Boolean(questions[idx])).map(t=>Number(t.id)));
           for(const slot of holes){
             // SERVER318: recuperar tablas T39 por su dato literal; una sola
@@ -21640,11 +21792,19 @@ app.post('/api/generate',async(req,res)=>{
                 continue;
               }
             }
-            const pool119=high119&&iiff91Topic(slot.t)?
-              [...recoveryCandidates119].sort((a,b)=>
-                (iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a))*4+
-                (Number(iiff91Band(b)===iiff91Band(slot.t))-
-                 Number(iiff91Band(a)===iiff91Band(slot.t)))*10):
+            // SERVER334: igual prioridad técnica del manual forestal en
+            // test aislado y mixto, primero PDF apto para INCORRECTA cuando
+            // la plaza la exige. Los demás temas conservan su orden propio.
+            const pool119=difficulty==='muy alta'&&iiff91Topic(slot.t)?
+              recoveryCandidates119.filter(c=>Number(c.topic_id)===Number(slot.t.topic_id))
+                .sort((a,b)=>
+                  Number(Number(a.adaptive_priority||4)!==Number(slot.t.adaptive_priority||4))-
+                  Number(Number(b.adaptive_priority||4)!==Number(slot.t.adaptive_priority||4))||
+                  (slot.t.questionFamily==='2026_INCORRECTA'?
+                    Number(!iiff92EvidenceCanSupportNegative(a.source_evidence))-
+                    Number(!iiff92EvidenceCanSupportNegative(b.source_evidence)):0)||
+                  iiff105TechnicalMerit(b)-iiff105TechnicalMerit(a)||
+                  Number(a.id)-Number(b.id)):
               specificRecoveryOrder129(recoveryCandidates119,slot.t,targets,slot.index);
             const ordered119=t39Hydraulica(slot.t)?[...pool119].sort((a,b)=>
               Number(a.adaptive_priority||4)-Number(b.adaptive_priority||4)||
@@ -21685,7 +21845,13 @@ app.post('/api/generate',async(req,res)=>{
             // no heredar RAZONAMIENTO/INCORRECTA de una fuente descartada.
             const t323Recovered=(!slot.t.t39StrictCalculation133&&specific&&difficulty==='muy alta')
               ?t323SafeFamily(other,recoveredFamily):recoveredFamily;
-            targets[slot.index]=specific?{...other,questionFamily:slot.t.t39StrictCalculation133?'CALCULO_FORMULACION':t323Recovered,...(slot.t.t39StrictCalculation133?{t39StrictCalculation133:true}:{})}:other;
+            const iiffFamily=iiff91Topic(other)?
+              (desiredFamily==='2026_INCORRECTA'&&
+               !iiff92EvidenceCanSupportNegative(other.source_evidence)
+                ?'2026_CORRECTA':(desiredFamily||'2024_TEXTO')):null;
+            targets[slot.index]=specific?
+              {...other,questionFamily:slot.t.t39StrictCalculation133?'CALCULO_FORMULACION':t323Recovered,...(slot.t.t39StrictCalculation133?{t39StrictCalculation133:true}:{})}:
+              (iiffFamily?{...other,questionFamily:iiffFamily}:other);
             occupied.add(Number(other.id));tried119.add(Number(other.id));
             slot.t=targets[slot.index];
             // Los formatos geográficos deterministas mantienen su ruta normal.
@@ -21697,7 +21863,7 @@ app.post('/api/generate',async(req,res)=>{
               t40TablaPregunta175(other,slot.index,difficulty)||
               t40FormulaQr175(other,difficulty)||
               t40AguaLiquida176(other,difficulty)||
-              (high119&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
+              (difficulty==='muy alta'&&iiff91Topic(other)?iiff120LocalQuestion(other):null)||
               resetGeoTableQuestion136(other,slot.index,difficulty,targets);
             if(local&&!acceptedStems.has(R136_NORM(local.stem))){
               questions[slot.index]=local;acceptedStems.add(R136_NORM(local.stem));
@@ -21734,7 +21900,7 @@ app.post('/api/generate',async(req,res)=>{
             questions[item.index]=question;acceptedStems.add(key);
           });
         });
-        draft136={targets,questions};
+        draft136={targets,questions,triedCoverageIds:[...tried119]};
         console.log('RESET_224_RECUPERACION_GLOBAL:',JSON.stringify({
           round:round119+1,valid:questions.filter(Boolean).length,
           pending:questions.filter(q=>!q).length,
@@ -21744,7 +21910,7 @@ app.post('/api/generate',async(req,res)=>{
           objetivos:repairGroups.flat().length,validas:questions.filter(Boolean).length,
           faltantes:questions.filter(q=>!q).length}));
       }
-      draft136={targets,questions};
+      draft136={targets,questions,triedCoverageIds:[...tried119]};
       // Nunca considerar válidas respuestas cuyo origen no ha sido verificado.
       if(questions.some(q=>!q)){
         const valid=questions.filter(Boolean).length;
