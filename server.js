@@ -28830,6 +28830,61 @@ async function applyT40Distractors313AfterStartup314(){
   throw Error('T314: no se pudo estabilizar el arranque');
 }
 
+// SERVER335: rectificación documental puntual confirmada por BOE-A-1982-20824.
+// No se modifica ninguna otra ficha ni el historial de respuestas o el SRS.
+async function applyLorafnaDateCorrection335(){
+  const client=await db.connect();
+  const oldDate='Ley Orgánica 13/1982, de 19 de agosto';
+  const official='Ley Orgánica 13/1982, de 10 de agosto';
+  const officialEvidence='Ley Orgánica 13/1982, de 10 de agosto, de reintegración y amejoramiento del Régimen Foral de Navarra (BOE-A-1982-20824).';
+  const expectedIds=[545,3943];
+  const patch=(value)=>String(value).split(oldDate).join(official);
+  try{
+    await client.query('BEGIN');
+    const coverageResult=await client.query(
+      'SELECT * FROM coverage_items WHERE id=$1 AND topic_id=$2 FOR UPDATE',[4282,7]);
+    if(coverageResult.rowCount!==1)throw Error('SERVER335: ficha 4282 no localizada en tema 7; sin cambios');
+    const coverage=coverageResult.rows[0];
+    const questionsResult=await client.query(
+      'SELECT * FROM question_bank WHERE id=ANY($1::bigint[]) AND coverage_item_id=$2 ORDER BY id FOR UPDATE',
+      [expectedIds,4282]);
+    const questions=questionsResult.rows;
+    if(questions.length!==2||questions[0].id!=545||questions[1].id!=3943)
+      throw Error('SERVER335: las dos preguntas esperadas han cambiado; sin cambios');
+    const already=String(coverage.concept).includes(official)&&
+       questions.every(q=>q.options.some(x=>String(x).includes(official)))&&
+       !questions.some(q=>JSON.stringify(q.options).includes(oldDate));
+    if(already){await client.query('COMMIT');return {ok:true,already:true,coverageId:4282,questions:2};}
+    if(!String(coverage.concept).includes(oldDate)||!String(coverage.source_evidence).includes(oldDate)||
+       !questions.every(q=>Array.isArray(q.options)&&
+         q.options[q.correct_index]?.includes(oldDate) &&
+         (q.source_evidence||'').includes(oldDate)))
+      throw Error('SERVER335: datos distintos al respaldo esperado; no corregir a ciegas');
+    if(questions[0].correct_index!==0||questions[1].correct_index!==1)
+      throw Error('SERVER335: posiciones correctas distintas al respaldo; sin cambios');
+    // Respaldar el dato histórico completo antes de modificarlo; no se elimina.
+    await client.query(`INSERT INTO app_state(key,value) VALUES($1,$2)
+      ON CONFLICT(key) DO NOTHING`,[
+      'LORAFNA335_BACKUP_20261123',
+      JSON.stringify({source:'BOE-A-1982-20824',coverage,questions})
+    ]);
+    await client.query(`UPDATE coverage_items SET concept=$2,source_evidence=$3,
+      source_page=NULL,manual_page=NULL WHERE id=$1 AND topic_id=$4`,
+      [4282,patch(coverage.concept),officialEvidence,7]);
+    for(const q of questions){
+      await client.query(`UPDATE question_bank SET options=$2::jsonb,
+        explanation=$3,source_evidence=$4,source_page=NULL,manual_page=NULL,
+        updated_at=NOW() WHERE id=$1 AND coverage_item_id=$5`,[
+        q.id,JSON.stringify(q.options.map(patch)),patch(q.explanation||''),officialEvidence,4282]);
+    }
+    await client.query('COMMIT');
+    return {ok:true,already:false,coverageId:4282,questions:2,source:'BOE-A-1982-20824'};
+  }catch(error){
+    await client.query('ROLLBACK');
+    throw error;
+  }finally{client.release();}
+}
+
 async function startServer(){
   console.log("STARTUP 1/4: initDatabase");
   await initDatabase();
@@ -28912,6 +28967,10 @@ async function startServer(){
   console.log("STARTUP 4/4: loadExamStyleStore");
   await loadExamStyleStore();
   console.log("STARTUP 4/4 OK");
+
+  // La evidencia transcrita en BD contiene una fecha errónea, contrastada con BOE.
+  try{console.log('LORAFNA335_FECHA_OFICIAL',JSON.stringify(await applyLorafnaDateCorrection335()));}
+  catch(error){console.error('LORAFNA335_NO_APLICADA_SIN_CAMBIOS:',String(error?.message||error));}
 
   app.listen(process.env.PORT || 3000, ()=>{
     console.log("Test Bombero V2 listo");
