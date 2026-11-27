@@ -21259,6 +21259,49 @@ app.post('/api/generate',async(req,res)=>{
           coverage:{targeted:targets.length,markedWorked:0},practice:true});
       }
     }
+// SERVER336: equilibrio estructural de familias de calculo en T55.
+// Conserva las plantillas y fuentes CEIS existentes; modifica solo el orden y cupos.
+// En 10 preguntas: 2 directas, 2 serie, 2 paralelo, 2 mixto, 2 otras
+// (transformadores, CA/factor de potencia y combinaciones).
+function t57BalanceCalculations336(families,count,rng=Math.random){
+  const pools={direct:[],series:[],parallel:[],mixed:[],other:[]};
+  for(const entry of families){
+    const name=String(entry?.[0]||'');
+    const group=name.startsWith('MIXTO_')?'mixed'
+      :name.startsWith('SERIE_')?'series'
+      :name.startsWith('PARALELO_')?'parallel'
+      :name.startsWith('TRAFO_')||name==='POTENCIA_CA'||name==='FACTOR_POTENCIA'
+       ||name==='CA_FACTOR_Y_POTENCIA'||name==='OHM_CARGA_TIEMPO'?'other':'direct';
+    pools[group].push(entry);
+  }
+  const groups=['direct','series','parallel','mixed','other'];
+  for(const group of groups){
+    if(pools[group].length<2)throw Error('T55_336: faltan dos familias verificadas de '+group);
+  }
+  function shuffle(xs){
+    const arr=[...xs];
+    for(let i=arr.length-1;i>0;i--){
+      const j=Math.floor(rng()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];
+    }
+    return arr;
+  }
+  // El reparto se hace por ciclos de cinco y se mezcla el orden final.
+  // Ninguna familia se repite hasta recorrer las disponibles de su grupo.
+  const queues=Object.fromEntries(groups.map(g=>[g,shuffle(pools[g])]));
+  const positions=Object.fromEntries(groups.map(g=>[g,0]));
+  const selected=[];
+  while(selected.length<count){
+    const cycle=shuffle(groups);
+    for(const group of cycle){
+      if(selected.length>=count)break;
+      if(positions[group]>=queues[group].length){
+        queues[group]=shuffle(pools[group]);positions[group]=0;
+      }
+      selected.push(queues[group][positions[group]++]);
+    }
+  }
+  return shuffle(selected);
+}
     // SERVER215: T57 - 24 familias simples y 8 combinadas, sin Gemini.
     if(mode==='calculos' && Array.isArray(topicIds) && topicIds.length===1){
       const t57=(await db.query('SELECT id,block,topic_order,name FROM topics WHERE id=$1',[topicIds[0]])).rows[0];
@@ -21273,12 +21316,28 @@ app.post('/api/generate',async(req,res)=>{
         const byFamily=new Map();
         for(const r of refs.rows){const m=String(r.concept).match(/(?:^| · )([A-Z0-9_]+):/);if(m)byFamily.set(m[1],r);}
         if(families.some(([name])=>!byFamily.has(name)))throw Error('T57: falta indexación de familias de cálculo');
-        const local=Array.from({length:count},(_,i)=>{
-          const [name,generate]=families[i%families.length],ref=byFamily.get(name);
+        const balanced336=t57BalanceCalculations336(families,count);
+        const local=balanced336.map(([name,generate],i)=>{
+          const ref=byFamily.get(name);
           const q=generate(name,i);
           return {...q,sourceEvidence:ref.source_evidence,sourcePage:Number(ref.source_page),
             manualPage:String(ref.manual_page),difficulty:'muy alta',questionFamily:'T57_CALCULO'};
         });
+        if(count===10){
+          const groups={direct:0,series:0,parallel:0,mixed:0,other:0};
+          for(const [name] of balanced336){
+            const group=name.startsWith('MIXTO_')?'mixed'
+              :name.startsWith('SERIE_')?'series'
+              :name.startsWith('PARALELO_')?'parallel'
+              :name.startsWith('TRAFO_')||name==='POTENCIA_CA'||name==='FACTOR_POTENCIA'
+               ||name==='CA_FACTOR_Y_POTENCIA'||name==='OHM_CARGA_TIEMPO'?'other':'direct';
+            groups[group]++;
+          }
+          if(Object.values(groups).some(n=>n!==2))
+            throw Error('T55_336: el test de 10 no cumple el equilibrio 2+2+2+2+2');
+          console.log('T55_336_CALCULOS_EQUILIBRADOS',JSON.stringify({count,groups,
+            families:balanced336.map(([name])=>name)}));
+        }
         if(local.some(q=>!Array.isArray(q.options)||q.options.length!==4||
           new Set(q.options).size!==4||!Number.isInteger(q.correctIndex)||
           q.correctIndex<0||q.correctIndex>3))throw Error('T57: pregunta matemática inválida');
